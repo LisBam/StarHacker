@@ -20,6 +20,10 @@ class_name RangedMonster
 @export_range(0.0, 5000.0, 1.0, "or_greater") var ranged_projectile_impact_force: float = 90.0
 ## 射击冷却；取值应大于 0，默认 1.25 秒，修改会影响远程怪物连续开火频率。
 @export_range(0.05, 10.0, 0.05) var shoot_cooldown: float = 1.25
+## 个体射击冷却最小倍率；取值建议 0.8 到 1，默认 0.85，让远程怪物射击间隔存在下限差异。
+@export_range(0.1, 3.0, 0.01) var shoot_cooldown_random_multiplier_min: float = 0.85
+## 个体射击冷却最大倍率；取值建议大于等于最小倍率，默认 1.35，让远程怪物射击间隔存在上限差异。
+@export_range(0.1, 3.0, 0.01) var shoot_cooldown_random_multiplier_max: float = 1.35
 ## 枪口偏移；取值为相对怪物中心的局部坐标，默认向前 24 像素，修改会影响子弹出生点。
 @export var muzzle_offset: Vector2 = Vector2(24.0, 0.0)
 ## 视线遮挡检测掩码；默认检测第 5 层环境，修改会影响怪物判断能否直接射击玩家。
@@ -29,10 +33,26 @@ class_name RangedMonster
 
 ## 远程射击冷却剩余时间；取值大于等于 0，默认 0 表示生成后可立即开火。
 var _shoot_cooldown_remaining: float = 0.0
+## 个体射击冷却倍率；取值由出生时随机生成，默认 1 表示不改变检查器中的基础射击冷却。
+var _shoot_cooldown_multiplier: float = 1.0
+
+
+func _ready() -> void:
+	super._ready()
+	_randomize_individual_shooting()
 
 
 func _process(delta: float) -> void:
 	_shoot_cooldown_remaining = maxf(_shoot_cooldown_remaining - delta, 0.0)
+
+
+func _randomize_individual_shooting() -> void:
+	_shoot_cooldown_multiplier = _get_randomized_multiplier(shoot_cooldown_random_multiplier_min, shoot_cooldown_random_multiplier_max)
+	_shoot_cooldown_remaining = _random.randf_range(0.0, _get_resolved_shoot_cooldown())
+
+
+func _get_resolved_shoot_cooldown() -> float:
+	return maxf(shoot_cooldown, 0.05) * maxf(_shoot_cooldown_multiplier, 0.1)
 
 
 func _update_target_behavior(_delta: float, target_distance: float) -> void:
@@ -47,7 +67,7 @@ func _update_target_behavior(_delta: float, target_distance: float) -> void:
 		var chase_destination: Vector2 = _get_current_chase_destination()
 		# 追击方向；取值为绕障后的单位向量，默认用于接近射击范围或寻找视线。
 		var chase_direction: Vector2 = _get_steered_direction_to(chase_destination)
-		velocity = chase_direction * move_speed
+		velocity = chase_direction * _get_resolved_move_speed()
 		return
 
 	# 目标方向；取值为怪物指向玩家的单位向量，默认用于发射和后退判断。
@@ -57,7 +77,7 @@ func _update_target_behavior(_delta: float, target_distance: float) -> void:
 		var retreat_destination: Vector2 = global_position - target_direction * keep_distance
 		# 后撤方向；取值为绕障后的单位向量，默认用于避免后退卡墙。
 		var retreat_direction: Vector2 = _get_steered_direction_to(retreat_destination)
-		velocity = retreat_direction * move_speed
+		velocity = retreat_direction * _get_resolved_move_speed()
 	else:
 		velocity = Vector2.ZERO
 
@@ -89,7 +109,7 @@ func _try_fire_projectile(direction: Vector2) -> void:
 	if projectile.has_method("launch"):
 		projectile.call("launch", direction, ranged_projectile_speed)
 
-	_shoot_cooldown_remaining = shoot_cooldown
+	_shoot_cooldown_remaining = _get_resolved_shoot_cooldown()
 
 
 func _has_line_of_sight_to_target() -> bool:

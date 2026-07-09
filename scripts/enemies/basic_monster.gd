@@ -24,12 +24,20 @@ const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat
 @export_range(0.0, 5000.0, 1.0, "or_greater") var attack_impact_force: float = 180.0
 ## 移动速度；取值建议大于 0，默认 150 像素每秒，运行时修改会影响怪物追击速度。
 @export_range(1.0, 2000.0, 1.0, "or_greater") var move_speed: float = 150.0
+## 个体移动速度最小倍率；取值建议 0.5 到 1，默认 0.88，让同类怪物移动速度存在下限差异。
+@export_range(0.1, 2.0, 0.01) var move_speed_random_multiplier_min: float = 0.88
+## 个体移动速度最大倍率；取值建议大于等于最小倍率，默认 1.16，让同类怪物移动速度存在上限差异。
+@export_range(0.1, 2.0, 0.01) var move_speed_random_multiplier_max: float = 1.16
 ## 视野范围；取值建议大于 0，默认 360 像素，玩家进入该范围后怪物开始索敌追击。
 @export_range(1.0, 4000.0, 1.0, "or_greater") var vision_range: float = 360.0
 ## 攻击距离；取值建议大于 0，默认 42 像素，玩家进入该距离后怪物停止移动并尝试攻击。
 @export_range(1.0, 400.0, 1.0, "or_greater") var attack_range: float = 42.0
 ## 攻击冷却；取值应大于 0，默认 0.9 秒，运行时修改会影响怪物连续攻击频率。
 @export_range(0.05, 10.0, 0.05) var attack_cooldown: float = 0.9
+## 个体攻击冷却最小倍率；取值建议 0.75 到 1，默认 0.9，让近战怪物攻击节奏存在下限差异。
+@export_range(0.1, 3.0, 0.01) var attack_cooldown_random_multiplier_min: float = 0.9
+## 个体攻击冷却最大倍率；取值建议大于等于最小倍率，默认 1.3，让近战怪物攻击节奏存在上限差异。
+@export_range(0.1, 3.0, 0.01) var attack_cooldown_random_multiplier_max: float = 1.3
 ## 脱战视野倍率；取值建议大于等于 1，默认 1.25 让怪物不会在视野边缘频繁切换索敌状态。
 @export_range(1.0, 4.0, 0.05, "or_greater") var lose_target_range_multiplier: float = 1.25
 ## 索敌是否需要直线视野；默认 true，墙体会阻挡怪物首次发现玩家。
@@ -68,24 +76,24 @@ const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat
 @export_range(1, 12, 1) var avoidance_candidate_count: int = 4
 ## 是否启用网格寻路；默认 true，直线被障碍阻挡时会向 GameWorld 请求 A* 路径。
 @export var pathfinding_enabled: bool = true
-## 寻路格子尺寸；取值建议 64 到 160，默认 96，越小路径越细但计算开销越高。
-@export_range(16.0, 512.0, 1.0, "or_greater") var pathfinding_cell_size: float = 96.0
-## 寻路代理半径；取值建议接近怪物碰撞半径，默认 24，让路径与墙体保持安全距离。
-@export_range(0.0, 256.0, 1.0) var pathfinding_agent_radius: float = 24.0
-## 路径重算最短间隔；取值建议大于 0，默认 0.45 秒，修改会影响怪物对移动目标的响应频率。
-@export_range(0.05, 5.0, 0.05) var path_recalculation_min_interval: float = 0.45
-## 路径重算最长间隔；取值应大于等于最短间隔，默认 0.9 秒，怪物会在区间内随机取值以错开路径更新。
-@export_range(0.05, 5.0, 0.05) var path_recalculation_max_interval: float = 0.9
-## 路径目标刷新距离；取值建议大于 0，默认 96，目标移动超过该距离会触发重新寻路。
-@export_range(1.0, 1024.0, 1.0, "or_greater") var path_destination_refresh_distance: float = 96.0
+## 寻路格子尺寸；取值建议 24 到 96，默认 32 可识别建筑入口，越小路径越细但计算开销越高。
+@export_range(16.0, 512.0, 1.0, "or_greater") var pathfinding_cell_size: float = 32.0
+## 寻路代理半径；取值建议接近怪物碰撞半径，默认 18 匹配当前怪物圆形碰撞体并保留入口通行能力。
+@export_range(0.0, 256.0, 1.0) var pathfinding_agent_radius: float = 18.0
+## 路径重算最短间隔；取值建议大于 0，默认 0.55 秒，修改会影响怪物对移动目标的响应频率。
+@export_range(0.05, 5.0, 0.05) var path_recalculation_min_interval: float = 0.55
+## 路径重算最长间隔；取值应大于等于最短间隔，默认 1.1 秒，怪物会在区间内随机取值以错开路径更新。
+@export_range(0.05, 5.0, 0.05) var path_recalculation_max_interval: float = 1.1
+## 路径目标刷新距离；取值建议大于 0，默认 64，目标移动超过该距离会触发重新寻路。
+@export_range(1.0, 1024.0, 1.0, "or_greater") var path_destination_refresh_distance: float = 64.0
 ## 路点到达距离；取值建议略大于怪物半径，默认 28，修改会影响怪物切换到下一个路点的时机。
 @export_range(1.0, 256.0, 1.0) var path_waypoint_arrive_distance: float = 28.0
-## 路径目标随机半径；取值建议 0 到 128，默认 48，让不同怪物绕同一障碍时不完全重合。
-@export_range(0.0, 512.0, 1.0) var path_random_goal_radius: float = 48.0
-## 单次路径最大路点数；取值建议 8 到 128，默认 64，修改会影响远距离寻路缓存长度。
-@export_range(1, 256, 1) var path_max_point_count: int = 64
-## 卡住判定时间；取值建议 0.2 到 1 秒，默认 0.45，怪物持续移动失败超过该时间会强制重算路径。
-@export_range(0.05, 5.0, 0.05) var stuck_detection_time: float = 0.45
+## 路径目标随机半径；取值建议 0 到 64，默认 18，只在目标可见时轻微分散怪物终点。
+@export_range(0.0, 512.0, 1.0) var path_random_goal_radius: float = 18.0
+## 单次路径最大路点数；取值建议 8 到 160，默认 96，修改会影响远距离寻路缓存长度。
+@export_range(1, 256, 1) var path_max_point_count: int = 96
+## 卡住判定时间；取值建议 0.3 到 1.2 秒，默认 0.75，避免正常转角减速被误判为卡住。
+@export_range(0.05, 5.0, 0.05) var stuck_detection_time: float = 0.75
 ## 卡住判定最小位移；取值建议 0 到 4 像素，默认 0.35，低于该帧位移会累计卡住时间。
 @export_range(0.0, 16.0, 0.05) var stuck_minimum_movement: float = 0.35
 ## 击退速度衰减；取值建议大于 0，默认 1600 像素每秒平方，修改会影响怪物受击后滑退持续时间。
@@ -119,6 +127,10 @@ var _has_target_search_destination: bool = false
 var _target_search_remaining: float = 0.0
 ## 当前攻击冷却剩余时间；取值大于等于 0，默认 0 表示可立即攻击，修改会影响下次攻击时机。
 var _attack_cooldown_remaining: float = 0.0
+## 个体移动速度倍率；取值由出生时随机生成，默认 1 表示不改变检查器中的基础速度。
+var _move_speed_multiplier: float = 1.0
+## 个体攻击冷却倍率；取值由出生时随机生成，默认 1 表示不改变检查器中的基础冷却。
+var _attack_cooldown_multiplier: float = 1.0
 ## 出生位置；取值为全局坐标，默认 ready 时记录，用于限制无目标游荡中心。
 var _spawn_position: Vector2 = Vector2.ZERO
 ## 当前游荡目标位置；取值为全局坐标，默认由随机选点生成，修改会影响无目标移动方向。
@@ -147,6 +159,7 @@ func _ready() -> void:
 	current_health = clampf(current_health, 0.0, max_health)
 	_spawn_position = global_position
 	_random.randomize()
+	_randomize_individual_behavior()
 	_avoidance_side_bias = -1 if _random.randi_range(0, 1) == 0 else 1
 	health_changed.emit(current_health, max_health)
 
@@ -181,6 +194,28 @@ func set_target(target_node: Node) -> void:
 	_estimated_target_velocity = Vector2.ZERO
 	_reset_target_search()
 	_clear_navigation_path()
+
+
+func _randomize_individual_behavior() -> void:
+	_move_speed_multiplier = _get_randomized_multiplier(move_speed_random_multiplier_min, move_speed_random_multiplier_max)
+	_attack_cooldown_multiplier = _get_randomized_multiplier(attack_cooldown_random_multiplier_min, attack_cooldown_random_multiplier_max)
+	_attack_cooldown_remaining = _random.randf_range(0.0, _get_resolved_attack_cooldown())
+
+
+func _get_randomized_multiplier(minimum_multiplier: float, maximum_multiplier: float) -> float:
+	# 标准化最小倍率；取值至少为 0.1，默认防止速度或冷却被随机到 0。
+	var resolved_minimum: float = maxf(minf(minimum_multiplier, maximum_multiplier), 0.1)
+	# 标准化最大倍率；取值至少为最小倍率，默认防止检查器中上下限反填导致随机范围错误。
+	var resolved_maximum: float = maxf(maxf(minimum_multiplier, maximum_multiplier), resolved_minimum)
+	return _random.randf_range(resolved_minimum, resolved_maximum)
+
+
+func _get_resolved_move_speed() -> float:
+	return maxf(move_speed, 0.0) * maxf(_move_speed_multiplier, 0.1)
+
+
+func _get_resolved_attack_cooldown() -> float:
+	return maxf(attack_cooldown, 0.05) * maxf(_attack_cooldown_multiplier, 0.1)
 
 
 func apply_damage(damage: float, source: Node) -> void:
@@ -232,7 +267,7 @@ func _try_attack_target() -> void:
 	if _target.has_method("apply_damage"):
 		_target.call("apply_damage", attack_damage, self)
 
-	_attack_cooldown_remaining = attack_cooldown
+	_attack_cooldown_remaining = _get_resolved_attack_cooldown()
 
 
 func _has_vision_line_of_sight_to_target() -> bool:
@@ -383,7 +418,7 @@ func _update_target_behavior(_delta: float, target_distance: float) -> void:
 	var chase_destination: Vector2 = _get_current_chase_destination()
 	# 追击方向；取值为绕障后的单位向量，默认用于设置本帧速度。
 	var chase_direction: Vector2 = _get_steered_direction_to(chase_destination)
-	velocity = chase_direction * move_speed
+	velocity = chase_direction * _get_resolved_move_speed()
 
 
 func _update_wander(delta: float) -> void:
@@ -409,7 +444,7 @@ func _update_wander(delta: float) -> void:
 
 	# 游荡方向；取值为绕障后的单位向量，默认用于无目标慢速移动。
 	var wander_direction: Vector2 = _get_steered_direction_to(_wander_target_position)
-	velocity = wander_direction * move_speed * wander_speed_multiplier
+	velocity = wander_direction * _get_resolved_move_speed() * wander_speed_multiplier
 
 
 func _pick_wander_target() -> void:
@@ -510,12 +545,18 @@ func _get_steered_direction_to(destination: Vector2) -> Vector2:
 
 	# 直接移动方向；取值为当前点指向目标点的单位向量，默认优先尝试直线移动。
 	var direct_direction: Vector2 = direct_offset.normalized()
+	# 通往目标的中心线是否被环境阻断；取值为 true/false，默认用于提前决定是否需要全局寻路。
+	var destination_path_blocked: bool = _is_path_to_destination_blocked(destination)
+	if pathfinding_enabled and (destination_path_blocked or not _path_points.is_empty()):
+		if not destination_path_blocked and not _is_direction_blocked(direct_direction):
+			_clear_navigation_path()
+			return direct_direction
+
+		return _get_pathfinding_direction_to(destination)
+
 	if not _is_direction_blocked(direct_direction):
 		_clear_navigation_path()
 		return direct_direction
-
-	if pathfinding_enabled:
-		return _get_pathfinding_direction_to(destination)
 
 	return _get_local_steered_direction_to(destination)
 
@@ -525,7 +566,6 @@ func _get_pathfinding_direction_to(destination: Vector2) -> Vector2:
 		_rebuild_navigation_path(destination)
 
 	_trim_reached_path_points()
-	_skip_blocked_path_points()
 	if _path_points.is_empty():
 		return _get_local_steered_direction_to(destination)
 
@@ -541,7 +581,7 @@ func _should_rebuild_navigation_path(destination: Vector2) -> bool:
 	if _path_goal_position.distance_to(destination) >= maxf(path_destination_refresh_distance, 1.0):
 		return true
 
-	return _target_is_visible and _path_recalculate_remaining <= 0.0
+	return _path_recalculate_remaining <= 0.0 and _is_path_to_destination_blocked(destination)
 
 
 func _rebuild_navigation_path(destination: Vector2) -> void:
@@ -578,16 +618,6 @@ func _trim_reached_path_points() -> void:
 		_path_points.remove_at(0)
 
 
-func _skip_blocked_path_points() -> void:
-	while not _path_points.is_empty():
-		# 当前路点方向；取值为怪物指向首个路点的单位向量，默认用于判断该路点是否已经不可达。
-		var waypoint_direction: Vector2 = _path_points[0] - global_position
-		if waypoint_direction.is_zero_approx() or not _is_direction_blocked(waypoint_direction.normalized()):
-			return
-
-		_path_points.remove_at(0)
-
-
 func _get_next_path_recalculation_interval() -> float:
 	# 标准化最短重算间隔；取值至少 0.05，默认防止每帧大量寻路。
 	var resolved_min_interval: float = maxf(path_recalculation_min_interval, 0.05)
@@ -597,6 +627,9 @@ func _get_next_path_recalculation_interval() -> float:
 
 
 func _get_randomized_path_destination(destination: Vector2) -> Vector2:
+	if not _target_is_visible:
+		return destination
+
 	# 随机半径；取值至少为 0，默认用于控制路径终点抖动范围。
 	var random_radius: float = maxf(path_random_goal_radius, 0.0)
 	if random_radius <= 0.0:
@@ -665,6 +698,21 @@ func _is_direction_blocked(direction: Vector2) -> bool:
 	# 检测位移；取值为候选方向乘检测距离，默认用于预测下一小段移动是否撞墙。
 	var test_motion: Vector2 = direction.normalized() * maxf(avoidance_probe_distance, 1.0)
 	return test_move(global_transform, test_motion)
+
+
+func _is_path_to_destination_blocked(destination: Vector2) -> bool:
+	# 目标偏移；取值为目标点减当前位置，默认用于跳过极短距离的全局寻路判断。
+	var destination_offset: Vector2 = destination - global_position
+	if destination_offset.length() <= maxf(avoidance_probe_distance, 1.0):
+		return _is_direction_blocked(destination_offset.normalized())
+
+	# 走廊中心线查询；取值为怪物中心到目标点的射线，默认只检测环境层墙体和建筑。
+	var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(global_position, destination, vision_line_of_sight_collision_mask, [get_rid()])
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+	# 中心线命中结果；取值为空表示可直走到目标附近，非空表示应该提前启用 A* 绕行。
+	var hit_result: Dictionary = get_world_2d().direct_space_state.intersect_ray(query)
+	return not hit_result.is_empty()
 
 
 func _move_with_external_velocity(delta: float) -> void:

@@ -30,6 +30,8 @@ class_name PlayerController
 @export_range(1.0, 1200.0, 1.0, "or_greater") var dodge_distance: float = 140.0
 ## 闪避持续时间；取值建议 0.05 到 0.5 秒，默认 0.16 秒，运行时修改会影响突进速度和无敌等后续扩展窗口。
 @export_range(0.01, 2.0, 0.01) var dodge_duration: float = 0.16
+## 击退速度衰减；取值建议大于 0，默认 1800 像素每秒平方，修改会影响后坐力和受击击退持续时间。
+@export_range(1.0, 12000.0, 1.0, "or_greater") var knockback_decay: float = 1800.0
 
 ## 最近一次有效瞄准方向；取值为单位向量，默认向右保证鼠标贴近角色时仍有攻击方向，修改会影响无有效鼠标方向时的攻击朝向。
 var _last_aim_direction: Vector2 = Vector2.RIGHT
@@ -37,6 +39,8 @@ var _last_aim_direction: Vector2 = Vector2.RIGHT
 var _dodge_direction: Vector2 = Vector2.ZERO
 ## 当前闪避剩余时间；取值大于等于 0，默认 0 表示未闪避，修改会影响突进持续帧数。
 var _dodge_time_remaining: float = 0.0
+## 当前外部击退速度；取值为 Vector2，默认零向量，修改会影响后坐力和受击击退叠加到移动上的强度。
+var _knockback_velocity: Vector2 = Vector2.ZERO
 
 ## 输入组件实例缓存；默认在 ready 阶段按路径获取，保持动态类型以降低脚本类名缓存依赖，修改会影响移动与攻击输入读取。
 @onready var _input_component = get_node(input_component_path)
@@ -72,7 +76,8 @@ func _physics_process(delta: float) -> void:
 	else:
 		# 当前帧移动速度倍率；取值大于等于 1，默认由疾跑状态和能量消耗计算，修改会影响普通移动速度。
 		var movement_speed_multiplier: float = _get_movement_speed_multiplier(movement_direction, delta)
-		_movement_component.move(self, movement_direction, delta, movement_speed_multiplier)
+		_movement_component.move(self, movement_direction, delta, movement_speed_multiplier, _knockback_velocity)
+		_decay_knockback(delta)
 
 	if _input_component.is_fire_requested():
 		_try_fire_ranged_weapon()
@@ -84,6 +89,8 @@ func _physics_process(delta: float) -> void:
 func apply_damage(damage: float, source: Node) -> void:
 	if _stats_component.has_method("take_damage"):
 		_stats_component.call("take_damage", damage)
+
+	_apply_knockback_from_source(source)
 
 
 func _handle_weapon_switch_input() -> void:
@@ -114,7 +121,11 @@ func _try_fire_ranged_weapon() -> void:
 
 	# 本次远程攻击是否成功生成弹体；取值为 true/false，默认由远程攻击组件返回，修改会影响是否扣除能量。
 	var attack_succeeded: bool = _ranged_attack_component.try_attack(_last_aim_direction, current_weapon)
-	if attack_succeeded and _stats_component.has_method("spend_energy"):
+	if not attack_succeeded:
+		return
+
+	_apply_weapon_recoil(current_weapon, _last_aim_direction)
+	if _stats_component.has_method("spend_energy"):
 		_stats_component.call("spend_energy", energy_cost)
 
 
@@ -162,8 +173,9 @@ func _move_dodge(delta: float) -> void:
 	var effective_dodge_duration: float = maxf(dodge_duration, 0.01)
 	# 闪避速度；取值为距离除以时长，默认确保总位移接近 dodge_distance，修改会影响突进帧速度。
 	var dodge_speed: float = maxf(dodge_distance, 0.0) / effective_dodge_duration
-	velocity = _dodge_direction * dodge_speed
+	velocity = _dodge_direction * dodge_speed + _knockback_velocity
 	move_and_slide()
+	_decay_knockback(delta)
 	_dodge_time_remaining = maxf(_dodge_time_remaining - delta, 0.0)
 	if _dodge_time_remaining <= 0.0:
 		_dodge_direction = Vector2.ZERO
@@ -200,3 +212,71 @@ func _get_weapon_energy_cost(weapon_data: Resource) -> float:
 		return 0.0
 
 	return maxf(float(weapon_data.get("energy_cost")), 0.0)
+
+
+func apply_knockback(direction: Vector2, force: float) -> void:
+	if direction.is_zero_approx() or force <= 0.0:
+		return
+
+	_knockback_velocity += direction.normalized() * force
+
+
+func _apply_weapon_recoil(weapon_data: Resource, attack_direction: Vector2) -> void:
+	if weapon_data == null or attack_direction.is_zero_approx():
+		return
+
+	# 武器后坐力；取值来自武器资源 recoil_force，默认 0 表示不推动玩家。
+	var recoil_force: float = maxf(float(weapon_data.get("recoil_force")), 0.0)
+	if recoil_force <= 0.0:
+		return
+
+	apply_knockback(-attack_direction.normalized(), recoil_force)
+
+
+func _apply_knockback_from_source(source: Node) -> void:
+	if source == null:
+		return
+
+	# 来源冲击力；取值来自 source.get_impact_force()，默认 0 表示不击退玩家。
+	var impact_force: float = _get_source_impact_force(source)
+	if impact_force <= 0.0:
+		return
+
+	# 来源击退方向；取值优先来自 source.get_knockback_direction()，默认由来源位置指向玩家。
+	var knockback_direction: Vector2 = _get_source_knockback_direction(source)
+	apply_knockback(knockback_direction, impact_force)
+
+
+func _get_source_impact_force(source: Node) -> float:
+	if source.has_method("get_impact_force"):
+		return maxf(float(source.call("get_impact_force")), 0.0)
+
+	return 0.0
+
+
+func _get_source_knockback_direction(source: Node) -> Vector2:
+	if source.has_method("get_knockback_direction"):
+		# 来源提供的原始方向；取值可能为任意 Variant，默认只接收 Vector2。
+		var raw_direction: Variant = source.call("get_knockback_direction")
+		if raw_direction is Vector2:
+			# 来源提供的击退方向；取值可能为零向量，默认返回前会做兜底判断。
+			var provided_direction: Vector2 = raw_direction
+			if not provided_direction.is_zero_approx():
+				return provided_direction.normalized()
+
+	if source is Node2D:
+		# 来源节点位置；取值为 Node2D 全局坐标，默认用于从来源指向玩家的击退方向。
+		var source_position: Vector2 = (source as Node2D).global_position
+		# 位置推导方向；取值为来源到玩家的单位向量，默认用于普通怪物近战击退。
+		var inferred_direction: Vector2 = global_position - source_position
+		if not inferred_direction.is_zero_approx():
+			return inferred_direction.normalized()
+
+	return _last_aim_direction
+
+
+func _decay_knockback(delta: float) -> void:
+	if _knockback_velocity.is_zero_approx():
+		return
+
+	_knockback_velocity = _knockback_velocity.move_toward(Vector2.ZERO, maxf(knockback_decay, 1.0) * delta)

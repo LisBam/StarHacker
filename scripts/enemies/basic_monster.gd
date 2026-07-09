@@ -13,6 +13,10 @@ signal died
 @export_range(0.0, 9999.0, 1.0, "or_greater") var current_health: float = 60.0
 ## 攻击力；取值建议大于等于 0，默认 12 表示每次近身攻击造成的伤害，运行时修改会影响玩家受击压力。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var attack_damage: float = 12.0
+## 韧性；取值为百分比，默认 0 表示不减免控制，1 表示减少 1% 击退效果，100 表示完全免疫击退。
+@export_range(0.0, 100.0, 1.0) var toughness: float = 0.0
+## 攻击冲击力；取值建议大于等于 0，默认 180 会在命中玩家时造成短距离击退。
+@export_range(0.0, 5000.0, 1.0, "or_greater") var attack_impact_force: float = 180.0
 ## 移动速度；取值建议大于 0，默认 150 像素每秒，运行时修改会影响怪物追击速度。
 @export_range(1.0, 2000.0, 1.0, "or_greater") var move_speed: float = 150.0
 ## 视野范围；取值建议大于 0，默认 360 像素，玩家进入该范围后怪物开始索敌追击。
@@ -33,6 +37,14 @@ signal died
 @export_range(0.0, 10.0, 0.05) var wander_wait_min: float = 0.6
 ## 游荡最长等待时间；取值应大于等于最短等待时间，默认 1.8 秒，修改会影响怪物到点后的停顿上限。
 @export_range(0.0, 10.0, 0.05) var wander_wait_max: float = 1.8
+## 绕障检测距离；取值建议大于怪物半径，默认 56 像素，修改会影响怪物提前绕开墙体的距离。
+@export_range(1.0, 400.0, 1.0, "or_greater") var avoidance_probe_distance: float = 56.0
+## 绕障候选角度步长；取值建议 5 到 45 度，默认 22.5 度，修改会影响怪物寻找绕行方向的细腻程度。
+@export_range(1.0, 90.0, 0.5) var avoidance_angle_step_degrees: float = 22.5
+## 单侧绕障候选数量；取值建议 1 到 8，默认 4，修改会影响怪物绕障能力和每帧检测开销。
+@export_range(1, 12, 1) var avoidance_candidate_count: int = 4
+## 击退速度衰减；取值建议大于 0，默认 1600 像素每秒平方，修改会影响怪物受击后滑退持续时间。
+@export_range(1.0, 12000.0, 1.0, "or_greater") var knockback_decay: float = 1600.0
 
 ## 当前追击目标；取值为 Node2D 或 null，默认由 GameWorld 设置，修改会影响怪物追击和攻击对象。
 var _target: Node2D
@@ -50,6 +62,8 @@ var _has_wander_target: bool = false
 var _wander_wait_remaining: float = 0.0
 ## 怪物局部随机数生成器；默认每只怪物独立随机化，修改会影响游荡点和等待时间。
 var _random: RandomNumberGenerator = RandomNumberGenerator.new()
+## 当前外部击退速度；取值为 Vector2，默认零向量，修改会影响怪物受击控制效果。
+var _knockback_velocity: Vector2 = Vector2.ZERO
 
 
 func _ready() -> void:
@@ -64,7 +78,7 @@ func _physics_process(delta: float) -> void:
 	if not is_instance_valid(_target):
 		_has_target = false
 		_update_wander(delta)
-		move_and_slide()
+		_move_with_external_velocity(delta)
 		return
 
 	# 目标距离；取值为当前怪物到玩家的距离，默认每帧计算，修改会影响索敌、追击和攻击判定。
@@ -72,18 +86,11 @@ func _physics_process(delta: float) -> void:
 	_update_target_state(target_distance)
 	if not _has_target:
 		_update_wander(delta)
-		move_and_slide()
+		_move_with_external_velocity(delta)
 		return
 
-	if target_distance <= attack_range:
-		velocity = Vector2.ZERO
-		_try_attack_target()
-	else:
-		# 追击方向；取值为怪物指向目标的单位向量，默认用于设置本帧速度，修改会影响怪物移动方向。
-		var chase_direction: Vector2 = (_target.global_position - global_position).normalized()
-		velocity = chase_direction * move_speed
-
-	move_and_slide()
+	_update_target_behavior(delta, target_distance)
+	_move_with_external_velocity(delta)
 
 
 func set_target(target_node: Node) -> void:
@@ -91,12 +98,13 @@ func set_target(target_node: Node) -> void:
 	_has_target = false
 
 
-func apply_damage(damage: float, _source: Node) -> void:
+func apply_damage(damage: float, source: Node) -> void:
 	if damage <= 0.0 or current_health <= 0.0:
 		return
 
 	current_health = clampf(current_health - damage, 0.0, max_health)
 	health_changed.emit(current_health, max_health)
+	_apply_knockback_from_source(source)
 	if current_health <= 0.0:
 		died.emit()
 		queue_free()
@@ -117,6 +125,17 @@ func _try_attack_target() -> void:
 		_target.call("apply_damage", attack_damage, self)
 
 	_attack_cooldown_remaining = attack_cooldown
+
+
+func _update_target_behavior(_delta: float, target_distance: float) -> void:
+	if target_distance <= attack_range:
+		velocity = Vector2.ZERO
+		_try_attack_target()
+		return
+
+	# 追击方向；取值为绕障后的单位向量，默认用于设置本帧速度。
+	var chase_direction: Vector2 = _get_steered_direction_to(_target.global_position)
+	velocity = chase_direction * move_speed
 
 
 func _update_wander(delta: float) -> void:
@@ -140,8 +159,8 @@ func _update_wander(delta: float) -> void:
 		velocity = Vector2.ZERO
 		return
 
-	# 游荡方向；取值为怪物指向随机游荡点的单位向量，默认用于无目标慢速移动。
-	var wander_direction: Vector2 = (_wander_target_position - global_position).normalized()
+	# 游荡方向；取值为绕障后的单位向量，默认用于无目标慢速移动。
+	var wander_direction: Vector2 = _get_steered_direction_to(_wander_target_position)
 	velocity = wander_direction * move_speed * wander_speed_multiplier
 
 
@@ -158,3 +177,126 @@ func _get_next_wander_wait() -> float:
 	# 标准化最长等待时间；取值至少为最短等待时间，默认防止配置反转导致随机范围错误。
 	var resolved_wait_max: float = maxf(wander_wait_max, wander_wait_min)
 	return _random.randf_range(wander_wait_min, resolved_wait_max)
+
+
+func apply_knockback(direction: Vector2, force: float) -> void:
+	if direction.is_zero_approx() or force <= 0.0:
+		return
+
+	# 韧性减免比例；取值为 0 到 1，默认由 toughness 百分比换算。
+	var toughness_reduction: float = clampf(toughness, 0.0, 100.0) * 0.01
+	# 实际击退力度；取值为原始力度按韧性减免后的结果，默认用于写入外部速度。
+	var resolved_force: float = maxf(force * (1.0 - toughness_reduction), 0.0)
+	if resolved_force <= 0.0:
+		return
+
+	_knockback_velocity += direction.normalized() * resolved_force
+
+
+func get_impact_force() -> float:
+	return maxf(attack_impact_force, 0.0)
+
+
+func get_knockback_direction() -> Vector2:
+	if is_instance_valid(_target):
+		# 指向目标方向；取值为怪物到当前目标的单位向量，默认用于近战命中玩家后的击退方向。
+		var target_direction: Vector2 = _target.global_position - global_position
+		if not target_direction.is_zero_approx():
+			return target_direction.normalized()
+
+	if not velocity.is_zero_approx():
+		return velocity.normalized()
+
+	return Vector2.RIGHT
+
+
+func _apply_knockback_from_source(source: Node) -> void:
+	if source == null:
+		return
+
+	# 来源冲击力；取值来自 source.get_impact_force()，默认 0 表示不击退怪物。
+	var impact_force: float = _get_source_impact_force(source)
+	if impact_force <= 0.0:
+		return
+
+	# 来源击退方向；取值优先来自 source.get_knockback_direction()，默认由来源位置指向怪物。
+	var knockback_direction: Vector2 = _get_source_knockback_direction(source)
+	apply_knockback(knockback_direction, impact_force)
+
+
+func _get_source_impact_force(source: Node) -> float:
+	if source.has_method("get_impact_force"):
+		return maxf(float(source.call("get_impact_force")), 0.0)
+
+	return 0.0
+
+
+func _get_source_knockback_direction(source: Node) -> Vector2:
+	if source.has_method("get_knockback_direction"):
+		# 来源提供的原始方向；取值可能为任意 Variant，默认只接收 Vector2。
+		var raw_direction: Variant = source.call("get_knockback_direction")
+		if raw_direction is Vector2:
+			# 来源提供的击退方向；取值可能为零向量，默认返回前会做兜底判断。
+			var provided_direction: Vector2 = raw_direction
+			if not provided_direction.is_zero_approx():
+				return provided_direction.normalized()
+
+	if source is Node2D:
+		# 来源节点位置；取值为 Node2D 全局坐标，默认用于从来源指向怪物的击退方向。
+		var source_position: Vector2 = (source as Node2D).global_position
+		# 位置推导方向；取值为来源到怪物的单位向量，默认用于无方向来源的击退。
+		var inferred_direction: Vector2 = global_position - source_position
+		if not inferred_direction.is_zero_approx():
+			return inferred_direction.normalized()
+
+	return Vector2.RIGHT
+
+
+func _get_steered_direction_to(destination: Vector2) -> Vector2:
+	# 直接目标偏移；取值为目标点减当前点，默认用于计算期望移动方向。
+	var direct_offset: Vector2 = destination - global_position
+	if direct_offset.is_zero_approx():
+		return Vector2.ZERO
+
+	# 直接移动方向；取值为当前点指向目标点的单位向量，默认优先尝试直线移动。
+	var direct_direction: Vector2 = direct_offset.normalized()
+	if not _is_direction_blocked(direct_direction):
+		return direct_direction
+
+	# 候选角度步长；取值为弧度，默认由检查器角度配置转换。
+	var angle_step: float = deg_to_rad(maxf(avoidance_angle_step_degrees, 1.0))
+	# 候选阶梯索引；取值为 1 到 avoidance_candidate_count，默认逐步扩大绕障角度。
+	for candidate_index in range(1, avoidance_candidate_count + 1):
+		# 候选方向符号；取值为 -1 和 1，默认左右两侧都尝试绕行。
+		for side in [-1, 1]:
+			# 候选方向；取值为直接方向旋转后的单位向量，默认用于避开前方障碍。
+			var candidate_direction: Vector2 = direct_direction.rotated(angle_step * float(candidate_index * side)).normalized()
+			if not _is_direction_blocked(candidate_direction):
+				return candidate_direction
+
+	return direct_direction
+
+
+func _is_direction_blocked(direction: Vector2) -> bool:
+	if direction.is_zero_approx():
+		return true
+
+	# 检测位移；取值为候选方向乘检测距离，默认用于预测下一小段移动是否撞墙。
+	var test_motion: Vector2 = direction.normalized() * maxf(avoidance_probe_distance, 1.0)
+	return test_move(global_transform, test_motion)
+
+
+func _move_with_external_velocity(delta: float) -> void:
+	# 本帧基础速度；取值来自追击或游荡逻辑，默认在叠加击退前缓存。
+	var desired_velocity: Vector2 = velocity
+	velocity = desired_velocity + _knockback_velocity
+	move_and_slide()
+	velocity = desired_velocity
+	_decay_knockback(delta)
+
+
+func _decay_knockback(delta: float) -> void:
+	if _knockback_velocity.is_zero_approx():
+		return
+
+	_knockback_velocity = _knockback_velocity.move_toward(Vector2.ZERO, maxf(knockback_decay, 1.0) * delta)

@@ -14,7 +14,7 @@ class_name TopDownMovementComponent
 @export_range(0.0, 20.0, 0.1) var stop_threshold: float = 4.0
 
 
-func move(body: CharacterBody2D, direction: Vector2, delta: float, speed_multiplier: float = 1.0) -> void:
+func move(body: CharacterBody2D, direction: Vector2, delta: float, speed_multiplier: float = 1.0, external_velocity: Vector2 = Vector2.ZERO) -> void:
 	# 标准化速度倍率；取值大于等于 0，默认 1 表示正常移动，修改会影响疾跑等临时速度加成。
 	var clamped_speed_multiplier: float = maxf(speed_multiplier, 0.0)
 	# 目标速度；取值由方向和最大速度计算，默认随输入实时变化，修改会直接影响本帧期望移动速度。
@@ -26,4 +26,13 @@ func move(body: CharacterBody2D, direction: Vector2, delta: float, speed_multipl
 	if target_velocity.is_zero_approx() and body.velocity.length() <= stop_threshold:
 		body.velocity = Vector2.ZERO
 
+	body.velocity += external_velocity
 	body.move_and_slide()
+
+
+func configure_max_speed(new_max_speed: float) -> void:
+	max_speed = maxf(new_max_speed, 1.0)
+
+
+func get_max_speed() -> float:
+	return max_speed

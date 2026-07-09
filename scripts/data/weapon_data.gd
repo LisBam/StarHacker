@@ -21,10 +21,16 @@ class_name WeaponData
 @export var projectile_scene: PackedScene
 ## 远程弹体速度；取值建议大于 0，默认 900，修改会影响远程弹道速度。
 @export_range(1.0, 3000.0, 1.0, "or_greater") var projectile_speed: float = 900.0
+## 远程弹体射程；取值建议大于 0，默认 960 像素，远程武器专用，修改会影响弹体自动销毁距离。
+@export_range(1.0, 12000.0, 1.0, "or_greater") var bullet_range: float = 960.0
 ## 远程弹体伤害；取值建议大于等于 0，默认 12，修改会影响弹体命中后的伤害值。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var ranged_damage: float = 12.0
 ## 远程射击冷却；取值应大于 0，默认 0.16 秒，修改会影响连续射击频率。
 @export_range(0.01, 5.0, 0.01) var ranged_cooldown: float = 0.16
+## 武器后坐力；取值建议大于等于 0，默认 0 表示不推动使用者，远程开火时会把玩家向反方向推开。
+@export_range(0.0, 3000.0, 1.0, "or_greater") var recoil_force: float = 0.0
+## 武器冲击力；取值建议大于等于 0，默认 0 表示不造成击退，命中目标时会按目标韧性折算控制效果。
+@export_range(0.0, 5000.0, 1.0, "or_greater") var impact_force: float = 0.0
 ## 近战伤害；取值建议大于等于 0，默认 35，修改会影响近战命中后的伤害值。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var melee_damage: float = 35.0
 ## 近战冷却；取值应大于 0，默认 0.45 秒，修改会影响近战攻击节奏。

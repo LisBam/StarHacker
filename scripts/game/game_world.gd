@@ -15,19 +15,19 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 
 ## 游戏世界场景负责提供当前关卡的基础承载环境。
 ## 玩家、敌人、掉落物、地图装饰都可以作为它的子节点存在。
-## 进入战斗场景时会生成一张空白大型地图，并在地图上随机摆放墙体、建筑和怪物。
+## 进入战斗场景时会生成一张大型网格地图，并在地图上随机摆放墙体、建筑和怪物。
 
 ## 调试网格单格尺寸；取值应大于 0，默认 64 匹配常见 2D 地图尺度，运行时修改会改变距离参照密度。
 @export var grid_size: float = 64.0
-## 空白地图向每个方向延伸的格数；取值应为正整数，默认 96 生成 192x192 格大型战斗地图，运行时修改会改变地图尺寸。
+## 网格地图向每个方向延伸的格数；取值应为正整数，默认 96 生成 192x192 格大型战斗地图，运行时修改会改变地图尺寸。
 @export var grid_extent: int = 96
-## 地图边框颜色；取值为 RGBA，默认更亮用于定位空白地图边界，运行时修改会影响边界识别。
+## 地图边框颜色；取值为 RGBA，默认更亮用于定位网格地图边界，运行时修改会影响边界识别。
 @export var axis_color: Color = Color(0.28, 0.52, 0.72, 0.62)
 ## 地图随机种子；默认 0 表示每次进入战斗场景随机生成，设置为正数可复现同一张地图。
 @export var map_seed: int = 0
-## 基础地面颜色；默认深蓝灰，运行时修改会影响空白地图底色。
+## 基础地面颜色；默认深蓝灰，运行时修改会影响网格地图底色。
 @export var base_floor_color: Color = Color(0.055, 0.07, 0.09, 1.0)
-## 网格线颜色；取值为 RGBA，默认低透明度用于空白地图定位，运行时修改会影响背景网格可见度。
+## 网格线颜色；取值为 RGBA，默认低透明度用于地图定位，运行时修改会影响背景网格可见度。
 @export var grid_color: Color = Color(0.18, 0.25, 0.30, 0.34)
 ## 探索迷雾格子尺寸；取值应大于 0，默认 256 像素，修改会影响大地图迷雾精度和探索记录数量。
 @export_range(16.0, 2048.0, 1.0, "or_greater") var exploration_cell_size: float = 256.0
@@ -39,20 +39,20 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export var environment_parent_path: NodePath = ^"Environment"
 ## 随机环境预制体列表；默认由场景指定墙体和建筑，元素必须能实例化为 Node2D，修改会影响地图障碍类型池。
 @export var obstacle_scenes: Array[PackedScene] = []
-## 随机环境生成数量；取值建议 0 到 256，默认 58，运行时修改会影响地图障碍密度。
-@export_range(0, 256, 1) var obstacle_spawn_count: int = 58
-## 环境生成最小玩家距离；取值应大于等于 0，默认 320 像素，运行时修改会影响玩家出生点周围空地大小。
-@export_range(0.0, 4000.0, 1.0) var obstacle_spawn_min_distance_from_player: float = 320.0
+## 随机环境生成数量；取值建议 0 到 256，默认 96，运行时修改会影响地图障碍密度。
+@export_range(0, 256, 1) var obstacle_spawn_count: int = 96
+## 环境生成最小玩家距离；取值应大于等于 0，默认 300 像素，运行时修改会影响玩家出生点周围空地大小。
+@export_range(0.0, 4000.0, 1.0) var obstacle_spawn_min_distance_from_player: float = 300.0
 ## 环境生成边界留白；取值应大于等于 0，默认 520 像素，运行时修改会影响墙体和建筑离地图边缘的距离。
 @export_range(0.0, 4000.0, 1.0) var obstacle_spawn_edge_margin: float = 520.0
-## 环境生成最小间距；取值应大于等于 0，默认 78 像素，运行时修改会影响建筑之间是否拥挤或重叠。
-@export_range(0.0, 2000.0, 1.0) var obstacle_spawn_min_spacing: float = 78.0
-## 单个环境物生成尝试次数；取值建议 1 到 128，默认 28，运行时修改会影响生成成功率和进入场景耗时。
-@export_range(1, 128, 1) var obstacle_spawn_attempts_per_item: int = 28
-## 环境物最小随机缩放；取值建议大于 0，默认 0.75，修改会影响墙体和建筑最小体积。
-@export_range(0.1, 8.0, 0.05) var obstacle_scale_min: float = 0.75
-## 环境物最大随机缩放；取值应大于等于最小缩放，默认 1.55，修改会影响墙体和建筑最大体积。
-@export_range(0.1, 8.0, 0.05) var obstacle_scale_max: float = 1.55
+## 环境生成最小间距；取值应大于等于 0，默认 52 像素，运行时修改会影响建筑之间是否拥挤或重叠。
+@export_range(0.0, 2000.0, 1.0) var obstacle_spawn_min_spacing: float = 52.0
+## 单个环境物生成尝试次数；取值建议 1 到 128，默认 36，运行时修改会影响生成成功率和进入场景耗时。
+@export_range(1, 128, 1) var obstacle_spawn_attempts_per_item: int = 36
+## 环境物最小随机缩放；取值建议大于 0，默认 0.65，修改会影响墙体和建筑最小体积。
+@export_range(0.1, 8.0, 0.05) var obstacle_scale_min: float = 0.65
+## 环境物最大随机缩放；取值应大于等于最小缩放，默认 1.9，修改会影响墙体和建筑最大体积。
+@export_range(0.1, 8.0, 0.05) var obstacle_scale_max: float = 1.9
 ## 随机怪物场景；默认由 game_world.tscn 指向 BasicMonster，必须实例化为 Node2D，修改会影响随机生成的敌人类型。
 @export var monster_scene: PackedScene
 ## 怪物生成数量；取值建议 0 到 64，默认 8，运行时修改会影响开局战斗压力。
@@ -125,7 +125,7 @@ func _draw() -> void:
 		draw_line(Vector2(offset, -half_size), Vector2(offset, half_size), grid_color, 1.0)
 		draw_line(Vector2(-half_size, offset), Vector2(half_size, offset), grid_color, 1.0)
 
-	# 地图边框颜色；取值来自 axis_color，默认只用于空白地图边界提示，不再绘制内部网格。
+	# 地图边框颜色；取值来自 axis_color，默认用于网格地图边界提示。
 	var border_color: Color = axis_color
 	draw_rect(play_area, border_color, false, 2.0)
 
@@ -365,7 +365,7 @@ func _place_environment_instance(obstacle_instance: Node2D) -> bool:
 func _get_random_environment_spawn_position() -> Vector2:
 	# 地图半边长；取值由 grid_size 和 grid_extent 计算，默认用于限制环境物出生范围。
 	var half_size: float = get_map_half_size()
-	# 有效生成边界；取值为半边长减边界留白，默认避免建筑贴边或超出空白地图。
+	# 有效生成边界；取值为半边长减边界留白，默认避免建筑贴边或超出网格地图。
 	var spawn_limit: float = maxf(0.0, half_size - obstacle_spawn_edge_margin)
 	return Vector2(
 		_random.randf_range(-spawn_limit, spawn_limit),
@@ -564,7 +564,7 @@ func _is_position_blocked_by_environment(position: Vector2, radius: float) -> bo
 
 
 func _clamp_position_to_map(position: Vector2) -> Vector2:
-	# 地图半边长；取值由 grid_size 和 grid_extent 计算，默认用于限制出生点不超出空白地图。
+	# 地图半边长；取值由 grid_size 和 grid_extent 计算，默认用于限制出生点不超出网格地图。
 	var half_size: float = grid_size * float(grid_extent)
 	# 地图边界留白；取值为一个网格尺寸，默认避免怪物贴边生成。
 	var edge_margin: float = grid_size

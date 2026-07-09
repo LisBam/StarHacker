@@ -28,6 +28,8 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export var toggle_inventory_action: StringName = &"toggle_inventory"
 ## 暂停输入动作名；默认 pause_game 对应 ESC，运行时通常不修改，改名会影响暂停菜单打开方式。
 @export var pause_action: StringName = &"pause_game"
+## 大地图开关输入动作名；默认 toggle_large_map 对应 M 键，运行时通常不修改，改名会影响大地图打开方式。
+@export var toggle_large_map_action: StringName = &"toggle_large_map"
 ## 主菜单场景路径；默认返回项目主菜单，必须填写 tscn 资源，运行时通常不修改，改错会导致暂停菜单返回失败。
 @export_file("*.tscn") var main_menu_scene_path: String = "res://scenes/ui/main_menu.tscn"
 ## 远程装备槽最小尺寸；默认 80x54 适合底部低遮挡显示，运行时通常不修改，扩展槽数量时可调小。
@@ -148,6 +150,8 @@ var _is_training_mode: bool = false
 @onready var _pause_master_volume_value_label: Label = %PauseMasterVolumeValueLabel
 ## 暂停设置返回按钮缓存；默认绑定 PauseSettingsBackButton，点击后返回暂停主菜单。
 @onready var _pause_settings_back_button: Button = %PauseSettingsBackButton
+## 大地图遮罩缓存；默认绑定 LargeMapOverlay，M 键切换显示，显示时锁定战斗输入。
+@onready var _large_map_overlay: Control = %LargeMapOverlay
 
 
 func _ready() -> void:
@@ -160,6 +164,7 @@ func _ready() -> void:
 	_bind_pause_menu()
 	_refresh_all()
 	_set_inventory_visible(false)
+	_set_large_map_visible(false)
 	_set_pause_menu_visible(false)
 
 
@@ -181,6 +186,11 @@ func _unhandled_input(event: InputEvent) -> void:
 
 		if key_event.pressed and not key_event.echo and _is_toggle_inventory_event(key_event):
 			_toggle_inventory()
+			get_viewport().set_input_as_handled()
+			return
+
+		if key_event.pressed and not key_event.echo and _is_toggle_large_map_event(key_event):
+			_toggle_large_map()
 			get_viewport().set_input_as_handled()
 
 
@@ -416,10 +426,32 @@ func _toggle_inventory() -> void:
 
 
 func _set_inventory_visible(visible: bool) -> void:
+	if visible and _large_map_overlay.visible:
+		_large_map_overlay.visible = false
+
 	_inventory_panel.visible = visible
-	_set_combat_input_enabled(not visible)
 	if visible:
 		_rebuild_inventory_slots()
+
+	_refresh_combat_input_state()
+
+
+func _toggle_large_map() -> void:
+	_set_large_map_visible(not _large_map_overlay.visible)
+
+
+func _set_large_map_visible(visible: bool) -> void:
+	if visible and _inventory_panel.visible:
+		_inventory_panel.visible = false
+
+	_large_map_overlay.visible = visible
+	_refresh_combat_input_state()
+
+
+func _refresh_combat_input_state() -> void:
+	# 战斗输入启用状态；取值由背包、大地图和暂停菜单共同决定，默认任意界面打开都会禁用战斗输入。
+	var combat_input_enabled: bool = not _inventory_panel.visible and not _large_map_overlay.visible and not _pause_overlay.visible
+	_set_combat_input_enabled(combat_input_enabled)
 
 
 func _set_combat_input_enabled(enabled: bool) -> void:
@@ -533,6 +565,13 @@ func _is_pause_event(key_event: InputEventKey) -> bool:
 	return InputMap.has_action(pause_action) and Input.is_action_just_pressed(pause_action)
 
 
+func _is_toggle_large_map_event(key_event: InputEventKey) -> bool:
+	if key_event.physical_keycode == KEY_M:
+		return true
+
+	return InputMap.has_action(toggle_large_map_action) and Input.is_action_just_pressed(toggle_large_map_action)
+
+
 func _toggle_pause_menu() -> void:
 	if _pause_overlay.visible and _pause_settings_panel.visible:
 		_show_pause_settings(false)
@@ -560,11 +599,13 @@ func _set_pause_menu_visible(visible: bool) -> void:
 	if visible:
 		if _inventory_panel.visible:
 			_set_inventory_visible(false)
-		_set_combat_input_enabled(false)
+		if _large_map_overlay.visible:
+			_set_large_map_visible(false)
+		_refresh_combat_input_state()
 		_sync_pause_master_volume_slider()
 		_resume_button.grab_focus()
 	else:
-		_set_combat_input_enabled(true)
+		_refresh_combat_input_state()
 
 
 func _show_pause_settings(visible: bool) -> void:

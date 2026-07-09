@@ -1,0 +1,82 @@
+[gd_scene load_steps=2 format=3]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_corner_block"]
+size = Vector2(118, 118)
+
+[node name="CrossAccessBuilding" type="Node2D"]
+
+[node name="FloorHint" type="Polygon2D" parent="."]
+color = Color(0.0705882, 0.0941176, 0.109804, 0.5)
+polygon = PackedVector2Array(-196, -196, 196, -196, 196, 196, -196, 196)
+
+[node name="TopLeftBlock" type="StaticBody2D" parent="." groups=["environment_obstacles"]]
+position = Vector2(-128, -128)
+collision_layer = 16
+collision_mask = 0
+
+[node name="Visual" type="Polygon2D" parent="TopLeftBlock"]
+color = Color(0.117647, 0.156863, 0.188235, 1)
+polygon = PackedVector2Array(-59, -59, 59, -59, 59, 59, -59, 59)
+
+[node name="Edge" type="Line2D" parent="TopLeftBlock"]
+points = PackedVector2Array(-59, -59, 59, -59, 59, 59, -59, 59, -59, -59)
+width = 2.0
+default_color = Color(0.454902, 0.698039, 0.756863, 0.64)
+closed = true
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="TopLeftBlock"]
+shape = SubResource("RectangleShape2D_corner_block")
+
+[node name="TopRightBlock" type="StaticBody2D" parent="." groups=["environment_obstacles"]]
+position = Vector2(128, -128)
+collision_layer = 16
+collision_mask = 0
+
+[node name="Visual" type="Polygon2D" parent="TopRightBlock"]
+color = Color(0.117647, 0.156863, 0.188235, 1)
+polygon = PackedVector2Array(-59, -59, 59, -59, 59, 59, -59, 59)
+
+[node name="Edge" type="Line2D" parent="TopRightBlock"]
+points = PackedVector2Array(-59, -59, 59, -59, 59, 59, -59, 59, -59, -59)
+width = 2.0
+default_color = Color(0.454902, 0.698039, 0.756863, 0.64)
+closed = true
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="TopRightBlock"]
+shape = SubResource("RectangleShape2D_corner_block")
+
+[node name="BottomLeftBlock" type="StaticBody2D" parent="." groups=["environment_obstacles"]]
+position = Vector2(-128, 128)
+collision_layer = 16
+collision_mask = 0
+
+[node name="Visual" type="Polygon2D" parent="BottomLeftBlock"]
+color = Color(0.117647, 0.156863, 0.188235, 1)
+polygon = PackedVector2Array(-59, -59, 59, -59, 59, 59, -59, 59)
+
+[node name="Edge" type="Line2D" parent="BottomLeftBlock"]
+points = PackedVector2Array(-59, -59, 59, -59, 59, 59, -59, 59, -59, -59)
+width = 2.0
+default_color = Color(0.454902, 0.698039, 0.756863, 0.64)
+closed = true
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="BottomLeftBlock"]
+shape = SubResource("RectangleShape2D_corner_block")
+
+[node name="BottomRightBlock" type="StaticBody2D" parent="." groups=["environment_obstacles"]]
+position = Vector2(128, 128)
+collision_layer = 16
+collision_mask = 0
+
+[node name="Visual" type="Polygon2D" parent="BottomRightBlock"]
+color = Color(0.117647, 0.156863, 0.188235, 1)
+polygon = PackedVector2Array(-59, -59, 59, -59, 59, 59, -59, 59)
+
+[node name="Edge" type="Line2D" parent="BottomRightBlock"]
+points = PackedVector2Array(-59, -59, 59, -59, 59, 59, -59, 59, -59, -59)
+width = 2.0
+default_color = Color(0.454902, 0.698039, 0.756863, 0.64)
+closed = true
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="BottomRightBlock"]
+shape = SubResource("RectangleShape2D_corner_block")

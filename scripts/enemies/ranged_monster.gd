@@ -43,8 +43,10 @@ func _update_target_behavior(_delta: float, target_distance: float) -> void:
 	# 是否拥有直线射击视线；取值为 true/false，默认只被环境墙体阻挡。
 	var has_line_of_sight: bool = _has_line_of_sight_to_target()
 	if target_distance > shoot_range or not has_line_of_sight:
+		# 当前追击目标点；取值为玩家当前位置或最后可见位置，默认用于失去视野后的搜索移动。
+		var chase_destination: Vector2 = _get_current_chase_destination()
 		# 追击方向；取值为绕障后的单位向量，默认用于接近射击范围或寻找视线。
-		var chase_direction: Vector2 = _get_steered_direction_to(_target.global_position)
+		var chase_direction: Vector2 = _get_steered_direction_to(chase_destination)
 		velocity = chase_direction * move_speed
 		return
 

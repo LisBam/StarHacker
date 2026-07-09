@@ -27,6 +27,14 @@ signal died
 @export_range(0.05, 10.0, 0.05) var attack_cooldown: float = 0.9
 ## 脱战视野倍率；取值建议大于等于 1，默认 1.25 让怪物不会在视野边缘频繁切换索敌状态。
 @export_range(1.0, 4.0, 0.05, "or_greater") var lose_target_range_multiplier: float = 1.25
+## 索敌是否需要直线视野；默认 true，墙体会阻挡怪物首次发现玩家。
+@export var vision_requires_line_of_sight: bool = true
+## 索敌视线遮挡检测掩码；默认检测第 5 层环境墙体，修改会影响哪些障碍能阻挡怪物发现玩家。
+@export_flags_2d_physics var vision_line_of_sight_collision_mask: int = 16
+## 失去视野后的记忆时间；取值建议大于 0，默认 4 秒，怪物会在这段时间内前往最后看见玩家的位置搜索。
+@export_range(0.0, 30.0, 0.1) var target_memory_duration: float = 4.0
+## 搜索到达距离；取值建议大于怪物半径，默认 54 像素，怪物靠近最后可见位置后会结束搜索。
+@export_range(1.0, 512.0, 1.0) var search_arrive_distance: float = 54.0
 ## 游荡半径；取值建议大于等于 0，默认 180 表示怪物无目标时围绕出生点小范围移动，修改会影响巡游范围。
 @export_range(0.0, 2000.0, 1.0) var wander_radius: float = 180.0
 ## 游荡速度倍率；取值建议 0 到 1，默认 0.35 表示无目标时慢速移动，修改会影响游荡节奏。
@@ -61,6 +69,10 @@ signal died
 @export_range(0.0, 512.0, 1.0) var path_random_goal_radius: float = 48.0
 ## 单次路径最大路点数；取值建议 8 到 128，默认 64，修改会影响远距离寻路缓存长度。
 @export_range(1, 256, 1) var path_max_point_count: int = 64
+## 卡住判定时间；取值建议 0.2 到 1 秒，默认 0.45，怪物持续移动失败超过该时间会强制重算路径。
+@export_range(0.05, 5.0, 0.05) var stuck_detection_time: float = 0.45
+## 卡住判定最小位移；取值建议 0 到 4 像素，默认 0.35，低于该帧位移会累计卡住时间。
+@export_range(0.0, 16.0, 0.05) var stuck_minimum_movement: float = 0.35
 ## 击退速度衰减；取值建议大于 0，默认 1600 像素每秒平方，修改会影响怪物受击后滑退持续时间。
 @export_range(1.0, 12000.0, 1.0, "or_greater") var knockback_decay: float = 1600.0
 
@@ -68,6 +80,14 @@ signal died
 var _target: Node2D
 ## 当前是否已锁定目标；取值为 true/false，默认 false，修改会影响怪物是否追击视野内玩家。
 var _has_target: bool = false
+## 当前目标是否处于可见状态；取值为 true/false，默认 false，墙体遮挡时会变为 false。
+var _target_is_visible: bool = false
+## 最后一次看见目标的位置；取值为世界坐标，默认零向量，仅在 _has_last_known_target_position 为 true 时有效。
+var _last_known_target_position: Vector2 = Vector2.ZERO
+## 是否存在最后目标位置；取值为 true/false，默认 false，失去视野后用于决定是否继续搜索。
+var _has_last_known_target_position: bool = false
+## 目标记忆剩余时间；取值大于等于 0，默认 0，失去视野后递减直到放弃搜索。
+var _target_memory_remaining: float = 0.0
 ## 当前攻击冷却剩余时间；取值大于等于 0，默认 0 表示可立即攻击，修改会影响下次攻击时机。
 var _attack_cooldown_remaining: float = 0.0
 ## 出生位置；取值为全局坐标，默认 ready 时记录，用于限制无目标游荡中心。
@@ -90,6 +110,8 @@ var _path_goal_position: Vector2 = Vector2.ZERO
 var _path_recalculate_remaining: float = 0.0
 ## 绕障侧向偏好；取值为 -1 或 1，默认每只怪物随机，修改会影响左右绕行优先级。
 var _avoidance_side_bias: int = 1
+## 当前卡住累计时间；取值大于等于 0，默认 0，持续移动失败时累加并触发重算路径。
+var _stuck_time: float = 0.0
 
 
 func _ready() -> void:
@@ -104,14 +126,14 @@ func _physics_process(delta: float) -> void:
 	_attack_cooldown_remaining = maxf(_attack_cooldown_remaining - delta, 0.0)
 	_path_recalculate_remaining = maxf(_path_recalculate_remaining - delta, 0.0)
 	if not is_instance_valid(_target):
-		_has_target = false
+		_forget_target()
 		_update_wander(delta)
 		_move_with_external_velocity(delta)
 		return
 
 	# 目标距离；取值为当前怪物到玩家的距离，默认每帧计算，修改会影响索敌、追击和攻击判定。
 	var target_distance: float = global_position.distance_to(_target.global_position)
-	_update_target_state(target_distance)
+	_update_target_state(target_distance, delta)
 	if not _has_target:
 		_update_wander(delta)
 		_move_with_external_velocity(delta)
@@ -124,6 +146,9 @@ func _physics_process(delta: float) -> void:
 func set_target(target_node: Node) -> void:
 	_target = target_node as Node2D
 	_has_target = false
+	_target_is_visible = false
+	_has_last_known_target_position = false
+	_target_memory_remaining = 0.0
 	_clear_navigation_path()
 
 
@@ -139,12 +164,28 @@ func apply_damage(damage: float, source: Node) -> void:
 		queue_free()
 
 
-func _update_target_state(target_distance: float) -> void:
-	if target_distance <= vision_range:
+func _update_target_state(target_distance: float, delta: float) -> void:
+	# 本帧有效视野范围；取值为基础视野或脱战扩展视野，默认让已锁定目标在视野边缘更稳定。
+	var active_vision_range: float = vision_range * lose_target_range_multiplier if _has_target else vision_range
+	# 本帧是否能看见目标；取值由距离和视线共同决定，默认墙体会阻挡首次索敌。
+	var can_see_target: bool = target_distance <= active_vision_range and _has_vision_line_of_sight_to_target()
+	_target_is_visible = can_see_target
+	if can_see_target:
 		_has_target = true
-	elif _has_target and target_distance > vision_range * lose_target_range_multiplier:
-		_has_target = false
-		_clear_navigation_path()
+		_remember_target_position(_target.global_position)
+		return
+
+	if not _has_target:
+		return
+
+	_target_memory_remaining = maxf(_target_memory_remaining - delta, 0.0)
+	if _has_last_known_target_position and _target_memory_remaining > 0.0:
+		# 最后可见位置距离；取值为怪物到记忆点距离，默认用于判断是否完成搜索。
+		var search_distance: float = global_position.distance_to(_last_known_target_position)
+		if search_distance > search_arrive_distance:
+			return
+
+	_forget_target()
 
 
 func _try_attack_target() -> void:
@@ -157,14 +198,56 @@ func _try_attack_target() -> void:
 	_attack_cooldown_remaining = attack_cooldown
 
 
+func _has_vision_line_of_sight_to_target() -> bool:
+	if not vision_requires_line_of_sight:
+		return true
+
+	if not is_instance_valid(_target):
+		return false
+
+	# 视线检测参数；取值为怪物到玩家之间的线段，默认只检测环境墙体和建筑。
+	var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(global_position, _target.global_position, vision_line_of_sight_collision_mask, [get_rid()])
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+	# 视线命中结果；取值为空表示无遮挡，默认用于决定怪物是否能发现或持续看见玩家。
+	var hit_result: Dictionary = get_world_2d().direct_space_state.intersect_ray(query)
+	return hit_result.is_empty()
+
+
+func _remember_target_position(target_position: Vector2) -> void:
+	_last_known_target_position = target_position
+	_has_last_known_target_position = true
+	_target_memory_remaining = maxf(target_memory_duration, 0.0)
+
+
+func _forget_target() -> void:
+	_has_target = false
+	_target_is_visible = false
+	_has_last_known_target_position = false
+	_target_memory_remaining = 0.0
+	_clear_navigation_path()
+
+
+func _get_current_chase_destination() -> Vector2:
+	if _target_is_visible and is_instance_valid(_target):
+		return _target.global_position
+
+	if _has_last_known_target_position:
+		return _last_known_target_position
+
+	return global_position
+
+
 func _update_target_behavior(_delta: float, target_distance: float) -> void:
-	if target_distance <= attack_range:
+	if _target_is_visible and target_distance <= attack_range:
 		velocity = Vector2.ZERO
 		_try_attack_target()
 		return
 
+	# 当前追击目标点；取值为可见玩家位置或最后可见位置，默认用于失去视野后的搜索移动。
+	var chase_destination: Vector2 = _get_current_chase_destination()
 	# 追击方向；取值为绕障后的单位向量，默认用于设置本帧速度。
-	var chase_direction: Vector2 = _get_steered_direction_to(_target.global_position)
+	var chase_direction: Vector2 = _get_steered_direction_to(chase_destination)
 	velocity = chase_direction * move_speed
 
 
@@ -307,6 +390,7 @@ func _get_pathfinding_direction_to(destination: Vector2) -> Vector2:
 		_rebuild_navigation_path(destination)
 
 	_trim_reached_path_points()
+	_skip_blocked_path_points()
 	if _path_points.is_empty():
 		return _get_local_steered_direction_to(destination)
 
@@ -319,10 +403,10 @@ func _should_rebuild_navigation_path(destination: Vector2) -> bool:
 	if _path_points.is_empty():
 		return true
 
-	if _path_recalculate_remaining <= 0.0:
+	if _path_goal_position.distance_to(destination) >= maxf(path_destination_refresh_distance, 1.0):
 		return true
 
-	return _path_goal_position.distance_to(destination) >= maxf(path_destination_refresh_distance, 1.0)
+	return _target_is_visible and _path_recalculate_remaining <= 0.0
 
 
 func _rebuild_navigation_path(destination: Vector2) -> void:
@@ -356,6 +440,16 @@ func _trim_reached_path_points() -> void:
 	# 路点到达阈值；取值至少为 1，默认用于弹出已经接近的路径点。
 	var arrive_distance: float = maxf(path_waypoint_arrive_distance, 1.0)
 	while not _path_points.is_empty() and global_position.distance_to(_path_points[0]) <= arrive_distance:
+		_path_points.remove_at(0)
+
+
+func _skip_blocked_path_points() -> void:
+	while not _path_points.is_empty():
+		# 当前路点方向；取值为怪物指向首个路点的单位向量，默认用于判断该路点是否已经不可达。
+		var waypoint_direction: Vector2 = _path_points[0] - global_position
+		if waypoint_direction.is_zero_approx() or not _is_direction_blocked(waypoint_direction.normalized()):
+			return
+
 		_path_points.remove_at(0)
 
 
@@ -426,7 +520,7 @@ func _get_local_steered_direction_to(destination: Vector2) -> Vector2:
 			if not _is_direction_blocked(candidate_direction):
 				return candidate_direction
 
-	return direct_direction
+	return Vector2.ZERO
 
 
 func _is_direction_blocked(direction: Vector2) -> bool:
@@ -441,10 +535,37 @@ func _is_direction_blocked(direction: Vector2) -> bool:
 func _move_with_external_velocity(delta: float) -> void:
 	# 本帧基础速度；取值来自追击或游荡逻辑，默认在叠加击退前缓存。
 	var desired_velocity: Vector2 = velocity
+	# 移动前位置；取值为当前全局坐标，默认用于移动后判断怪物是否卡住。
+	var previous_position: Vector2 = global_position
 	velocity = desired_velocity + _knockback_velocity
 	move_and_slide()
+	# 本帧实际位移；取值为 move_and_slide 后的位置差，默认用于卡墙检测。
+	var moved_distance: float = global_position.distance_to(previous_position)
 	velocity = desired_velocity
+	_update_stuck_state(desired_velocity, moved_distance, delta)
 	_decay_knockback(delta)
+
+
+func _update_stuck_state(desired_velocity: Vector2, moved_distance: float, delta: float) -> void:
+	if desired_velocity.length() <= 1.0 or not _knockback_velocity.is_zero_approx():
+		_stuck_time = 0.0
+		return
+
+	if moved_distance > stuck_minimum_movement:
+		_stuck_time = 0.0
+		return
+
+	_stuck_time += delta
+	if _stuck_time < stuck_detection_time:
+		return
+
+	_resolve_stuck_path()
+
+
+func _resolve_stuck_path() -> void:
+	_stuck_time = 0.0
+	_avoidance_side_bias *= -1
+	_clear_navigation_path()
 
 
 func _decay_knockback(delta: float) -> void:

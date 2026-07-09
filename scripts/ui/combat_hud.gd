@@ -72,6 +72,8 @@ var _master_bus_index: int = -1
 ## 当前是否为训练场模式；取值为 true/false，默认 false，修改会影响训练场设置按钮和角色切换入口是否可见。
 var _is_training_mode: bool = false
 
+## 角色名称文本缓存；默认绑定 CharacterNameLabel，显示当前选择角色名称，节点缺失会导致 HUD 无法展示角色名。
+@onready var _character_name_label: Label = %CharacterNameLabel
 ## 生命文本缓存；默认绑定 HealthLabel，显示当前生命和最大生命，节点缺失会导致生命文本无法刷新。
 @onready var _health_label: Label = %HealthLabel
 ## 生命条缓存；默认绑定 HealthBar，显示当前生命比例，节点缺失会导致生命条无法刷新。
@@ -222,6 +224,7 @@ func _refresh_all() -> void:
 
 
 func _refresh_stats() -> void:
+	_character_name_label.text = _get_current_character_display_name()
 	if _stats_component == null:
 		_health_label.text = "生命 -- / --"
 		_energy_label.text = "能量 -- / --"
@@ -651,6 +654,22 @@ func _get_component_cooldown_ratio(component: Node) -> float:
 		return 0.0
 
 	return clampf(float(component.call("get_cooldown_ratio")), 0.0, 1.0)
+
+
+func _get_current_character_display_name() -> String:
+	if _game_world != null and _game_world.has_method("get_selected_character_name"):
+		# 游戏世界角色名；取值来自当前会话选择，默认用于 HUD 最优先显示。
+		var world_character_name: String = str(_game_world.call("get_selected_character_name"))
+		if not world_character_name.is_empty():
+			return world_character_name
+
+	if _player != null:
+		# 玩家节点显示名；取值来自 player_display_name 属性，默认作为 GameWorld 缺失时的兜底。
+		var player_character_name: String = str(_player.get("player_display_name"))
+		if not player_character_name.is_empty():
+			return player_character_name
+
+	return "角色"
 
 
 func _on_weapon_slot_drop_received(drop_data: Dictionary, target_context: String, target_kind: String, target_index: int) -> void:

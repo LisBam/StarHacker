@@ -102,6 +102,14 @@ pause_game={
 ]
 }
 
+[layer_names]
+
+2d_physics/layer_1="Player"
+2d_physics/layer_2="Monster"
+2d_physics/layer_3="Melee"
+2d_physics/layer_4="Projectile"
+2d_physics/layer_5="Environment"
+
 [physics]
 
 3d/physics_engine="Jolt Physics"

@@ -1,0 +1,21 @@
+[gd_scene load_steps=2 format=3]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_wall"]
+size = Vector2(128, 32)
+
+[node name="WallSegment" type="StaticBody2D" groups=["environment_obstacles"]]
+collision_layer = 16
+collision_mask = 0
+
+[node name="Visual" type="Polygon2D" parent="."]
+color = Color(0.184314, 0.239216, 0.282353, 1)
+polygon = PackedVector2Array(-64, -16, 64, -16, 64, 16, -64, 16)
+
+[node name="Edge" type="Line2D" parent="."]
+points = PackedVector2Array(-64, -16, 64, -16, 64, 16, -64, 16, -64, -16)
+width = 2.0
+default_color = Color(0.454902, 0.698039, 0.756863, 0.62)
+closed = true
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_wall")

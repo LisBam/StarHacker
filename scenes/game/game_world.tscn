@@ -1,17 +1,24 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="Script" path="res://scripts/game/game_world.gd" id="1_game_world"]
 [ext_resource type="PackedScene" path="res://scenes/characters/silver_wolf.tscn" id="2_silver_wolf"]
 [ext_resource type="Script" path="res://scripts/ui/combat_hud.gd" id="3_combat_hud"]
 [ext_resource type="Script" path="res://scripts/ui/inventory_drop_area.gd" id="4_inventory_drop_area"]
 [ext_resource type="PackedScene" path="res://scenes/enemies/basic_monster.tscn" id="5_basic_monster"]
+[ext_resource type="PackedScene" path="res://scenes/environment/wall_ring_building.tscn" id="6_wall_ring_building"]
+[ext_resource type="PackedScene" path="res://scenes/environment/compact_building.tscn" id="7_compact_building"]
+[ext_resource type="PackedScene" path="res://scenes/environment/wall_segment.tscn" id="8_wall_segment"]
+[ext_resource type="Script" path="res://scripts/ui/minimap_control.gd" id="9_minimap_control"]
 
 [node name="GameWorld" type="Node2D"]
 script = ExtResource("1_game_world")
 monster_scene = ExtResource("5_basic_monster")
+obstacle_scenes = Array[PackedScene]([ExtResource("6_wall_ring_building"), ExtResource("7_compact_building"), ExtResource("8_wall_segment")])
 
 [node name="Player" parent="." instance=ExtResource("2_silver_wolf")]
 position = Vector2(0, 0)
+
+[node name="Environment" type="Node2D" parent="."]
 
 [node name="Enemies" type="Node2D" parent="."]
 
@@ -26,6 +33,21 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
+
+[node name="MiniMap" type="Control" parent="BattleHUD/Root"]
+custom_minimum_size = Vector2(180, 180)
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -198.0
+offset_top = 18.0
+offset_right = -18.0
+offset_bottom = 198.0
+grow_horizontal = 0
+grow_vertical = 0
+mouse_filter = 2
+script = ExtResource("9_minimap_control")
 
 [node name="BottomDock" type="VBoxContainer" parent="BattleHUD/Root"]
 custom_minimum_size = Vector2(390, 118)

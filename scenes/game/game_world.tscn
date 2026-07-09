@@ -1,0 +1,221 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/game/game_world.gd" id="1_game_world"]
+[ext_resource type="PackedScene" path="res://scenes/characters/silver_wolf.tscn" id="2_silver_wolf"]
+[ext_resource type="Script" path="res://scripts/ui/combat_hud.gd" id="3_combat_hud"]
+
+[node name="GameWorld" type="Node2D"]
+script = ExtResource("1_game_world")
+
+[node name="SilverWolf" parent="." instance=ExtResource("2_silver_wolf")]
+position = Vector2(0, 0)
+
+[node name="BattleHUD" type="CanvasLayer" parent="."]
+script = ExtResource("3_combat_hud")
+
+[node name="Root" type="Control" parent="BattleHUD"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="BottomDock" type="VBoxContainer" parent="BattleHUD/Root"]
+custom_minimum_size = Vector2(430, 118)
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -215.0
+offset_top = -128.0
+offset_right = 215.0
+offset_bottom = -10.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_constants/separation = 4
+
+[node name="BarsPanel" type="PanelContainer" parent="BattleHUD/Root/BottomDock"]
+layout_mode = 2
+
+[node name="BarsMargin" type="MarginContainer" parent="BattleHUD/Root/BottomDock/BarsPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 4
+
+[node name="BarsContent" type="VBoxContainer" parent="BattleHUD/Root/BottomDock/BarsPanel/BarsMargin"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="HealthLabel" type="Label" parent="BattleHUD/Root/BottomDock/BarsPanel/BarsMargin/BarsContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "生命 -- / --"
+horizontal_alignment = 1
+
+[node name="HealthBar" type="ProgressBar" parent="BattleHUD/Root/BottomDock/BarsPanel/BarsMargin/BarsContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 8)
+layout_mode = 2
+max_value = 100.0
+value = 100.0
+show_percentage = false
+
+[node name="EnergyLabel" type="Label" parent="BattleHUD/Root/BottomDock/BarsPanel/BarsMargin/BarsContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "能量 -- / --"
+horizontal_alignment = 1
+
+[node name="EnergyBar" type="ProgressBar" parent="BattleHUD/Root/BottomDock/BarsPanel/BarsMargin/BarsContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 8)
+layout_mode = 2
+max_value = 100.0
+value = 100.0
+show_percentage = false
+
+[node name="WeaponPanel" type="PanelContainer" parent="BattleHUD/Root/BottomDock"]
+layout_mode = 2
+
+[node name="WeaponMargin" type="MarginContainer" parent="BattleHUD/Root/BottomDock/WeaponPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = 5
+theme_override_constants/margin_right = 6
+theme_override_constants/margin_bottom = 5
+
+[node name="WeaponRows" type="HBoxContainer" parent="BattleHUD/Root/BottomDock/WeaponPanel/WeaponMargin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+alignment = 1
+
+[node name="RangedSlots" type="HBoxContainer" parent="BattleHUD/Root/BottomDock/WeaponPanel/WeaponMargin/WeaponRows"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="SlotDivider" type="VSeparator" parent="BattleHUD/Root/BottomDock/WeaponPanel/WeaponMargin/WeaponRows"]
+layout_mode = 2
+
+[node name="MeleeSlotHost" type="HBoxContainer" parent="BattleHUD/Root/BottomDock/WeaponPanel/WeaponMargin/WeaponRows"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="InventoryPanel" type="PanelContainer" parent="BattleHUD/Root"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(760, 460)
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -380.0
+offset_top = -250.0
+offset_right = 380.0
+offset_bottom = 210.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="InventoryMargin" type="MarginContainer" parent="BattleHUD/Root/InventoryPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
+
+[node name="InventoryContent" type="VBoxContainer" parent="BattleHUD/Root/InventoryPanel/InventoryMargin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="InventoryTitleLabel" type="Label" parent="BattleHUD/Root/InventoryPanel/InventoryMargin/InventoryContent"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "背包  E关闭"
+horizontal_alignment = 1
+
+[node name="InventoryHintLabel" type="Label" parent="BattleHUD/Root/InventoryPanel/InventoryMargin/InventoryContent"]
+layout_mode = 2
+text = "左侧是当前装备，右侧是背包武器。拖右侧武器到左侧装备；拖左侧装备到右侧卸下。"
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="InventoryColumns" type="HBoxContainer" parent="BattleHUD/Root/InventoryPanel/InventoryMargin/InventoryContent"]
+custom_minimum_size = Vector2(0, 330)
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="CurrentEquipmentPanel" type="PanelContainer" parent="BattleHUD/Root/InventoryPanel/InventoryMargin/InventoryContent/InventoryColumns"]
+custom_minimum_size = Vector2(240, 0)
+layout_mode = 2
+
+[node name="CurrentEquipmentMargin" type="MarginContainer" parent="BattleHUD/Root/InventoryPanel/InventoryMargin/InventoryContent/InventoryColumns/CurrentEquipmentPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="CurrentEquipmentContent" type="VBoxContainer" parent="BattleHUD/Root/InventoryPanel/InventoryMargin/InventoryContent/InventoryColumns/CurrentEquipmentPanel/CurrentEquipmentMargin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="CurrentEquipmentTitle" type="Label" parent="BattleHUD/Root/InventoryPanel/InventoryMargin/InventoryContent/InventoryColumns/CurrentEquipmentPanel/CurrentEquipmentMargin/CurrentEquipmentContent"]
+layout_mode = 2
+text = "当前装备"
+horizontal_alignment = 1
+
+[node name="InventoryEquipmentRangedSlots" type="VBoxContainer" parent="BattleHUD/Root/InventoryPanel/InventoryMargin/InventoryContent/InventoryColumns/CurrentEquipmentPanel/CurrentEquipmentMargin/CurrentEquipmentContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="InventoryEquipmentMeleeTitle" type="Label" parent="BattleHUD/Root/InventoryPanel/InventoryMargin/InventoryContent/InventoryColumns/CurrentEquipmentPanel/CurrentEquipmentMargin/CurrentEquipmentContent"]
+layout_mode = 2
+text = "近战"
+horizontal_alignment = 1
+
+[node name="InventoryEquipmentMeleeSlotHost" type="VBoxContainer" parent="BattleHUD/Root/InventoryPanel/InventoryMargin/InventoryContent/InventoryColumns/CurrentEquipmentPanel/CurrentEquipmentMargin/CurrentEquipmentContent"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="BackpackPanel" type="PanelContainer" parent="BattleHUD/Root/InventoryPanel/InventoryMargin/InventoryContent/InventoryColumns"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BackpackMargin" type="MarginContainer" parent="BattleHUD/Root/InventoryPanel/InventoryMargin/InventoryContent/InventoryColumns/BackpackPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="BackpackContent" type="VBoxContainer" parent="BattleHUD/Root/InventoryPanel/InventoryMargin/InventoryContent/InventoryColumns/BackpackPanel/BackpackMargin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="BackpackTitle" type="Label" parent="BattleHUD/Root/InventoryPanel/InventoryMargin/InventoryContent/InventoryColumns/BackpackPanel/BackpackMargin/BackpackContent"]
+layout_mode = 2
+text = "背包武器"
+horizontal_alignment = 1
+
+[node name="InventoryScroll" type="ScrollContainer" parent="BattleHUD/Root/InventoryPanel/InventoryMargin/InventoryContent/InventoryColumns/BackpackPanel/BackpackMargin/BackpackContent"]
+custom_minimum_size = Vector2(0, 300)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="InventoryWeaponGrid" type="GridContainer" parent="BattleHUD/Root/InventoryPanel/InventoryMargin/InventoryContent/InventoryColumns/BackpackPanel/BackpackMargin/BackpackContent/InventoryScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/h_separation = 10
+theme_override_constants/v_separation = 10
+columns = 4

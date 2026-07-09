@@ -12,8 +12,8 @@ signal hit_area(area: Area2D, damage: float)
 @export_range(1.0, 2400.0, 1.0, "or_greater") var speed: float = 900.0
 ## 弹体最大存活时间；取值应大于 0，默认 1.2 秒避免远距离残留，运行时修改会影响自动销毁时间。
 @export_range(0.01, 20.0, 0.01) var lifetime: float = 1.2
-## 弹体最大飞行距离；取值应大于 0，默认 960 像素限制射程，运行时修改会影响自动销毁距离。
-@export_range(1.0, 4000.0, 1.0, "or_greater") var max_distance: float = 960.0
+## 弹体最大飞行距离；取值应大于 0，默认 340 像素限制射程，运行时修改会影响自动销毁距离。
+@export_range(1.0, 4000.0, 1.0, "or_greater") var max_distance: float = 340.0
 ## 弹体命中伤害；取值建议大于等于 0，默认 12 作为基础远程伤害，运行时修改会影响命中回调伤害值。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var damage: float = 12.0
 ## 命中后是否销毁；取值为 true/false，默认 true 避免穿透，运行时修改会影响弹体能否连续命中。

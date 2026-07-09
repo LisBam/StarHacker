@@ -199,6 +199,68 @@ func get_exploration_cell_size() -> float:
 	return maxf(exploration_cell_size, 1.0)
 
 
+func find_navigation_path(start_position: Vector2, end_position: Vector2, agent_radius: float = 24.0, navigation_cell_size: float = 96.0, max_path_points: int = 64) -> Array[Vector2]:
+	# 路径结果；元素为世界坐标路点，默认空数组表示无法找到可用路径。
+	var result: Array[Vector2] = []
+	# 标准化寻路格尺寸；取值至少 16 像素，默认避免格子过小导致临时网格开销过大。
+	var resolved_cell_size: float = maxf(navigation_cell_size, 16.0)
+	# 地图半边长；取值来自当前地图配置，默认用于计算寻路网格覆盖范围。
+	var half_size: float = get_map_half_size()
+	# 最小格坐标；取值为地图左上角所在格，默认允许负格坐标覆盖以原点居中的地图。
+	var min_cell: int = floori(-half_size / resolved_cell_size)
+	# 最大格坐标；取值为地图右下角所在格，默认包含地图边界。
+	var max_cell: int = ceili(half_size / resolved_cell_size)
+	# 寻路区域起点；取值为左上格坐标，默认传给 AStarGrid2D.region。
+	var region_position: Vector2i = Vector2i(min_cell, min_cell)
+	# 寻路区域尺寸；取值为横纵格数量，默认覆盖整张地图。
+	var region_size: Vector2i = Vector2i(max_cell - min_cell + 1, max_cell - min_cell + 1)
+	# 寻路区域；取值为 AStarGrid2D 使用的格坐标矩形。
+	var navigation_region: Rect2i = Rect2i(region_position, region_size)
+	# 临时寻路网格；取值为本次路径查询创建的 AStarGrid2D，默认只在调用期间存在。
+	var navigation_grid: AStarGrid2D = AStarGrid2D.new()
+	navigation_grid.region = navigation_region
+	navigation_grid.cell_size = Vector2(resolved_cell_size, resolved_cell_size)
+	navigation_grid.offset = Vector2(resolved_cell_size * 0.5, resolved_cell_size * 0.5)
+	navigation_grid.update()
+	_mark_navigation_obstacles(navigation_grid, navigation_region, resolved_cell_size, maxf(agent_radius, 0.0))
+
+	# 起点格坐标；取值为世界坐标转换结果并限制在寻路区域内。
+	var start_cell: Vector2i = _clamp_navigation_cell_to_region(_world_position_to_navigation_cell(start_position, resolved_cell_size), navigation_region)
+	# 终点格坐标；取值为世界坐标转换结果并限制在寻路区域内。
+	var end_cell: Vector2i = _clamp_navigation_cell_to_region(_world_position_to_navigation_cell(end_position, resolved_cell_size), navigation_region)
+	if navigation_grid.is_point_solid(start_cell):
+		start_cell = _find_nearest_walkable_navigation_cell(navigation_grid, start_cell, navigation_region, 5)
+	if navigation_grid.is_point_solid(end_cell):
+		end_cell = _find_nearest_walkable_navigation_cell(navigation_grid, end_cell, navigation_region, 8)
+	if navigation_grid.is_point_solid(start_cell) or navigation_grid.is_point_solid(end_cell):
+		return result
+
+	# 原始格路径；取值来自 AStarGrid2D，默认允许部分路径以便障碍复杂时仍能靠近目标。
+	var raw_path: Array = navigation_grid.get_id_path(start_cell, end_cell, true)
+	# 已加入路径点数量；取值从 0 开始，默认用于限制单次返回的路径长度。
+	var added_point_count: int = 0
+	# 最大路径点数量；取值至少为 1，默认避免极长路径让怪物缓存过多路点。
+	var resolved_max_path_points: int = maxi(max_path_points, 1)
+	# 原始路径格遍历项；取值可能为 Vector2i，默认逐项转换成世界坐标。
+	for raw_path_cell in raw_path:
+		if not (raw_path_cell is Vector2i):
+			continue
+
+		# 当前路径格；取值为 Vector2i，默认用于转换世界坐标路点。
+		var path_cell: Vector2i = raw_path_cell
+		# 当前路径点；取值为格子中心的世界坐标，默认作为怪物移动目标。
+		var waypoint: Vector2 = _navigation_cell_to_world_position(path_cell, resolved_cell_size)
+		if added_point_count == 0 and waypoint.distance_to(start_position) <= resolved_cell_size * 0.75:
+			continue
+
+		result.append(waypoint)
+		added_point_count += 1
+		if added_point_count >= resolved_max_path_points:
+			break
+
+	return result
+
+
 func switch_character(character_id: String) -> void:
 	_selected_character_id = _normalize_character_id(character_id)
 
@@ -343,6 +405,82 @@ func _world_position_to_exploration_cell(world_position: Vector2) -> Vector2i:
 	# 有效探索格子尺寸；取值至少 1，默认防止配置错误导致除零。
 	var cell_size: float = get_exploration_cell_size()
 	return Vector2i(floori(world_position.x / cell_size), floori(world_position.y / cell_size))
+
+
+func _mark_navigation_obstacles(navigation_grid: AStarGrid2D, navigation_region: Rect2i, navigation_cell_size: float, agent_radius: float) -> void:
+	# 障碍矩形遍历项；取值为世界坐标 Rect2，默认逐项写入寻路网格的不可通行格。
+	for obstacle_rect in _environment_obstacle_rects:
+		# 扩张后的障碍矩形；取值按怪物半径向外扩展，默认让路径与墙体保持安全距离。
+		var expanded_rect: Rect2 = obstacle_rect.grow(agent_radius)
+		# 障碍起始格；取值为扩张矩形左上角转换结果，默认用于标记格子范围。
+		var start_cell: Vector2i = _world_position_to_navigation_cell(expanded_rect.position, navigation_cell_size)
+		# 障碍结束格；取值为扩张矩形右下角转换结果，默认用于标记格子范围。
+		var end_cell: Vector2i = _world_position_to_navigation_cell(expanded_rect.end, navigation_cell_size)
+		# 障碍 X 格遍历；取值为障碍覆盖的横向格坐标范围。
+		for cell_x in range(start_cell.x, end_cell.x + 1):
+			# 障碍 Y 格遍历；取值为障碍覆盖的纵向格坐标范围。
+			for cell_y in range(start_cell.y, end_cell.y + 1):
+				# 当前障碍格；取值为 Vector2i，默认用于 AStarGrid2D 设置 solid。
+				var obstacle_cell: Vector2i = Vector2i(cell_x, cell_y)
+				if _is_navigation_cell_in_region(obstacle_cell, navigation_region):
+					navigation_grid.set_point_solid(obstacle_cell, true)
+
+
+func _world_position_to_navigation_cell(world_position: Vector2, navigation_cell_size: float) -> Vector2i:
+	# 有效寻路格尺寸；取值至少 1，默认防止转换时除零。
+	var resolved_cell_size: float = maxf(navigation_cell_size, 1.0)
+	return Vector2i(floori(world_position.x / resolved_cell_size), floori(world_position.y / resolved_cell_size))
+
+
+func _navigation_cell_to_world_position(navigation_cell: Vector2i, navigation_cell_size: float) -> Vector2:
+	# 有效寻路格尺寸；取值至少 1，默认用于把格坐标转换成世界坐标。
+	var resolved_cell_size: float = maxf(navigation_cell_size, 1.0)
+	# 格坐标浮点值；取值来自 Vector2i 的 x/y，默认用于安全转换成世界坐标。
+	var cell_position: Vector2 = Vector2(float(navigation_cell.x), float(navigation_cell.y))
+	# 格子中心世界坐标；取值为格坐标加半格偏移，默认让怪物朝格子中心移动。
+	var world_position: Vector2 = (cell_position + Vector2(0.5, 0.5)) * resolved_cell_size
+	return _clamp_position_to_map(world_position)
+
+
+func _is_navigation_cell_in_region(navigation_cell: Vector2i, navigation_region: Rect2i) -> bool:
+	if navigation_cell.x < navigation_region.position.x or navigation_cell.y < navigation_region.position.y:
+		return false
+	if navigation_cell.x >= navigation_region.end.x or navigation_cell.y >= navigation_region.end.y:
+		return false
+
+	return true
+
+
+func _clamp_navigation_cell_to_region(navigation_cell: Vector2i, navigation_region: Rect2i) -> Vector2i:
+	return Vector2i(
+		clampi(navigation_cell.x, navigation_region.position.x, navigation_region.end.x - 1),
+		clampi(navigation_cell.y, navigation_region.position.y, navigation_region.end.y - 1)
+	)
+
+
+func _find_nearest_walkable_navigation_cell(navigation_grid: AStarGrid2D, origin_cell: Vector2i, navigation_region: Rect2i, max_search_radius: int) -> Vector2i:
+	if _is_navigation_cell_in_region(origin_cell, navigation_region) and not navigation_grid.is_point_solid(origin_cell):
+		return origin_cell
+
+	# 标准化搜索半径；取值至少为 0，默认用于限制向外寻找可走格的范围。
+	var resolved_max_radius: int = maxi(max_search_radius, 0)
+	# 搜索半径遍历；取值从 1 到最大半径，默认逐圈向外找最近可走格。
+	for search_radius in range(1, resolved_max_radius + 1):
+		# X 偏移遍历；取值为当前搜索圈的横向偏移。
+		for offset_x in range(-search_radius, search_radius + 1):
+			# Y 偏移遍历；取值为当前搜索圈的纵向偏移。
+			for offset_y in range(-search_radius, search_radius + 1):
+				if abs(offset_x) != search_radius and abs(offset_y) != search_radius:
+					continue
+
+				# 候选格；取值为原始格加当前偏移，默认用于测试是否可通行。
+				var candidate_cell: Vector2i = origin_cell + Vector2i(offset_x, offset_y)
+				if not _is_navigation_cell_in_region(candidate_cell, navigation_region):
+					continue
+				if not navigation_grid.is_point_solid(candidate_cell):
+					return candidate_cell
+
+	return origin_cell
 
 
 func _spawn_boundary_walls() -> void:

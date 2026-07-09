@@ -1,15 +1,17 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene format=3 uid="uid://bex4msc620lpr"]
 
-[ext_resource type="Script" path="res://scripts/enemies/ranged_monster.gd" id="1_ranged_monster"]
+[ext_resource type="Script" uid="uid://dyyfpj7eisub4" path="res://scripts/enemies/ranged_monster.gd" id="1_ranged_monster"]
 [ext_resource type="PackedScene" path="res://scenes/projectiles/enemy_projectile.tscn" id="2_enemy_projectile"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_body"]
 radius = 17.0
 
-[node name="RangedMonster" type="CharacterBody2D"]
+[node name="RangedMonster" type="CharacterBody2D" unique_id=1983671995]
+visible = false
 collision_layer = 2
 collision_mask = 17
 script = ExtResource("1_ranged_monster")
+projectile_scene = ExtResource("2_enemy_projectile")
 max_health = 46.0
 current_health = 46.0
 attack_damage = 8.0
@@ -18,22 +20,21 @@ attack_impact_force = 120.0
 move_speed = 132.0
 vision_range = 620.0
 attack_range = 46.0
-projectile_scene = ExtResource("2_enemy_projectile")
 
-[node name="Body" type="Polygon2D" parent="."]
+[node name="Body" type="Polygon2D" parent="." unique_id=1722335495]
 color = Color(0.67451, 0.439216, 1, 1)
 polygon = PackedVector2Array(0, -22, 17, -8, 14, 14, 0, 22, -14, 14, -17, -8)
 
-[node name="Core" type="Polygon2D" parent="."]
+[node name="Core" type="Polygon2D" parent="." unique_id=1277332169]
 color = Color(1, 0.858824, 0.494118, 1)
 polygon = PackedVector2Array(0, -8, 7, 0, 0, 8, -7, 0)
 
-[node name="MuzzleHint" type="Line2D" parent="."]
+[node name="MuzzleHint" type="Line2D" parent="." unique_id=492784493]
 points = PackedVector2Array(4, 0, 26, 0)
 width = 4.0
 default_color = Color(1, 0.741176, 0.384314, 0.85)
 begin_cap_mode = 2
 end_cap_mode = 2
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=646621478]
 shape = SubResource("CircleShape2D_body")

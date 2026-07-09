@@ -7,10 +7,15 @@ class_name BasicMonster
 signal health_changed(current_health: float, max_health: float)
 signal died
 
+## 战斗爆发特效脚本；默认通过路径预加载，避免怪物脚本依赖 Godot 全局类名缓存解析顺序。
+const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat_burst_effect.gd")
+
 ## 最大血量；取值应大于 0，默认 60 用于训练场怪物强度，运行时修改会影响怪物承伤能力。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var max_health: float = 60.0
 ## 当前血量；取值会被限制在 0 到 max_health，默认 60 表示满血生成，运行时修改会影响怪物当前生存状态。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var current_health: float = 60.0
+## 武器掉落概率；取值为 0 到 1，默认 0.03 表示 3% 概率掉落随机武器，运行时修改会影响该怪物死亡奖励。
+@export_range(0.0, 1.0, 0.001) var weapon_drop_chance: float = 0.03
 ## 攻击力；取值建议大于等于 0，默认 12 表示每次近身攻击造成的伤害，运行时修改会影响玩家受击压力。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var attack_damage: float = 12.0
 ## 韧性；取值为百分比，默认 0 表示不减免控制，1 表示减少 1% 击退效果，100 表示完全免疫击退。
@@ -31,10 +36,20 @@ signal died
 @export var vision_requires_line_of_sight: bool = true
 ## 索敌视线遮挡检测掩码；默认检测第 5 层环境墙体，修改会影响哪些障碍能阻挡怪物发现玩家。
 @export_flags_2d_physics var vision_line_of_sight_collision_mask: int = 16
-## 失去视野后的记忆时间；取值建议大于 0，默认 4 秒，怪物会在这段时间内前往最后看见玩家的位置搜索。
-@export_range(0.0, 30.0, 0.1) var target_memory_duration: float = 4.0
-## 搜索到达距离；取值建议大于怪物半径，默认 54 像素，怪物靠近最后可见位置后会结束搜索。
+## 失去视野后的记忆时间；取值建议大于 0，默认 8 秒，怪物会在这段时间内前往最后看见或推断的玩家位置搜索。
+@export_range(0.0, 30.0, 0.1) var target_memory_duration: float = 8.0
+## 搜索到达距离；取值建议大于怪物半径，默认 54 像素，怪物靠近推断位置或当前搜索点后会进入扫荡或切换下一个搜索点。
 @export_range(1.0, 512.0, 1.0) var search_arrive_distance: float = 54.0
+## 隔墙警觉追踪范围倍率；取值建议大于 1，默认 1.85 表示怪物已经发现玩家后，会在更大范围内根据动向继续追踪墙后的玩家。
+@export_range(1.0, 6.0, 0.05, "or_greater") var hidden_target_tracking_range_multiplier: float = 1.85
+## 目标预测时间；取值建议 0 到 2 秒，默认 0.55 会按最近移动趋势把搜索点向玩家移动方向前推。
+@export_range(0.0, 5.0, 0.05) var target_prediction_time: float = 0.55
+## 目标预测最大距离；取值建议大于等于 0，默认 220 像素，防止高速移动或瞬移导致搜索点偏离过远。
+@export_range(0.0, 2000.0, 1.0) var target_prediction_max_distance: float = 220.0
+## 到达推断位置后的搜索时间；取值建议大于等于 0，默认 4 秒，怪物会围绕推断位置继续扫荡而不是立刻丢失目标。
+@export_range(0.0, 30.0, 0.1) var target_search_duration_after_arrival: float = 4.0
+## 到达推断位置后的搜索半径；取值建议大于怪物半径，默认 180 像素，修改会影响怪物在墙后区域的扫荡范围。
+@export_range(0.0, 2000.0, 1.0) var target_search_radius: float = 180.0
 ## 游荡半径；取值建议大于等于 0，默认 180 表示怪物无目标时围绕出生点小范围移动，修改会影响巡游范围。
 @export_range(0.0, 2000.0, 1.0) var wander_radius: float = 180.0
 ## 游荡速度倍率；取值建议 0 到 1，默认 0.35 表示无目标时慢速移动，修改会影响游荡节奏。
@@ -75,6 +90,10 @@ signal died
 @export_range(0.0, 16.0, 0.05) var stuck_minimum_movement: float = 0.35
 ## 击退速度衰减；取值建议大于 0，默认 1600 像素每秒平方，修改会影响怪物受击后滑退持续时间。
 @export_range(1.0, 12000.0, 1.0, "or_greater") var knockback_decay: float = 1600.0
+## 怪物受击特效颜色；默认橙红色，修改会影响怪物被命中时的爆发反馈。
+@export var hit_effect_color: Color = Color(1.0, 0.45, 0.28, 0.95)
+## 怪物死亡特效颜色；默认亮橙色，修改会影响怪物死亡时的爆发反馈。
+@export var death_effect_color: Color = Color(1.0, 0.82, 0.34, 1.0)
 
 ## 当前追击目标；取值为 Node2D 或 null，默认由 GameWorld 设置，修改会影响怪物追击和攻击对象。
 var _target: Node2D
@@ -82,12 +101,22 @@ var _target: Node2D
 var _has_target: bool = false
 ## 当前目标是否处于可见状态；取值为 true/false，默认 false，墙体遮挡时会变为 false。
 var _target_is_visible: bool = false
-## 最后一次看见目标的位置；取值为世界坐标，默认零向量，仅在 _has_last_known_target_position 为 true 时有效。
+## 最后一次看见或推断目标的位置；取值为世界坐标，默认零向量，仅在 _has_last_known_target_position 为 true 时有效。
 var _last_known_target_position: Vector2 = Vector2.ZERO
 ## 是否存在最后目标位置；取值为 true/false，默认 false，失去视野后用于决定是否继续搜索。
 var _has_last_known_target_position: bool = false
 ## 目标记忆剩余时间；取值大于等于 0，默认 0，失去视野后递减直到放弃搜索。
 var _target_memory_remaining: float = 0.0
+## 目标最近估算速度；取值为世界坐标速度向量，默认零向量，用于失去视野后预测玩家可能移动方向。
+var _estimated_target_velocity: Vector2 = Vector2.ZERO
+## 搜索锚点位置；取值为世界坐标，默认零向量，到达推断点后怪物会围绕该点继续搜索。
+var _target_search_anchor_position: Vector2 = Vector2.ZERO
+## 当前搜索点位置；取值为世界坐标，默认零向量，仅在 _has_target_search_destination 为 true 时有效。
+var _target_search_destination: Vector2 = Vector2.ZERO
+## 当前是否存在搜索点；取值为 true/false，默认 false，修改会影响失去视野后的扫荡移动。
+var _has_target_search_destination: bool = false
+## 到达推断位置后的搜索剩余时间；取值大于等于 0，默认 0，递减到 0 后怪物才真正放弃目标。
+var _target_search_remaining: float = 0.0
 ## 当前攻击冷却剩余时间；取值大于等于 0，默认 0 表示可立即攻击，修改会影响下次攻击时机。
 var _attack_cooldown_remaining: float = 0.0
 ## 出生位置；取值为全局坐标，默认 ready 时记录，用于限制无目标游荡中心。
@@ -149,6 +178,8 @@ func set_target(target_node: Node) -> void:
 	_target_is_visible = false
 	_has_last_known_target_position = false
 	_target_memory_remaining = 0.0
+	_estimated_target_velocity = Vector2.ZERO
+	_reset_target_search()
 	_clear_navigation_path()
 
 
@@ -160,8 +191,11 @@ func apply_damage(damage: float, source: Node) -> void:
 	health_changed.emit(current_health, max_health)
 	_apply_knockback_from_source(source)
 	if current_health <= 0.0:
+		_spawn_death_effect()
 		died.emit()
 		queue_free()
+	else:
+		_spawn_hit_effect()
 
 
 func _update_target_state(target_distance: float, delta: float) -> void:
@@ -172,18 +206,21 @@ func _update_target_state(target_distance: float, delta: float) -> void:
 	_target_is_visible = can_see_target
 	if can_see_target:
 		_has_target = true
-		_remember_target_position(_target.global_position)
+		_remember_target_position(_target.global_position, delta)
+		_reset_target_search()
 		return
 
 	if not _has_target:
 		return
 
+	if _can_track_hidden_target(target_distance):
+		_track_hidden_target_position(delta)
+		return
+
 	_target_memory_remaining = maxf(_target_memory_remaining - delta, 0.0)
-	if _has_last_known_target_position and _target_memory_remaining > 0.0:
-		# 最后可见位置距离；取值为怪物到记忆点距离，默认用于判断是否完成搜索。
-		var search_distance: float = global_position.distance_to(_last_known_target_position)
-		if search_distance > search_arrive_distance:
-			return
+	_target_search_remaining = maxf(_target_search_remaining - delta, 0.0)
+	if _should_continue_lost_target_search():
+		return
 
 	_forget_target()
 
@@ -214,7 +251,29 @@ func _has_vision_line_of_sight_to_target() -> bool:
 	return hit_result.is_empty()
 
 
-func _remember_target_position(target_position: Vector2) -> void:
+func _can_track_hidden_target(target_distance: float) -> bool:
+	if not is_instance_valid(_target):
+		return false
+
+	# 隔墙警觉追踪范围；取值为基础视野乘倍率，默认只允许已经发现玩家的怪物在有限范围内继续追踪。
+	var hidden_tracking_range: float = vision_range * maxf(hidden_target_tracking_range_multiplier, 1.0)
+	return target_distance <= hidden_tracking_range
+
+
+func _track_hidden_target_position(delta: float) -> void:
+	if not is_instance_valid(_target):
+		return
+
+	_remember_target_position(_target.global_position, delta)
+	_reset_target_search()
+
+
+func _remember_target_position(target_position: Vector2, delta: float = 0.0) -> void:
+	if _has_last_known_target_position and delta > 0.001:
+		# 目标瞬时速度；取值由本帧目标位置变化估算，用于失去视野后的短距离预测。
+		var measured_velocity: Vector2 = (target_position - _last_known_target_position) / delta
+		_estimated_target_velocity = measured_velocity
+
 	_last_known_target_position = target_position
 	_has_last_known_target_position = true
 	_target_memory_remaining = maxf(target_memory_duration, 0.0)
@@ -225,6 +284,8 @@ func _forget_target() -> void:
 	_target_is_visible = false
 	_has_last_known_target_position = false
 	_target_memory_remaining = 0.0
+	_estimated_target_velocity = Vector2.ZERO
+	_reset_target_search()
 	_clear_navigation_path()
 
 
@@ -232,10 +293,84 @@ func _get_current_chase_destination() -> Vector2:
 	if _target_is_visible and is_instance_valid(_target):
 		return _target.global_position
 
+	if _has_target_search_destination:
+		return _target_search_destination
+
 	if _has_last_known_target_position:
-		return _last_known_target_position
+		return _get_predicted_target_position()
 
 	return global_position
+
+
+func _should_continue_lost_target_search() -> bool:
+	if _has_target_search_destination:
+		# 当前搜索点距离；取值为怪物到搜索点的距离，默认用于判断是否需要切换下一个搜索点。
+		var search_point_distance: float = global_position.distance_to(_target_search_destination)
+		if search_point_distance <= search_arrive_distance:
+			_pick_next_target_search_destination()
+
+		return _target_search_remaining > 0.0
+
+	if not _has_last_known_target_position:
+		return false
+
+	# 推断目标点；取值由最后目标位置和估算速度计算，用于失去视野后继续追踪。
+	var predicted_target_position: Vector2 = _get_predicted_target_position()
+	# 推断目标距离；取值为怪物到推断点的距离，默认决定是否已经到达搜索区域。
+	var predicted_target_distance: float = global_position.distance_to(predicted_target_position)
+	if predicted_target_distance > search_arrive_distance and _target_memory_remaining > 0.0:
+		return true
+
+	if target_search_duration_after_arrival <= 0.0:
+		return _target_memory_remaining > 0.0
+
+	_start_target_search(predicted_target_position)
+	return _target_search_remaining > 0.0
+
+
+func _get_predicted_target_position() -> Vector2:
+	if not _has_last_known_target_position:
+		return global_position
+
+	# 预测偏移；取值为估算速度乘预测时间，默认让怪物追向玩家移动趋势的前方。
+	var prediction_offset: Vector2 = _estimated_target_velocity * maxf(target_prediction_time, 0.0)
+	# 最大预测距离；取值至少为 0，默认限制推断点偏离最后目标位置的最大距离。
+	var max_prediction_distance: float = maxf(target_prediction_max_distance, 0.0)
+	if max_prediction_distance > 0.0 and prediction_offset.length() > max_prediction_distance:
+		prediction_offset = prediction_offset.normalized() * max_prediction_distance
+
+	return _last_known_target_position + prediction_offset
+
+
+func _start_target_search(anchor_position: Vector2) -> void:
+	_target_search_anchor_position = anchor_position
+	_target_search_remaining = maxf(target_search_duration_after_arrival, 0.0)
+	_pick_next_target_search_destination()
+
+
+func _pick_next_target_search_destination() -> void:
+	if _target_search_remaining <= 0.0:
+		_has_target_search_destination = false
+		return
+
+	# 搜索半径；取值至少为 0，默认用于在推断点周围随机选择扫荡位置。
+	var resolved_search_radius: float = maxf(target_search_radius, 0.0)
+	if resolved_search_radius <= 0.0:
+		_target_search_destination = _target_search_anchor_position
+		_has_target_search_destination = true
+		return
+
+	# 搜索角度；取值为 0 到 TAU 的随机弧度，默认让怪物在目标消失点附近不固定走同一方向。
+	var search_angle: float = _random.randf_range(0.0, TAU)
+	# 搜索距离；取值为搜索半径的 35% 到 100%，默认避免所有搜索点都挤在锚点中心。
+	var search_distance: float = _random.randf_range(resolved_search_radius * 0.35, resolved_search_radius)
+	_target_search_destination = _target_search_anchor_position + Vector2.RIGHT.rotated(search_angle) * search_distance
+	_has_target_search_destination = true
+
+
+func _reset_target_search() -> void:
+	_has_target_search_destination = false
+	_target_search_remaining = 0.0
 
 
 func _update_target_behavior(_delta: float, target_distance: float) -> void:
@@ -573,3 +708,36 @@ func _decay_knockback(delta: float) -> void:
 		return
 
 	_knockback_velocity = _knockback_velocity.move_toward(Vector2.ZERO, maxf(knockback_decay, 1.0) * delta)
+
+
+func _spawn_hit_effect() -> void:
+	_spawn_combat_burst(_resolve_effect_parent(), global_position, hit_effect_color, 26.0, 0.16, 6)
+
+
+func _spawn_death_effect() -> void:
+	_spawn_combat_burst(_resolve_effect_parent(), global_position, death_effect_color, 54.0, 0.34, 16)
+
+
+func _spawn_combat_burst(parent_node: Node, burst_position: Vector2, burst_color: Color, burst_radius: float, burst_duration: float, burst_particle_count: int) -> void:
+	if parent_node == null:
+		return
+
+	# 特效实例；取值为预加载脚本创建的 Node2D，默认挂到当前场景独立播放。
+	var effect: Node2D = COMBAT_BURST_EFFECT_SCRIPT.new() as Node2D
+	if effect == null:
+		return
+
+	effect.process_mode = Node.PROCESS_MODE_ALWAYS
+	parent_node.add_child(effect)
+	effect.global_position = burst_position
+	if effect.has_method("configure"):
+		effect.call("configure", burst_color, burst_radius, burst_duration, burst_particle_count)
+
+
+func _resolve_effect_parent() -> Node:
+	# 当前场景节点；取值通常为 GameWorld，默认让特效脱离怪物节点生命周期独立播放。
+	var current_scene: Node = get_tree().current_scene
+	if current_scene != null:
+		return current_scene
+
+	return get_tree().root

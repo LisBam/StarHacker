@@ -1,4 +1,4 @@
-[gd_scene load_steps=15 format=3]
+[gd_scene load_steps=23 format=3]
 
 [ext_resource type="Script" path="res://scripts/game/game_world.gd" id="1_game_world"]
 [ext_resource type="PackedScene" path="res://scenes/characters/player.tscn" id="2_player"]
@@ -14,12 +14,22 @@
 [ext_resource type="PackedScene" path="res://scenes/environment/l_wall.tscn" id="12_l_wall"]
 [ext_resource type="PackedScene" path="res://scenes/environment/l_building.tscn" id="13_l_building"]
 [ext_resource type="PackedScene" path="res://scenes/enemies/ranged_monster.tscn" id="14_ranged_monster"]
+[ext_resource type="PackedScene" path="res://scenes/drops/weapon_drop.tscn" id="15_weapon_drop"]
+[ext_resource type="Resource" path="res://data/weapons/quantum_pistol.tres" id="16_quantum_pistol"]
+[ext_resource type="Resource" path="res://data/weapons/pulse_rifle.tres" id="17_pulse_rifle"]
+[ext_resource type="Resource" path="res://data/weapons/ion_smg.tres" id="18_ion_smg"]
+[ext_resource type="Resource" path="res://data/weapons/scatter_blaster.tres" id="19_scatter_blaster"]
+[ext_resource type="Resource" path="res://data/weapons/rail_cannon.tres" id="20_rail_cannon"]
+[ext_resource type="Resource" path="res://data/weapons/phase_blade.tres" id="21_phase_blade"]
+[ext_resource type="Resource" path="res://data/weapons/quantum_dagger.tres" id="22_quantum_dagger"]
 
 [node name="GameWorld" type="Node2D"]
 script = ExtResource("1_game_world")
 monster_scene = ExtResource("5_basic_monster")
 monster_scenes = Array[PackedScene]([ExtResource("5_basic_monster"), ExtResource("14_ranged_monster")])
 obstacle_scenes = Array[PackedScene]([ExtResource("6_wall_ring_building"), ExtResource("7_compact_building"), ExtResource("8_wall_segment"), ExtResource("10_corridor_building"), ExtResource("11_cross_access_building"), ExtResource("12_l_wall"), ExtResource("13_l_building")])
+weapon_drop_scene = ExtResource("15_weapon_drop")
+weapon_drop_table = Array[Resource]([ExtResource("16_quantum_pistol"), ExtResource("17_pulse_rifle"), ExtResource("18_ion_smg"), ExtResource("19_scatter_blaster"), ExtResource("20_rail_cannon"), ExtResource("21_phase_blade"), ExtResource("22_quantum_dagger")])
 
 [node name="Player" parent="." instance=ExtResource("2_player")]
 position = Vector2(0, 0)
@@ -27,6 +37,8 @@ position = Vector2(0, 0)
 [node name="Environment" type="Node2D" parent="."]
 
 [node name="Enemies" type="Node2D" parent="."]
+
+[node name="Drops" type="Node2D" parent="."]
 
 [node name="BattleHUD" type="CanvasLayer" parent="."]
 script = ExtResource("3_combat_hud")

@@ -16,6 +16,7 @@
 [ext_resource type="Resource" path="res://data/weapons/rail_cannon.tres" id="14_rail_cannon"]
 [ext_resource type="Resource" path="res://data/weapons/scatter_blaster.tres" id="15_scatter_blaster"]
 [ext_resource type="Resource" path="res://data/weapons/quantum_dagger.tres" id="16_quantum_dagger"]
+[ext_resource type="Script" path="res://scripts/camera/combat_camera.gd" id="17_combat_camera"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_body"]
 radius = 18.0
@@ -85,5 +86,7 @@ polygon = PackedVector2Array(20, -22, 72, -22, 92, 0, 72, 22, 20, 22)
 
 [node name="Camera2D" type="Camera2D" parent="." unique_id=389718966]
 zoom = Vector2(0.95, 0.95)
-position_smoothing_enabled = true
+script = ExtResource("17_combat_camera")
+position_smoothing_enabled = false
+process_callback = 0
 position_smoothing_speed = 8.0

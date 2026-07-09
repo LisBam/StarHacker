@@ -6,6 +6,7 @@ class_name WeaponSlotControl
 ## HUD 通过 drop_received 信号接收拖拽结果，再调用装备组件完成装备、移动或卸下。
 
 signal drop_received(drop_data: Dictionary, target_context: String, target_kind: String, target_index: int)
+signal drag_released_outside(drop_data: Dictionary)
 
 ## 槽位所属上下文；取值为 equipment 或 inventory，默认 equipment，修改会影响拖拽来源和投放规则。
 var slot_context: String = "equipment"
@@ -28,6 +29,8 @@ var _title_label: Label
 var _name_label: Label
 ## 详情标签缓存；默认由 _ready 创建，显示能量消耗和冷却信息，修改会影响槽位辅助信息刷新目标。
 var _detail_label: Label
+## 当前拖拽数据缓存；取值为拖拽字典或空字典，默认用于拖拽结束时判断是否需要丢弃到世界。
+var _active_drag_data: Dictionary = {}
 
 
 func _ready() -> void:
@@ -85,12 +88,13 @@ func _get_drag_data(_at_position: Vector2) -> Variant:
 	preview_label.modulate = Color(0.9, 0.98, 1.0, 0.92)
 	set_drag_preview(preview_label)
 
-	return {
+	_active_drag_data = {
 		"source_context": slot_context,
 		"slot_kind": slot_kind,
 		"slot_index": slot_index,
 		"weapon_data": weapon_data,
 	}
+	return _active_drag_data
 
 
 func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
@@ -124,6 +128,21 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 	# 投放数据；取值来自拖拽源，默认传递给 HUD 处理，修改会影响装备和卸下目标解析。
 	var drop_data: Dictionary = data as Dictionary
 	drop_received.emit(drop_data, slot_context, slot_kind, slot_index)
+
+
+func _notification(what: int) -> void:
+	if what != NOTIFICATION_DRAG_END:
+		return
+
+	if _active_drag_data.is_empty():
+		return
+
+	# 拖拽是否被目标成功接收；取值来自 Viewport，默认 false 表示释放在无效区域。
+	var drag_successful: bool = get_viewport().gui_is_drag_successful()
+	if not drag_successful:
+		drag_released_outside.emit(_active_drag_data)
+
+	_active_drag_data = {}
 
 
 func _build_content() -> void:

@@ -19,15 +19,27 @@ signal stats_changed
 @export_range(0.0, 9999.0, 1.0, "or_greater") var current_energy: float = 100.0
 ## 每秒能量恢复量；取值建议大于等于 0，默认 18 让原型战斗保持节奏，运行时修改会影响持续作战能力。
 @export_range(0.0, 9999.0, 0.1, "or_greater") var energy_regeneration_per_second: float = 18.0
+## 是否启用无限血量；取值为 true/false，默认 false，训练场测试设置会运行时修改，启用后受伤不会降低生命。
+@export var infinite_health: bool = false
+## 是否启用无限能量；取值为 true/false，默认 false，训练场测试设置会运行时修改，启用后消耗能量不会降低能量。
+@export var infinite_energy: bool = false
 
 
 func _ready() -> void:
 	current_health = clampf(current_health, 0.0, max_health)
 	current_energy = clampf(current_energy, 0.0, max_energy)
+	if infinite_health:
+		current_health = max_health
+	if infinite_energy:
+		current_energy = max_energy
 	_emit_all_stats_changed()
 
 
 func _process(delta: float) -> void:
+	if infinite_energy:
+		set_energy(max_energy)
+		return
+
 	if energy_regeneration_per_second <= 0.0 or current_energy >= max_energy:
 		return
 
@@ -37,10 +49,17 @@ func _process(delta: float) -> void:
 
 
 func can_spend_energy(amount: float) -> bool:
+	if infinite_energy:
+		return true
+
 	return amount <= 0.0 or current_energy >= amount
 
 
 func spend_energy(amount: float) -> bool:
+	if infinite_energy:
+		set_energy(max_energy)
+		return true
+
 	if amount <= 0.0:
 		return true
 
@@ -64,6 +83,10 @@ func set_energy(value: float) -> void:
 
 func take_damage(amount: float) -> void:
 	if amount <= 0.0:
+		return
+
+	if infinite_health:
+		set_health(max_health)
 		return
 
 	set_health(current_health - amount)
@@ -93,6 +116,26 @@ func get_health_ratio() -> float:
 
 func get_energy_ratio() -> float:
 	return current_energy / max_energy if max_energy > 0.0 else 0.0
+
+
+func set_infinite_health(enabled: bool) -> void:
+	infinite_health = enabled
+	if infinite_health:
+		set_health(max_health)
+
+
+func set_infinite_energy(enabled: bool) -> void:
+	infinite_energy = enabled
+	if infinite_energy:
+		set_energy(max_energy)
+
+
+func is_infinite_health_enabled() -> bool:
+	return infinite_health
+
+
+func is_infinite_energy_enabled() -> bool:
+	return infinite_energy
 
 
 func _emit_all_stats_changed() -> void:

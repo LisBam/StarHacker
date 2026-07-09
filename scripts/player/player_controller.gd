@@ -4,6 +4,9 @@ class_name PlayerController
 ## 玩家聚合脚本只负责把输入、移动、远程攻击、近战攻击等组件串起来。
 ## 具体能力放在独立组件中实现，后续替换角色、武器或控制方式时可以局部替换节点。
 
+## 战斗爆发特效脚本；默认通过路径预加载，避免依赖 Godot 全局类名缓存解析顺序。
+const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat_burst_effect.gd")
+
 ## 玩家显示名称；默认值为“角色”，会由当前选择角色覆盖，运行时修改会影响后续 UI 展示文本。
 @export var player_display_name: String = "角色"
 ## 输入组件路径；默认指向同场景子节点 InputComponent，必须解析到提供输入查询方法的节点，修改会影响所有玩家操作来源。
@@ -20,6 +23,8 @@ class_name PlayerController
 @export var equipment_component_path: NodePath = ^"EquipmentComponent"
 ## 瞄准旋转轴路径；默认指向 AimPivot，必须解析到 Node2D，修改会影响武器朝向和枪口位置。
 @export var aim_pivot_path: NodePath = ^"AimPivot"
+## 战斗相机路径；默认指向玩家子节点 Camera2D，必须解析到提供 add_shake 方法的节点，修改会影响屏幕震动反馈。
+@export var camera_path: NodePath = ^"Camera2D"
 ## 疾跑速度倍率；取值建议大于等于 1，默认 1.55 表示按住 Shift 时移动速度提升 55%，运行时修改会影响疾跑手感。
 @export_range(1.0, 4.0, 0.05, "or_greater") var sprint_speed_multiplier: float = 1.55
 ## 疾跑每秒能量消耗；取值建议大于等于 0，默认 24 表示持续疾跑会稳定消耗能量，运行时修改会影响疾跑续航。
@@ -32,6 +37,16 @@ class_name PlayerController
 @export_range(0.01, 2.0, 0.01) var dodge_duration: float = 0.16
 ## 击退速度衰减；取值建议大于 0，默认 1800 像素每秒平方，修改会影响后坐力和受击击退持续时间。
 @export_range(1.0, 12000.0, 1.0, "or_greater") var knockback_decay: float = 1800.0
+## 射击震动后坐力倍率；取值建议 0 到 0.1，默认 0.035 会让高后坐力武器产生更强屏幕震动。
+@export_range(0.0, 1.0, 0.001) var fire_shake_per_recoil: float = 0.035
+## 受伤震动伤害倍率；取值建议 0 到 1，默认 0.16 会让高伤害受击产生更强屏幕震动。
+@export_range(0.0, 2.0, 0.01) var damage_shake_per_damage: float = 0.16
+## 最小受伤震动；取值建议 0 到 8，默认 1.6 保证小伤害也有轻微反馈。
+@export_range(0.0, 32.0, 0.1) var minimum_damage_shake: float = 1.6
+## 玩家受击特效颜色；默认浅青色，修改会影响玩家被命中时的爆发特效颜色。
+@export var hit_effect_color: Color = Color(0.55, 0.90, 1.0, 0.95)
+## 玩家死亡特效颜色；默认偏红白色，修改会影响玩家死亡时的爆发特效颜色。
+@export var death_effect_color: Color = Color(1.0, 0.35, 0.46, 1.0)
 
 ## 最近一次有效瞄准方向；取值为单位向量，默认向右保证鼠标贴近角色时仍有攻击方向，修改会影响无有效鼠标方向时的攻击朝向。
 var _last_aim_direction: Vector2 = Vector2.RIGHT
@@ -56,6 +71,8 @@ var _knockback_velocity: Vector2 = Vector2.ZERO
 @onready var _equipment_component = get_node(equipment_component_path)
 ## 瞄准轴节点缓存；默认按 aim_pivot_path 获取 Node2D，运行时跟随鼠标方向旋转，修改会影响武器视觉和枪口朝向。
 @onready var _aim_pivot: Node2D = get_node(aim_pivot_path) as Node2D
+## 战斗相机节点缓存；默认按 camera_path 获取，允许为空，缺失时只跳过屏幕震动不影响移动和攻击。
+@onready var _camera: Node = get_node_or_null(camera_path)
 
 
 func _physics_process(delta: float) -> void:
@@ -87,9 +104,19 @@ func _physics_process(delta: float) -> void:
 
 
 func apply_damage(damage: float, source: Node) -> void:
+	# 受伤前死亡状态；取值来自属性组件，默认用于避免死亡特效重复生成。
+	var was_dead: bool = _is_stats_dead()
 	if _stats_component.has_method("take_damage"):
 		_stats_component.call("take_damage", damage)
 
+	# 受伤后死亡状态；取值来自属性组件，默认用于决定播放受击或死亡特效。
+	var is_dead_after_damage: bool = _is_stats_dead()
+	if is_dead_after_damage and not was_dead:
+		_spawn_player_death_effect()
+	else:
+		_spawn_player_hit_effect()
+
+	_shake_screen_for_damage(damage)
 	_apply_knockback_from_source(source)
 
 
@@ -125,6 +152,7 @@ func _try_fire_ranged_weapon() -> void:
 		return
 
 	_apply_weapon_recoil(current_weapon, _last_aim_direction)
+	_shake_screen_for_weapon_fire(current_weapon)
 	if _stats_component.has_method("spend_energy"):
 		_stats_component.call("spend_energy", energy_cost)
 
@@ -226,11 +254,83 @@ func _apply_weapon_recoil(weapon_data: Resource, attack_direction: Vector2) -> v
 		return
 
 	# 武器后坐力；取值来自武器资源 recoil_force，默认 0 表示不推动玩家。
-	var recoil_force: float = maxf(float(weapon_data.get("recoil_force")), 0.0)
+	var recoil_force: float = _get_weapon_recoil_force(weapon_data)
 	if recoil_force <= 0.0:
 		return
 
 	apply_knockback(-attack_direction.normalized(), recoil_force)
+
+
+func _get_weapon_recoil_force(weapon_data: Resource) -> float:
+	if weapon_data == null:
+		return 0.0
+
+	return maxf(float(weapon_data.get("recoil_force")), 0.0)
+
+
+func _shake_screen_for_weapon_fire(weapon_data: Resource) -> void:
+	# 武器后坐力；取值来自武器资源 recoil_force，默认用于换算射击屏幕震动强度。
+	var recoil_force: float = _get_weapon_recoil_force(weapon_data)
+	if recoil_force <= 0.0:
+		return
+
+	_shake_screen(recoil_force * fire_shake_per_recoil)
+
+
+func _shake_screen_for_damage(damage: float) -> void:
+	if damage <= 0.0:
+		return
+
+	# 受伤震动强度；取值由伤害和最小震动共同决定，默认让高伤害反馈更强。
+	var shake_amount: float = maxf(damage * damage_shake_per_damage, minimum_damage_shake)
+	_shake_screen(shake_amount)
+
+
+func _shake_screen(amount: float) -> void:
+	if _camera == null or not _camera.has_method("add_shake"):
+		return
+
+	_camera.call("add_shake", amount)
+
+
+func _spawn_player_hit_effect() -> void:
+	_spawn_combat_burst(_resolve_effect_parent(), global_position, hit_effect_color, 30.0, 0.18, 7)
+
+
+func _spawn_player_death_effect() -> void:
+	_spawn_combat_burst(_resolve_effect_parent(), global_position, death_effect_color, 58.0, 0.42, 18)
+
+
+func _spawn_combat_burst(parent_node: Node, burst_position: Vector2, burst_color: Color, burst_radius: float, burst_duration: float, burst_particle_count: int) -> void:
+	if parent_node == null:
+		return
+
+	# 特效实例；取值为预加载脚本创建的 Node2D，默认挂到当前场景独立播放。
+	var effect: Node2D = COMBAT_BURST_EFFECT_SCRIPT.new() as Node2D
+	if effect == null:
+		return
+
+	effect.process_mode = Node.PROCESS_MODE_ALWAYS
+	parent_node.add_child(effect)
+	effect.global_position = burst_position
+	if effect.has_method("configure"):
+		effect.call("configure", burst_color, burst_radius, burst_duration, burst_particle_count)
+
+
+func _resolve_effect_parent() -> Node:
+	# 当前场景节点；取值通常为 GameWorld，默认让特效脱离玩家节点生命周期独立播放。
+	var current_scene: Node = get_tree().current_scene
+	if current_scene != null:
+		return current_scene
+
+	return get_tree().root
+
+
+func _is_stats_dead() -> bool:
+	if _stats_component != null and _stats_component.has_method("is_dead"):
+		return bool(_stats_component.call("is_dead"))
+
+	return false
 
 
 func _apply_knockback_from_source(source: Node) -> void:

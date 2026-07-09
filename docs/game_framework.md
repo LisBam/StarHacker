@@ -37,6 +37,7 @@
 - `toggle_inventory`：E，打开或关闭背包界面
 - `toggle_large_map`：M，打开或关闭完整大地图
 - `pause_game`：ESC，暂停游戏并打开暂停菜单
+- `pickup_nearby`：F，快速拾取玩家附近最近的一件地面掉落武器
 
 `PlayerInputComponent` 同时读取 InputMap 和物理按键兜底。即使输入映射被误删，WASD、Shift、Space、鼠标左键、鼠标右键仍可保持基础可控。
 
@@ -55,12 +56,15 @@
 - `EquipmentComponent`：维护远程武器槽、当前远程槽索引和近战武器槽，负责切换与装备状态，不直接执行攻击。
 - `WeaponSlotControl`：显示单个武器槽或背包物品槽，负责拖拽数据、投放校验、白色冷却遮罩绘制和武器悬浮提示，不直接修改装备数据。
 - `InventoryDropArea`：接收拖到背包空白区域的武器拖拽数据，并转发给 HUD 按背包末尾投放处理。
-- `CombatHud`：底部中心显示当前角色名、玩家生命、能量和武器栏，右上角显示玩家周围小地图，E 键打开背包，M 键打开完整大地图，ESC 打开暂停菜单，监听组件信号并处理拖拽装备和卸下。
+- `CombatCamera`：玩家子节点上的战斗相机，关闭 Camera2D 位置平滑并使用物理帧回调跟随玩家，避免物理移动和渲染相机不同步造成移动抖动；屏幕震动只修改相机 `offset`，不会改变玩家或相机节点真实位置。
+- `CombatHud`：底部中心显示当前角色名、玩家生命、能量和武器栏，右上角显示玩家周围小地图，E 键打开背包，M 键打开完整大地图，ESC 打开暂停菜单，监听组件信号并处理拖拽装备、卸下、地面掉落列表、点击拾取、F 快速拾取和背包武器拖出丢弃。
 - `MiniMapControl`：读取 GameWorld 的地图边界、探索格和环境障碍矩形，局部模式绘制玩家周围地图，完整模式绘制整张地图和未探索区域迷雾，当前不显示怪物。
-- `BasicMonster`：基础怪物，维护血量、攻击力、韧性、冲击力、移速、墙体遮挡索敌、最后可见位置搜索、A* 网格寻路、局部随机绕障、卡住重算、游荡和近身攻击。
+- `BasicMonster`：基础怪物，维护血量、攻击力、韧性、冲击力、移速、墙体遮挡索敌、隔墙警觉追踪、目标位置预测、到点扫荡搜索、A* 网格寻路、局部随机绕障、卡住重算、游荡和近身攻击。
 - `RangedMonster`：远程测试怪物，继承基础怪物受击、韧性、索敌记忆、绕障和游荡逻辑，发现玩家后保持距离并发射敌方子弹。
+- `WeaponDrop`：地面武器掉落物，保存单把武器资源并加入 `weapon_drops` 组，HUD 按距离扫描后生成附近掉落列表；拾取成功后会把同一个武器资源加入背包并释放掉落物节点。
+- `CombatBurstEffect`：代码绘制的短促战斗爆发特效，用于玩家和怪物受击、死亡反馈；默认挂到当前场景根节点，保证死亡节点释放后特效仍能播放完成。
 - `SessionState`：入口会话状态，保存当前模式和当前角色，供主菜单、GameWorld 和训练场角色切换复用。
-- `GameWorld`：战斗承载脚本，生成大型网格地图，按配置随机生成墙体、建筑和怪物，根据当前角色刷新玩家占位属性，并提供基于环境障碍矩形的临时 A* 路径查询接口。
+- `GameWorld`：战斗承载脚本，生成大型网格地图，按配置随机生成墙体、建筑、怪物和地面掉落物，根据当前角色刷新玩家占位属性，并提供基于环境障碍矩形的临时 A* 路径查询接口。
 
 ## 武器与装备
 
@@ -84,6 +88,8 @@
 
 近战攻击流程为：玩家输入右键 -> `PlayerController` 读取当前近战武器 -> 检查能量是否足够 -> `MeleeAttackComponent.try_attack(direction, weapon_data)` 成功开启命中框 -> 命中怪物时按武器 `impact_force` 击退，命中敌方子弹时直接消除 -> 扣除武器 `energy_cost`。
 
+战斗反馈流程为：玩家射击成功后，`PlayerController` 会按武器 `recoil_force * fire_shake_per_recoil` 向 `CombatCamera` 累加屏幕震动；玩家受到伤害时，会按伤害值和 `minimum_damage_shake` 计算受击震动。玩家和怪物受击时生成短促 `CombatBurstEffect`，生命归零时生成更大的死亡爆发特效。
+
 武器新增三项控制相关属性：`bullet_range` 仅远程武器使用，用于覆盖弹体最大飞行距离，未配置时兜底为 340 像素；`recoil_force` 表示开火后坐力，会把玩家向射击反方向推开；`impact_force` 表示命中冲击力，怪物会按自身韧性折算击退强度。当前远程测试武器采用短射程默认值，避免玩家在大地图上过早跨屏清怪：手枪 340、步枪 420、冲锋枪 280、磁轨炮 520、散射爆能枪 260。
 
 移动能力流程为：玩家按住 Shift 且存在移动输入时，`PlayerController` 每帧按 `sprint_energy_cost_per_second * delta` 扣除能量，并把本帧移动速度倍率提升到 `sprint_speed_multiplier`；玩家按下 Space 且当前存在移动输入时，先扣除 `dodge_energy_cost`，再按 `dodge_distance / dodge_duration` 朝当前移动方向突进。背包打开时战斗输入被锁定，疾跑和闪避也不会触发能量消耗。
@@ -97,6 +103,8 @@
 背包界面采用左右分栏：左侧是当前装备的远程槽和近战槽，右侧是背包内未装备的武器。右侧提供“全部”“近战”“远程”分页筛选，背包物品槽第一行直接显示武器类型，避免把近战和远程武器混淆。鼠标悬停在任意有武器的槽位上时，会显示武器名称、类型、说明、能量消耗、后坐力、冲击力，以及远程或近战专属参数。
 
 装备和背包使用单实例流转规则：一把武器资源同一时间只能存在于一个位置。右侧背包武器拖到左侧装备槽后，会从背包列表移除；如果目标装备槽已有武器，旧武器会回到原背包位置。左侧装备拖回右侧背包的空白区域或任意背包物品上都会卸下并插入背包；背包武器之间拖拽会移动原物品顺序，不会复制资源；远程装备槽之间拖拽会移动或交换同一个武器引用。
+
+地面掉落物使用同一套武器资源流转规则。怪物死亡时，`GameWorld` 会读取该怪物的 `weapon_drop_chance`，默认 0.03 表示 3% 概率从 `weapon_drop_table` 随机复制一把武器并生成 `WeaponDrop`。玩家靠近地面武器时，HUD 左侧会显示附近掉落物列表，点击列表项可拾取指定武器，按 F 会拾取最近的一件。背包打开时，把右侧背包武器或左侧已装备武器拖到背包面板外，会从原位置移除该武器并在玩家附近生成地面掉落物；如果世界掉落生成失败，系统会把武器回滚到原背包位置或原装备槽。
 
 ## 暂停与设置
 
@@ -115,6 +123,7 @@ ESC 会打开战斗暂停菜单，并通过 `get_tree().paused` 暂停游戏世�
 基础怪物属性包括：
 
 - `max_health` / `current_health`：血量。
+- `weapon_drop_chance`：死亡掉落武器概率，默认 0.03。每只怪物可单独调节，0 表示不掉落，1 表示必定掉落。
 - `attack_damage`：攻击力，近身攻击玩家时传给玩家的 `apply_damage(damage, source)`。
 - `toughness`：韧性百分比，默认 0；数值为 1 时减少 1% 击退效果，数值为 100 时完全免疫击退。
 - `attack_impact_force`：怪物近身攻击冲击力，玩家受伤时会按来源方向被击退。
@@ -124,12 +133,16 @@ ESC 会打开战斗暂停菜单，并通过 `get_tree().paused` 暂停游戏世�
 - `attack_cooldown`：攻击冷却。
 - `lose_target_range_multiplier`：脱战视野倍率，怪物已经锁定玩家后，会在无遮挡情况下使用扩展视野减少边缘反复丢失目标。
 - `vision_requires_line_of_sight`、`vision_line_of_sight_collision_mask`：索敌视线参数。默认开启墙体遮挡检测，并只检测第 5 层环境墙体和建筑；玩家站在墙后时，怪物不会直接获得目标。
-- `target_memory_duration`、`search_arrive_distance`：失去视野后的搜索参数。怪物看见玩家时会记录最后可见位置；被墙体遮挡后，会在记忆时间内尝试绕到该位置搜索，到达搜索距离或记忆耗尽后才放弃目标。
+- `target_memory_duration`、`search_arrive_distance`：失去视野后的基础搜索参数。怪物看见玩家时会记录最后可见或推断位置；被墙体遮挡后，会在记忆时间内尝试绕到该位置搜索。
+- `hidden_target_tracking_range_multiplier`：隔墙警觉追踪范围倍率。怪物必须先通过无遮挡视线发现玩家；一旦锁定目标，即使玩家跑到墙后，只要仍在该范围内，怪物会继续根据动向追踪推断位置，避免玩家刚绕墙就让怪物脱战。
+- `target_prediction_time`、`target_prediction_max_distance`：目标预测参数。怪物会根据最近目标位置变化估算移动趋势，并把搜索目标短距离前推；最大距离用于限制预测过头。
+- `target_search_duration_after_arrival`、`target_search_radius`：到达推断位置后的扫荡参数。怪物靠近推断位置后不会立刻放弃，而是在锚点周围随机选点搜索，直到搜索时间耗尽。
 - `wander_radius`、`wander_speed_multiplier`、`wander_arrive_distance`、`wander_wait_min`、`wander_wait_max`：无目标游荡参数。怪物未发现玩家时会围绕出生点随机选点移动，到达后等待一小段时间再选下一个点。
 - `avoidance_probe_distance`、`avoidance_angle_step_degrees`、`avoidance_candidate_count`：局部绕障参数。怪物追击或游荡时会先尝试直线方向，若前方被墙体挡住，则按每只怪物随机生成的左右偏好寻找可移动方向。
 - `pathfinding_enabled`、`pathfinding_cell_size`、`pathfinding_agent_radius`、`path_recalculation_min_interval`、`path_recalculation_max_interval`、`path_destination_refresh_distance`、`path_waypoint_arrive_distance`、`path_random_goal_radius`、`path_max_point_count`：网格寻路参数。怪物直线被障碍阻挡时，会向 `GameWorld.find_navigation_path()` 请求无斜向穿角的 A* 路径；路径终点带有小范围随机偏移。目标可见时会按随机间隔刷新路径，目标位置明显变化或怪物卡住时也会重算；失去视野后的搜索路径不会仅因计时器到期而频繁换终点，减少贴墙来回抖动。
 - `stuck_detection_time`、`stuck_minimum_movement`：卡住检测参数。怪物持续有移动意图但实际位移过小时，会翻转局部绕障偏好并清空缓存路径，下一帧重新请求路径。
 - `knockback_decay`：击退衰减速度，控制怪物被玩家武器命中后滑退多久。
+- `hit_effect_color`、`death_effect_color`：怪物受击和死亡特效颜色，只影响视觉反馈，不影响战斗数值。
 
 远程怪物额外属性包括 `projectile_scene`、`shoot_range`、`keep_distance`、`ranged_projectile_speed`、`ranged_projectile_damage`、`ranged_projectile_range`、`ranged_projectile_impact_force`、`shoot_cooldown`、`muzzle_offset`、`line_of_sight_collision_mask` 和 `projectile_parent_path`。远程怪物只有在玩家进入射击距离且与怪物之间没有环境墙体遮挡时才会开火；如果距离太远或视线被挡，会先绕障接近；如果玩家太近，会尝试后撤保持距离。
 
@@ -153,6 +166,8 @@ ESC 会打开战斗暂停菜单，并通过 `get_tree().paused` 暂停游戏世�
 
 `GameWorld` 通过 `monster_scene`、`monster_scenes`、`monster_spawn_count`、`monster_spawn_min_distance`、`monster_spawn_max_distance` 和 `monster_parent_path` 控制怪物生成。`monster_scenes` 非空时会优先从该数组随机选择怪物场景，当前默认混合生成近战基础怪物和远程测试怪物。默认进入战斗场景时，以玩家位置为中心，在最小和最大距离之间随机生成 8 个怪物，并调用怪物的 `set_target(player)` 设置索敌目标。
 
+`GameWorld` 通过 `drop_parent_path`、`weapon_drop_scene`、`weapon_drop_table` 和 `dropped_weapon_scatter_radius` 控制地面武器生成。怪物死亡掉落会从掉落表复制武器模板，背包拖出丢弃会直接使用背包里的同一个武器资源；落点会尽量避开环境障碍并限制在地图范围内。
+
 训练场提供 `clear_monsters()` 和 `respawn_monsters()` 两个接口给 HUD 训练场设置调用。清怪会先按训练怪物组清理，再清理 `monster_parent_path` 指向的怪物容器；重新生成会按当前配置追加一批新怪物，不会清空场上已有怪物。
 
 ## 可调参数
@@ -161,21 +176,24 @@ ESC 会打开战斗暂停菜单，并通过 `get_tree().paused` 暂停游戏世�
 
 - 移动：`max_speed`、`acceleration`、`friction`、`stop_threshold`
 - 玩家移动能力：`sprint_speed_multiplier`、`sprint_energy_cost_per_second`、`dodge_energy_cost`、`dodge_distance`、`dodge_duration`、`knockback_decay`
+- 玩家战斗反馈：`camera_path`、`fire_shake_per_recoil`、`damage_shake_per_damage`、`minimum_damage_shake`、`hit_effect_color`、`death_effect_color`
+- 战斗相机：`shake_decay`、`max_shake_offset`、`max_shake_strength`
 - 远程攻击：`projectile_scene`、`projectile_speed`、`projectile_damage`、`fire_cooldown`、`fallback_muzzle_distance`、`muzzle_block_check_radius`、`muzzle_block_collision_mask`、`projectile_parent_path`
 - 近战攻击：`damage`、`cooldown_duration`、`active_duration`、`rotation_offset`
 - 弹体：`speed`、`lifetime`、`max_distance`、`damage`、`destroy_on_hit`、`impact_force`
 - 战斗属性：`max_health`、`current_health`、`max_energy`、`current_energy`、`energy_regeneration_per_second`、`infinite_health`、`infinite_energy`
 - 装备：`ranged_slot_count`、`starting_ranged_weapons`、`starting_melee_weapon`
-- 怪物：`max_health`、`current_health`、`attack_damage`、`toughness`、`attack_impact_force`、`move_speed`、`vision_range`、`attack_range`、`attack_cooldown`、`lose_target_range_multiplier`、`vision_requires_line_of_sight`、`vision_line_of_sight_collision_mask`、`target_memory_duration`、`search_arrive_distance`、`wander_radius`、`wander_speed_multiplier`、`wander_arrive_distance`、`wander_wait_min`、`wander_wait_max`、`avoidance_probe_distance`、`avoidance_angle_step_degrees`、`avoidance_candidate_count`、`pathfinding_enabled`、`pathfinding_cell_size`、`pathfinding_agent_radius`、`path_recalculation_min_interval`、`path_recalculation_max_interval`、`path_destination_refresh_distance`、`path_waypoint_arrive_distance`、`path_random_goal_radius`、`path_max_point_count`、`stuck_detection_time`、`stuck_minimum_movement`、`knockback_decay`
+- 怪物：`max_health`、`current_health`、`weapon_drop_chance`、`attack_damage`、`toughness`、`attack_impact_force`、`move_speed`、`vision_range`、`attack_range`、`attack_cooldown`、`lose_target_range_multiplier`、`vision_requires_line_of_sight`、`vision_line_of_sight_collision_mask`、`target_memory_duration`、`search_arrive_distance`、`hidden_target_tracking_range_multiplier`、`target_prediction_time`、`target_prediction_max_distance`、`target_search_duration_after_arrival`、`target_search_radius`、`wander_radius`、`wander_speed_multiplier`、`wander_arrive_distance`、`wander_wait_min`、`wander_wait_max`、`avoidance_probe_distance`、`avoidance_angle_step_degrees`、`avoidance_candidate_count`、`pathfinding_enabled`、`pathfinding_cell_size`、`pathfinding_agent_radius`、`path_recalculation_min_interval`、`path_recalculation_max_interval`、`path_destination_refresh_distance`、`path_waypoint_arrive_distance`、`path_random_goal_radius`、`path_max_point_count`、`stuck_detection_time`、`stuck_minimum_movement`、`knockback_decay`、`hit_effect_color`、`death_effect_color`
 - 远程怪物：`projectile_scene`、`shoot_range`、`keep_distance`、`ranged_projectile_speed`、`ranged_projectile_damage`、`ranged_projectile_range`、`ranged_projectile_impact_force`、`shoot_cooldown`、`muzzle_offset`、`line_of_sight_collision_mask`、`projectile_parent_path`
 - 战斗地图：`grid_size`、`grid_extent`、`map_seed`、`base_floor_color`、`grid_color`、`axis_color`、`exploration_cell_size`、`exploration_radius`、`boundary_wall_thickness`、`boundary_wall_color`
 - 训练场生成：`monster_scene`、`monster_scenes`、`monster_spawn_count`、`monster_spawn_min_distance`、`monster_spawn_max_distance`、`monster_parent_path`
+- 掉落物：`drop_parent_path`、`weapon_drop_scene`、`weapon_drop_table`、`dropped_weapon_scatter_radius`、`weapon_data`、`pickup_radius`、`bob_amplitude`、`bob_speed`
 - 环境生成：`environment_parent_path`、`obstacle_scenes`、`obstacle_spawn_count`、`obstacle_spawn_min_distance_from_player`、`obstacle_spawn_edge_margin`、`obstacle_spawn_min_spacing`、`obstacle_spawn_attempts_per_item`、`obstacle_scale_min`、`obstacle_scale_max`
 - 角色占位属性：`stelle_max_health`、`stelle_max_energy`、`stelle_move_speed`、`caelus_max_health`、`caelus_max_energy`、`caelus_move_speed`、`silver_wolf_max_health`、`silver_wolf_max_energy`、`silver_wolf_move_speed`
 - 武器数据：`weapon_type`、`energy_cost`、`projectile_speed`、`bullet_range`、`ranged_damage`、`ranged_cooldown`、`recoil_force`、`impact_force`、`melee_damage`、`melee_cooldown`、`melee_active_duration`
 - 主菜单入口：`character_select_scene_path`
 - 角色选择：`game_scene_path`、`main_menu_scene_path`、`stat_bar_maximum`、`speed_bar_maximum`
-- HUD：`ranged_slot_minimum_size`、`melee_slot_minimum_size`、`inventory_slot_minimum_size`、`toggle_inventory_action`、`toggle_large_map_action`、`pause_action`、`main_menu_scene_path`
+- HUD：`ranged_slot_minimum_size`、`melee_slot_minimum_size`、`inventory_slot_minimum_size`、`toggle_inventory_action`、`toggle_large_map_action`、`pause_action`、`pickup_action`、`nearby_drop_pickup_range`、`max_nearby_drop_buttons`、`nearby_drop_refresh_interval`、`main_menu_scene_path`
 - 小地图和大地图：`game_world_path`、`player_path`、`display_mode`、`local_view_radius`、`fallback_map_half_size`、`minimap_background_color`、`minimap_border_color`、`obstacle_color`、`fog_overlay_color`、`player_color`、`player_marker_radius`
 
 调参优先在 Godot 检查器中完成，只有新增规则或默认值需要沉淀时再修改脚本。

@@ -30,6 +30,8 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export var pause_action: StringName = &"pause_game"
 ## 大地图开关输入动作名；默认 toggle_large_map 对应 M 键，运行时通常不修改，改名会影响大地图打开方式。
 @export var toggle_large_map_action: StringName = &"toggle_large_map"
+## 快速拾取输入动作名；默认 pickup_nearby 对应 F 键，运行时通常不修改，改名会影响附近掉落物快速拾取。
+@export var pickup_action: StringName = &"pickup_nearby"
 ## 主菜单场景路径；默认返回项目主菜单，必须填写 tscn 资源，运行时通常不修改，改错会导致暂停菜单返回失败。
 @export_file("*.tscn") var main_menu_scene_path: String = "res://scenes/ui/main_menu.tscn"
 ## 远程装备槽最小尺寸；默认 80x54 适合底部低遮挡显示，运行时通常不修改，扩展槽数量时可调小。
@@ -38,6 +40,12 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export var melee_slot_minimum_size: Vector2 = Vector2(80.0, 54.0)
 ## 背包物品槽最小尺寸；默认 112x72 适合网格展示，运行时通常不修改，修改会影响背包容量视觉密度。
 @export var inventory_slot_minimum_size: Vector2 = Vector2(112.0, 72.0)
+## 附近掉落物检测距离；取值建议大于玩家半径，默认 120 像素，修改会影响掉落物列表出现距离。
+@export_range(16.0, 600.0, 1.0) var nearby_drop_pickup_range: float = 120.0
+## 附近掉落物列表最大显示数量；取值建议 1 到 8，默认 5，修改会影响列表高度和拾取选择数量。
+@export_range(1, 12, 1) var max_nearby_drop_buttons: int = 5
+## 附近掉落物列表刷新间隔；取值建议 0.05 到 0.5 秒，默认 0.12 秒，修改会影响列表响应速度和 UI 重建频率。
+@export_range(0.01, 2.0, 0.01) var nearby_drop_refresh_interval: float = 0.12
 
 ## 玩家节点缓存；默认按 player_path 获取，允许为空但 HUD 不会显示有效状态，修改会影响所有组件绑定。
 var _player: Node
@@ -75,7 +83,17 @@ var _master_bus_index: int = -1
 var _is_training_mode: bool = false
 ## 玩家是否已经死亡；取值为 true/false，默认 false，生命归零后用于阻止继续打开暂停、背包和大地图。
 var _is_player_dead: bool = false
+## 附近掉落物面板缓存；默认运行时创建，显示玩家可拾取的地面武器列表。
+var _nearby_drop_panel: PanelContainer
+## 附近掉落物列表容器缓存；默认运行时创建，按距离生成拾取按钮。
+var _nearby_drop_list: VBoxContainer
+## 附近掉落物按钮缓存；元素为 Button，默认每次刷新前清空，修改会影响拾取列表复用方式。
+var _nearby_drop_buttons: Array[Button] = []
+## 附近掉落物刷新剩余时间；取值大于等于 0，默认 0 表示下一帧可刷新列表。
+var _nearby_drop_refresh_remaining: float = 0.0
 
+## HUD 根控件缓存；默认绑定 Root，用于动态挂载附近掉落物面板。
+@onready var _root_control: Control = get_node("Root") as Control
 ## 角色名称文本缓存；默认绑定 CharacterNameLabel，显示当前选择角色名称，节点缺失会导致 HUD 无法展示角色名。
 @onready var _character_name_label: Label = %CharacterNameLabel
 ## 生命文本缓存；默认绑定 HealthLabel，显示当前生命和最大生命，节点缺失会导致生命文本无法刷新。
@@ -168,6 +186,7 @@ func _ready() -> void:
 	_bind_inventory_filter_buttons()
 	_bind_inventory_drop_area()
 	_bind_pause_menu()
+	_build_nearby_drop_panel()
 	_refresh_all()
 	_set_inventory_visible(false)
 	_set_large_map_visible(false)
@@ -176,8 +195,12 @@ func _ready() -> void:
 		_set_death_overlay_visible(false)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	_refresh_cooldown_overlays()
+	_nearby_drop_refresh_remaining = maxf(_nearby_drop_refresh_remaining - delta, 0.0)
+	if _nearby_drop_refresh_remaining <= 0.0:
+		_nearby_drop_refresh_remaining = maxf(nearby_drop_refresh_interval, 0.01)
+		_refresh_nearby_drop_panel()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -202,6 +225,11 @@ func _unhandled_input(event: InputEvent) -> void:
 
 		if key_event.pressed and not key_event.echo and _is_toggle_large_map_event(key_event):
 			_toggle_large_map()
+			get_viewport().set_input_as_handled()
+			return
+
+		if key_event.pressed and not key_event.echo and _is_pickup_event(key_event):
+			_pickup_nearest_drop()
 			get_viewport().set_input_as_handled()
 
 
@@ -426,6 +454,7 @@ func _create_weapon_slot_control(minimum_size: Vector2) -> Control:
 	var slot_control: Control = WEAPON_SLOT_CONTROL_SCRIPT.new() as Control
 	slot_control.custom_minimum_size = minimum_size
 	slot_control.connect("drop_received", Callable(self, "_on_weapon_slot_drop_received"))
+	slot_control.connect("drag_released_outside", Callable(self, "_on_weapon_slot_drag_released_outside"))
 	return slot_control
 
 
@@ -434,6 +463,146 @@ func _clear_container(container: Node) -> void:
 	for child in container.get_children():
 		container.remove_child(child)
 		child.queue_free()
+
+
+func _build_nearby_drop_panel() -> void:
+	_nearby_drop_panel = PanelContainer.new()
+	_nearby_drop_panel.name = "NearbyDropPanel"
+	_nearby_drop_panel.visible = false
+	_nearby_drop_panel.custom_minimum_size = Vector2(220.0, 0.0)
+	_nearby_drop_panel.anchor_left = 0.0
+	_nearby_drop_panel.anchor_top = 0.5
+	_nearby_drop_panel.anchor_right = 0.0
+	_nearby_drop_panel.anchor_bottom = 0.5
+	_nearby_drop_panel.offset_left = 18.0
+	_nearby_drop_panel.offset_top = -110.0
+	_nearby_drop_panel.offset_right = 238.0
+	_nearby_drop_panel.offset_bottom = 110.0
+	_root_control.add_child(_nearby_drop_panel)
+
+	# 面板内边距；取值为动态创建的 MarginContainer，默认给掉落物列表留出点击空间。
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 8)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 8)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	_nearby_drop_panel.add_child(margin)
+
+	_nearby_drop_list = VBoxContainer.new()
+	_nearby_drop_list.add_theme_constant_override("separation", 5)
+	margin.add_child(_nearby_drop_list)
+
+
+func _refresh_nearby_drop_panel() -> void:
+	if _nearby_drop_panel == null or _nearby_drop_list == null:
+		return
+
+	_clear_container(_nearby_drop_list)
+	_nearby_drop_buttons.clear()
+	if not _can_show_nearby_drops():
+		_nearby_drop_panel.visible = false
+		return
+
+	# 附近掉落物列表；元素为 WeaponDrop Node2D，默认按距离从近到远排序。
+	var nearby_drops: Array[Node2D] = _get_nearby_weapon_drops()
+	if nearby_drops.is_empty():
+		_nearby_drop_panel.visible = false
+		return
+
+	_nearby_drop_panel.visible = true
+	# 列表标题；取值为动态创建 Label，默认提示 F 快速拾取最近掉落物。
+	var title_label: Label = Label.new()
+	title_label.text = "附近掉落物  F拾取"
+	title_label.add_theme_font_size_override("font_size", 12)
+	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_nearby_drop_list.add_child(title_label)
+
+	# 附近掉落物遍历项；取值为按距离排序后的 WeaponDrop，默认逐个创建拾取按钮。
+	for drop_node in nearby_drops:
+		# 掉落物按钮；取值为动态创建 Button，默认点击后尝试拾取对应掉落物。
+		var pickup_button: Button = Button.new()
+		pickup_button.text = _get_drop_button_text(drop_node)
+		pickup_button.focus_mode = Control.FOCUS_NONE
+		pickup_button.pressed.connect(Callable(self, "_on_pickup_drop_button_pressed").bind(drop_node))
+		_nearby_drop_list.add_child(pickup_button)
+		_nearby_drop_buttons.append(pickup_button)
+
+
+func _can_show_nearby_drops() -> bool:
+	return not _is_player_dead and not _inventory_panel.visible and not _large_map_overlay.visible and not _pause_overlay.visible and not _death_overlay.visible
+
+
+func _get_nearby_weapon_drops() -> Array[Node2D]:
+	# 候选掉落物列表；元素为 Node2D，默认从 weapon_drops 组筛选玩家拾取范围内的对象。
+	var candidate_drops: Array[Node2D] = []
+	if _player == null:
+		return candidate_drops
+
+	# 组内掉落物遍历项；取值来自场景树 weapon_drops 组，默认只接收有效 Node2D。
+	for raw_drop in get_tree().get_nodes_in_group("weapon_drops"):
+		if not (raw_drop is Node2D):
+			continue
+
+		# 掉落物节点；取值为 Node2D，默认用于计算与玩家的距离。
+		var drop_node: Node2D = raw_drop as Node2D
+		if not _is_drop_in_pickup_range(drop_node):
+			continue
+
+		candidate_drops.append(drop_node)
+
+	# 排序后的掉落物列表；元素为 Node2D，默认按距离从近到远选择有限数量。
+	var sorted_drops: Array[Node2D] = []
+	while not candidate_drops.is_empty() and sorted_drops.size() < max_nearby_drop_buttons:
+		# 最近候选索引；取值为 candidate_drops 的有效下标，默认用于逐个取出最近掉落物。
+		var nearest_index: int = _find_nearest_drop_index(candidate_drops)
+		sorted_drops.append(candidate_drops[nearest_index])
+		candidate_drops.remove_at(nearest_index)
+
+	return sorted_drops
+
+
+func _find_nearest_drop_index(drop_nodes: Array[Node2D]) -> int:
+	# 最近索引；取值为 drop_nodes 的有效下标，默认 0 用于初始化比较。
+	var nearest_index: int = 0
+	# 最近距离；取值为玩家到当前最近掉落物的距离，默认用于排序比较。
+	var nearest_distance: float = _get_drop_distance(drop_nodes[0])
+	# 掉落物索引；取值从 1 到数组末尾，默认跳过已经作为初始值的第一个元素。
+	for drop_index in range(1, drop_nodes.size()):
+		# 当前距离；取值为玩家到当前掉落物距离，默认用于更新最近索引。
+		var current_distance: float = _get_drop_distance(drop_nodes[drop_index])
+		if current_distance < nearest_distance:
+			nearest_distance = current_distance
+			nearest_index = drop_index
+
+	return nearest_index
+
+
+func _is_drop_in_pickup_range(drop_node: Node2D) -> bool:
+	if _player == null or drop_node == null or not is_instance_valid(drop_node):
+		return false
+
+	# 掉落物拾取半径；取值来自掉落物自身或 HUD 默认范围，默认两者取较小值避免远距离误拾取。
+	var drop_pickup_radius: float = nearby_drop_pickup_range
+	if drop_node.has_method("get_pickup_radius"):
+		drop_pickup_radius = minf(drop_pickup_radius, maxf(float(drop_node.call("get_pickup_radius")), 1.0))
+
+	return _get_drop_distance(drop_node) <= drop_pickup_radius
+
+
+func _get_drop_distance(drop_node: Node2D) -> float:
+	if _player == null or drop_node == null:
+		return INF
+
+	return (_player as Node2D).global_position.distance_to(drop_node.global_position)
+
+
+func _get_drop_button_text(drop_node: Node2D) -> String:
+	# 掉落物名称；取值来自 WeaponDrop.get_pickup_display_name，默认用于按钮文本。
+	var drop_name: String = "未知武器"
+	if drop_node.has_method("get_pickup_display_name"):
+		drop_name = str(drop_node.call("get_pickup_display_name"))
+
+	return "%s  %.0f" % [drop_name, _get_drop_distance(drop_node)]
 
 
 func _toggle_inventory() -> void:
@@ -586,6 +755,119 @@ func _is_toggle_large_map_event(key_event: InputEventKey) -> bool:
 		return true
 
 	return InputMap.has_action(toggle_large_map_action) and Input.is_action_just_pressed(toggle_large_map_action)
+
+
+func _is_pickup_event(key_event: InputEventKey) -> bool:
+	if key_event.physical_keycode == KEY_F:
+		return true
+
+	return InputMap.has_action(pickup_action) and Input.is_action_just_pressed(pickup_action)
+
+
+func _pickup_nearest_drop() -> void:
+	if not _can_show_nearby_drops():
+		return
+
+	# 附近掉落物列表；元素为按距离排序的 WeaponDrop，默认第一个就是最近目标。
+	var nearby_drops: Array[Node2D] = _get_nearby_weapon_drops()
+	if nearby_drops.is_empty():
+		return
+
+	_pickup_drop(nearby_drops[0])
+
+
+func _pickup_drop(drop_node: Node) -> void:
+	if drop_node == null or not is_instance_valid(drop_node) or _inventory_component == null:
+		return
+
+	if not (drop_node is Node2D):
+		return
+
+	# 掉落物节点；取值为 Node2D，默认用于最后一次拾取距离校验。
+	var drop_node_2d: Node2D = drop_node as Node2D
+	if not _is_drop_in_pickup_range(drop_node_2d):
+		return
+
+	if drop_node.has_method("pickup_to_inventory") and bool(drop_node.call("pickup_to_inventory", _inventory_component)):
+		_refresh_nearby_drop_panel()
+		if _inventory_panel.visible:
+			_rebuild_inventory_slots()
+
+
+func _drop_weapon_to_world(drop_data: Dictionary) -> void:
+	if _game_world == null or not _game_world.has_method("spawn_weapon_drop_near_player"):
+		return
+
+	# 拖拽来源上下文；取值为 inventory 或 equipment，默认用于决定从背包移除还是从装备槽卸下。
+	var source_context: String = str(drop_data.get("source_context", ""))
+	# 被丢弃武器资源；取值为 Resource 或 null，默认来自拖拽数据，修改会影响世界掉落物内容。
+	var dragged_weapon: Resource = drop_data.get("weapon_data", null) as Resource
+	if dragged_weapon == null:
+		return
+
+	if source_context == "inventory":
+		_drop_inventory_source_weapon_to_world(drop_data, dragged_weapon)
+	elif source_context == "equipment":
+		_drop_equipment_source_weapon_to_world(drop_data, dragged_weapon)
+
+
+func _drop_inventory_source_weapon_to_world(drop_data: Dictionary, dragged_weapon: Resource) -> void:
+	if _inventory_component == null:
+		return
+
+	# 背包来源索引；取值为有效背包下标或 -1，默认用于生成失败时回滚到原位置。
+	var source_index: int = int(drop_data.get("slot_index", -1))
+	if not _remove_item_from_inventory(dragged_weapon):
+		return
+
+	if not _spawn_dragged_weapon_or_restore_to_inventory(dragged_weapon, source_index):
+		return
+
+	_rebuild_inventory_slots()
+	_refresh_nearby_drop_panel()
+
+
+func _drop_equipment_source_weapon_to_world(drop_data: Dictionary, dragged_weapon: Resource) -> void:
+	if _equipment_component == null:
+		return
+
+	# 装备来源槽类型；取值为 ranged 或 melee，默认用于生成失败时把武器放回原装备槽。
+	var source_kind: String = str(drop_data.get("slot_kind", ""))
+	# 装备来源槽索引；取值为远程槽有效下标或 -1，默认用于远程武器回滚到原槽。
+	var source_index: int = int(drop_data.get("slot_index", -1))
+	# 来源远程槽是否当前选中；取值为 true/false，默认用于生成失败后恢复当前武器选择。
+	var source_was_current_ranged: bool = _is_current_ranged_source(source_kind, source_index)
+	if not _unequip_from_drop_source(drop_data):
+		return
+
+	if not _spawn_dragged_weapon_or_restore_to_equipment(dragged_weapon, source_kind, source_index, source_was_current_ranged):
+		return
+
+	_refresh_equipment()
+	_rebuild_inventory_slots()
+	_refresh_nearby_drop_panel()
+
+
+func _spawn_dragged_weapon_or_restore_to_inventory(dragged_weapon: Resource, source_index: int) -> bool:
+	# 是否成功生成世界掉落物；取值为 true/false，默认失败时把武器放回背包。
+	var drop_spawned: bool = bool(_game_world.call("spawn_weapon_drop_near_player", dragged_weapon))
+	if drop_spawned:
+		return true
+
+	_add_item_to_inventory(dragged_weapon, source_index)
+	return false
+
+
+func _spawn_dragged_weapon_or_restore_to_equipment(dragged_weapon: Resource, source_kind: String, source_index: int, source_was_current_ranged: bool) -> bool:
+	# 是否成功生成世界掉落物；取值为 true/false，默认失败时把武器放回原装备槽。
+	var drop_spawned: bool = bool(_game_world.call("spawn_weapon_drop_near_player", dragged_weapon))
+	if drop_spawned:
+		return true
+
+	_equip_weapon_to_target(source_kind, source_index, dragged_weapon)
+	if source_was_current_ranged and _equipment_component.has_method("equip_ranged_slot"):
+		_equipment_component.call("equip_ranged_slot", source_index)
+	return false
 
 
 func _toggle_pause_menu() -> void:
@@ -1008,6 +1290,31 @@ func _on_inventory_drop_area_drop_received(drop_data: Dictionary) -> void:
 	_handle_drop_to_inventory(drop_data, target_index)
 	_refresh_equipment()
 	_rebuild_inventory_slots()
+
+
+func _on_weapon_slot_drag_released_outside(drop_data: Dictionary) -> void:
+	if not _inventory_panel.visible:
+		return
+
+	if _is_pointer_inside_inventory_panel():
+		return
+
+	_drop_weapon_to_world(drop_data)
+
+
+func _on_pickup_drop_button_pressed(drop_node: Node) -> void:
+	_pickup_drop(drop_node)
+
+
+func _is_pointer_inside_inventory_panel() -> bool:
+	if _inventory_panel == null:
+		return false
+
+	# 鼠标屏幕位置；取值来自当前视口，用于区分拖拽释放在背包内还是背包外。
+	var mouse_position: Vector2 = get_viewport().get_mouse_position()
+	# 背包面板全局矩形；取值来自 Control 布局结果，默认用于判断拖出背包的边界。
+	var inventory_rect: Rect2 = _inventory_panel.get_global_rect()
+	return inventory_rect.has_point(mouse_position)
 
 
 func _on_resume_button_pressed() -> void:

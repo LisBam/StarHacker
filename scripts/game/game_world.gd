@@ -69,6 +69,14 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export_range(1.0, 8000.0, 1.0, "or_greater") var monster_spawn_max_distance: float = 900.0
 ## 怪物父节点路径；默认指向 Enemies 容器，允许为空并回退到 GameWorld，修改会影响怪物节点层级。
 @export var monster_parent_path: NodePath = ^"Enemies"
+## 掉落物父节点路径；默认指向 Drops 容器，允许为空并回退到 GameWorld，修改会影响武器掉落物节点层级。
+@export var drop_parent_path: NodePath = ^"Drops"
+## 武器掉落物场景；默认由 game_world.tscn 指向 WeaponDrop，必须实例化为 Node2D，修改会影响所有地面武器表现。
+@export var weapon_drop_scene: PackedScene
+## 武器掉落随机池；元素为 WeaponData 资源，怪物死亡掉落时会从中随机复制一把作为独立掉落物。
+@export var weapon_drop_table: Array[Resource] = []
+## 玩家丢弃武器散落半径；取值建议大于玩家半径，默认 52 像素，修改会影响拖出背包时武器落点距离。
+@export_range(0.0, 400.0, 1.0) var dropped_weapon_scatter_radius: float = 52.0
 ## 星的固定生命上限；取值应大于 0，默认 130，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var stelle_max_health: float = 130.0
 ## 星的固定能量上限；取值应大于 0，默认 110，切换角色时直接应用，不再随机。
@@ -107,6 +115,8 @@ var _selected_character_id: String = CHARACTER_STELLE
 @onready var _environment_parent: Node = get_node_or_null(environment_parent_path)
 ## 怪物父节点缓存；默认按 monster_parent_path 获取，允许为空并回退到当前 GameWorld。
 @onready var _monster_parent: Node = get_node_or_null(monster_parent_path)
+## 掉落物父节点缓存；默认按 drop_parent_path 获取，允许为空并回退到当前 GameWorld。
+@onready var _drop_parent: Node = get_node_or_null(drop_parent_path)
 
 
 func _ready() -> void:
@@ -260,6 +270,38 @@ func find_navigation_path(start_position: Vector2, end_position: Vector2, agent_
 			break
 
 	return result
+
+
+func spawn_weapon_drop(weapon_data: Resource, drop_position: Vector2) -> bool:
+	if weapon_data == null or weapon_drop_scene == null:
+		return false
+
+	# 掉落物实例；取值为 Node2D 或 null，默认由 weapon_drop_scene 实例化。
+	var drop_instance: Node2D = weapon_drop_scene.instantiate() as Node2D
+	if drop_instance == null:
+		return false
+
+	# 掉落物父节点；取值为 Drops 容器或 GameWorld，默认用于集中组织地面武器。
+	var spawn_parent: Node = _drop_parent if _drop_parent != null else self
+	spawn_parent.add_child(drop_instance)
+	drop_instance.global_position = _clamp_position_to_map(drop_position)
+	if drop_instance.has_method("configure_drop"):
+		drop_instance.call("configure_drop", weapon_data)
+	else:
+		drop_instance.set("weapon_data", weapon_data)
+
+	return true
+
+
+func spawn_weapon_drop_near_player(weapon_data: Resource) -> bool:
+	if weapon_data == null:
+		return false
+
+	# 丢弃中心点；取值为玩家当前位置或世界原点，默认用于从背包拖出武器时生成落点。
+	var drop_center: Vector2 = _player.global_position if _player != null else Vector2.ZERO
+	# 丢弃位置；取值为玩家附近随机点，默认尽量避免直接落入墙体。
+	var drop_position: Vector2 = _get_scattered_drop_position(drop_center)
+	return spawn_weapon_drop(weapon_data, drop_position)
 
 
 func switch_character(character_id: String) -> void:
@@ -718,6 +760,8 @@ func _spawn_monster_batch() -> void:
 		monster.add_to_group(TRAINING_MONSTER_GROUP)
 		spawn_parent.add_child(monster)
 		monster.global_position = _get_random_monster_spawn_position()
+		if monster.has_signal("died"):
+			monster.connect("died", Callable(self, "_on_monster_died").bind(monster))
 		if monster.has_method("set_target"):
 			monster.call("set_target", _player)
 
@@ -758,6 +802,76 @@ func clear_monsters() -> void:
 
 func respawn_monsters() -> void:
 	_spawn_monster_batch()
+
+
+func _on_monster_died(monster_node: Node) -> void:
+	if monster_node == null or not (monster_node is Node2D):
+		return
+
+	_try_spawn_monster_weapon_drop(monster_node as Node2D)
+
+
+func _try_spawn_monster_weapon_drop(monster_node: Node2D) -> void:
+	if weapon_drop_table.is_empty() or weapon_drop_scene == null:
+		return
+
+	# 怪物武器掉落概率；取值来自怪物 weapon_drop_chance，默认 0.03，修改会影响当前怪物死亡掉落判定。
+	var drop_chance: float = _get_monster_weapon_drop_chance(monster_node)
+	if drop_chance <= 0.0 or _random.randf() > drop_chance:
+		return
+
+	# 掉落武器资源；取值为随机武器资源的深拷贝，默认让每个地面武器成为独立物品实例。
+	var dropped_weapon: Resource = _get_random_weapon_drop_data()
+	if dropped_weapon == null:
+		return
+
+	spawn_weapon_drop(dropped_weapon, monster_node.global_position)
+
+
+func _get_monster_weapon_drop_chance(monster_node: Node) -> float:
+	if monster_node == null:
+		return 0.0
+
+	# 原始掉落概率；取值可能来自怪物导出属性，默认转为 0 到 1 范围。
+	var raw_drop_chance: Variant = monster_node.get("weapon_drop_chance")
+	if raw_drop_chance == null:
+		return 0.03
+
+	return clampf(float(raw_drop_chance), 0.0, 1.0)
+
+
+func _get_random_weapon_drop_data() -> Resource:
+	if weapon_drop_table.is_empty():
+		return null
+
+	# 武器池随机下标；取值为 0 到武器池末尾，默认用于随机选择掉落模板。
+	var weapon_index: int = _random.randi_range(0, weapon_drop_table.size() - 1)
+	# 武器模板资源；取值来自 weapon_drop_table，默认会深拷贝为独立掉落物。
+	var weapon_template: Resource = weapon_drop_table[weapon_index]
+	if weapon_template == null:
+		return null
+
+	# 独立武器资源；取值为模板深拷贝，默认避免多个掉落物共享同一个资源实例。
+	var dropped_weapon: Resource = weapon_template.duplicate(true) as Resource
+	return dropped_weapon if dropped_weapon != null else weapon_template
+
+
+func _get_scattered_drop_position(center_position: Vector2) -> Vector2:
+	# 丢弃尝试次数；取值为固定 8 次，默认用于尽量避开环境墙体。
+	var scatter_attempt_count: int = 8
+	# 标准化散落半径；取值至少为 0，默认控制丢弃武器离玩家多远。
+	var scatter_radius: float = maxf(dropped_weapon_scatter_radius, 0.0)
+	for _attempt_index in range(scatter_attempt_count):
+		# 散落角度；取值为 0 到 TAU 的随机弧度，默认让丢弃落点不完全固定。
+		var scatter_angle: float = _random.randf_range(0.0, TAU)
+		# 散落距离；取值为半径的 45% 到 100%，默认避免武器直接压在玩家中心。
+		var scatter_distance: float = _random.randf_range(scatter_radius * 0.45, scatter_radius)
+		# 候选位置；取值为中心点加随机偏移并夹到地图内。
+		var candidate_position: Vector2 = _clamp_position_to_map(center_position + Vector2.RIGHT.rotated(scatter_angle) * scatter_distance)
+		if not _is_position_blocked_by_environment(candidate_position, 18.0):
+			return candidate_position
+
+	return _clamp_position_to_map(center_position)
 
 
 func _free_monster_node(monster_node: Node) -> void:

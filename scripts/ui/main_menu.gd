@@ -25,10 +25,16 @@ const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_p
 @onready var _settings_panel: Control = %SettingsPanel
 ## 设置内容容器缓存；默认通过场景路径绑定，用于动态挂载按键绑定面板。
 @onready var _settings_content: VBoxContainer = get_node("SettingsPanel/SettingsMargin/SettingsContent") as VBoxContainer
+## 设置首页标题缓存；默认按节点路径绑定 SettingsTitle，用于多页设置中切换首页显示。
+@onready var _settings_title_label: Label = get_node("SettingsPanel/SettingsMargin/SettingsContent/SettingsTitle") as Label
 ## 主音量滑条缓存；默认绑定唯一名 MasterVolumeSlider，取值 0 到 100，修改会影响全局 Master 音量。
 @onready var _master_volume_slider: HSlider = %MasterVolumeSlider
+## 主音量行容器缓存；默认绑定主音量标签、滑条和数值，用于多页设置中切换首页显示。
+@onready var _master_volume_row: HBoxContainer = get_node("SettingsPanel/SettingsMargin/SettingsContent/MasterVolumeRow") as HBoxContainer
 ## 主音量数值文本缓存；默认绑定唯一名 MasterVolumeValueLabel，显示滑条当前百分比。
 @onready var _master_volume_value_label: Label = %MasterVolumeValueLabel
+## 设置页弹性留白缓存；默认按节点路径绑定 SettingsSpacer，用于保持首页按钮位置稳定。
+@onready var _settings_spacer: Control = get_node("SettingsPanel/SettingsMargin/SettingsContent/SettingsSpacer") as Control
 ## 设置返回按钮缓存；默认绑定唯一名 SettingsBackButton，点击后关闭设置面板。
 @onready var _settings_back_button: Button = %SettingsBackButton
 
@@ -36,6 +42,14 @@ const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_p
 var _master_bus_index: int = -1
 ## 主菜单按键绑定面板缓存；默认运行时创建，显示并修改 InputMap 的玩家操作绑定。
 var _key_binding_panel: Control
+## 按键绑定入口按钮缓存；默认运行时插入设置首页，点击后切换到按键绑定页面。
+var _key_binding_button: Button
+## 按键绑定页面容器缓存；默认运行时创建并隐藏，显示时替代设置首页内容。
+var _key_binding_page: VBoxContainer
+## 按键绑定页面返回按钮缓存；默认运行时创建，点击后回到设置首页而不是关闭设置面板。
+var _key_binding_back_button: Button
+## 设置首页控件列表；元素为 Control，默认用于在多页设置之间统一隐藏或显示首页内容。
+var _settings_home_controls: Array[Control] = []
 
 
 func _ready() -> void:
@@ -46,8 +60,9 @@ func _ready() -> void:
 	_quit_button.pressed.connect(_on_quit_button_pressed)
 	_master_volume_slider.value_changed.connect(_on_master_volume_slider_value_changed)
 	_settings_back_button.pressed.connect(_on_settings_back_button_pressed)
-	_build_key_binding_panel()
+	_build_key_binding_navigation()
 	_settings_panel.visible = false
+	_show_key_binding_page(false)
 	_sync_master_volume_slider()
 	_start_button.grab_focus()
 
@@ -62,6 +77,7 @@ func _on_training_button_pressed() -> void:
 
 func _on_settings_button_pressed() -> void:
 	_settings_panel.visible = true
+	_show_key_binding_page(false)
 	_settings_back_button.grab_focus()
 
 
@@ -74,6 +90,10 @@ func _on_master_volume_slider_value_changed(value: float) -> void:
 
 
 func _on_settings_back_button_pressed() -> void:
+	if _is_key_binding_page_visible():
+		_show_key_binding_page(false)
+		return
+
 	_settings_panel.visible = false
 	_settings_button.grab_focus()
 
@@ -123,20 +143,80 @@ func _refresh_master_volume_label(value: float) -> void:
 	_master_volume_value_label.text = "%d%%" % roundi(value)
 
 
-func _build_key_binding_panel() -> void:
+func _build_key_binding_navigation() -> void:
 	if _settings_content == null:
 		return
 
-	if _key_binding_panel != null:
+	if _key_binding_page != null:
 		return
 
-	# 按键绑定面板；取值为 KeyBindingPanel 实例，默认添加到主菜单设置音量下方。
+	# 按键绑定入口按钮；取值为 Button，默认放在设置首页用于进入独立按键绑定页面。
+	var key_binding_button: Button = Button.new()
+	key_binding_button.name = "KeyBindingPageButton"
+	key_binding_button.custom_minimum_size = Vector2(0.0, 42.0)
+	key_binding_button.text = "按键绑定"
+	key_binding_button.pressed.connect(_on_key_binding_button_pressed)
+	_settings_content.add_child(key_binding_button)
+	_settings_content.move_child(key_binding_button, maxi(_settings_content.get_child_count() - 3, 0))
+	_key_binding_button = key_binding_button
+	_settings_home_controls = [
+		_settings_title_label,
+		_master_volume_row,
+		_key_binding_button,
+		_settings_spacer,
+		_settings_back_button,
+	]
+
+	# 按键绑定页面；取值为 VBoxContainer，默认隐藏并在点击入口按钮时显示。
+	var key_binding_page: VBoxContainer = VBoxContainer.new()
+	key_binding_page.name = "KeyBindingPage"
+	key_binding_page.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	key_binding_page.add_theme_constant_override("separation", 10)
+	_settings_content.add_child(key_binding_page)
+	_key_binding_page = key_binding_page
+
+	# 按键绑定面板；取值为 KeyBindingPanel 实例，默认只在按键绑定页面内显示。
 	var key_binding_panel: Control = KEY_BINDING_PANEL_SCRIPT.new() as Control
 	if key_binding_panel == null:
 		return
 
 	key_binding_panel.name = "MainMenuKeyBindingPanel"
 	key_binding_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_settings_content.add_child(key_binding_panel)
-	_settings_content.move_child(key_binding_panel, maxi(_settings_content.get_child_count() - 3, 0))
+	_key_binding_page.add_child(key_binding_panel)
 	_key_binding_panel = key_binding_panel
+
+	# 按键绑定返回按钮；取值为 Button，默认从按键绑定页面回到设置首页。
+	var key_binding_back_button: Button = Button.new()
+	key_binding_back_button.name = "KeyBindingBackButton"
+	key_binding_back_button.custom_minimum_size = Vector2(0.0, 42.0)
+	key_binding_back_button.text = "返回"
+	key_binding_back_button.pressed.connect(_on_key_binding_back_button_pressed)
+	_key_binding_page.add_child(key_binding_back_button)
+	_key_binding_back_button = key_binding_back_button
+
+
+func _show_key_binding_page(visible: bool) -> void:
+	# 首页控件遍历项；取值为设置首页的直接控件，默认与按键绑定页面互斥显示。
+	for home_control in _settings_home_controls:
+		if home_control != null:
+			home_control.visible = not visible
+
+	if _key_binding_page != null:
+		_key_binding_page.visible = visible
+
+	if visible and _key_binding_back_button != null:
+		_key_binding_back_button.grab_focus()
+	elif _settings_back_button != null:
+		_settings_back_button.grab_focus()
+
+
+func _is_key_binding_page_visible() -> bool:
+	return _key_binding_page != null and _key_binding_page.visible
+
+
+func _on_key_binding_button_pressed() -> void:
+	_show_key_binding_page(true)
+
+
+func _on_key_binding_back_button_pressed() -> void:
+	_show_key_binding_page(false)

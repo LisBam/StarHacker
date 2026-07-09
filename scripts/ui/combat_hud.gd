@@ -38,6 +38,8 @@ const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
 @export var pickup_action: StringName = &"pickup_nearby"
 ## 掉落物列表开关输入动作名；默认 toggle_drop_list 对应 G 键，运行时通常不修改，改名会影响自动展开开关。
 @export var toggle_drop_list_action: StringName = &"toggle_drop_list"
+## 撤离确认输入动作名；默认复用 dodge 对应闪避键，运行时通常不修改，改名会影响撤离点可撤离后的确认操作。
+@export var extraction_action: StringName = &"dodge"
 ## 主菜单场景路径；默认返回项目主菜单，必须填写 tscn 资源，运行时通常不修改，改错会导致暂停菜单返回失败。
 @export_file("*.tscn") var main_menu_scene_path: String = "res://scenes/ui/main_menu.tscn"
 ## 远程装备槽最小尺寸；默认 80x54 适合底部低遮挡显示，运行时通常不修改，扩展槽数量时可调小。
@@ -95,16 +97,32 @@ var _drop_list_enabled: bool = true
 var _drop_list_combat_suppression_remaining: float = 0.0
 ## 附近掉落物面板缓存；默认运行时创建，显示玩家可拾取的地面武器列表。
 var _nearby_drop_panel: PanelContainer
-## 附近掉落物列表容器缓存；默认运行时创建，按距离生成拾取按钮。
+## 附近掉落物标题缓存；默认运行时创建，G 关闭列表时仍保留该标题提示当前附近存在掉落物。
+var _nearby_drop_title_label: Label
+## 附近掉落物列表容器缓存；默认运行时创建，只承载拾取按钮，不承载标题。
 var _nearby_drop_list: VBoxContainer
 ## 附近掉落物按钮缓存；元素为 Button，默认每次刷新前清空，修改会影响拾取列表复用方式。
 var _nearby_drop_buttons: Array[Button] = []
 ## 附近掉落物刷新剩余时间；取值大于等于 0，默认 0 表示下一帧可刷新列表。
 var _nearby_drop_refresh_remaining: float = 0.0
-## 当前掉落物列表签名；元素为掉落物实例 ID，默认用于避免列表内容未变化时频繁重建按钮。
-var _nearby_drop_signature: Array[int] = []
+## 当前掉落物列表签名；元素为实例、名称和位置组成的字符串，默认用于判断列表内容是否需要重建。
+var _nearby_drop_signature: Array[String] = []
+## 战斗顶部状态容器缓存；默认运行时创建，用于显示生存时间和撤离点状态。
+var _combat_status_container: VBoxContainer
+## 生存时间文本缓存；默认运行时创建，显示进入战斗后的 mm:ss 计时。
+var _survival_timer_label: Label
+## 撤离状态文本缓存；默认运行时创建，撤离点未出现时隐藏。
+var _extraction_status_label: Label
 ## 暂停设置按键绑定面板缓存；默认运行时创建，显示并修改 InputMap 的玩家操作绑定。
 var _pause_key_binding_panel: Control
+## 暂停设置按键绑定入口按钮缓存；默认运行时插入设置首页，点击后切换到按键绑定页面。
+var _pause_key_binding_button: Button
+## 暂停设置按键绑定页面缓存；默认运行时创建并隐藏，用于分页显示完整按键绑定面板。
+var _pause_key_binding_page: VBoxContainer
+## 暂停设置按键绑定返回按钮缓存；默认运行时创建，点击后回到暂停设置首页。
+var _pause_key_binding_back_button: Button
+## 暂停设置首页控件列表；元素为 Control，默认用于在设置首页和按键绑定页之间切换可见性。
+var _pause_settings_home_controls: Array[Control] = []
 
 ## HUD 根控件缓存；默认绑定 Root，用于动态挂载附近掉落物面板。
 @onready var _root_control: Control = get_node("Root") as Control
@@ -202,8 +220,10 @@ func _ready() -> void:
 	_bind_inventory_filter_buttons()
 	_bind_inventory_drop_area()
 	_bind_pause_menu()
+	_build_combat_status_panel()
 	_build_nearby_drop_panel()
 	_refresh_all()
+	_refresh_combat_status()
 	_set_inventory_visible(false)
 	_set_large_map_visible(false)
 	_set_pause_menu_visible(false)
@@ -213,12 +233,12 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_refresh_cooldown_overlays()
+	_refresh_combat_status()
 	_drop_list_combat_suppression_remaining = maxf(_drop_list_combat_suppression_remaining - delta, 0.0)
 	_nearby_drop_refresh_remaining = maxf(_nearby_drop_refresh_remaining - delta, 0.0)
 	if _nearby_drop_refresh_remaining <= 0.0:
 		_nearby_drop_refresh_remaining = maxf(nearby_drop_refresh_interval, 0.01)
-		if not _is_pointer_inside_nearby_drop_panel():
-			_refresh_nearby_drop_panel()
+		_refresh_nearby_drop_panel()
 
 	_refresh_combat_input_state()
 
@@ -228,6 +248,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if _is_key_binding_capture_active():
+		return
+
+	if _is_extraction_return_event(event):
+		_return_to_main_menu()
+		get_viewport().set_input_as_handled()
 		return
 
 	if event is InputEventKey:
@@ -497,6 +522,45 @@ func _clear_container(container: Node) -> void:
 		child.queue_free()
 
 
+func _build_combat_status_panel() -> void:
+	if _root_control == null:
+		return
+
+	# 顶部状态容器；取值为 VBoxContainer，默认锚定屏幕顶部中央显示战斗时间和撤离状态。
+	var status_container: VBoxContainer = VBoxContainer.new()
+	status_container.name = "CombatStatus"
+	status_container.anchor_left = 0.5
+	status_container.anchor_top = 0.0
+	status_container.anchor_right = 0.5
+	status_container.anchor_bottom = 0.0
+	status_container.offset_left = -120.0
+	status_container.offset_top = 12.0
+	status_container.offset_right = 120.0
+	status_container.offset_bottom = 68.0
+	status_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	status_container.add_theme_constant_override("separation", 4)
+	_root_control.add_child(status_container)
+	_combat_status_container = status_container
+
+	# 生存时间标签；取值为 Label，默认以两位分钟和两位秒数显示战斗存活时间。
+	var survival_timer_label: Label = Label.new()
+	survival_timer_label.text = "00:00"
+	survival_timer_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	survival_timer_label.add_theme_font_size_override("font_size", 24)
+	survival_timer_label.add_theme_color_override("font_color", Color(0.82, 0.96, 1.0, 1.0))
+	status_container.add_child(survival_timer_label)
+	_survival_timer_label = survival_timer_label
+
+	# 撤离状态标签；取值为 Label，默认撤离点未出现时隐藏，出现后提示驻留进度和撤离确认。
+	var extraction_status_label: Label = Label.new()
+	extraction_status_label.visible = false
+	extraction_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	extraction_status_label.add_theme_font_size_override("font_size", 13)
+	extraction_status_label.add_theme_color_override("font_color", Color(0.68, 1.0, 0.86, 1.0))
+	status_container.add_child(extraction_status_label)
+	_extraction_status_label = extraction_status_label
+
+
 func _build_nearby_drop_panel() -> void:
 	_nearby_drop_panel = PanelContainer.new()
 	_nearby_drop_panel.name = "NearbyDropPanel"
@@ -524,18 +588,35 @@ func _build_nearby_drop_panel() -> void:
 	margin.gui_input.connect(_on_nearby_drop_panel_gui_input)
 	_nearby_drop_panel.add_child(margin)
 
+	# 面板内容容器；取值为 VBoxContainer，默认把固定标题和可隐藏按钮列表垂直排列。
+	var drop_content: VBoxContainer = VBoxContainer.new()
+	drop_content.mouse_filter = Control.MOUSE_FILTER_STOP
+	drop_content.add_theme_constant_override("separation", 5)
+	drop_content.gui_input.connect(_on_nearby_drop_panel_gui_input)
+	margin.add_child(drop_content)
+
+	# 列表标题；取值为动态创建 Label，默认在 G 关闭列表后仍保留用于提示附近存在掉落物。
+	var title_label: Label = Label.new()
+	title_label.text = "附近掉落物  G显示"
+	title_label.mouse_filter = Control.MOUSE_FILTER_STOP
+	title_label.add_theme_font_size_override("font_size", 12)
+	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_label.gui_input.connect(_on_nearby_drop_panel_gui_input)
+	drop_content.add_child(title_label)
+	_nearby_drop_title_label = title_label
+
 	_nearby_drop_list = VBoxContainer.new()
 	_nearby_drop_list.mouse_filter = Control.MOUSE_FILTER_STOP
 	_nearby_drop_list.add_theme_constant_override("separation", 5)
 	_nearby_drop_list.gui_input.connect(_on_nearby_drop_panel_gui_input)
-	margin.add_child(_nearby_drop_list)
+	drop_content.add_child(_nearby_drop_list)
 
 
 func _refresh_nearby_drop_panel() -> void:
 	if _nearby_drop_panel == null or _nearby_drop_list == null:
 		return
 
-	if not _can_show_nearby_drops():
+	if not _can_pickup_nearby_drops():
 		_hide_nearby_drop_panel()
 		return
 
@@ -545,23 +626,24 @@ func _refresh_nearby_drop_panel() -> void:
 		_hide_nearby_drop_panel()
 		return
 
-	# 新掉落物列表签名；元素为实例 ID，默认用于判断是否需要重建按钮节点。
-	var next_signature: Array[int] = _get_nearby_drop_signature(nearby_drops)
+	_nearby_drop_panel.visible = true
+	_refresh_nearby_drop_title()
+	if not _drop_list_enabled:
+		_clear_container(_nearby_drop_list)
+		_nearby_drop_list.visible = false
+		_nearby_drop_buttons.clear()
+		_nearby_drop_signature.clear()
+		return
+
+	_nearby_drop_list.visible = true
+	# 新掉落物列表签名；元素为掉落物实例、名称和位置，默认用于判断是否需要重建按钮节点。
+	var next_signature: Array[String] = _get_nearby_drop_signature(nearby_drops)
 	if _nearby_drop_panel.visible and _nearby_drop_signature == next_signature:
 		return
 
 	_clear_container(_nearby_drop_list)
 	_nearby_drop_buttons.clear()
 	_nearby_drop_signature = next_signature
-	_nearby_drop_panel.visible = true
-	# 列表标题；取值为动态创建 Label，默认提示 F 快速拾取最近掉落物。
-	var title_label: Label = Label.new()
-	title_label.text = "附近掉落物  F拾取  G关闭"
-	title_label.mouse_filter = Control.MOUSE_FILTER_STOP
-	title_label.add_theme_font_size_override("font_size", 12)
-	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_label.gui_input.connect(_on_nearby_drop_panel_gui_input)
-	_nearby_drop_list.add_child(title_label)
 
 	# 附近掉落物遍历项；取值为按距离排序后的 WeaponDrop，默认逐个创建拾取按钮。
 	for drop_node in nearby_drops:
@@ -583,13 +665,10 @@ func _hide_nearby_drop_panel() -> void:
 
 	if _nearby_drop_list != null:
 		_clear_container(_nearby_drop_list)
+		_nearby_drop_list.visible = true
 
 	_nearby_drop_buttons.clear()
 	_nearby_drop_signature.clear()
-
-
-func _can_show_nearby_drops() -> bool:
-	return _drop_list_enabled and _can_pickup_nearby_drops()
 
 
 func _can_pickup_nearby_drops() -> bool:
@@ -666,15 +745,31 @@ func _get_drop_button_text(drop_node: Node2D) -> String:
 	if drop_node.has_method("get_pickup_display_name"):
 		drop_name = str(drop_node.call("get_pickup_display_name"))
 
-	return "%s  %.0f" % [drop_name, _get_drop_distance(drop_node)]
+	return drop_name
 
 
-func _get_nearby_drop_signature(drop_nodes: Array[Node2D]) -> Array[int]:
-	# 掉落物列表签名；元素为实例 ID，默认用于判断 UI 列表是否需要重建。
-	var signature: Array[int] = []
+func _refresh_nearby_drop_title() -> void:
+	if _nearby_drop_title_label == null:
+		return
+
+	_nearby_drop_title_label.text = "附近掉落物  F拾取  G关闭" if _drop_list_enabled else "附近掉落物  G显示"
+
+
+func _get_nearby_drop_signature(drop_nodes: Array[Node2D]) -> Array[String]:
+	# 掉落物列表签名；元素为实例、名称和位置组成的字符串，默认用于判断 UI 列表是否需要重建。
+	var signature: Array[String] = []
 	# 签名遍历项；取值为当前附近掉落物节点，默认按显示顺序写入。
 	for drop_node in drop_nodes:
-		signature.append(int(drop_node.get_instance_id()))
+		# 掉落物显示名；取值来自按钮文本，默认用于武器资源变化时触发列表重建。
+		var drop_display_name: String = _get_drop_button_text(drop_node)
+		# 掉落物签名文本；取值包含实例、名称和固定世界位置，默认避免相同实例内容变化时列表不刷新。
+		var drop_signature: String = "%d:%s:%d:%d" % [
+			int(drop_node.get_instance_id()),
+			drop_display_name,
+			roundi(drop_node.global_position.x),
+			roundi(drop_node.global_position.y),
+		]
+		signature.append(drop_signature)
 
 	return signature
 
@@ -719,6 +814,113 @@ func _set_combat_input_enabled(enabled: bool) -> void:
 	_input_component.call("set_combat_input_enabled", enabled)
 
 
+func _refresh_combat_status() -> void:
+	if _survival_timer_label != null:
+		_survival_timer_label.text = _format_survival_time(_get_survival_time_seconds())
+
+	_refresh_extraction_status()
+
+
+func _get_survival_time_seconds() -> float:
+	if _game_world != null and _game_world.has_method("get_survival_time_seconds"):
+		return maxf(float(_game_world.call("get_survival_time_seconds")), 0.0)
+
+	return 0.0
+
+
+func _format_survival_time(total_seconds: float) -> String:
+	# 总秒数整数；取值为非负秒数向下取整，默认用于稳定显示 mm:ss。
+	var total_whole_seconds: int = maxi(floori(total_seconds), 0)
+	# 分钟数；取值为总秒数除以 60，默认允许超过两位以支持长时间战斗。
+	var minute_count: int = floori(float(total_whole_seconds) / 60.0)
+	# 秒数；取值为 0 到 59，默认显示两位补零。
+	var second_count: int = total_whole_seconds % 60
+	return "%02d:%02d" % [minute_count, second_count]
+
+
+func _refresh_extraction_status() -> void:
+	if _extraction_status_label == null:
+		return
+
+	if _game_world == null or not _game_world.has_method("has_extraction_point_spawned"):
+		_extraction_status_label.visible = false
+		return
+
+	if not bool(_game_world.call("has_extraction_point_spawned")):
+		_extraction_status_label.visible = false
+		return
+
+	_extraction_status_label.visible = true
+	_extraction_status_label.text = _get_extraction_status_text()
+
+
+func _get_extraction_status_text() -> String:
+	if _is_extraction_ready_to_leave():
+		return "撤离就绪  按闪避返回"
+
+	# 是否在撤离范围内；取值来自 GameWorld，默认用于区分驻留倒计时和地图提示。
+	var is_inside_extraction_area: bool = false
+	if _game_world != null and _game_world.has_method("is_player_inside_extraction_area"):
+		is_inside_extraction_area = bool(_game_world.call("is_player_inside_extraction_area"))
+	if not is_inside_extraction_area:
+		if _is_extraction_point_marked_on_map():
+			return "撤离点已在地图上标记"
+
+		return "撤离点已出现"
+
+	# 撤离驻留时长；取值来自 GameWorld，默认至少 1 秒用于显示倒计时分母。
+	var hold_duration: float = 1.0
+	if _game_world != null and _game_world.has_method("get_extraction_hold_duration_seconds"):
+		hold_duration = maxf(float(_game_world.call("get_extraction_hold_duration_seconds")), 1.0)
+
+	# 已驻留时长；取值来自 GameWorld，默认限制到 0 到驻留时长。
+	var hold_elapsed: float = 0.0
+	if _game_world != null and _game_world.has_method("get_extraction_hold_elapsed_seconds"):
+		hold_elapsed = clampf(float(_game_world.call("get_extraction_hold_elapsed_seconds")), 0.0, hold_duration)
+
+	return "撤离准备  %d / %d秒" % [ceili(hold_elapsed), ceili(hold_duration)]
+
+
+func _is_extraction_return_event(event: InputEvent) -> bool:
+	if not _can_process_extraction_input() or not _is_extraction_ready_to_leave():
+		return false
+
+	if event is InputEventKey:
+		# 撤离键盘事件；取值来自输入系统，默认只响应非 echo 的按下事件。
+		var key_event: InputEventKey = event as InputEventKey
+		if not key_event.pressed or key_event.echo:
+			return false
+		if _should_use_physical_fallback(extraction_action) and key_event.physical_keycode == KEY_SPACE:
+			return true
+	elif event is InputEventMouseButton:
+		# 撤离鼠标事件；取值来自输入系统，默认支持玩家把闪避动作绑定到鼠标按钮。
+		var mouse_event: InputEventMouseButton = event as InputEventMouseButton
+		if not mouse_event.pressed:
+			return false
+	else:
+		return false
+
+	return InputMap.has_action(extraction_action) and Input.is_action_just_pressed(extraction_action)
+
+
+func _can_process_extraction_input() -> bool:
+	return not _is_player_dead and not _inventory_panel.visible and not _large_map_overlay.visible and not _pause_overlay.visible and not _death_overlay.visible
+
+
+func _is_extraction_ready_to_leave() -> bool:
+	if _game_world == null or not _game_world.has_method("is_extraction_ready_to_leave"):
+		return false
+
+	return bool(_game_world.call("is_extraction_ready_to_leave"))
+
+
+func _is_extraction_point_marked_on_map() -> bool:
+	if _game_world == null or not _game_world.has_method("is_extraction_point_marked_on_map"):
+		return false
+
+	return bool(_game_world.call("is_extraction_point_marked_on_map"))
+
+
 func _bind_inventory_filter_buttons() -> void:
 	_inventory_filter_all_button.toggle_mode = true
 	_inventory_filter_melee_button.toggle_mode = true
@@ -754,28 +956,62 @@ func _bind_pause_menu() -> void:
 	_infinite_health_check_button.toggled.connect(_on_infinite_health_toggled)
 	_test_settings_back_button.pressed.connect(_on_test_settings_back_button_pressed)
 	_pause_master_volume_slider.value_changed.connect(_on_pause_master_volume_slider_value_changed)
-	_build_pause_key_binding_panel()
+	_build_pause_key_binding_navigation()
 	_sync_pause_master_volume_slider()
 	_sync_mode_controls()
 
 
-func _build_pause_key_binding_panel() -> void:
+func _build_pause_key_binding_navigation() -> void:
 	if _pause_settings_content == null:
 		return
 
-	if _pause_key_binding_panel != null:
+	if _pause_key_binding_page != null:
 		return
 
-	# 按键绑定面板；取值为 KeyBindingPanel 实例，默认添加到暂停设置音量下方。
+	# 按键绑定入口按钮；取值为 Button，默认放在暂停设置首页用于进入独立按键绑定页。
+	var key_binding_button: Button = Button.new()
+	key_binding_button.name = "PauseKeyBindingPageButton"
+	key_binding_button.custom_minimum_size = Vector2(0.0, 42.0)
+	key_binding_button.text = "按键绑定"
+	key_binding_button.pressed.connect(_on_pause_key_binding_button_pressed)
+	_pause_settings_content.add_child(key_binding_button)
+	_pause_settings_content.move_child(key_binding_button, maxi(_pause_settings_content.get_child_count() - 3, 0))
+	_pause_key_binding_button = key_binding_button
+	_pause_settings_home_controls = [
+		get_node("Root/PauseOverlay/PauseSettingsPanel/PauseSettingsMargin/PauseSettingsContent/PauseSettingsTitle") as Control,
+		get_node("Root/PauseOverlay/PauseSettingsPanel/PauseSettingsMargin/PauseSettingsContent/PauseMasterVolumeRow") as Control,
+		_pause_key_binding_button,
+		get_node("Root/PauseOverlay/PauseSettingsPanel/PauseSettingsMargin/PauseSettingsContent/PauseSettingsSpacer") as Control,
+		_pause_settings_back_button,
+	]
+
+	# 按键绑定页面；取值为 VBoxContainer，默认隐藏并在点击入口后显示。
+	var key_binding_page: VBoxContainer = VBoxContainer.new()
+	key_binding_page.name = "PauseKeyBindingPage"
+	key_binding_page.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	key_binding_page.add_theme_constant_override("separation", 10)
+	_pause_settings_content.add_child(key_binding_page)
+	_pause_key_binding_page = key_binding_page
+
+	# 按键绑定面板；取值为 KeyBindingPanel 实例，默认只在按键绑定页面内显示。
 	var key_binding_panel: Control = KEY_BINDING_PANEL_SCRIPT.new() as Control
 	if key_binding_panel == null:
 		return
 
 	key_binding_panel.name = "PauseKeyBindingPanel"
 	key_binding_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_pause_settings_content.add_child(key_binding_panel)
-	_pause_settings_content.move_child(key_binding_panel, maxi(_pause_settings_content.get_child_count() - 3, 0))
+	_pause_key_binding_page.add_child(key_binding_panel)
 	_pause_key_binding_panel = key_binding_panel
+
+	# 按键绑定返回按钮；取值为 Button，默认回到暂停设置首页。
+	var key_binding_back_button: Button = Button.new()
+	key_binding_back_button.name = "PauseKeyBindingBackButton"
+	key_binding_back_button.custom_minimum_size = Vector2(0.0, 42.0)
+	key_binding_back_button.text = "返回"
+	key_binding_back_button.pressed.connect(_on_pause_key_binding_back_button_pressed)
+	_pause_key_binding_page.add_child(key_binding_back_button)
+	_pause_key_binding_back_button = key_binding_back_button
+	_show_pause_key_binding_page(false)
 
 
 func _is_key_binding_capture_active() -> bool:
@@ -905,11 +1141,6 @@ func _close_top_interactive_panel() -> bool:
 
 func _toggle_drop_list_enabled() -> void:
 	_drop_list_enabled = not _drop_list_enabled
-	if not _drop_list_enabled:
-		_hide_nearby_drop_panel()
-		_refresh_combat_input_state()
-		return
-
 	_nearby_drop_refresh_remaining = 0.0
 	_refresh_nearby_drop_panel()
 	_refresh_combat_input_state()
@@ -1025,6 +1256,10 @@ func _toggle_pause_menu() -> void:
 	if _is_player_dead:
 		return
 
+	if _pause_overlay.visible and _pause_settings_panel.visible and _is_pause_key_binding_page_visible():
+		_show_pause_key_binding_page(false)
+		return
+
 	if _pause_overlay.visible and _pause_settings_panel.visible:
 		_show_pause_settings(false)
 		return
@@ -1069,10 +1304,30 @@ func _show_pause_settings(visible: bool) -> void:
 	_test_settings_panel.visible = false
 	_character_switch_panel.visible = false
 	if visible:
+		_show_pause_key_binding_page(false)
 		_sync_pause_master_volume_slider()
 		_pause_settings_back_button.grab_focus()
 	else:
 		_pause_settings_button.grab_focus()
+
+
+func _show_pause_key_binding_page(visible: bool) -> void:
+	# 暂停设置首页控件遍历项；取值为设置首页直接控件，默认与按键绑定页面互斥显示。
+	for home_control in _pause_settings_home_controls:
+		if home_control != null:
+			home_control.visible = not visible
+
+	if _pause_key_binding_page != null:
+		_pause_key_binding_page.visible = visible
+
+	if visible and _pause_key_binding_back_button != null:
+		_pause_key_binding_back_button.grab_focus()
+	elif _pause_settings_back_button != null:
+		_pause_settings_back_button.grab_focus()
+
+
+func _is_pause_key_binding_page_visible() -> bool:
+	return _pause_key_binding_page != null and _pause_key_binding_page.visible
 
 
 func _show_test_settings(visible: bool) -> void:
@@ -1551,7 +1806,19 @@ func _on_death_return_main_menu_button_pressed() -> void:
 
 
 func _on_pause_settings_back_button_pressed() -> void:
+	if _is_pause_key_binding_page_visible():
+		_show_pause_key_binding_page(false)
+		return
+
 	_show_pause_settings(false)
+
+
+func _on_pause_key_binding_button_pressed() -> void:
+	_show_pause_key_binding_page(true)
+
+
+func _on_pause_key_binding_back_button_pressed() -> void:
+	_show_pause_key_binding_page(false)
 
 
 func _on_clear_monsters_button_pressed() -> void:
@@ -1606,6 +1873,7 @@ func _set_death_overlay_visible(visible: bool) -> void:
 		_pause_overlay.visible = false
 		_pause_menu_panel.visible = false
 		_pause_settings_panel.visible = false
+		_show_pause_key_binding_page(false)
 		_test_settings_panel.visible = false
 		_character_switch_panel.visible = false
 		get_tree().paused = true

@@ -103,7 +103,6 @@ func rebind_action(action_name: StringName, event: InputEvent) -> bool:
 	if not InputMap.has_action(action_name):
 		InputMap.add_action(action_name)
 
-	_erase_event_from_other_actions(action_name, normalized_event)
 	InputMap.action_erase_events(action_name)
 	InputMap.action_add_event(action_name, normalized_event)
 	_set_action_explicitly_unbound(action_name, false)
@@ -236,57 +235,6 @@ func _duplicate_supported_event(event: InputEvent) -> InputEvent:
 		return mouse_event
 
 	return null
-
-
-func _erase_event_from_other_actions(target_action_name: StringName, event: InputEvent) -> void:
-	# 可配置动作遍历项；取值为 action_entries 字典，默认用于移除其它操作上的重复主绑定。
-	for action_entry in _action_entries:
-		# 动作名字符串；取值来自配置字典，默认作为 InputMap action 名。
-		var action_name_string: String = str(action_entry.get("action", ""))
-		# 动作名；取值为 StringName，默认用于访问 InputMap。
-		var action_name: StringName = StringName(action_name_string)
-		if action_name == target_action_name or not InputMap.has_action(action_name):
-			continue
-
-		# 当前动作事件列表；元素为 InputEvent，默认遍历副本并删除与新绑定完全相同的事件。
-		var existing_events: Array = InputMap.action_get_events(action_name)
-		# 既有事件遍历项；取值为 InputEvent 或其他对象，默认只比较可识别输入事件。
-		var erased_event: bool = false
-		for existing_event in existing_events:
-			if existing_event is InputEvent and _events_match(existing_event as InputEvent, event):
-				InputMap.action_erase_event(action_name, existing_event as InputEvent)
-				erased_event = true
-
-		if erased_event and InputMap.action_get_events(action_name).is_empty():
-			_set_action_explicitly_unbound(action_name, true)
-
-
-func _events_match(first_event: InputEvent, second_event: InputEvent) -> bool:
-	if first_event is InputEventKey and second_event is InputEventKey:
-		return _key_events_match(first_event as InputEventKey, second_event as InputEventKey)
-
-	if first_event is InputEventMouseButton and second_event is InputEventMouseButton:
-		return _mouse_button_events_match(first_event as InputEventMouseButton, second_event as InputEventMouseButton)
-
-	return false
-
-
-func _key_events_match(first_key_event: InputEventKey, second_key_event: InputEventKey) -> bool:
-	if _get_key_event_identity(first_key_event) != _get_key_event_identity(second_key_event):
-		return false
-
-	return first_key_event.alt_pressed == second_key_event.alt_pressed and first_key_event.shift_pressed == second_key_event.shift_pressed and first_key_event.ctrl_pressed == second_key_event.ctrl_pressed and first_key_event.meta_pressed == second_key_event.meta_pressed
-
-
-func _mouse_button_events_match(first_mouse_event: InputEventMouseButton, second_mouse_event: InputEventMouseButton) -> bool:
-	return first_mouse_event.button_index == second_mouse_event.button_index
-
-
-func _get_key_event_identity(key_event: InputEventKey) -> Key:
-	if key_event.physical_keycode != KEY_NONE:
-		return key_event.physical_keycode
-
-	return key_event.keycode
 
 
 func _is_key_event_modifier(key_event: InputEventKey, modifier_key: Key) -> bool:

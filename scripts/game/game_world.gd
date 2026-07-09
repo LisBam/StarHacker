@@ -77,6 +77,24 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export var weapon_drop_table: Array[Resource] = []
 ## 玩家丢弃武器散落半径；取值建议大于玩家半径，默认 52 像素，修改会影响拖出背包时武器落点距离。
 @export_range(0.0, 400.0, 1.0) var dropped_weapon_scatter_radius: float = 52.0
+## 撤离点生成时间；取值为进入战斗后的秒数，默认 120 表示存活 2 分钟后生成撤离点。
+@export_range(1.0, 7200.0, 1.0, "or_greater") var extraction_spawn_time_seconds: float = 120.0
+## 撤离点地图标记时间；取值为进入战斗后的秒数，默认 300 表示存活 5 分钟后在地图上显示撤离点标记。
+@export_range(1.0, 7200.0, 1.0, "or_greater") var extraction_map_marker_time_seconds: float = 300.0
+## 撤离驻留时长；取值应大于 0，默认 5 秒，玩家在撤离范围内连续停留满该时间后可按闪避撤离。
+@export_range(0.1, 120.0, 0.1, "or_greater") var extraction_hold_duration_seconds: float = 5.0
+## 撤离点半径；取值建议大于玩家碰撞半径，默认 96 像素，修改会影响可驻留撤离范围。
+@export_range(16.0, 512.0, 1.0, "or_greater") var extraction_radius: float = 96.0
+## 撤离点生成边界留白；取值应大于撤离半径，默认 420 像素，修改会影响撤离点离地图边缘的距离。
+@export_range(0.0, 4000.0, 1.0) var extraction_spawn_edge_margin: float = 420.0
+## 撤离点生成最小玩家距离；取值建议大于屏幕半径，默认 900 像素，避免撤离点直接刷在玩家脚下。
+@export_range(0.0, 8000.0, 1.0) var extraction_spawn_min_distance_from_player: float = 900.0
+## 撤离点生成尝试次数；取值建议 1 到 128，默认 36，用于寻找不被环境障碍覆盖的位置。
+@export_range(1, 128, 1) var extraction_spawn_attempt_count: int = 36
+## 撤离点填充颜色；默认青绿色半透明，修改只影响撤离范围视觉反馈。
+@export var extraction_fill_color: Color = Color(0.1, 0.9, 0.62, 0.18)
+## 撤离点边框颜色；默认亮青绿色，修改只影响撤离范围边界视觉反馈。
+@export var extraction_ring_color: Color = Color(0.35, 1.0, 0.76, 0.88)
 ## 星的固定生命上限；取值应大于 0，默认 130，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var stelle_max_health: float = 130.0
 ## 星的固定能量上限；取值应大于 0，默认 110，切换角色时直接应用，不再随机。
@@ -104,10 +122,28 @@ var _active_map_seed: int = 0
 var _environment_obstacle_rects: Array[Rect2] = []
 ## 已探索迷雾格子缓存；键为 Vector2i，值为 true，默认由玩家位置持续写入，修改会影响大地图可见区域。
 var _explored_cells: Dictionary = {}
+## 导航网格缓存；键为寻路格尺寸与代理半径组合，值为 AStarGrid2D，用于避免每只怪物重复重建整张地图网格。
+var _navigation_grid_cache: Dictionary = {}
 ## 当前是否为训练场模式；默认 false 表示正式骇入，修改会影响 HUD 是否显示训练场设置。
 var _is_training_mode: bool = false
 ## 当前选择角色标识；取值为 stelle、caelus 或 silver_wolf，默认 stelle，用于角色切换和属性随机。
 var _selected_character_id: String = CHARACTER_STELLE
+## 当前战斗存活时间；取值为进入 GameWorld 后玩家未死亡的累计秒数，默认 0 用于 HUD 计时显示。
+var _survival_time_seconds: float = 0.0
+## 撤离点节点缓存；取值为运行时生成的 Node2D 或 null，默认 null 表示撤离点尚未生成。
+var _extraction_point_node: Node2D
+## 撤离点位置缓存；取值为世界坐标，默认零向量，仅在 _has_extraction_point 为 true 时有效。
+var _extraction_point_position: Vector2 = Vector2.ZERO
+## 是否已经生成撤离点；取值为 true/false，默认 false，避免 2 分钟后重复生成多个撤离点。
+var _has_extraction_point: bool = false
+## 撤离点是否已经显示在地图上；取值为 true/false，默认 false，达到地图标记时间后变为 true。
+var _extraction_point_marked_on_map: bool = false
+## 玩家是否处于撤离范围内；取值为 true/false，默认 false，用于 HUD 显示驻留状态。
+var _player_inside_extraction_area: bool = false
+## 撤离驻留累计时间；取值大于等于 0，默认 0，离开撤离范围会重置。
+var _extraction_hold_elapsed_seconds: float = 0.0
+## 是否已经满足撤离条件；取值为 true/false，默认 false，达到驻留时长且仍在范围内时变为 true。
+var _extraction_ready_to_leave: bool = false
 
 ## 玩家节点缓存；默认按 player_path 获取，允许为空并以世界原点作为生成中心。
 @onready var _player: Node2D = get_node_or_null(player_path) as Node2D
@@ -125,13 +161,16 @@ func _ready() -> void:
 	_apply_session_state()
 	_prepare_map_seed()
 	_environment_obstacle_rects.clear()
+	_navigation_grid_cache.clear()
 	_spawn_boundary_walls()
 	_spawn_random_environment()
 	_spawn_monster_batch()
 	_update_explored_cells()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_update_survival_time(delta)
+	_update_extraction_state(delta)
 	_update_explored_cells()
 
 
@@ -209,31 +248,49 @@ func get_exploration_cell_size() -> float:
 	return maxf(exploration_cell_size, 1.0)
 
 
+func get_survival_time_seconds() -> float:
+	return maxf(_survival_time_seconds, 0.0)
+
+
+func has_extraction_point_spawned() -> bool:
+	return _has_extraction_point
+
+
+func is_extraction_point_marked_on_map() -> bool:
+	return _extraction_point_marked_on_map
+
+
+func is_player_inside_extraction_area() -> bool:
+	return _player_inside_extraction_area
+
+
+func is_extraction_ready_to_leave() -> bool:
+	return _extraction_ready_to_leave
+
+
+func get_extraction_hold_elapsed_seconds() -> float:
+	return maxf(_extraction_hold_elapsed_seconds, 0.0)
+
+
+func get_extraction_hold_duration_seconds() -> float:
+	return maxf(extraction_hold_duration_seconds, 0.1)
+
+
+func get_extraction_point_position() -> Vector2:
+	return _extraction_point_position
+
+
 func find_navigation_path(start_position: Vector2, end_position: Vector2, agent_radius: float = 24.0, navigation_cell_size: float = 96.0, max_path_points: int = 64) -> Array[Vector2]:
 	# 路径结果；元素为世界坐标路点，默认空数组表示无法找到可用路径。
 	var result: Array[Vector2] = []
 	# 标准化寻路格尺寸；取值至少 16 像素，默认避免格子过小导致临时网格开销过大。
 	var resolved_cell_size: float = maxf(navigation_cell_size, 16.0)
-	# 地图半边长；取值来自当前地图配置，默认用于计算寻路网格覆盖范围。
-	var half_size: float = get_map_half_size()
-	# 最小格坐标；取值为地图左上角所在格，默认允许负格坐标覆盖以原点居中的地图。
-	var min_cell: int = floori(-half_size / resolved_cell_size)
-	# 最大格坐标；取值为地图右下角所在格，默认包含地图边界。
-	var max_cell: int = ceili(half_size / resolved_cell_size)
-	# 寻路区域起点；取值为左上格坐标，默认传给 AStarGrid2D.region。
-	var region_position: Vector2i = Vector2i(min_cell, min_cell)
-	# 寻路区域尺寸；取值为横纵格数量，默认覆盖整张地图。
-	var region_size: Vector2i = Vector2i(max_cell - min_cell + 1, max_cell - min_cell + 1)
-	# 寻路区域；取值为 AStarGrid2D 使用的格坐标矩形。
-	var navigation_region: Rect2i = Rect2i(region_position, region_size)
-	# 临时寻路网格；取值为本次路径查询创建的 AStarGrid2D，默认只在调用期间存在。
-	var navigation_grid: AStarGrid2D = AStarGrid2D.new()
-	navigation_grid.region = navigation_region
-	navigation_grid.cell_size = Vector2(resolved_cell_size, resolved_cell_size)
-	navigation_grid.offset = Vector2(resolved_cell_size * 0.5, resolved_cell_size * 0.5)
-	navigation_grid.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_NEVER
-	navigation_grid.update()
-	_mark_navigation_obstacles(navigation_grid, navigation_region, resolved_cell_size, maxf(agent_radius, 0.0))
+	# 标准化代理半径；取值至少为 0，默认用于匹配怪物碰撞体与墙体安全间距。
+	var resolved_agent_radius: float = maxf(agent_radius, 0.0)
+	# 缓存寻路网格；取值为按格子尺寸和代理半径缓存的 AStarGrid2D，默认复用地图障碍标记结果。
+	var navigation_grid: AStarGrid2D = _get_cached_navigation_grid(resolved_cell_size, resolved_agent_radius)
+	# 寻路区域；取值来自缓存网格，默认用于约束起点和终点格。
+	var navigation_region: Rect2i = navigation_grid.region
 
 	# 起点格坐标；取值为世界坐标转换结果并限制在寻路区域内。
 	var start_cell: Vector2i = _clamp_navigation_cell_to_region(_world_position_to_navigation_cell(start_position, resolved_cell_size), navigation_region)
@@ -270,6 +327,48 @@ func find_navigation_path(start_position: Vector2, end_position: Vector2, agent_
 			break
 
 	return result
+
+
+func _get_cached_navigation_grid(navigation_cell_size: float, agent_radius: float) -> AStarGrid2D:
+	# 导航缓存键；取值为格子尺寸和代理半径组合，默认区分不同怪物体积的寻路网格。
+	var cache_key: String = _get_navigation_grid_cache_key(navigation_cell_size, agent_radius)
+	if _navigation_grid_cache.has(cache_key) and _navigation_grid_cache[cache_key] is AStarGrid2D:
+		# 已缓存导航网格；取值为对应格子尺寸和代理半径的 AStarGrid2D，默认直接复用障碍固化结果。
+		var cached_navigation_grid: AStarGrid2D = _navigation_grid_cache[cache_key] as AStarGrid2D
+		return cached_navigation_grid
+
+	# 新建导航网格；取值为覆盖整张地图的 AStarGrid2D，默认禁用斜向移动避免穿墙角。
+	var navigation_grid: AStarGrid2D = _build_navigation_grid(navigation_cell_size, agent_radius)
+	_navigation_grid_cache[cache_key] = navigation_grid
+	return navigation_grid
+
+
+func _get_navigation_grid_cache_key(navigation_cell_size: float, agent_radius: float) -> String:
+	return "%d:%d" % [roundi(navigation_cell_size), roundi(agent_radius)]
+
+
+func _build_navigation_grid(navigation_cell_size: float, agent_radius: float) -> AStarGrid2D:
+	# 地图半边长；取值来自当前地图配置，默认用于计算寻路网格覆盖范围。
+	var half_size: float = get_map_half_size()
+	# 最小格坐标；取值为地图左上角所在格，默认允许负格坐标覆盖以原点居中的地图。
+	var min_cell: int = floori(-half_size / navigation_cell_size)
+	# 最大格坐标；取值为地图右下角所在格，默认包含地图边界。
+	var max_cell: int = ceili(half_size / navigation_cell_size)
+	# 寻路区域起点；取值为左上格坐标，默认传给 AStarGrid2D.region。
+	var region_position: Vector2i = Vector2i(min_cell, min_cell)
+	# 寻路区域尺寸；取值为横纵格数量，默认覆盖整张地图。
+	var region_size: Vector2i = Vector2i(max_cell - min_cell + 1, max_cell - min_cell + 1)
+	# 寻路区域；取值为 AStarGrid2D 使用的格坐标矩形。
+	var navigation_region: Rect2i = Rect2i(region_position, region_size)
+	# 导航网格；取值为 AStarGrid2D，默认仅在首次请求对应配置时创建。
+	var navigation_grid: AStarGrid2D = AStarGrid2D.new()
+	navigation_grid.region = navigation_region
+	navigation_grid.cell_size = Vector2(navigation_cell_size, navigation_cell_size)
+	navigation_grid.offset = Vector2(navigation_cell_size * 0.5, navigation_cell_size * 0.5)
+	navigation_grid.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_NEVER
+	navigation_grid.update()
+	_mark_navigation_obstacles(navigation_grid, navigation_region, navigation_cell_size, agent_radius)
+	return navigation_grid
 
 
 func spawn_weapon_drop(weapon_data: Resource, drop_position: Vector2) -> bool:
@@ -418,6 +517,157 @@ func _get_character_display_name(character_id: String) -> String:
 		return "银狼"
 
 	return "星"
+
+
+func _update_survival_time(delta: float) -> void:
+	if _is_player_dead():
+		return
+
+	_survival_time_seconds += maxf(delta, 0.0)
+	if not _has_extraction_point and _survival_time_seconds >= maxf(extraction_spawn_time_seconds, 1.0):
+		_spawn_extraction_point()
+
+	if _has_extraction_point and not _extraction_point_marked_on_map and _survival_time_seconds >= maxf(extraction_map_marker_time_seconds, 1.0):
+		_extraction_point_marked_on_map = true
+
+
+func _update_extraction_state(delta: float) -> void:
+	if not _has_extraction_point or _player == null or _is_player_dead():
+		_player_inside_extraction_area = false
+		_extraction_hold_elapsed_seconds = 0.0
+		_extraction_ready_to_leave = false
+		return
+
+	_player_inside_extraction_area = _player.global_position.distance_to(_extraction_point_position) <= maxf(extraction_radius, 1.0)
+	if not _player_inside_extraction_area:
+		_extraction_hold_elapsed_seconds = 0.0
+		_extraction_ready_to_leave = false
+		return
+
+	_extraction_hold_elapsed_seconds = minf(_extraction_hold_elapsed_seconds + maxf(delta, 0.0), get_extraction_hold_duration_seconds())
+	_extraction_ready_to_leave = _extraction_hold_elapsed_seconds >= get_extraction_hold_duration_seconds()
+
+
+func _spawn_extraction_point() -> void:
+	if _has_extraction_point:
+		return
+
+	_extraction_point_position = _get_random_extraction_position()
+	_extraction_point_node = _create_extraction_point_node(_extraction_point_position)
+	_has_extraction_point = true
+	_extraction_point_marked_on_map = _survival_time_seconds >= maxf(extraction_map_marker_time_seconds, 1.0)
+	_player_inside_extraction_area = false
+	_extraction_hold_elapsed_seconds = 0.0
+	_extraction_ready_to_leave = false
+
+
+func _create_extraction_point_node(point_position: Vector2) -> Node2D:
+	# 撤离点根节点；取值为运行时创建的 Node2D，默认挂在 GameWorld 下并显示撤离范围。
+	var extraction_point: Node2D = Node2D.new()
+	extraction_point.name = "ExtractionPoint"
+	extraction_point.add_to_group("extraction_points")
+	add_child(extraction_point)
+	extraction_point.global_position = point_position
+
+	# 撤离范围填充；取值为 Polygon2D，默认绘制半透明圆形范围用于站位判断。
+	var fill_polygon: Polygon2D = Polygon2D.new()
+	fill_polygon.color = extraction_fill_color
+	fill_polygon.polygon = _build_circle_points(maxf(extraction_radius, 1.0), 48, false)
+	extraction_point.add_child(fill_polygon)
+
+	# 撤离范围边框；取值为 Line2D，默认绘制闭合圆环便于玩家识别边界。
+	var ring_line: Line2D = Line2D.new()
+	ring_line.default_color = extraction_ring_color
+	ring_line.width = 4.0
+	ring_line.closed = true
+	ring_line.points = _build_circle_points(maxf(extraction_radius, 1.0), 64, false)
+	extraction_point.add_child(ring_line)
+
+	# 撤离中心横线；取值为 Line2D，默认和竖线组成短十字用于定位中心点。
+	var center_horizontal_line: Line2D = Line2D.new()
+	center_horizontal_line.default_color = extraction_ring_color
+	center_horizontal_line.width = 3.0
+	center_horizontal_line.points = PackedVector2Array([
+		Vector2(-14.0, 0.0),
+		Vector2(14.0, 0.0)
+	])
+	extraction_point.add_child(center_horizontal_line)
+
+	# 撤离中心竖线；取值为 Line2D，默认和横线组成短十字用于定位中心点。
+	var center_vertical_line: Line2D = Line2D.new()
+	center_vertical_line.default_color = extraction_ring_color
+	center_vertical_line.width = 3.0
+	center_vertical_line.points = PackedVector2Array([
+		Vector2(0.0, -14.0),
+		Vector2(0.0, 14.0)
+	])
+	extraction_point.add_child(center_vertical_line)
+	return extraction_point
+
+
+func _build_circle_points(radius: float, point_count: int, close_loop: bool) -> PackedVector2Array:
+	# 圆点列表；元素为局部坐标，默认用于 Polygon2D 和 Line2D 绘制圆形撤离范围。
+	var points: PackedVector2Array = PackedVector2Array()
+	# 有效圆点数量；取值至少为 8，默认避免圆形视觉过于粗糙。
+	var resolved_point_count: int = maxi(point_count, 8)
+	# 圆点索引；取值为 0 到 resolved_point_count - 1，默认按角度均匀生成。
+	for point_index in range(resolved_point_count):
+		# 圆点角度；取值为 0 到 TAU 的弧度，默认用于计算当前圆周点。
+		var point_angle: float = TAU * float(point_index) / float(resolved_point_count)
+		points.append(Vector2.RIGHT.rotated(point_angle) * radius)
+
+	if close_loop and not points.is_empty():
+		points.append(points[0])
+
+	return points
+
+
+func _get_random_extraction_position() -> Vector2:
+	# 撤离点尝试次数；取值来自检查器配置，默认用于寻找不被障碍遮挡的位置。
+	var resolved_attempt_count: int = maxi(extraction_spawn_attempt_count, 1)
+	# 撤离点尝试索引；取值为 0 到 resolved_attempt_count - 1，默认逐次测试候选位置。
+	for _attempt_index in range(resolved_attempt_count):
+		# 候选撤离位置；取值为地图内随机点，默认会继续校验玩家距离和环境障碍。
+		var candidate_position: Vector2 = _get_random_extraction_candidate()
+		if _is_extraction_position_valid(candidate_position):
+			return candidate_position
+
+	return _get_random_extraction_candidate()
+
+
+func _get_random_extraction_candidate() -> Vector2:
+	# 地图半边长；取值由 grid_size 和 grid_extent 计算，默认用于限制撤离点候选范围。
+	var half_size: float = get_map_half_size()
+	# 有效边界留白；取值至少为撤离半径，默认避免撤离范围压到地图边界。
+	var edge_margin: float = maxf(extraction_spawn_edge_margin, extraction_radius)
+	# 有效生成边界；取值为半边长减边界留白，默认确保撤离点位于地图内部。
+	var spawn_limit: float = maxf(0.0, half_size - edge_margin)
+	return Vector2(
+		_random.randf_range(-spawn_limit, spawn_limit),
+		_random.randf_range(-spawn_limit, spawn_limit)
+	)
+
+
+func _is_extraction_position_valid(candidate_position: Vector2) -> bool:
+	if _player != null and candidate_position.distance_to(_player.global_position) < maxf(extraction_spawn_min_distance_from_player, 0.0):
+		return false
+
+	if _is_position_blocked_by_environment(candidate_position, maxf(extraction_radius, 1.0)):
+		return false
+
+	return true
+
+
+func _is_player_dead() -> bool:
+	if _player == null:
+		return false
+
+	# 玩家属性组件；默认从玩家子节点 StatsComponent 获取，用于停止死亡后的存活计时和撤离进度。
+	var stats_component: Node = _player.get_node_or_null("StatsComponent")
+	if stats_component != null and stats_component.has_method("is_dead"):
+		return bool(stats_component.call("is_dead"))
+
+	return false
 
 
 func _update_explored_cells() -> void:

@@ -39,11 +39,20 @@ func _input(event: InputEvent) -> void:
 
 	if _is_supported_capture_event(event):
 		_apply_captured_event(event)
-		get_viewport().set_input_as_handled()
+		_mark_input_as_handled()
 
 
 func is_waiting_for_binding() -> bool:
 	return _waiting_action != &""
+
+
+func _mark_input_as_handled() -> void:
+	# 当前视口；取值可能在场景切换期间为空，默认仅在有效时标记输入已处理。
+	var current_viewport: Viewport = get_viewport()
+	if current_viewport == null:
+		return
+
+	current_viewport.set_input_as_handled()
 
 
 func _build_panel() -> void:

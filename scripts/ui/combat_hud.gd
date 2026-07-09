@@ -107,6 +107,16 @@ var _nearby_drop_buttons: Array[Button] = []
 var _nearby_drop_refresh_remaining: float = 0.0
 ## 当前掉落物列表签名；元素为实例、名称和位置组成的字符串，默认用于判断列表内容是否需要重建。
 var _nearby_drop_signature: Array[String] = []
+## 最近一次显示的存活时间整秒数；默认 -1 表示尚未刷新，用于避免每帧重复写入相同计时文本。
+var _last_survival_time_whole_seconds: int = -1
+## 最近一次显示的撤离状态文本；默认空字符串，用于避免每帧重复写入相同撤离提示。
+var _last_extraction_status_text: String = ""
+## 最近一次撤离状态是否可见；默认 false，用于避免每帧重复写入相同可见状态。
+var _last_extraction_status_visible: bool = false
+## 是否已经缓存战斗输入启用状态；默认 false，第一次刷新时会强制同步输入组件。
+var _has_combat_input_enabled_state: bool = false
+## 最近一次战斗输入启用状态；默认 true，仅状态变化时才写入玩家输入组件。
+var _last_combat_input_enabled: bool = true
 ## 战斗顶部状态容器缓存；默认运行时创建，用于显示生存时间和撤离点状态。
 var _combat_status_container: VBoxContainer
 ## 生存时间文本缓存；默认运行时创建，显示进入战斗后的 mm:ss 计时。
@@ -251,8 +261,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if _is_extraction_return_event(event):
+		_mark_input_as_handled()
 		_return_to_main_menu()
-		get_viewport().set_input_as_handled()
 		return
 
 	if event is InputEventKey:
@@ -260,11 +270,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		var key_event: InputEventKey = event as InputEventKey
 		if key_event.pressed and not key_event.echo and _is_pause_event(key_event):
 			if _close_top_interactive_panel():
-				get_viewport().set_input_as_handled()
+				_mark_input_as_handled()
 				return
 
 			_toggle_pause_menu()
-			get_viewport().set_input_as_handled()
+			_mark_input_as_handled()
 			return
 
 		if _pause_overlay.visible:
@@ -272,22 +282,22 @@ func _unhandled_input(event: InputEvent) -> void:
 
 		if key_event.pressed and not key_event.echo and _is_toggle_inventory_event(key_event):
 			_toggle_inventory()
-			get_viewport().set_input_as_handled()
+			_mark_input_as_handled()
 			return
 
 		if key_event.pressed and not key_event.echo and _is_toggle_large_map_event(key_event):
 			_toggle_large_map()
-			get_viewport().set_input_as_handled()
+			_mark_input_as_handled()
 			return
 
 		if key_event.pressed and not key_event.echo and _is_toggle_drop_list_event(key_event):
 			_toggle_drop_list_enabled()
-			get_viewport().set_input_as_handled()
+			_mark_input_as_handled()
 			return
 
 		if key_event.pressed and not key_event.echo and _is_pickup_event(key_event):
 			_pickup_nearest_drop()
-			get_viewport().set_input_as_handled()
+			_mark_input_as_handled()
 
 
 func _bind_game_world() -> void:
@@ -804,6 +814,11 @@ func _set_large_map_visible(visible: bool) -> void:
 func _refresh_combat_input_state() -> void:
 	# 战斗输入启用状态；取值由背包、大地图、暂停菜单和掉落物 UI 共同决定，默认任意交互界面打开都会禁用战斗输入。
 	var combat_input_enabled: bool = not _inventory_panel.visible and not _large_map_overlay.visible and not _pause_overlay.visible and not _death_overlay.visible and not _is_player_dead and not _should_drop_ui_block_combat_input()
+	if _has_combat_input_enabled_state and _last_combat_input_enabled == combat_input_enabled:
+		return
+
+	_has_combat_input_enabled_state = true
+	_last_combat_input_enabled = combat_input_enabled
 	_set_combat_input_enabled(combat_input_enabled)
 
 
@@ -816,7 +831,11 @@ func _set_combat_input_enabled(enabled: bool) -> void:
 
 func _refresh_combat_status() -> void:
 	if _survival_timer_label != null:
-		_survival_timer_label.text = _format_survival_time(_get_survival_time_seconds())
+		# 当前存活整秒数；取值为非负整数，默认只在数值变化时刷新 Label 文本。
+		var survival_time_whole_seconds: int = maxi(floori(_get_survival_time_seconds()), 0)
+		if survival_time_whole_seconds != _last_survival_time_whole_seconds:
+			_last_survival_time_whole_seconds = survival_time_whole_seconds
+			_survival_timer_label.text = _format_survival_time(float(survival_time_whole_seconds))
 
 	_refresh_extraction_status()
 
@@ -843,15 +862,26 @@ func _refresh_extraction_status() -> void:
 		return
 
 	if _game_world == null or not _game_world.has_method("has_extraction_point_spawned"):
-		_extraction_status_label.visible = false
+		_set_extraction_status(false, "")
 		return
 
 	if not bool(_game_world.call("has_extraction_point_spawned")):
-		_extraction_status_label.visible = false
+		_set_extraction_status(false, "")
 		return
 
-	_extraction_status_label.visible = true
-	_extraction_status_label.text = _get_extraction_status_text()
+	_set_extraction_status(true, _get_extraction_status_text())
+
+
+func _set_extraction_status(visible: bool, status_text: String) -> void:
+	if _last_extraction_status_visible != visible:
+		_last_extraction_status_visible = visible
+		_extraction_status_label.visible = visible
+
+	if visible and _last_extraction_status_text != status_text:
+		_last_extraction_status_text = status_text
+		_extraction_status_label.text = status_text
+	elif not visible:
+		_last_extraction_status_text = ""
 
 
 func _get_extraction_status_text() -> String:
@@ -1711,7 +1741,7 @@ func _on_weapon_slot_drag_released_outside(drop_data: Dictionary) -> void:
 func _on_pickup_drop_button_pressed(drop_node: Node) -> void:
 	_suppress_drop_list_combat_input()
 	_pickup_drop(drop_node)
-	get_viewport().set_input_as_handled()
+	_mark_input_as_handled()
 
 
 func _on_pickup_drop_button_gui_input(event: InputEvent, drop_node: Node) -> void:
@@ -1722,7 +1752,7 @@ func _on_pickup_drop_button_gui_input(event: InputEvent, drop_node: Node) -> voi
 	if _is_left_mouse_press_event(event):
 		_pickup_drop(drop_node)
 
-	get_viewport().set_input_as_handled()
+	_mark_input_as_handled()
 
 
 func _on_nearby_drop_panel_gui_input(event: InputEvent) -> void:
@@ -1730,7 +1760,7 @@ func _on_nearby_drop_panel_gui_input(event: InputEvent) -> void:
 		return
 
 	_suppress_drop_list_combat_input()
-	get_viewport().set_input_as_handled()
+	_mark_input_as_handled()
 
 
 func _suppress_drop_list_combat_input() -> void:
@@ -1760,8 +1790,13 @@ func _is_pointer_inside_inventory_panel() -> bool:
 	if _inventory_panel == null:
 		return false
 
+	# 当前视口；取值可能在场景切换期间为空，默认为空时不执行鼠标区域判断。
+	var current_viewport: Viewport = get_viewport()
+	if current_viewport == null:
+		return false
+
 	# 鼠标屏幕位置；取值来自当前视口，用于区分拖拽释放在背包内还是背包外。
-	var mouse_position: Vector2 = get_viewport().get_mouse_position()
+	var mouse_position: Vector2 = current_viewport.get_mouse_position()
 	# 背包面板全局矩形；取值来自 Control 布局结果，默认用于判断拖出背包的边界。
 	var inventory_rect: Rect2 = _inventory_panel.get_global_rect()
 	return inventory_rect.has_point(mouse_position)
@@ -1778,11 +1813,25 @@ func _is_pointer_inside_nearby_drop_panel() -> bool:
 	if _nearby_drop_panel == null or not _nearby_drop_panel.visible:
 		return false
 
+	# 当前视口；取值可能在场景切换期间为空，默认为空时不阻止战斗输入。
+	var current_viewport: Viewport = get_viewport()
+	if current_viewport == null:
+		return false
+
 	# 鼠标屏幕位置；取值来自当前视口，用于判断掉落物列表是否正在被鼠标交互。
-	var mouse_position: Vector2 = get_viewport().get_mouse_position()
+	var mouse_position: Vector2 = current_viewport.get_mouse_position()
 	# 掉落物面板全局矩形；取值来自 Control 布局结果，默认用于屏蔽射击和暂停列表刷新。
 	var panel_rect: Rect2 = _nearby_drop_panel.get_global_rect()
 	return panel_rect.has_point(mouse_position)
+
+
+func _mark_input_as_handled() -> void:
+	# 当前视口；取值可能在场景切换后为空，默认只在有效时标记输入已处理。
+	var current_viewport: Viewport = get_viewport()
+	if current_viewport == null:
+		return
+
+	current_viewport.set_input_as_handled()
 
 
 func _on_resume_button_pressed() -> void:

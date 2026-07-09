@@ -16,6 +16,12 @@ const DISPLAY_MODE_FULL: int = 1
 @export_enum("局部", "完整") var display_mode: int = DISPLAY_MODE_LOCAL
 ## 局部小地图半径；取值应大于 0，默认 1200 像素，修改会影响右上角小地图能看到的玩家周围范围。
 @export_range(128.0, 6000.0, 1.0, "or_greater") var local_view_radius: float = 1200.0
+## 局部小地图重绘间隔；取值建议 0.05 到 0.25 秒，默认 0.12 秒，用于降低每帧重画障碍带来的 UI 开销。
+@export_range(0.02, 2.0, 0.01) var local_redraw_interval: float = 0.12
+## 完整大地图重绘间隔；取值建议 0.1 到 0.5 秒，默认 0.25 秒，用于降低大地图迷雾重绘频率。
+@export_range(0.02, 2.0, 0.01) var full_redraw_interval: float = 0.25
+## 玩家移动触发重绘距离；取值建议 8 到 64 像素，默认 24 像素，玩家移动超过该距离会提前刷新地图。
+@export_range(0.0, 512.0, 1.0) var redraw_player_move_distance: float = 24.0
 ## 无法读取 GameWorld 时的小地图半边长；取值应大于 0，默认 6144 对应 grid_size 64 和 grid_extent 96。
 @export_range(1.0, 99999.0, 1.0, "or_greater") var fallback_map_half_size: float = 6144.0
 ## 小地图背景颜色；默认深色半透明，修改会影响小地图底色。
@@ -35,6 +41,31 @@ const DISPLAY_MODE_FULL: int = 1
 ## 撤离点标记半径；取值建议大于玩家点半径，默认 6 像素，修改会影响地图上撤离点识别度。
 @export_range(2.0, 32.0, 0.5) var extraction_marker_radius: float = 6.0
 
+## 小地图重绘剩余时间；取值大于等于 0，默认 0 表示下一帧可根据状态触发重绘。
+var _redraw_remaining: float = 0.0
+## 缓存障碍矩形列表；元素为世界坐标 Rect2，默认只在 GameWorld 障碍版本变化时更新。
+var _cached_obstacle_rects: Array[Rect2] = []
+## 缓存障碍版本号；取值来自 GameWorld，默认 -1 表示尚未拉取障碍数据。
+var _cached_obstacle_version: int = -1
+## 是否已经初始化障碍缓存；取值为 true/false，默认 false 用于首次强制拉取地图障碍。
+var _has_obstacle_cache: bool = false
+## 缓存探索格查询表；键为 Vector2i，值为 true，默认只在完整大地图绘制迷雾时使用。
+var _cached_explored_lookup: Dictionary = {}
+## 缓存探索格版本号；取值来自 GameWorld，默认 -1 表示尚未拉取探索数据。
+var _cached_explored_version: int = -1
+## 是否已经初始化探索缓存；取值为 true/false，默认 false 用于首次打开大地图时构建迷雾查询。
+var _has_explored_cache: bool = false
+## 上次请求重绘时的玩家位置；取值为世界坐标，默认零向量，仅在 _has_last_redraw_player_position 为 true 时有效。
+var _last_redraw_player_position: Vector2 = Vector2.ZERO
+## 是否已有上次重绘玩家位置；取值为 true/false，默认 false 用于首次强制重绘。
+var _has_last_redraw_player_position: bool = false
+## 上次请求重绘时撤离点是否可见；取值为 true/false，默认 false，用于撤离点标记出现时立即刷新。
+var _last_redraw_extraction_visible: bool = false
+## 上次请求重绘时撤离点位置；取值为世界坐标，默认零向量，用于撤离点位置变化时刷新地图。
+var _last_redraw_extraction_position: Vector2 = Vector2.ZERO
+## 上次请求重绘时控件尺寸；取值为 Control.size，默认零向量，用于窗口或布局变化时刷新地图。
+var _last_redraw_size: Vector2 = Vector2.ZERO
+
 ## 游戏世界节点缓存；默认按 game_world_path 获取，允许为空并使用兜底地图尺寸。
 @onready var _game_world: Node = get_node_or_null(game_world_path)
 ## 玩家节点缓存；默认按 player_path 获取，允许为空并跳过玩家点绘制。
@@ -45,8 +76,20 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 
-func _process(_delta: float) -> void:
-	queue_redraw()
+func _process(delta: float) -> void:
+	if not is_visible_in_tree():
+		return
+
+	_redraw_remaining = maxf(_redraw_remaining - maxf(delta, 0.0), 0.0)
+	# 地图结构是否变化；取值为 true/false，默认用于障碍或探索缓存变化后立即重绘。
+	var map_cache_changed: bool = _refresh_obstacle_cache_if_needed()
+	if display_mode == DISPLAY_MODE_FULL:
+		map_cache_changed = _refresh_explored_cache_if_needed() or map_cache_changed
+
+	if map_cache_changed or _should_redraw_map():
+		_remember_redraw_state()
+		_redraw_remaining = _get_redraw_interval()
+		queue_redraw()
 
 
 func _draw() -> void:
@@ -139,22 +182,110 @@ func _draw_extraction_marker(world_view_rect: Rect2) -> void:
 	draw_line(marker_position + Vector2(0.0, -marker_radius * 1.7), marker_position + Vector2(0.0, marker_radius * 1.7), extraction_marker_color, 2.0)
 
 
-func _get_obstacle_rects() -> Array[Rect2]:
-	if _game_world == null or not _game_world.has_method("get_minimap_obstacle_rects"):
-		# 空障碍列表；取值为空数组，默认用于 GameWorld 缺失时跳过障碍绘制。
-		var empty_result: Array[Rect2] = []
-		return empty_result
+func _should_redraw_map() -> bool:
+	if not _has_last_redraw_player_position:
+		return true
 
-	# 原始障碍列表；取值来自 GameWorld 动态调用，默认需要重新整理为强类型数组。
+	if _last_redraw_size != size:
+		return true
+
+	# 当前撤离点可见状态；取值来自 GameWorld，默认用于标记出现或消失时立即刷新地图。
+	var extraction_visible: bool = _is_extraction_marker_visible()
+	if extraction_visible != _last_redraw_extraction_visible:
+		return true
+
+	if extraction_visible and _get_extraction_marker_position() != _last_redraw_extraction_position:
+		return true
+
+	if _player != null:
+		# 玩家移动阈值；取值至少为 0，默认移动超过阈值时提前刷新局部地图和玩家点。
+		var move_distance: float = maxf(redraw_player_move_distance, 0.0)
+		if move_distance <= 0.0 or _player.global_position.distance_to(_last_redraw_player_position) >= move_distance:
+			return true
+
+	return _redraw_remaining <= 0.0
+
+
+func _remember_redraw_state() -> void:
+	_has_last_redraw_player_position = true
+	_last_redraw_player_position = _player.global_position if _player != null else Vector2.ZERO
+	_last_redraw_extraction_visible = _is_extraction_marker_visible()
+	_last_redraw_extraction_position = _get_extraction_marker_position() if _last_redraw_extraction_visible else Vector2.ZERO
+	_last_redraw_size = size
+
+
+func _get_redraw_interval() -> float:
+	if display_mode == DISPLAY_MODE_FULL:
+		return maxf(full_redraw_interval, 0.02)
+
+	return maxf(local_redraw_interval, 0.02)
+
+
+func _refresh_obstacle_cache_if_needed() -> bool:
+	if _game_world == null or not _game_world.has_method("get_minimap_obstacle_rects"):
+		if _has_obstacle_cache and _cached_obstacle_rects.is_empty():
+			return false
+
+		_cached_obstacle_rects.clear()
+		_cached_obstacle_version = -1
+		_has_obstacle_cache = true
+		return true
+
+	# 当前障碍版本号；取值来自 GameWorld，缺少版本接口时使用 0 并只拉取一次。
+	var obstacle_version: int = 0
+	if _game_world.has_method("get_minimap_obstacle_version"):
+		obstacle_version = int(_game_world.call("get_minimap_obstacle_version"))
+	if _has_obstacle_cache and obstacle_version == _cached_obstacle_version:
+		return false
+
+	# 原始障碍列表；取值来自 GameWorld 动态调用，默认只在版本变化时整理为强类型缓存。
 	var raw_rects: Array = _game_world.call("get_minimap_obstacle_rects")
-	# 强类型障碍列表；元素为 Rect2，默认用于满足小地图绘制接口类型。
-	var result: Array[Rect2] = []
+	_cached_obstacle_rects.clear()
 	# 原始障碍遍历项；取值可能为任意 Variant，默认只接收 Rect2。
 	for raw_rect in raw_rects:
 		if raw_rect is Rect2:
-			result.append(raw_rect)
+			_cached_obstacle_rects.append(raw_rect)
 
-	return result
+	_cached_obstacle_version = obstacle_version
+	_has_obstacle_cache = true
+	return true
+
+
+func _refresh_explored_cache_if_needed() -> bool:
+	if _game_world == null or not _game_world.has_method("get_explored_cells"):
+		if _has_explored_cache and _cached_explored_lookup.is_empty():
+			return false
+
+		_cached_explored_lookup.clear()
+		_cached_explored_version = -1
+		_has_explored_cache = true
+		return true
+
+	# 当前探索版本号；取值来自 GameWorld，缺少版本接口时使用 0 并只拉取一次。
+	var explored_version: int = 0
+	if _game_world.has_method("get_explored_cells_version"):
+		explored_version = int(_game_world.call("get_explored_cells_version"))
+	if _has_explored_cache and explored_version == _cached_explored_version:
+		return false
+
+	# 原始探索格列表；取值来自 GameWorld 动态调用，默认整理为字典查询表。
+	var raw_cells: Array = _game_world.call("get_explored_cells")
+	_cached_explored_lookup.clear()
+	# 原始探索格遍历项；取值可能为任意 Variant，默认只接收 Vector2i。
+	for raw_cell in raw_cells:
+		if raw_cell is Vector2i:
+			_cached_explored_lookup[raw_cell] = true
+
+	_cached_explored_version = explored_version
+	_has_explored_cache = true
+	return true
+
+
+func _get_obstacle_rects() -> Array[Rect2]:
+	if not _has_obstacle_cache:
+		_refresh_obstacle_cache_if_needed()
+
+	return _cached_obstacle_rects
 
 
 func _is_extraction_marker_visible() -> bool:
@@ -177,19 +308,10 @@ func _get_extraction_marker_position() -> Vector2:
 
 
 func _get_explored_cell_lookup() -> Dictionary:
-	# 已探索查询表；键为探索格 Vector2i，值为 true，默认用于大地图迷雾快速判断。
-	var result: Dictionary = {}
-	if _game_world == null or not _game_world.has_method("get_explored_cells"):
-		return result
+	if not _has_explored_cache:
+		_refresh_explored_cache_if_needed()
 
-	# 原始探索格列表；取值来自 GameWorld 动态调用，默认整理为字典查询表。
-	var raw_cells: Array = _game_world.call("get_explored_cells")
-	# 原始探索格遍历项；取值可能为任意 Variant，默认只接收 Vector2i。
-	for raw_cell in raw_cells:
-		if raw_cell is Vector2i:
-			result[raw_cell] = true
-
-	return result
+	return _cached_explored_lookup
 
 
 func _world_rect_to_minimap_rect(world_rect: Rect2, world_view_rect: Rect2) -> Rect2:

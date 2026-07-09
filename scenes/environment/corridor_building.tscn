@@ -1,0 +1,46 @@
+[gd_scene load_steps=2 format=3]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_corridor_wall"]
+size = Vector2(420, 34)
+
+[node name="CorridorBuilding" type="Node2D"]
+
+[node name="FloorHint" type="Polygon2D" parent="."]
+color = Color(0.0705882, 0.0941176, 0.109804, 0.46)
+polygon = PackedVector2Array(-210, -76, 210, -76, 210, 76, -210, 76)
+
+[node name="TopWall" type="StaticBody2D" parent="." groups=["environment_obstacles"]]
+position = Vector2(0, -96)
+collision_layer = 16
+collision_mask = 0
+
+[node name="Visual" type="Polygon2D" parent="TopWall"]
+color = Color(0.184314, 0.239216, 0.282353, 1)
+polygon = PackedVector2Array(-210, -17, 210, -17, 210, 17, -210, 17)
+
+[node name="Edge" type="Line2D" parent="TopWall"]
+points = PackedVector2Array(-210, -17, 210, -17, 210, 17, -210, 17, -210, -17)
+width = 2.0
+default_color = Color(0.454902, 0.698039, 0.756863, 0.62)
+closed = true
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="TopWall"]
+shape = SubResource("RectangleShape2D_corridor_wall")
+
+[node name="BottomWall" type="StaticBody2D" parent="." groups=["environment_obstacles"]]
+position = Vector2(0, 96)
+collision_layer = 16
+collision_mask = 0
+
+[node name="Visual" type="Polygon2D" parent="BottomWall"]
+color = Color(0.184314, 0.239216, 0.282353, 1)
+polygon = PackedVector2Array(-210, -17, 210, -17, 210, 17, -210, 17)
+
+[node name="Edge" type="Line2D" parent="BottomWall"]
+points = PackedVector2Array(-210, -17, 210, -17, 210, 17, -210, 17, -210, -17)
+width = 2.0
+default_color = Color(0.454902, 0.698039, 0.756863, 0.62)
+closed = true
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="BottomWall"]
+shape = SubResource("RectangleShape2D_corridor_wall")

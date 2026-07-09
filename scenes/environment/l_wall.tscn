@@ -1,0 +1,45 @@
+[gd_scene load_steps=3 format=3]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_horizontal"]
+size = Vector2(320, 34)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_vertical"]
+size = Vector2(34, 260)
+
+[node name="LWall" type="Node2D"]
+
+[node name="HorizontalWall" type="StaticBody2D" parent="." groups=["environment_obstacles"]]
+position = Vector2(64, -112)
+collision_layer = 16
+collision_mask = 0
+
+[node name="Visual" type="Polygon2D" parent="HorizontalWall"]
+color = Color(0.184314, 0.239216, 0.282353, 1)
+polygon = PackedVector2Array(-160, -17, 160, -17, 160, 17, -160, 17)
+
+[node name="Edge" type="Line2D" parent="HorizontalWall"]
+points = PackedVector2Array(-160, -17, 160, -17, 160, 17, -160, 17, -160, -17)
+width = 2.0
+default_color = Color(0.454902, 0.698039, 0.756863, 0.62)
+closed = true
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="HorizontalWall"]
+shape = SubResource("RectangleShape2D_horizontal")
+
+[node name="VerticalWall" type="StaticBody2D" parent="." groups=["environment_obstacles"]]
+position = Vector2(-112, 0)
+collision_layer = 16
+collision_mask = 0
+
+[node name="Visual" type="Polygon2D" parent="VerticalWall"]
+color = Color(0.184314, 0.239216, 0.282353, 1)
+polygon = PackedVector2Array(-17, -130, 17, -130, 17, 130, -17, 130)
+
+[node name="Edge" type="Line2D" parent="VerticalWall"]
+points = PackedVector2Array(-17, -130, 17, -130, 17, 130, -17, 130, -17, -130)
+width = 2.0
+default_color = Color(0.454902, 0.698039, 0.756863, 0.62)
+closed = true
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="VerticalWall"]
+shape = SubResource("RectangleShape2D_vertical")

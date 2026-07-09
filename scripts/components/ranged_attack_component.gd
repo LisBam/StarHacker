@@ -39,10 +39,14 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	var selected_projectile_scene: PackedScene = _get_weapon_packed_scene(weapon_data, "projectile_scene", projectile_scene)
 	# 本次使用的弹体速度；取值来自武器数据或组件默认值，默认 projectile_speed，修改会影响本次弹体飞行速度。
 	var selected_projectile_speed: float = _get_weapon_float(weapon_data, "projectile_speed", projectile_speed)
+	# 本次使用的弹体射程；取值来自武器数据或弹体默认值，默认 960，修改会影响本次弹体飞行距离。
+	var selected_bullet_range: float = _get_weapon_float(weapon_data, "bullet_range", 960.0)
 	# 本次使用的弹体伤害；取值来自武器数据或组件默认值，默认 projectile_damage，修改会影响本次弹体命中伤害。
 	var selected_projectile_damage: float = _get_weapon_float(weapon_data, "ranged_damage", projectile_damage)
 	# 本次使用的射击冷却；取值来自武器数据或组件默认值，默认 fire_cooldown，修改会影响下一次可射击时间。
 	var selected_fire_cooldown: float = _get_weapon_float(weapon_data, "ranged_cooldown", fire_cooldown)
+	# 本次使用的弹体冲击力；取值来自武器数据，默认 0 表示只造成伤害不击退。
+	var selected_impact_force: float = _get_weapon_float(weapon_data, "impact_force", 0.0)
 
 	if selected_projectile_scene == null or _cooldown_remaining > 0.0 or direction.is_zero_approx():
 		return false
@@ -54,6 +58,10 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 
 	if projectile.has_method("set_damage"):
 		projectile.call("set_damage", selected_projectile_damage)
+	if projectile.has_method("set_max_distance"):
+		projectile.call("set_max_distance", selected_bullet_range)
+	if projectile.has_method("set_impact_force"):
+		projectile.call("set_impact_force", selected_impact_force)
 
 	# 本次弹体出生位置；取值为全局坐标 Vector2，默认由枪口或备用距离计算，修改会影响弹体出现地点。
 	var spawn_position: Vector2 = _get_spawn_position(direction)

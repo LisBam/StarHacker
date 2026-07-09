@@ -16,6 +16,8 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export_file("*.tscn") var main_menu_scene_path: String = "res://scenes/ui/main_menu.tscn"
 ## 数值条显示上限；取值应大于 0，默认 200 覆盖当前占位生命和能量范围，修改会影响详情面板条形比例。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var stat_bar_maximum: float = 200.0
+## 速度条显示上限；取值应大于 0，默认 420 覆盖当前占位速度范围，修改会影响速度条形比例。
+@export_range(1.0, 9999.0, 1.0, "or_greater") var speed_bar_maximum: float = 420.0
 
 ## 当前选中的角色标识；取值为 stelle、caelus 或 silver_wolf，默认 stelle，修改会影响确认进入的角色。
 var _selected_character_id: String = CHARACTER_STELLE
@@ -42,6 +44,10 @@ var _selected_character_id: String = CHARACTER_STELLE
 @onready var _energy_value_label: Label = %EnergyValueLabel
 ## 能量数值条缓存；默认绑定 EnergyPreviewBar，用于表现固定能量上限。
 @onready var _energy_preview_bar: ProgressBar = %EnergyPreviewBar
+## 速度数值文本缓存；默认绑定 SpeedValueLabel，显示当前查看角色的固定移动速度。
+@onready var _speed_value_label: Label = %SpeedValueLabel
+## 速度数值条缓存；默认绑定 SpeedPreviewBar，用于表现固定移动速度。
+@onready var _speed_preview_bar: ProgressBar = %SpeedPreviewBar
 ## 被动技能文本缓存；默认绑定 PassiveLabel，显示后续被动技能占位信息。
 @onready var _passive_label: Label = %PassiveLabel
 ## 主动技能文本缓存；默认绑定 ActiveLabel，显示后续主动技能占位信息。
@@ -92,15 +98,20 @@ func _refresh_character_detail() -> void:
 	var max_health: float = float(profile.get("max_health", 0.0))
 	# 固定能量上限；取值来自角色档案，默认用于文字和条形预览。
 	var max_energy: float = float(profile.get("max_energy", 0.0))
+	# 固定移动速度；取值来自角色档案，默认用于文字和条形预览。
+	var move_speed: float = float(profile.get("move_speed", 0.0))
 	_character_name_label.text = str(profile.get("display_name", "角色"))
 	_character_role_label.text = str(profile.get("role", "未配置定位"))
 	_character_description_label.text = str(profile.get("description", "暂无角色说明"))
 	_health_value_label.text = "生命上限  %d" % roundi(max_health)
 	_energy_value_label.text = "能量上限  %d" % roundi(max_energy)
+	_speed_value_label.text = "速度  %d" % roundi(move_speed)
 	_health_preview_bar.max_value = stat_bar_maximum
 	_energy_preview_bar.max_value = stat_bar_maximum
+	_speed_preview_bar.max_value = speed_bar_maximum
 	_health_preview_bar.value = clampf(max_health, 0.0, stat_bar_maximum)
 	_energy_preview_bar.value = clampf(max_energy, 0.0, stat_bar_maximum)
+	_speed_preview_bar.value = clampf(move_speed, 0.0, speed_bar_maximum)
 	_passive_label.text = str(profile.get("passive", "被动技能：待配置"))
 	_active_label.text = str(profile.get("active", "主动技能：待配置"))
 
@@ -151,6 +162,7 @@ func _get_character_profile(character_id: String) -> Dictionary:
 		"description": "生命和能量上限都较平衡，适合验证默认战斗流程。",
 		"max_health": 130.0,
 		"max_energy": 110.0,
+		"move_speed": 320.0,
 		"passive": "被动技能：待配置",
 		"active": "主动技能：待配置"
 	}

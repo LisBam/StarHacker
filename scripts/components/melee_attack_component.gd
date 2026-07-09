@@ -31,6 +31,10 @@ var _active_remaining: float = 0.0
 var _hit_instances: Dictionary = {}
 ## 当前挥击实际伤害；取值建议大于等于 0，默认跟随 damage，修改会影响本次挥击命中和信号伤害。
 var _current_damage: float = 35.0
+## 当前挥击冲击力；取值建议大于等于 0，默认 0 表示不击退，修改会影响本次挥击命中后的控制效果。
+var _current_impact_force: float = 0.0
+## 当前挥击方向；取值为单位向量，默认向右，修改会影响被击中目标的击退方向。
+var _current_attack_direction: Vector2 = Vector2.RIGHT
 ## 当前近战冷却总时长；取值大于等于 0，默认 0 表示无冷却基准，修改会影响 HUD 冷却覆盖比例。
 var _cooldown_duration: float = 0.0
 
@@ -65,12 +69,16 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	var selected_cooldown: float = _get_weapon_float(weapon_data, "melee_cooldown", cooldown_duration)
 	# 本次近战激活时长；取值来自武器数据或组件默认值，默认 active_duration，修改会影响命中框持续时间。
 	var selected_active_duration: float = _get_weapon_float(weapon_data, "melee_active_duration", active_duration)
+	# 本次近战冲击力；取值来自武器数据，默认 0 表示只造成伤害不击退。
+	var selected_impact_force: float = _get_weapon_float(weapon_data, "impact_force", 0.0)
 
 	if _cooldown_remaining > 0.0 or _active_remaining > 0.0 or direction.is_zero_approx():
 		return false
 
 	rotation = direction.angle() + rotation_offset
 	_current_damage = selected_damage
+	_current_impact_force = selected_impact_force
+	_current_attack_direction = direction.normalized()
 	_hit_instances.clear()
 	_cooldown_remaining = selected_cooldown
 	_cooldown_duration = selected_cooldown
@@ -111,8 +119,12 @@ func _register_hit(target: Node) -> bool:
 		return false
 
 	_hit_instances[target] = true
+	if target.has_method("destroy_by_melee"):
+		target.call("destroy_by_melee", owner)
+		return true
+
 	if target.has_method("apply_damage"):
-		target.call("apply_damage", _current_damage, owner)
+		target.call("apply_damage", _current_damage, self)
 
 	return true
 
@@ -130,6 +142,14 @@ func get_cooldown_ratio() -> float:
 		return 0.0
 
 	return clampf(_cooldown_remaining / _cooldown_duration, 0.0, 1.0)
+
+
+func get_impact_force() -> float:
+	return _current_impact_force
+
+
+func get_knockback_direction() -> Vector2:
+	return _current_attack_direction
 
 
 func _get_weapon_float(weapon_data: Resource, property_name: StringName, fallback_value: float) -> float:

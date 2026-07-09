@@ -33,6 +33,10 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export_range(16.0, 2048.0, 1.0, "or_greater") var exploration_cell_size: float = 256.0
 ## 玩家探索半径；取值应大于等于 0，默认 760 像素，修改会影响玩家走过后大地图可见区域大小。
 @export_range(0.0, 6000.0, 1.0) var exploration_radius: float = 760.0
+## 边界墙厚度；取值应大于 0，默认 64 像素，用于在地图四周生成一圈阻挡玩家和怪物离场的墙体。
+@export_range(1.0, 1024.0, 1.0, "or_greater") var boundary_wall_thickness: float = 64.0
+## 边界墙颜色；取值为 RGBA，默认深蓝灰，修改会影响地图边缘墙体的可视表现。
+@export var boundary_wall_color: Color = Color(0.10, 0.15, 0.18, 1.0)
 ## 玩家节点路径；默认指向当前场景 Player，必须解析到 Node2D，修改会影响怪物索敌目标。
 @export var player_path: NodePath = ^"Player"
 ## 环境物父节点路径；默认指向 Environment 容器，允许为空并回退到 GameWorld，修改会影响随机墙体和建筑层级。
@@ -55,6 +59,8 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export_range(0.1, 8.0, 0.05) var obstacle_scale_max: float = 1.9
 ## 随机怪物场景；默认由 game_world.tscn 指向 BasicMonster，必须实例化为 Node2D，修改会影响随机生成的敌人类型。
 @export var monster_scene: PackedScene
+## 随机怪物场景池；默认由场景填入近战和远程怪物，非空时会优先从池中随机选择生成对象。
+@export var monster_scenes: Array[PackedScene] = []
 ## 怪物生成数量；取值建议 0 到 64，默认 8，运行时修改会影响开局战斗压力。
 @export_range(0, 64, 1) var monster_spawn_count: int = 8
 ## 怪物生成最小距离；取值应大于等于 0，默认 280 像素，运行时修改会影响怪物是否离玩家过近。
@@ -67,14 +73,20 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export_range(1.0, 9999.0, 1.0, "or_greater") var stelle_max_health: float = 130.0
 ## 星的固定能量上限；取值应大于 0，默认 110，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var stelle_max_energy: float = 110.0
+## 星的固定移动速度；取值应大于 0，默认 320，切换角色时会写入玩家移动组件。
+@export_range(1.0, 2000.0, 1.0, "or_greater") var stelle_move_speed: float = 320.0
 ## 穹的固定生命上限；取值应大于 0，默认 150，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var caelus_max_health: float = 150.0
 ## 穹的固定能量上限；取值应大于 0，默认 95，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var caelus_max_energy: float = 95.0
+## 穹的固定移动速度；取值应大于 0，默认 300，切换角色时会写入玩家移动组件。
+@export_range(1.0, 2000.0, 1.0, "or_greater") var caelus_move_speed: float = 300.0
 ## 银狼的固定生命上限；取值应大于 0，默认 105，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var silver_wolf_max_health: float = 105.0
 ## 银狼的固定能量上限；取值应大于 0，默认 155，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var silver_wolf_max_energy: float = 155.0
+## 银狼的固定移动速度；取值应大于 0，默认 355，切换角色时会写入玩家移动组件。
+@export_range(1.0, 2000.0, 1.0, "or_greater") var silver_wolf_move_speed: float = 355.0
 
 ## 随机数生成器；默认新建并在 ready 随机化，修改会影响地图和怪物生成结果。
 var _random: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -102,6 +114,8 @@ func _ready() -> void:
 	_random.randomize()
 	_apply_session_state()
 	_prepare_map_seed()
+	_environment_obstacle_rects.clear()
+	_spawn_boundary_walls()
 	_spawn_random_environment()
 	_spawn_monster_batch()
 	_update_explored_cells()
@@ -236,14 +250,24 @@ func _apply_selected_character() -> void:
 
 	# 玩家属性组件；默认从玩家子节点 StatsComponent 获取，缺失时跳过占位属性应用。
 	var stats_component: Node = _player.get_node_or_null("StatsComponent")
-	if stats_component == null or not stats_component.has_method("configure_max_stats"):
+	if stats_component != null and stats_component.has_method("configure_max_stats"):
+		# 固定生命上限；取值来自当前角色配置，默认用于进入场景或训练场切换角色时刷新生命。
+		var resolved_max_health: float = _get_character_max_health(_selected_character_id)
+		# 固定能量上限；取值来自当前角色配置，默认用于进入场景或训练场切换角色时刷新能量。
+		var resolved_max_energy: float = _get_character_max_energy(_selected_character_id)
+		stats_component.call("configure_max_stats", resolved_max_health, resolved_max_energy)
+
+	# 玩家移动组件；默认从玩家子节点 MovementComponent 获取，缺失时跳过速度应用。
+	var movement_component: Node = _player.get_node_or_null("MovementComponent")
+	if movement_component == null:
 		return
 
-	# 固定生命上限；取值来自当前角色配置，默认用于进入场景或训练场切换角色时刷新生命。
-	var resolved_max_health: float = _get_character_max_health(_selected_character_id)
-	# 固定能量上限；取值来自当前角色配置，默认用于进入场景或训练场切换角色时刷新能量。
-	var resolved_max_energy: float = _get_character_max_energy(_selected_character_id)
-	stats_component.call("configure_max_stats", resolved_max_health, resolved_max_energy)
+	# 固定移动速度；取值来自当前角色配置，默认用于进入场景或训练场切换角色时刷新移动速度。
+	var resolved_move_speed: float = _get_character_move_speed(_selected_character_id)
+	if movement_component.has_method("configure_max_speed"):
+		movement_component.call("configure_max_speed", resolved_move_speed)
+	else:
+		movement_component.set("max_speed", resolved_move_speed)
 
 
 func _get_character_max_health(character_id: String) -> float:
@@ -262,6 +286,15 @@ func _get_character_max_energy(character_id: String) -> float:
 		return maxf(silver_wolf_max_energy, 1.0)
 
 	return maxf(stelle_max_energy, 1.0)
+
+
+func _get_character_move_speed(character_id: String) -> float:
+	if character_id == CHARACTER_CAEULUS:
+		return maxf(caelus_move_speed, 1.0)
+	if character_id == CHARACTER_SILVER_WOLF:
+		return maxf(silver_wolf_move_speed, 1.0)
+
+	return maxf(stelle_move_speed, 1.0)
 
 
 func _normalize_character_id(character_id: String) -> String:
@@ -312,8 +345,60 @@ func _world_position_to_exploration_cell(world_position: Vector2) -> Vector2i:
 	return Vector2i(floori(world_position.x / cell_size), floori(world_position.y / cell_size))
 
 
+func _spawn_boundary_walls() -> void:
+	# 边界墙挂载父节点；取值为 Environment 容器或 GameWorld，默认用于组织地图边缘阻挡体。
+	var spawn_parent: Node = _environment_parent if _environment_parent != null else self
+	# 地图半边长；取值由 grid_size 和 grid_extent 计算，默认用于定位四周边界。
+	var half_size: float = get_map_half_size()
+	# 边界墙厚度；取值至少为 1，默认用于生成四条矩形墙体。
+	var wall_thickness: float = maxf(boundary_wall_thickness, 1.0)
+	# 地图完整宽度；取值为半边长两倍，默认用于横向墙体长度。
+	var map_width: float = half_size * 2.0
+	# 横向墙体尺寸；取值覆盖地图宽度，默认放置在地图上下边缘内侧。
+	var horizontal_wall_size: Vector2 = Vector2(map_width, wall_thickness)
+	# 纵向墙体尺寸；取值覆盖地图高度，默认放置在地图左右边缘内侧。
+	var vertical_wall_size: Vector2 = Vector2(wall_thickness, map_width)
+	_create_boundary_wall(spawn_parent, "TopBoundaryWall", Vector2(0.0, -half_size + wall_thickness * 0.5), horizontal_wall_size)
+	_create_boundary_wall(spawn_parent, "BottomBoundaryWall", Vector2(0.0, half_size - wall_thickness * 0.5), horizontal_wall_size)
+	_create_boundary_wall(spawn_parent, "LeftBoundaryWall", Vector2(-half_size + wall_thickness * 0.5, 0.0), vertical_wall_size)
+	_create_boundary_wall(spawn_parent, "RightBoundaryWall", Vector2(half_size - wall_thickness * 0.5, 0.0), vertical_wall_size)
+
+
+func _create_boundary_wall(parent_node: Node, wall_name: String, wall_position: Vector2, wall_size: Vector2) -> void:
+	# 边界墙物理体；取值为新建 StaticBody2D，默认使用环境层阻挡玩家、怪物和弹体。
+	var wall_body: StaticBody2D = StaticBody2D.new()
+	wall_body.name = wall_name
+	wall_body.collision_layer = 16
+	wall_body.collision_mask = 0
+	wall_body.add_to_group("environment_obstacles")
+	parent_node.add_child(wall_body)
+	wall_body.global_position = wall_position
+
+	# 边界墙碰撞形状资源；取值为 RectangleShape2D，默认尺寸等于传入墙体尺寸。
+	var rectangle_shape: RectangleShape2D = RectangleShape2D.new()
+	rectangle_shape.size = wall_size
+	# 边界墙碰撞节点；取值为 CollisionShape2D，默认挂载到墙体物理节点。
+	var collision_shape: CollisionShape2D = CollisionShape2D.new()
+	collision_shape.shape = rectangle_shape
+	wall_body.add_child(collision_shape)
+
+	# 边界墙视觉节点；取值为 Polygon2D，默认用半透明深色矩形标记地图边缘。
+	var visual: Polygon2D = Polygon2D.new()
+	visual.color = boundary_wall_color
+	visual.polygon = PackedVector2Array([
+		Vector2(-wall_size.x * 0.5, -wall_size.y * 0.5),
+		Vector2(wall_size.x * 0.5, -wall_size.y * 0.5),
+		Vector2(wall_size.x * 0.5, wall_size.y * 0.5),
+		Vector2(-wall_size.x * 0.5, wall_size.y * 0.5)
+	])
+	wall_body.add_child(visual)
+
+	# 边界墙世界矩形；取值为墙体全局位置和尺寸计算结果，默认写入地图障碍缓存。
+	var wall_rect: Rect2 = Rect2(wall_position - wall_size * 0.5, wall_size)
+	_environment_obstacle_rects.append(wall_rect)
+
+
 func _spawn_random_environment() -> void:
-	_environment_obstacle_rects.clear()
 	if obstacle_scenes.is_empty() or obstacle_spawn_count <= 0:
 		return
 
@@ -474,15 +559,20 @@ func _get_rects_bounds(rects: Array[Rect2]) -> Rect2:
 
 
 func _spawn_monster_batch() -> void:
-	if monster_scene == null or monster_spawn_count <= 0:
+	if not _has_monster_scene_available() or monster_spawn_count <= 0:
 		return
 
 	# 怪物挂载父节点；取值为 Enemies 容器或 GameWorld，默认用于组织随机生成物。
 	var spawn_parent: Node = _monster_parent if _monster_parent != null else self
 	# 怪物生成循环索引；取值为 0 到 monster_spawn_count - 1，默认逐个生成怪物，修改循环范围会影响生成数量。
 	for _spawn_index in range(monster_spawn_count):
-		# 怪物实例；取值为 Node2D 或 null，默认由 monster_scene 实例化，修改会影响生成对象。
-		var monster: Node2D = monster_scene.instantiate() as Node2D
+		# 本次怪物场景；取值来自 monster_scenes 随机池或 monster_scene 兜底，默认用于生成不同怪物类型。
+		var selected_monster_scene: PackedScene = _get_random_monster_scene()
+		if selected_monster_scene == null:
+			continue
+
+		# 怪物实例；取值为 Node2D 或 null，默认由选中的怪物场景实例化，修改会影响生成对象。
+		var monster: Node2D = selected_monster_scene.instantiate() as Node2D
 		if monster == null:
 			continue
 
@@ -491,6 +581,22 @@ func _spawn_monster_batch() -> void:
 		monster.global_position = _get_random_monster_spawn_position()
 		if monster.has_method("set_target"):
 			monster.call("set_target", _player)
+
+
+func _has_monster_scene_available() -> bool:
+	if not monster_scenes.is_empty():
+		return true
+
+	return monster_scene != null
+
+
+func _get_random_monster_scene() -> PackedScene:
+	if not monster_scenes.is_empty():
+		# 怪物场景随机下标；取值为 0 到怪物场景池末尾，默认用于混合生成近战和远程怪物。
+		var scene_index: int = _random.randi_range(0, monster_scenes.size() - 1)
+		return monster_scenes[scene_index]
+
+	return monster_scene
 
 
 func clear_monsters() -> void:

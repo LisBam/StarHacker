@@ -63,6 +63,7 @@ func get_character_profile(character_id: String) -> Dictionary:
 			"description": "生命上限较高，能量上限偏低，适合测试更稳定的近距离战斗节奏。",
 			"max_health": 150.0,
 			"max_energy": 95.0,
+			"move_speed": 300.0,
 			"passive": "被动技能：待配置",
 			"active": "主动技能：待配置"
 		}
@@ -74,6 +75,7 @@ func get_character_profile(character_id: String) -> Dictionary:
 			"description": "生命上限偏低，能量上限较高，适合测试高频武器和持续消耗型动作。",
 			"max_health": 105.0,
 			"max_energy": 155.0,
+			"move_speed": 355.0,
 			"passive": "被动技能：待配置",
 			"active": "主动技能：待配置"
 		}
@@ -85,6 +87,7 @@ func get_character_profile(character_id: String) -> Dictionary:
 		"description": "生命和能量上限都较平衡，适合验证默认战斗、背包和武器流程。",
 		"max_health": 130.0,
 		"max_energy": 110.0,
+		"move_speed": 320.0,
 		"passive": "被动技能：待配置",
 		"active": "主动技能：待配置"
 	}

@@ -18,6 +18,8 @@ signal hit_area(area: Area2D, damage: float)
 @export_range(0.0, 9999.0, 1.0, "or_greater") var damage: float = 12.0
 ## 命中后是否销毁；取值为 true/false，默认 true 避免穿透，运行时修改会影响弹体能否连续命中。
 @export var destroy_on_hit: bool = true
+## 弹体冲击力；取值建议大于等于 0，默认 0 表示只造成伤害不击退，武器会在发射时覆盖该值。
+@export_range(0.0, 5000.0, 1.0, "or_greater") var impact_force: float = 0.0
 
 ## 当前弹体速度向量；取值为方向乘速度，默认向右用于未 launch 时的兜底移动，修改会影响后续飞行方向和速度。
 var _velocity: Vector2 = Vector2.RIGHT
@@ -34,7 +36,12 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	global_position += _velocity * delta
+	# 本帧目标位置；取值为当前位置加速度位移，默认用于射线检测和最终位移。
+	var target_position: Vector2 = global_position + _velocity * delta
+	if _handle_swept_collision(target_position):
+		return
+
+	global_position = target_position
 	_age += delta
 
 	if _age >= lifetime or global_position.distance_to(_start_position) >= max_distance:
@@ -55,6 +62,25 @@ func set_damage(value: float) -> void:
 	damage = maxf(value, 0.0)
 
 
+func set_max_distance(value: float) -> void:
+	max_distance = maxf(value, 1.0)
+
+
+func set_impact_force(value: float) -> void:
+	impact_force = maxf(value, 0.0)
+
+
+func get_impact_force() -> float:
+	return impact_force
+
+
+func get_knockback_direction() -> Vector2:
+	if _velocity.is_zero_approx():
+		return Vector2.RIGHT.rotated(rotation)
+
+	return _velocity.normalized()
+
+
 func _on_body_entered(body: Node) -> void:
 	if _apply_hit(body):
 		hit_body.emit(body, damage)
@@ -66,6 +92,37 @@ func _on_area_entered(area: Area2D) -> void:
 
 	if _apply_hit(area):
 		hit_area.emit(area, damage)
+
+
+func _handle_swept_collision(target_position: Vector2) -> bool:
+	# 射线查询参数；取值为当前位置到目标位置，默认使用弹体碰撞掩码检测怪物和环境。
+	var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(global_position, target_position, collision_mask, [get_rid()])
+	query.collide_with_areas = true
+	query.collide_with_bodies = true
+	# 射线命中结果；取值为空字典或包含 collider/position，默认用于提前处理高速碰撞。
+	var hit_result: Dictionary = get_world_2d().direct_space_state.intersect_ray(query)
+	if hit_result.is_empty():
+		return false
+
+	# 命中位置；取值为射线碰撞点，默认让弹体销毁前停在碰撞处。
+	var hit_position: Vector2 = target_position
+	if hit_result.get("position") is Vector2:
+		hit_position = hit_result.get("position")
+	global_position = hit_position
+	# 命中对象；取值为 Node 或 null，默认用于沿用普通 body/area 命中流程。
+	var collider: Node = hit_result.get("collider", null) as Node
+	if collider == null:
+		queue_free()
+		return true
+
+	if collider is Area2D:
+		if _apply_hit(collider):
+			hit_area.emit(collider as Area2D, damage)
+	else:
+		if _apply_hit(collider):
+			hit_body.emit(collider, damage)
+
+	return true
 
 
 func _apply_hit(target: Node) -> bool:

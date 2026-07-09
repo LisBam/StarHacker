@@ -59,6 +59,9 @@ func _update_target_behavior(_delta: float, target_distance: float) -> void:
 	if not is_instance_valid(_target):
 		velocity = Vector2.ZERO
 		return
+	if _should_pause_target_movement():
+		velocity = Vector2.ZERO
+		return
 
 	# 是否拥有直线射击视线；取值为 true/false，默认只被环境墙体阻挡。
 	var has_line_of_sight: bool = _has_line_of_sight_to_target()
@@ -67,7 +70,9 @@ func _update_target_behavior(_delta: float, target_distance: float) -> void:
 		var chase_destination: Vector2 = _get_current_chase_destination()
 		# 追击方向；取值为绕障后的单位向量，默认用于接近射击范围或寻找视线。
 		var chase_direction: Vector2 = _get_steered_direction_to(chase_destination)
-		velocity = chase_direction * _get_resolved_move_speed()
+		# 当前状态速度倍率；取值为 1 或搜查倍率，默认让远程怪物同样以谨慎速度排查最后线索。
+		var state_speed_multiplier: float = 1.0 if _target_ai_state == TARGET_AI_STATE_VISIBLE else maxf(search_move_speed_multiplier, 0.0)
+		velocity = chase_direction * _get_resolved_move_speed() * state_speed_multiplier
 		return
 
 	# 目标方向；取值为怪物指向玩家的单位向量，默认用于发射和后退判断。

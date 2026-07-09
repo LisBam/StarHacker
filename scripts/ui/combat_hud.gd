@@ -13,9 +13,15 @@ const INVENTORY_FILTER_ALL: String = "all"
 const INVENTORY_FILTER_RANGED: String = "ranged"
 ## 背包近战分页标识；默认匹配武器资源 weapon_type 的 melee 值，修改会影响近战筛选页。
 const INVENTORY_FILTER_MELEE: String = "melee"
+## 星角色标识；默认与 SessionState 和 GameWorld 保持一致，修改会影响训练场切换角色目标。
+const CHARACTER_STELLE: String = "stelle"
+## 穹角色标识；默认与 SessionState 和 GameWorld 保持一致，修改会影响训练场切换角色目标。
+const CHARACTER_CAEULUS: String = "caelus"
+## 银狼角色标识；默认与 SessionState 和 GameWorld 保持一致，修改会影响训练场切换角色目标。
+const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 
-## 玩家节点路径；默认指向同一游戏世界下的 SilverWolf，必须解析到玩家根节点，运行时通常不修改。
-@export var player_path: NodePath = ^"../SilverWolf"
+## 玩家节点路径；默认指向同一游戏世界下的 Player，必须解析到玩家根节点，运行时通常不修改。
+@export var player_path: NodePath = ^"../Player"
 ## 游戏世界节点路径；默认指向 HUD 父节点 GameWorld，必须解析到提供训练场测试接口的节点。
 @export var game_world_path: NodePath = ^".."
 ## 背包开关输入动作名；默认 toggle_inventory 对应 E 键，运行时通常不修改，改名会影响背包打开/关闭。
@@ -33,7 +39,7 @@ const INVENTORY_FILTER_MELEE: String = "melee"
 
 ## 玩家节点缓存；默认按 player_path 获取，允许为空但 HUD 不会显示有效状态，修改会影响所有组件绑定。
 var _player: Node
-## 游戏世界节点缓存；默认按 game_world_path 获取，允许为空但测试设置无法清怪或重刷怪物。
+## 游戏世界节点缓存；默认按 game_world_path 获取，允许为空但训练场设置无法清怪或重刷怪物。
 var _game_world: Node
 ## 战斗属性组件缓存；默认从玩家子节点 StatsComponent 获取，允许为空但生命和能量无法刷新。
 var _stats_component: Node
@@ -63,6 +69,8 @@ var _last_cooling_ranged_slot: int = -1
 var _inventory_filter: String = INVENTORY_FILTER_ALL
 ## Master 音频总线索引；取值为 -1 或有效总线下标，默认 -1 表示尚未解析，修改会影响暂停设置音量应用目标。
 var _master_bus_index: int = -1
+## 当前是否为训练场模式；取值为 true/false，默认 false，修改会影响训练场设置按钮和角色切换入口是否可见。
+var _is_training_mode: bool = false
 
 ## 生命文本缓存；默认绑定 HealthLabel，显示当前生命和最大生命，节点缺失会导致生命文本无法刷新。
 @onready var _health_label: Label = %HealthLabel
@@ -104,22 +112,34 @@ var _master_bus_index: int = -1
 @onready var _resume_button: Button = %ResumeButton
 ## 暂停设置按钮缓存；默认绑定 PauseSettingsButton，点击后打开暂停设置面板。
 @onready var _pause_settings_button: Button = %PauseSettingsButton
-## 测试设置按钮缓存；默认绑定 TestSettingsButton，点击后打开训练场测试设置面板。
+## 训练场设置按钮缓存；默认绑定 TestSettingsButton，点击后打开训练场设置面板。
 @onready var _test_settings_button: Button = %TestSettingsButton
 ## 返回主菜单按钮缓存；默认绑定 ReturnMainMenuButton，点击后解除暂停并切换到主菜单。
 @onready var _return_main_menu_button: Button = %ReturnMainMenuButton
-## 测试设置面板缓存；默认绑定 TestSettingsPanel，显示清怪、重刷和无限属性开关。
+## 训练场设置面板缓存；默认绑定 TestSettingsPanel，显示清怪、重刷和无限属性开关。
 @onready var _test_settings_panel: Control = %TestSettingsPanel
 ## 清空怪物按钮缓存；默认绑定 ClearMonstersButton，点击后清空训练场怪物。
 @onready var _clear_monsters_button: Button = %ClearMonstersButton
-## 重新生成怪物按钮缓存；默认绑定 RespawnMonstersButton，点击后按当前训练场配置重新刷新怪物。
+## 重新生成怪物按钮缓存；默认绑定 RespawnMonstersButton，点击后按当前训练场配置追加一批怪物。
 @onready var _respawn_monsters_button: Button = %RespawnMonstersButton
+## 切换角色按钮缓存；默认绑定 SwitchCharacterButton，仅训练场显示，点击后打开角色切换面板。
+@onready var _switch_character_button: Button = %SwitchCharacterButton
 ## 无限能量开关缓存；默认绑定 InfiniteEnergyCheckButton，切换后修改玩家属性组件的无限能量状态。
 @onready var _infinite_energy_check_button: CheckButton = %InfiniteEnergyCheckButton
 ## 无限血量开关缓存；默认绑定 InfiniteHealthCheckButton，切换后修改玩家属性组件的无限血量状态。
 @onready var _infinite_health_check_button: CheckButton = %InfiniteHealthCheckButton
-## 测试设置返回按钮缓存；默认绑定 TestSettingsBackButton，点击后返回暂停主菜单。
+## 训练场设置返回按钮缓存；默认绑定 TestSettingsBackButton，点击后返回暂停主菜单。
 @onready var _test_settings_back_button: Button = %TestSettingsBackButton
+## 训练场角色切换面板缓存；默认绑定 CharacterSwitchPanel，只在训练场设置中打开。
+@onready var _character_switch_panel: Control = %CharacterSwitchPanel
+## 训练场星角色按钮缓存；默认绑定 SwitchCharacterStelleButton，点击后切换为星并刷新占位属性。
+@onready var _switch_character_stelle_button: Button = %SwitchCharacterStelleButton
+## 训练场穹角色按钮缓存；默认绑定 SwitchCharacterCaelusButton，点击后切换为穹并刷新占位属性。
+@onready var _switch_character_caelus_button: Button = %SwitchCharacterCaelusButton
+## 训练场银狼角色按钮缓存；默认绑定 SwitchCharacterSilverWolfButton，点击后切换为银狼并刷新占位属性。
+@onready var _switch_character_silver_wolf_button: Button = %SwitchCharacterSilverWolfButton
+## 训练场角色切换返回按钮缓存；默认绑定 CharacterSwitchBackButton，点击后回到训练场设置面板。
+@onready var _character_switch_back_button: Button = %CharacterSwitchBackButton
 ## 暂停设置主音量滑条缓存；默认绑定 PauseMasterVolumeSlider，取值 0 到 100，修改会影响全局 Master 音量。
 @onready var _pause_master_volume_slider: HSlider = %PauseMasterVolumeSlider
 ## 暂停设置主音量数值文本缓存；默认绑定 PauseMasterVolumeValueLabel，显示滑条当前百分比。
@@ -164,6 +184,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _bind_game_world() -> void:
 	_game_world = get_node_or_null(game_world_path)
+	_is_training_mode = _resolve_training_mode()
 
 
 func _bind_player_components() -> void:
@@ -430,11 +451,31 @@ func _bind_pause_menu() -> void:
 	_pause_settings_back_button.pressed.connect(_on_pause_settings_back_button_pressed)
 	_clear_monsters_button.pressed.connect(_on_clear_monsters_button_pressed)
 	_respawn_monsters_button.pressed.connect(_on_respawn_monsters_button_pressed)
+	_switch_character_button.pressed.connect(_on_switch_character_button_pressed)
+	_switch_character_stelle_button.pressed.connect(_on_switch_character_stelle_button_pressed)
+	_switch_character_caelus_button.pressed.connect(_on_switch_character_caelus_button_pressed)
+	_switch_character_silver_wolf_button.pressed.connect(_on_switch_character_silver_wolf_button_pressed)
+	_character_switch_back_button.pressed.connect(_on_character_switch_back_button_pressed)
 	_infinite_energy_check_button.toggled.connect(_on_infinite_energy_toggled)
 	_infinite_health_check_button.toggled.connect(_on_infinite_health_toggled)
 	_test_settings_back_button.pressed.connect(_on_test_settings_back_button_pressed)
 	_pause_master_volume_slider.value_changed.connect(_on_pause_master_volume_slider_value_changed)
 	_sync_pause_master_volume_slider()
+	_sync_mode_controls()
+
+
+func _resolve_training_mode() -> bool:
+	if _game_world == null or not _game_world.has_method("is_training_mode"):
+		return false
+
+	return bool(_game_world.call("is_training_mode"))
+
+
+func _sync_mode_controls() -> void:
+	_test_settings_button.visible = _is_training_mode
+	if not _is_training_mode:
+		_test_settings_panel.visible = false
+		_character_switch_panel.visible = false
 
 
 func _set_inventory_filter(new_filter: String) -> void:
@@ -494,6 +535,10 @@ func _toggle_pause_menu() -> void:
 		_show_pause_settings(false)
 		return
 
+	if _pause_overlay.visible and _character_switch_panel.visible:
+		_show_character_switch(false)
+		return
+
 	if _pause_overlay.visible and _test_settings_panel.visible:
 		_show_test_settings(false)
 		return
@@ -506,6 +551,8 @@ func _set_pause_menu_visible(visible: bool) -> void:
 	_pause_menu_panel.visible = visible
 	_pause_settings_panel.visible = false
 	_test_settings_panel.visible = false
+	_character_switch_panel.visible = false
+	_sync_mode_controls()
 	get_tree().paused = visible
 	if visible:
 		if _inventory_panel.visible:
@@ -521,6 +568,7 @@ func _show_pause_settings(visible: bool) -> void:
 	_pause_menu_panel.visible = not visible
 	_pause_settings_panel.visible = visible
 	_test_settings_panel.visible = false
+	_character_switch_panel.visible = false
 	if visible:
 		_sync_pause_master_volume_slider()
 		_pause_settings_back_button.grab_focus()
@@ -529,14 +577,32 @@ func _show_pause_settings(visible: bool) -> void:
 
 
 func _show_test_settings(visible: bool) -> void:
+	if visible and not _is_training_mode:
+		return
+
 	_pause_menu_panel.visible = not visible
 	_pause_settings_panel.visible = false
 	_test_settings_panel.visible = visible
+	_character_switch_panel.visible = false
 	if visible:
 		_sync_test_settings_controls()
 		_clear_monsters_button.grab_focus()
 	else:
 		_test_settings_button.grab_focus()
+
+
+func _show_character_switch(visible: bool) -> void:
+	if visible and not _is_training_mode:
+		return
+
+	_pause_menu_panel.visible = false
+	_pause_settings_panel.visible = false
+	_test_settings_panel.visible = not visible
+	_character_switch_panel.visible = visible
+	if visible:
+		_switch_character_stelle_button.grab_focus()
+	else:
+		_switch_character_button.grab_focus()
 
 
 func _sync_test_settings_controls() -> void:
@@ -545,9 +611,9 @@ func _sync_test_settings_controls() -> void:
 		_infinite_health_check_button.set_pressed_no_signal(false)
 		return
 
-	# 无限能量状态；取值来自属性组件，默认 false，修改会影响测试设置开关显示。
+	# 无限能量状态；取值来自属性组件，默认 false，修改会影响训练场设置开关显示。
 	var infinite_energy_enabled: bool = bool(_stats_component.get("infinite_energy"))
-	# 无限血量状态；取值来自属性组件，默认 false，修改会影响测试设置开关显示。
+	# 无限血量状态；取值来自属性组件，默认 false，修改会影响训练场设置开关显示。
 	var infinite_health_enabled: bool = bool(_stats_component.get("infinite_health"))
 	_infinite_energy_check_button.set_pressed_no_signal(infinite_energy_enabled)
 	_infinite_health_check_button.set_pressed_no_signal(infinite_health_enabled)
@@ -786,6 +852,18 @@ func _set_infinite_health_enabled(enabled: bool) -> void:
 	_refresh_stats()
 
 
+func _switch_training_character(character_id: String) -> void:
+	if not _is_training_mode:
+		return
+
+	if _game_world == null or not _game_world.has_method("switch_character"):
+		return
+
+	_game_world.call("switch_character", character_id)
+	_refresh_all()
+	_show_character_switch(false)
+
+
 func _is_current_ranged_source(source_kind: String, source_index: int) -> bool:
 	if source_kind != "ranged" or not _equipment_component.has_method("get_current_ranged_slot"):
 		return false
@@ -872,6 +950,26 @@ func _on_clear_monsters_button_pressed() -> void:
 
 func _on_respawn_monsters_button_pressed() -> void:
 	_respawn_training_monsters()
+
+
+func _on_switch_character_button_pressed() -> void:
+	_show_character_switch(true)
+
+
+func _on_switch_character_stelle_button_pressed() -> void:
+	_switch_training_character(CHARACTER_STELLE)
+
+
+func _on_switch_character_caelus_button_pressed() -> void:
+	_switch_training_character(CHARACTER_CAEULUS)
+
+
+func _on_switch_character_silver_wolf_button_pressed() -> void:
+	_switch_training_character(CHARACTER_SILVER_WOLF)
+
+
+func _on_character_switch_back_button_pressed() -> void:
+	_show_character_switch(false)
 
 
 func _on_infinite_energy_toggled(enabled: bool) -> void:

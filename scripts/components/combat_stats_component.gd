@@ -19,9 +19,9 @@ signal stats_changed
 @export_range(0.0, 9999.0, 1.0, "or_greater") var current_energy: float = 100.0
 ## 每秒能量恢复量；取值建议大于等于 0，默认 18 让原型战斗保持节奏，运行时修改会影响持续作战能力。
 @export_range(0.0, 9999.0, 0.1, "or_greater") var energy_regeneration_per_second: float = 18.0
-## 是否启用无限血量；取值为 true/false，默认 false，训练场测试设置会运行时修改，启用后受伤不会降低生命。
+## 是否启用无限血量；取值为 true/false，默认 false，训练场设置会运行时修改，启用后受伤不会降低生命。
 @export var infinite_health: bool = false
-## 是否启用无限能量；取值为 true/false，默认 false，训练场测试设置会运行时修改，启用后消耗能量不会降低能量。
+## 是否启用无限能量；取值为 true/false，默认 false，训练场设置会运行时修改，启用后消耗能量不会降低能量。
 @export var infinite_energy: bool = false
 
 
@@ -79,6 +79,18 @@ func set_energy(value: float) -> void:
 	current_energy = clamped_energy
 	energy_changed.emit(current_energy, max_energy)
 	stats_changed.emit()
+
+
+func configure_max_stats(new_max_health: float, new_max_energy: float) -> void:
+	# 标准化后的最大生命；取值至少为 1，默认由角色配置随机得出，修改会影响生命上限和满血值。
+	var resolved_max_health: float = maxf(new_max_health, 1.0)
+	# 标准化后的最大能量；取值至少为 1，默认由角色配置随机得出，修改会影响能量上限和满能量值。
+	var resolved_max_energy: float = maxf(new_max_energy, 1.0)
+	max_health = resolved_max_health
+	max_energy = resolved_max_energy
+	current_health = max_health
+	current_energy = max_energy
+	_emit_all_stats_changed()
 
 
 func take_damage(amount: float) -> void:

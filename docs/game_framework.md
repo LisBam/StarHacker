@@ -1,17 +1,19 @@
 # 游戏基础框架
 
-本文档记录当前项目的入口流程、玩家控制框架和可扩展点，用于后续长期维护。
+本文档记录《崩坏：量子骇袭》的入口流程、玩家控制框架和可扩展点，用于后续长期维护。
 
 ## 场景入口
 
 - `res://scenes/ui/main_menu.tscn` 是项目主场景，由 `project.godot` 的 `run/main_scene` 指向。
-- 主菜单脚本 `res://scripts/ui/main_menu.gd` 通过 `game_scene_path` 加载游戏世界，默认按钮文案为“训练场”，进入 `res://scenes/game/game_world.tscn`。
+- 主菜单脚本 `res://scripts/ui/main_menu.gd` 通过 `game_scene_path` 加载游戏世界，默认第一行按钮文案为“骇入”。主菜单同时保留“训练场”按钮，两者都会先打开角色选择面板，再进入 `res://scenes/game/game_world.tscn`。
 - 主菜单提供“设置”入口，当前设置项为全局 Master 主音量，设置值直接写入 `AudioServer`。
-- `res://scenes/game/game_world.tscn` 是当前训练场场景，负责放置玩家、怪物、地图和掉落物。它的脚本会绘制调试网格，并在进入场景后随机刷新训练怪物。
+- `res://scripts/game/session_state.gd` 通过 `project.godot` 自动加载为 `SessionState`，负责保存本次进入的模式和角色，避免把入口参数写进场景路径。
+- `res://scenes/game/game_world.tscn` 是当前战斗承载场景，负责放置玩家、怪物、地图和掉落物。它的脚本会在进入场景后随机生成大型地图，并随机生成一批怪物。
 
 ## 玩家角色
 
-- `res://scenes/characters/silver_wolf.tscn` 是玩家角色“银狼”的预制体，根节点为 `CharacterBody2D`。
+- `res://scenes/characters/silver_wolf.tscn` 当前作为通用玩家预制体使用，根节点为 `CharacterBody2D`。实际显示角色由入口角色选择决定。
+- 当前可选角色为“星”“穹”“银狼”。三名角色暂时只提供占位属性：进入骇入、进入训练场或在训练场内切换角色时，会随机设置生命上限和能量上限；主动技能和被动技能后续再接入。
 - `res://scripts/player/player_controller.gd` 是聚合脚本，只负责调度输入、移动、远程攻击、近战攻击和瞄准朝向。聚合脚本通过节点路径获取组件，不直接强类型依赖自定义组件类，避免新项目或缓存刷新时出现全局类名解析顺序问题。
 - 玩家视觉、碰撞、摄像机、枪口、输入组件、移动组件、远程攻击组件和近战攻击组件都以子节点形式挂载，便于逐项替换。
 
@@ -52,7 +54,8 @@
 - `InventoryDropArea`：接收拖到背包空白区域的武器拖拽数据，并转发给 HUD 按背包末尾投放处理。
 - `CombatHud`：底部中心显示玩家生命、能量和武器栏，E 键打开背包，ESC 打开暂停菜单，监听组件信号并处理拖拽装备和卸下。
 - `BasicMonster`：基础怪物，维护血量、攻击力、移速、视野范围、索敌追击和近身攻击。
-- `GameWorld`：训练场承载脚本，绘制调试网格，并按配置随机刷新怪物。
+- `SessionState`：入口会话状态，保存当前模式和当前角色，供主菜单、GameWorld 和训练场角色切换复用。
+- `GameWorld`：战斗承载脚本，随机生成大型地图、绘制网格，按配置随机生成怪物，并根据当前角色刷新玩家占位属性。
 
 ## 武器与装备
 
@@ -66,7 +69,7 @@
 - `scatter_blaster.tres`：散射爆能枪，远程测试武器，中等射速和中等消耗。
 - `quantum_dagger.tres`：量子短刃，近战测试武器，低消耗、短冷却。
 
-`silver_wolf.tscn` 默认装备两把远程武器和一把近战武器：
+当前通用玩家预制体默认装备两把远程武器和一把近战武器：
 
 - 远程槽 1：量子手枪
 - 远程槽 2：脉冲步枪
@@ -92,7 +95,7 @@ ESC 会打开战斗暂停菜单，并通过 `get_tree().paused` 暂停游戏世�
 
 暂停设置和主菜单设置共用同一条 Master 音量规则：滑条范围为 0 到 100，0 会静音 Master 总线，大于 0 时使用 `linear_to_db()` 写入音量。
 
-训练场暂停菜单额外提供“测试设置”面板。该面板包含“清空场上怪物”“重新生成怪物”两个按钮，以及“无限能量”“无限血量”两个开关。无限能量通过 `CombatStatsComponent.set_infinite_energy()` 生效，开启后武器、疾跑和闪避消耗都不会降低能量；无限血量通过 `CombatStatsComponent.set_infinite_health()` 生效，开启后怪物攻击不会降低玩家生命。
+训练场暂停菜单额外提供“训练场设置”面板。正式“骇入”模式会隐藏该入口，不能打开训练场专属功能。训练场设置包含“清空场上怪物”“重新生成怪物”“切换角色”三个按钮，以及“无限能量”“无限血量”两个开关。无限能量通过 `CombatStatsComponent.set_infinite_energy()` 生效，开启后武器、疾跑和闪避消耗都不会降低能量；无限血量通过 `CombatStatsComponent.set_infinite_health()` 生效，开启后怪物攻击不会降低玩家生命；切换角色通过 `GameWorld.switch_character(character_id)` 生效，并重新随机当前角色的生命上限和能量上限。
 
 ## 怪物与训练场
 
@@ -108,9 +111,11 @@ ESC 会打开战斗暂停菜单，并通过 `get_tree().paused` 暂停游戏世�
 - `attack_cooldown`：攻击冷却。
 - `wander_radius`、`wander_speed_multiplier`、`wander_arrive_distance`、`wander_wait_min`、`wander_wait_max`：无目标游荡参数。怪物未发现玩家时会围绕出生点随机选点移动，到达后等待一小段时间再选下一个点。
 
+`GameWorld` 进入骇入或训练场时都会先生成大型随机视觉地图。默认地图以世界原点居中，`grid_extent = 96` 会生成 192x192 格地图；`map_seed = 0` 表示每次进入都随机，设置为固定正数可以复现同一张地图。地图瓦片通过 `dark_tile_density`、`line_tile_density` 和 `rift_tile_density` 控制视觉变化密度，当前地图只提供地表视觉，不阻挡玩家或怪物移动。
+
 `GameWorld` 通过 `monster_scene`、`monster_spawn_count`、`monster_spawn_min_distance`、`monster_spawn_max_distance` 和 `monster_parent_path` 控制训练场怪物生成。默认进入训练场时，以玩家位置为中心，在最小和最大距离之间随机生成 8 个怪物，并调用怪物的 `set_target(player)` 设置索敌目标。
 
-训练场提供 `clear_monsters()` 和 `respawn_monsters()` 两个接口给 HUD 测试设置调用。清怪只清理 `monster_parent_path` 指向的怪物容器，重新生成会先清空再按当前配置刷新。
+训练场提供 `clear_monsters()` 和 `respawn_monsters()` 两个接口给 HUD 训练场设置调用。清怪会先按训练怪物组清理，再清理 `monster_parent_path` 指向的怪物容器；重新生成会按当前配置追加一批新怪物，不会清空场上已有怪物。
 
 ## 可调参数
 
@@ -124,7 +129,9 @@ ESC 会打开战斗暂停菜单，并通过 `get_tree().paused` 暂停游戏世�
 - 战斗属性：`max_health`、`current_health`、`max_energy`、`current_energy`、`energy_regeneration_per_second`、`infinite_health`、`infinite_energy`
 - 装备：`ranged_slot_count`、`starting_ranged_weapons`、`starting_melee_weapon`
 - 怪物：`max_health`、`current_health`、`attack_damage`、`move_speed`、`vision_range`、`attack_range`、`attack_cooldown`、`lose_target_range_multiplier`、`wander_radius`、`wander_speed_multiplier`、`wander_arrive_distance`、`wander_wait_min`、`wander_wait_max`
+- 训练场地图：`grid_size`、`grid_extent`、`map_seed`、`dark_tile_density`、`line_tile_density`、`rift_tile_density`、`base_floor_color`、`dark_floor_color`、`line_floor_color`、`rift_floor_color`
 - 训练场生成：`monster_scene`、`monster_spawn_count`、`monster_spawn_min_distance`、`monster_spawn_max_distance`、`monster_parent_path`
+- 角色占位属性：`stelle_health_range`、`stelle_energy_range`、`caelus_health_range`、`caelus_energy_range`、`silver_wolf_health_range`、`silver_wolf_energy_range`
 - 武器数据：`weapon_type`、`energy_cost`、`projectile_speed`、`ranged_damage`、`ranged_cooldown`、`melee_damage`、`melee_cooldown`、`melee_active_duration`
 - HUD：`ranged_slot_minimum_size`、`melee_slot_minimum_size`、`inventory_slot_minimum_size`、`toggle_inventory_action`、`pause_action`、`main_menu_scene_path`
 

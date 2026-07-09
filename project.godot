@@ -10,10 +10,14 @@ config_version=5
 
 [application]
 
-config/name="银狼：量子围城"
+config/name="崩坏：量子骇袭"
 run/main_scene="res://scenes/ui/main_menu.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
 config/icon="res://icon.svg"
+
+[autoload]
+
+SessionState="*res://scripts/game/session_state.gd"
 
 [display]
 
@@ -23,7 +27,7 @@ window/stretch/mode="canvas_items"
 
 [dotnet]
 
-project/assembly_name="银狼：量子围城"
+project/assembly_name="崩坏：量子骇袭"
 
 [input]
 

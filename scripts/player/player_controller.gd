@@ -4,8 +4,8 @@ class_name PlayerController
 ## 玩家聚合脚本只负责把输入、移动、远程攻击、近战攻击等组件串起来。
 ## 具体能力放在独立组件中实现，后续替换角色、武器或控制方式时可以局部替换节点。
 
-## 玩家显示名称；默认值为“银狼”，仅用于界面和调试标识，运行时通常不需要修改，改名会影响后续 UI 展示文本。
-@export var player_display_name: String = "银狼"
+## 玩家显示名称；默认值为“角色”，会由当前选择角色覆盖，运行时修改会影响后续 UI 展示文本。
+@export var player_display_name: String = "角色"
 ## 输入组件路径；默认指向同场景子节点 InputComponent，必须解析到提供输入查询方法的节点，修改会影响所有玩家操作来源。
 @export var input_component_path: NodePath = ^"InputComponent"
 ## 移动组件路径；默认指向 MovementComponent，必须解析到提供 move 方法的节点，修改会影响角色移动执行方式。

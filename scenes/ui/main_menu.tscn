@@ -21,7 +21,7 @@ grow_vertical = 2
 color = Color(0.0509804, 0.0666667, 0.0862745, 1)
 
 [node name="Center" type="VBoxContainer" parent="."]
-custom_minimum_size = Vector2(440, 300)
+custom_minimum_size = Vector2(440, 360)
 layout_mode = 1
 anchors_preset = -1
 anchor_left = 0.5
@@ -29,9 +29,9 @@ anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
 offset_left = -220.0
-offset_top = -150.0
+offset_top = -180.0
 offset_right = 220.0
-offset_bottom = 150.0
+offset_bottom = 180.0
 theme_override_constants/separation = 18
 alignment = 1
 
@@ -39,14 +39,7 @@ alignment = 1
 layout_mode = 2
 theme_override_colors/font_color = Color(0.721569, 0.894118, 1, 1)
 theme_override_font_sizes/font_size = 38
-text = "银狼：量子围城"
-horizontal_alignment = 1
-
-[node name="Subtitle" type="Label" parent="Center"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.788235, 0.858824, 0.898039, 1)
-theme_override_font_sizes/font_size = 16
-text = "量子战场原型框架"
+text = "崩坏：量子骇袭"
 horizontal_alignment = 1
 
 [node name="Spacer" type="Control" parent="Center"]
@@ -54,6 +47,12 @@ custom_minimum_size = Vector2(0, 14)
 layout_mode = 2
 
 [node name="StartButton" type="Button" parent="Center"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+text = "骇入"
+
+[node name="TrainingButton" type="Button" parent="Center"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
@@ -136,6 +135,74 @@ layout_mode = 2
 size_flags_vertical = 3
 
 [node name="SettingsBackButton" type="Button" parent="SettingsPanel/SettingsMargin/SettingsContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+text = "返回"
+
+[node name="CharacterSelectPanel" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(460, 330)
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -230.0
+offset_top = -165.0
+offset_right = 230.0
+offset_bottom = 165.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="CharacterSelectMargin" type="MarginContainer" parent="CharacterSelectPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 18
+
+[node name="CharacterSelectContent" type="VBoxContainer" parent="CharacterSelectPanel/CharacterSelectMargin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="CharacterSelectTitleLabel" type="Label" parent="CharacterSelectPanel/CharacterSelectMargin/CharacterSelectContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "选择骇入角色"
+horizontal_alignment = 1
+
+[node name="CharacterSelectSpacer" type="Control" parent="CharacterSelectPanel/CharacterSelectMargin/CharacterSelectContent"]
+custom_minimum_size = Vector2(0, 8)
+layout_mode = 2
+
+[node name="CharacterStelleButton" type="Button" parent="CharacterSelectPanel/CharacterSelectMargin/CharacterSelectContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+text = "星"
+
+[node name="CharacterCaelusButton" type="Button" parent="CharacterSelectPanel/CharacterSelectMargin/CharacterSelectContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+text = "穹"
+
+[node name="CharacterSilverWolfButton" type="Button" parent="CharacterSelectPanel/CharacterSelectMargin/CharacterSelectContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+text = "银狼"
+
+[node name="CharacterSelectBottomSpacer" type="Control" parent="CharacterSelectPanel/CharacterSelectMargin/CharacterSelectContent"]
+custom_minimum_size = Vector2(0, 8)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="CharacterSelectBackButton" type="Button" parent="CharacterSelectPanel/CharacterSelectMargin/CharacterSelectContent"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 42)
 layout_mode = 2

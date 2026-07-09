@@ -10,7 +10,7 @@
 script = ExtResource("1_game_world")
 monster_scene = ExtResource("5_basic_monster")
 
-[node name="SilverWolf" parent="." instance=ExtResource("2_silver_wolf")]
+[node name="Player" parent="." instance=ExtResource("2_silver_wolf")]
 position = Vector2(0, 0)
 
 [node name="Enemies" type="Node2D" parent="."]
@@ -328,7 +328,7 @@ text = "设置"
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 44)
 layout_mode = 2
-text = "测试设置"
+text = "训练场设置"
 
 [node name="ReturnMainMenuButton" type="Button" parent="BattleHUD/Root/PauseOverlay/PauseMenuPanel/PauseMenuMargin/PauseMenuContent"]
 unique_name_in_owner = true
@@ -409,7 +409,7 @@ text = "返回"
 [node name="TestSettingsPanel" type="PanelContainer" parent="BattleHUD/Root/PauseOverlay"]
 unique_name_in_owner = true
 visible = false
-custom_minimum_size = Vector2(420, 310)
+custom_minimum_size = Vector2(420, 360)
 layout_mode = 1
 anchors_preset = -1
 anchor_left = 0.5
@@ -417,9 +417,9 @@ anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
 offset_left = -210.0
-offset_top = -155.0
+offset_top = -180.0
 offset_right = 210.0
-offset_bottom = 155.0
+offset_bottom = 180.0
 grow_horizontal = 2
 grow_vertical = 2
 
@@ -437,7 +437,7 @@ theme_override_constants/separation = 12
 [node name="TestSettingsTitle" type="Label" parent="BattleHUD/Root/PauseOverlay/TestSettingsPanel/TestSettingsMargin/TestSettingsContent"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 22
-text = "测试设置"
+text = "训练场设置"
 horizontal_alignment = 1
 
 [node name="ClearMonstersButton" type="Button" parent="BattleHUD/Root/PauseOverlay/TestSettingsPanel/TestSettingsMargin/TestSettingsContent"]
@@ -451,6 +451,12 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
 text = "重新生成怪物"
+
+[node name="SwitchCharacterButton" type="Button" parent="BattleHUD/Root/PauseOverlay/TestSettingsPanel/TestSettingsMargin/TestSettingsContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+text = "切换角色"
 
 [node name="InfiniteEnergyCheckButton" type="CheckButton" parent="BattleHUD/Root/PauseOverlay/TestSettingsPanel/TestSettingsMargin/TestSettingsContent"]
 unique_name_in_owner = true
@@ -470,6 +476,73 @@ layout_mode = 2
 size_flags_vertical = 3
 
 [node name="TestSettingsBackButton" type="Button" parent="BattleHUD/Root/PauseOverlay/TestSettingsPanel/TestSettingsMargin/TestSettingsContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+text = "返回"
+
+[node name="CharacterSwitchPanel" type="PanelContainer" parent="BattleHUD/Root/PauseOverlay"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(420, 310)
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -210.0
+offset_top = -155.0
+offset_right = 210.0
+offset_bottom = 155.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="CharacterSwitchMargin" type="MarginContainer" parent="BattleHUD/Root/PauseOverlay/CharacterSwitchPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 18
+
+[node name="CharacterSwitchContent" type="VBoxContainer" parent="BattleHUD/Root/PauseOverlay/CharacterSwitchPanel/CharacterSwitchMargin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="CharacterSwitchTitle" type="Label" parent="BattleHUD/Root/PauseOverlay/CharacterSwitchPanel/CharacterSwitchMargin/CharacterSwitchContent"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "切换角色"
+horizontal_alignment = 1
+
+[node name="CharacterSwitchSpacer" type="Control" parent="BattleHUD/Root/PauseOverlay/CharacterSwitchPanel/CharacterSwitchMargin/CharacterSwitchContent"]
+custom_minimum_size = Vector2(0, 8)
+layout_mode = 2
+
+[node name="SwitchCharacterStelleButton" type="Button" parent="BattleHUD/Root/PauseOverlay/CharacterSwitchPanel/CharacterSwitchMargin/CharacterSwitchContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+text = "星"
+
+[node name="SwitchCharacterCaelusButton" type="Button" parent="BattleHUD/Root/PauseOverlay/CharacterSwitchPanel/CharacterSwitchMargin/CharacterSwitchContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+text = "穹"
+
+[node name="SwitchCharacterSilverWolfButton" type="Button" parent="BattleHUD/Root/PauseOverlay/CharacterSwitchPanel/CharacterSwitchMargin/CharacterSwitchContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+text = "银狼"
+
+[node name="CharacterSwitchBottomSpacer" type="Control" parent="BattleHUD/Root/PauseOverlay/CharacterSwitchPanel/CharacterSwitchMargin/CharacterSwitchContent"]
+custom_minimum_size = Vector2(0, 8)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="CharacterSwitchBackButton" type="Button" parent="BattleHUD/Root/PauseOverlay/CharacterSwitchPanel/CharacterSwitchMargin/CharacterSwitchContent"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 42)
 layout_mode = 2

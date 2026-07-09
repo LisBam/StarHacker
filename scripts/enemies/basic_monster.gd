@@ -43,6 +43,24 @@ signal died
 @export_range(1.0, 90.0, 0.5) var avoidance_angle_step_degrees: float = 22.5
 ## 单侧绕障候选数量；取值建议 1 到 8，默认 4，修改会影响怪物绕障能力和每帧检测开销。
 @export_range(1, 12, 1) var avoidance_candidate_count: int = 4
+## 是否启用网格寻路；默认 true，直线被障碍阻挡时会向 GameWorld 请求 A* 路径。
+@export var pathfinding_enabled: bool = true
+## 寻路格子尺寸；取值建议 64 到 160，默认 96，越小路径越细但计算开销越高。
+@export_range(16.0, 512.0, 1.0, "or_greater") var pathfinding_cell_size: float = 96.0
+## 寻路代理半径；取值建议接近怪物碰撞半径，默认 24，让路径与墙体保持安全距离。
+@export_range(0.0, 256.0, 1.0) var pathfinding_agent_radius: float = 24.0
+## 路径重算最短间隔；取值建议大于 0，默认 0.45 秒，修改会影响怪物对移动目标的响应频率。
+@export_range(0.05, 5.0, 0.05) var path_recalculation_min_interval: float = 0.45
+## 路径重算最长间隔；取值应大于等于最短间隔，默认 0.9 秒，怪物会在区间内随机取值以错开路径更新。
+@export_range(0.05, 5.0, 0.05) var path_recalculation_max_interval: float = 0.9
+## 路径目标刷新距离；取值建议大于 0，默认 96，目标移动超过该距离会触发重新寻路。
+@export_range(1.0, 1024.0, 1.0, "or_greater") var path_destination_refresh_distance: float = 96.0
+## 路点到达距离；取值建议略大于怪物半径，默认 28，修改会影响怪物切换到下一个路点的时机。
+@export_range(1.0, 256.0, 1.0) var path_waypoint_arrive_distance: float = 28.0
+## 路径目标随机半径；取值建议 0 到 128，默认 48，让不同怪物绕同一障碍时不完全重合。
+@export_range(0.0, 512.0, 1.0) var path_random_goal_radius: float = 48.0
+## 单次路径最大路点数；取值建议 8 到 128，默认 64，修改会影响远距离寻路缓存长度。
+@export_range(1, 256, 1) var path_max_point_count: int = 64
 ## 击退速度衰减；取值建议大于 0，默认 1600 像素每秒平方，修改会影响怪物受击后滑退持续时间。
 @export_range(1.0, 12000.0, 1.0, "or_greater") var knockback_decay: float = 1600.0
 
@@ -64,17 +82,27 @@ var _wander_wait_remaining: float = 0.0
 var _random: RandomNumberGenerator = RandomNumberGenerator.new()
 ## 当前外部击退速度；取值为 Vector2，默认零向量，修改会影响怪物受击控制效果。
 var _knockback_velocity: Vector2 = Vector2.ZERO
+## 当前缓存路径点；元素为世界坐标 Vector2，默认空数组表示正在直线移动或尚未寻路。
+var _path_points: Array[Vector2] = []
+## 当前路径对应的目标位置；取值为世界坐标，默认零向量，修改会影响是否需要重算路径。
+var _path_goal_position: Vector2 = Vector2.ZERO
+## 路径重算剩余时间；取值大于等于 0，默认 0 表示允许立即重算路径。
+var _path_recalculate_remaining: float = 0.0
+## 绕障侧向偏好；取值为 -1 或 1，默认每只怪物随机，修改会影响左右绕行优先级。
+var _avoidance_side_bias: int = 1
 
 
 func _ready() -> void:
 	current_health = clampf(current_health, 0.0, max_health)
 	_spawn_position = global_position
 	_random.randomize()
+	_avoidance_side_bias = -1 if _random.randi_range(0, 1) == 0 else 1
 	health_changed.emit(current_health, max_health)
 
 
 func _physics_process(delta: float) -> void:
 	_attack_cooldown_remaining = maxf(_attack_cooldown_remaining - delta, 0.0)
+	_path_recalculate_remaining = maxf(_path_recalculate_remaining - delta, 0.0)
 	if not is_instance_valid(_target):
 		_has_target = false
 		_update_wander(delta)
@@ -96,6 +124,7 @@ func _physics_process(delta: float) -> void:
 func set_target(target_node: Node) -> void:
 	_target = target_node as Node2D
 	_has_target = false
+	_clear_navigation_path()
 
 
 func apply_damage(damage: float, source: Node) -> void:
@@ -115,6 +144,7 @@ func _update_target_state(target_distance: float) -> void:
 		_has_target = true
 	elif _has_target and target_distance > vision_range * lose_target_range_multiplier:
 		_has_target = false
+		_clear_navigation_path()
 
 
 func _try_attack_target() -> void:
@@ -171,6 +201,7 @@ func _pick_wander_target() -> void:
 	var wander_distance: float = _random.randf_range(0.0, wander_radius)
 	_wander_target_position = _spawn_position + Vector2.RIGHT.rotated(wander_angle) * wander_distance
 	_has_wander_target = true
+	_clear_navigation_path()
 
 
 func _get_next_wander_wait() -> float:
@@ -256,6 +287,125 @@ func _get_steered_direction_to(destination: Vector2) -> Vector2:
 	# 直接目标偏移；取值为目标点减当前点，默认用于计算期望移动方向。
 	var direct_offset: Vector2 = destination - global_position
 	if direct_offset.is_zero_approx():
+		_clear_navigation_path()
+		return Vector2.ZERO
+
+	# 直接移动方向；取值为当前点指向目标点的单位向量，默认优先尝试直线移动。
+	var direct_direction: Vector2 = direct_offset.normalized()
+	if not _is_direction_blocked(direct_direction):
+		_clear_navigation_path()
+		return direct_direction
+
+	if pathfinding_enabled:
+		return _get_pathfinding_direction_to(destination)
+
+	return _get_local_steered_direction_to(destination)
+
+
+func _get_pathfinding_direction_to(destination: Vector2) -> Vector2:
+	if _should_rebuild_navigation_path(destination):
+		_rebuild_navigation_path(destination)
+
+	_trim_reached_path_points()
+	if _path_points.is_empty():
+		return _get_local_steered_direction_to(destination)
+
+	# 当前路径路点；取值为缓存路径第一个元素，默认作为本帧移动目标。
+	var waypoint: Vector2 = _path_points[0]
+	return _get_local_steered_direction_to(waypoint)
+
+
+func _should_rebuild_navigation_path(destination: Vector2) -> bool:
+	if _path_points.is_empty():
+		return true
+
+	if _path_recalculate_remaining <= 0.0:
+		return true
+
+	return _path_goal_position.distance_to(destination) >= maxf(path_destination_refresh_distance, 1.0)
+
+
+func _rebuild_navigation_path(destination: Vector2) -> void:
+	_path_points.clear()
+	_path_goal_position = destination
+	_path_recalculate_remaining = _get_next_path_recalculation_interval()
+
+	# 寻路服务节点；取值为提供 find_navigation_path 的 GameWorld，默认缺失时回退局部绕障。
+	var navigation_provider: Node = _resolve_navigation_provider()
+	if navigation_provider == null or not navigation_provider.has_method("find_navigation_path"):
+		return
+
+	# 随机化目标位置；取值为目标附近的小偏移点，默认让多只怪物路径不完全重合。
+	var randomized_destination: Vector2 = _get_randomized_path_destination(destination)
+	# 原始路径点；取值来自 GameWorld，默认可能为空数组表示无法寻路。
+	var raw_path_points: Array = navigation_provider.call(
+		"find_navigation_path",
+		global_position,
+		randomized_destination,
+		pathfinding_agent_radius,
+		pathfinding_cell_size,
+		path_max_point_count
+	)
+	# 原始路径点遍历项；取值可能为 Vector2，默认只接收合法世界坐标。
+	for raw_path_point in raw_path_points:
+		if raw_path_point is Vector2:
+			_path_points.append(raw_path_point)
+
+
+func _trim_reached_path_points() -> void:
+	# 路点到达阈值；取值至少为 1，默认用于弹出已经接近的路径点。
+	var arrive_distance: float = maxf(path_waypoint_arrive_distance, 1.0)
+	while not _path_points.is_empty() and global_position.distance_to(_path_points[0]) <= arrive_distance:
+		_path_points.remove_at(0)
+
+
+func _get_next_path_recalculation_interval() -> float:
+	# 标准化最短重算间隔；取值至少 0.05，默认防止每帧大量寻路。
+	var resolved_min_interval: float = maxf(path_recalculation_min_interval, 0.05)
+	# 标准化最长重算间隔；取值至少为最短间隔，默认防止配置反转。
+	var resolved_max_interval: float = maxf(path_recalculation_max_interval, resolved_min_interval)
+	return _random.randf_range(resolved_min_interval, resolved_max_interval)
+
+
+func _get_randomized_path_destination(destination: Vector2) -> Vector2:
+	# 随机半径；取值至少为 0，默认用于控制路径终点抖动范围。
+	var random_radius: float = maxf(path_random_goal_radius, 0.0)
+	if random_radius <= 0.0:
+		return destination
+
+	# 随机角度；取值为 0 到 TAU，默认用于生成终点偏移方向。
+	var random_angle: float = _random.randf_range(0.0, TAU)
+	# 随机距离；取值为 0 到 random_radius，默认用于生成终点偏移长度。
+	var random_distance: float = _random.randf_range(0.0, random_radius)
+	return destination + Vector2.RIGHT.rotated(random_angle) * random_distance
+
+
+func _resolve_navigation_provider() -> Node:
+	# 当前场景节点；取值通常为 GameWorld，默认优先作为寻路服务提供者。
+	var current_scene: Node = get_tree().current_scene
+	if current_scene != null and current_scene.has_method("find_navigation_path"):
+		return current_scene
+
+	# 父级扫描节点；取值从怪物父节点开始向上查找，默认用于兼容怪物挂载层级变化。
+	var parent_node: Node = get_parent()
+	while parent_node != null:
+		if parent_node.has_method("find_navigation_path"):
+			return parent_node
+
+		parent_node = parent_node.get_parent()
+
+	return null
+
+
+func _clear_navigation_path() -> void:
+	_path_points.clear()
+	_path_recalculate_remaining = 0.0
+
+
+func _get_local_steered_direction_to(destination: Vector2) -> Vector2:
+	# 直接目标偏移；取值为目标点减当前点，默认用于计算期望移动方向。
+	var direct_offset: Vector2 = destination - global_position
+	if direct_offset.is_zero_approx():
 		return Vector2.ZERO
 
 	# 直接移动方向；取值为当前点指向目标点的单位向量，默认优先尝试直线移动。
@@ -267,8 +417,10 @@ func _get_steered_direction_to(destination: Vector2) -> Vector2:
 	var angle_step: float = deg_to_rad(maxf(avoidance_angle_step_degrees, 1.0))
 	# 候选阶梯索引；取值为 1 到 avoidance_candidate_count，默认逐步扩大绕障角度。
 	for candidate_index in range(1, avoidance_candidate_count + 1):
-		# 候选方向符号；取值为 -1 和 1，默认左右两侧都尝试绕行。
-		for side in [-1, 1]:
+		# 候选侧向索引；取值为 0 或 1，默认先尝试每只怪物自己的随机偏好侧。
+		for side_index in range(2):
+			# 候选方向符号；取值为 -1 或 1，默认用于左右两侧尝试绕行。
+			var side: int = _avoidance_side_bias if side_index == 0 else -_avoidance_side_bias
 			# 候选方向；取值为直接方向旋转后的单位向量，默认用于避开前方障碍。
 			var candidate_direction: Vector2 = direct_direction.rotated(angle_step * float(candidate_index * side)).normalized()
 			if not _is_direction_blocked(candidate_direction):

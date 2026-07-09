@@ -18,6 +18,10 @@ signal fired(projectile: Node2D)
 @export_range(0.01, 5.0, 0.01) var fire_cooldown: float = 0.16
 ## 枪口缺失时的备用出生距离；取值应大于等于 0，默认 34 让弹体从角色前方出现，修改会影响兜底发射位置。
 @export_range(0.0, 160.0, 1.0) var fallback_muzzle_distance: float = 34.0
+## 枪口碰撞检查半径；取值建议略大于弹体半径，默认 7 像素，修改会影响贴墙射击被阻止的距离。
+@export_range(0.0, 64.0, 0.5) var muzzle_block_check_radius: float = 7.0
+## 枪口阻挡检测掩码；默认检测第 5 层环境墙体，修改会影响哪些物体能阻止子弹生成。
+@export_flags_2d_physics var muzzle_block_collision_mask: int = 16
 ## 弹体父节点路径；默认留空表示挂到当前场景，运行时通常不修改，指定后会影响弹体所在层级和坐标继承。
 @export var projectile_parent_path: NodePath
 
@@ -39,8 +43,8 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	var selected_projectile_scene: PackedScene = _get_weapon_packed_scene(weapon_data, "projectile_scene", projectile_scene)
 	# 本次使用的弹体速度；取值来自武器数据或组件默认值，默认 projectile_speed，修改会影响本次弹体飞行速度。
 	var selected_projectile_speed: float = _get_weapon_float(weapon_data, "projectile_speed", projectile_speed)
-	# 本次使用的弹体射程；取值来自武器数据或弹体默认值，默认 620，修改会影响本次弹体飞行距离。
-	var selected_bullet_range: float = _get_weapon_float(weapon_data, "bullet_range", 620.0)
+	# 本次使用的弹体射程；取值来自武器数据或弹体默认值，默认 340，修改会影响本次弹体飞行距离。
+	var selected_bullet_range: float = _get_weapon_float(weapon_data, "bullet_range", 340.0)
 	# 本次使用的弹体伤害；取值来自武器数据或组件默认值，默认 projectile_damage，修改会影响本次弹体命中伤害。
 	var selected_projectile_damage: float = _get_weapon_float(weapon_data, "ranged_damage", projectile_damage)
 	# 本次使用的射击冷却；取值来自武器数据或组件默认值，默认 fire_cooldown，修改会影响下一次可射击时间。
@@ -49,6 +53,11 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	var selected_impact_force: float = _get_weapon_float(weapon_data, "impact_force", 0.0)
 
 	if selected_projectile_scene == null or _cooldown_remaining > 0.0 or direction.is_zero_approx():
+		return false
+
+	# 本次弹体出生位置；取值为全局坐标 Vector2，默认由枪口或备用距离计算，修改会影响弹体出现地点。
+	var spawn_position: Vector2 = _get_spawn_position(direction)
+	if _is_spawn_blocked(direction, spawn_position):
 		return false
 
 	# 本次射击生成的弹体实例；取值应为 Node2D 或 null，默认由 projectile_scene 实例化，修改会影响发射对象。
@@ -63,8 +72,6 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	if projectile.has_method("set_impact_force"):
 		projectile.call("set_impact_force", selected_impact_force)
 
-	# 本次弹体出生位置；取值为全局坐标 Vector2，默认由枪口或备用距离计算，修改会影响弹体出现地点。
-	var spawn_position: Vector2 = _get_spawn_position(direction)
 	projectile.global_position = spawn_position
 	projectile.global_rotation = direction.angle()
 
@@ -90,6 +97,49 @@ func _get_spawn_position(direction: Vector2) -> Vector2:
 		return _muzzle.global_position
 
 	return global_position + direction.normalized() * fallback_muzzle_distance
+
+
+func _is_spawn_blocked(direction: Vector2, spawn_position: Vector2) -> bool:
+	if muzzle_block_collision_mask == 0:
+		return false
+
+	if _is_muzzle_line_blocked(spawn_position):
+		return true
+
+	return _is_muzzle_area_blocked(direction, spawn_position)
+
+
+func _is_muzzle_line_blocked(spawn_position: Vector2) -> bool:
+	# 枪口线段检测参数；取值为角色中心到枪口位置，默认用于发现枪口已经越过墙体的情况。
+	var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(global_position, spawn_position, muzzle_block_collision_mask)
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+	# 枪口线段命中结果；取值为空字典或包含 collider/position，默认非空表示不允许生成子弹。
+	var hit_result: Dictionary = get_world_2d().direct_space_state.intersect_ray(query)
+	return not hit_result.is_empty()
+
+
+func _is_muzzle_area_blocked(direction: Vector2, spawn_position: Vector2) -> bool:
+	# 检查半径；取值至少为 0，默认用于近似弹体出生时占用的空间。
+	var check_radius: float = maxf(muzzle_block_check_radius, 0.0)
+	if check_radius <= 0.0:
+		return false
+
+	# 枪口碰撞圆形；取值为临时 CircleShape2D，默认检测枪口是否已经在墙体内部。
+	var circle_shape: CircleShape2D = CircleShape2D.new()
+	circle_shape.radius = check_radius
+	# 枪口检测朝向；取值来自攻击方向，默认只用于构建 Transform2D。
+	var check_rotation: float = direction.angle() if not direction.is_zero_approx() else 0.0
+	# 枪口形状查询参数；取值为枪口圆形和环境掩码，默认用于阻止墙内生成弹体。
+	var query: PhysicsShapeQueryParameters2D = PhysicsShapeQueryParameters2D.new()
+	query.shape = circle_shape
+	query.transform = Transform2D(check_rotation, spawn_position)
+	query.collision_mask = muzzle_block_collision_mask
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+	# 枪口形状命中列表；取值为空数组或若干碰撞结果，默认非空表示枪口空间被墙体占用。
+	var hit_results: Array = get_world_2d().direct_space_state.intersect_shape(query, 1)
+	return not hit_results.is_empty()
 
 
 func _resolve_projectile_parent() -> Node:

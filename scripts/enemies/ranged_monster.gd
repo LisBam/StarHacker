@@ -6,16 +6,16 @@ class_name RangedMonster
 
 ## 敌方弹体场景；默认由远程怪物场景指定，必须实例化为 Node2D，修改会影响怪物发射对象。
 @export var projectile_scene: PackedScene
-## 射击距离；取值建议大于保持距离，默认 760 像素，玩家进入该范围且无遮挡时怪物会开火。
-@export_range(1.0, 4000.0, 1.0, "or_greater") var shoot_range: float = 760.0
+## 射击距离；取值建议大于保持距离且不超过弹体射程，默认 500 像素，玩家进入该范围且无遮挡时怪物会开火。
+@export_range(1.0, 4000.0, 1.0, "or_greater") var shoot_range: float = 500.0
 ## 保持距离；取值建议大于攻击距离，默认 260 像素，玩家过近时怪物会后退。
 @export_range(1.0, 2000.0, 1.0, "or_greater") var keep_distance: float = 260.0
 ## 敌方弹体速度；取值建议大于 0，默认 620 像素每秒，修改会影响弹道速度。
 @export_range(1.0, 3000.0, 1.0, "or_greater") var ranged_projectile_speed: float = 620.0
 ## 敌方弹体伤害；取值建议大于等于 0，默认 10，修改会影响玩家被命中后的生命损失。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var ranged_projectile_damage: float = 10.0
-## 敌方弹体射程；取值建议大于 0，默认 1400 像素，修改会影响弹体自动销毁距离。
-@export_range(1.0, 12000.0, 1.0, "or_greater") var ranged_projectile_range: float = 1400.0
+## 敌方弹体射程；取值建议大于 0，默认 520 像素，修改会影响弹体自动销毁距离。
+@export_range(1.0, 12000.0, 1.0, "or_greater") var ranged_projectile_range: float = 520.0
 ## 敌方弹体冲击力；取值建议大于等于 0，默认 90，命中玩家时会造成短距离击退。
 @export_range(0.0, 5000.0, 1.0, "or_greater") var ranged_projectile_impact_force: float = 90.0
 ## 射击冷却；取值应大于 0，默认 1.25 秒，修改会影响远程怪物连续开火频率。

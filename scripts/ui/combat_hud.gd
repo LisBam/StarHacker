@@ -234,6 +234,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		# 当前键盘事件；取值来自输入系统，默认用于识别 E 键和背包动作，修改会影响背包开关响应。
 		var key_event: InputEventKey = event as InputEventKey
 		if key_event.pressed and not key_event.echo and _is_pause_event(key_event):
+			if _close_top_interactive_panel():
+				get_viewport().set_input_as_handled()
+				return
+
 			_toggle_pause_menu()
 			get_viewport().set_input_as_handled()
 			return
@@ -872,13 +876,39 @@ func _should_use_physical_fallback(action_name: StringName) -> bool:
 	if not InputMap.has_action(action_name):
 		return true
 
-	return InputMap.action_get_events(action_name).is_empty()
+	if not InputMap.action_get_events(action_name).is_empty():
+		return false
+
+	return not _is_action_explicitly_unbound(action_name)
+
+
+func _is_action_explicitly_unbound(action_name: StringName) -> bool:
+	# 输入绑定单例；取值为 AutoLoad InputBindings，默认用于区分玩家主动未绑定和 InputMap 配置缺失。
+	var input_bindings: Node = get_tree().root.get_node_or_null("InputBindings")
+	if input_bindings == null or not input_bindings.has_method("is_action_explicitly_unbound"):
+		return false
+
+	return bool(input_bindings.call("is_action_explicitly_unbound", action_name))
+
+
+func _close_top_interactive_panel() -> bool:
+	if _inventory_panel.visible:
+		_set_inventory_visible(false)
+		return true
+
+	if _large_map_overlay.visible:
+		_set_large_map_visible(false)
+		return true
+
+	return false
 
 
 func _toggle_drop_list_enabled() -> void:
 	_drop_list_enabled = not _drop_list_enabled
 	if not _drop_list_enabled:
 		_hide_nearby_drop_panel()
+		_refresh_combat_input_state()
+		return
 
 	_nearby_drop_refresh_remaining = 0.0
 	_refresh_nearby_drop_panel()

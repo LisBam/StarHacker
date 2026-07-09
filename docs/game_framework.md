@@ -40,7 +40,7 @@
 - `pickup_nearby`：F，快速拾取玩家附近最近的一件地面掉落武器
 - `toggle_drop_list`：G，常驻开启或关闭附近掉落物列表自动显示
 
-`InputBindings` 会在项目启动时记录 InputMap 默认值，并从 `user://input_bindings.cfg` 读取玩家自定义绑定。主菜单设置和暂停设置都会动态显示“按键绑定”面板，玩家点击操作对应按钮后，按下新的键盘键或鼠标按钮即可覆盖该操作的主绑定；如果新绑定与其它可配置操作重复，旧操作会被清空并以“未绑定”状态保存，避免同一个输入同时触发多个操作。点击“恢复默认”会把所有可配置操作恢复到项目默认输入。`PlayerInputComponent` 仍保留物理键兜底，但只有当对应 InputMap 动作缺失或事件为空时才启用，因此玩家完成自定义绑定后，旧默认按键不会继续触发同一操作。
+`InputBindings` 会在项目启动时记录 InputMap 默认值，并从 `user://input_bindings.cfg` 读取玩家自定义绑定。主菜单设置和暂停设置都会动态显示“按键绑定”面板，玩家点击操作对应按钮后，按下新的键盘键或鼠标按钮即可覆盖该操作的主绑定；如果新绑定与其它可配置操作重复，旧操作会被清空并以“未绑定”状态保存，避免同一个输入同时触发多个操作。未绑定状态会写入 `EVENT_TYPE_UNBOUND` 并记录到显式未绑定缓存，玩家输入层和 HUD 会识别该状态，不会再启用默认物理键兜底。点击“恢复默认”会把所有可配置操作恢复到项目默认输入。`PlayerInputComponent` 仍保留物理键兜底，但只在对应 InputMap 动作缺失，或事件为空且不是玩家显式未绑定时启用，因此玩家完成自定义绑定后，旧默认按键不会继续触发同一操作。
 
 数字键切换通过 `max_direct_ranged_slots` 控制可直接访问的远程槽数量，默认值为 2。扩展远程槽位时，需要同步提高 `EquipmentComponent.ranged_slot_count` 和 `PlayerInputComponent.max_direct_ranged_slots`。
 
@@ -75,11 +75,11 @@
 
 - `quantum_pistol.tres`：量子手枪，远程武器，低能耗、稳定射速。
 - `pulse_rifle.tres`：脉冲步枪，远程武器，高射速、高能耗。
-- `phase_blade.tres`：相位刃，近战武器，右键消耗能量开启近战命中框。
+- `phase_blade.tres`：相位刃，近战武器，右键消耗能量开启近战命中框，默认前坐力为 140。
 - `ion_smg.tres`：离子冲锋枪，远程测试武器，高射速、低单发伤害。
 - `rail_cannon.tres`：磁轨炮，远程测试武器，高伤害、长冷却。
 - `scatter_blaster.tres`：散射爆能枪，远程测试武器，中等射速和中等消耗。
-- `quantum_dagger.tres`：量子短刃，近战测试武器，低消耗、短冷却。
+- `quantum_dagger.tres`：量子短刃，近战测试武器，低消耗、短冷却，默认前坐力为 140。
 
 当前通用玩家预制体默认装备两把远程武器和一把近战武器：
 
@@ -87,13 +87,13 @@
 - 远程槽 2：脉冲步枪
 - 近战槽：相位刃
 
-远程攻击流程为：玩家输入左键 -> `PlayerController` 读取当前远程武器 -> 检查 `CombatStatsComponent` 能量是否足够 -> `RangedAttackComponent.try_attack(direction, weapon_data)` 成功生成弹体 -> 弹体获得武器 `bullet_range`、`impact_force`、速度和伤害 -> 玩家受到 `recoil_force` 反方向后坐力 -> 扣除武器 `energy_cost`。
+远程攻击流程为：玩家输入左键 -> `PlayerController` 读取当前远程武器 -> 检查 `CombatStatsComponent` 能量是否足够 -> `RangedAttackComponent.try_attack(direction, weapon_data)` 成功生成弹体 -> 弹体获得武器 `bullet_range`、`impact_force`、速度和伤害 -> 玩家受到 `recoil_force` 反方向后坐力和可选 `front_recoil_force` 正方向前坐力 -> 扣除武器 `energy_cost`。
 
-近战攻击流程为：玩家输入右键 -> `PlayerController` 读取当前近战武器 -> 检查能量是否足够 -> `MeleeAttackComponent.try_attack(direction, weapon_data)` 成功开启命中框 -> 命中怪物时按武器 `impact_force` 击退，命中敌方子弹时直接消除 -> 扣除武器 `energy_cost`。
+近战攻击流程为：玩家输入右键 -> `PlayerController` 读取当前近战武器 -> 检查能量是否足够 -> `MeleeAttackComponent.try_attack(direction, weapon_data)` 成功开启命中框 -> 玩家按 `front_recoil_force` 向攻击方向获得前坐力反馈 -> 命中怪物时按武器 `impact_force` 击退，命中敌方子弹时直接消除 -> 扣除武器 `energy_cost`。
 
-战斗反馈流程为：玩家射击成功后，`PlayerController` 会按武器 `recoil_force * fire_shake_per_recoil` 向 `CombatCamera` 累加屏幕震动；玩家受到伤害时，会按伤害值和 `minimum_damage_shake` 计算受击震动。玩家和怪物受击时生成短促 `CombatBurstEffect`，生命归零时生成更大的死亡爆发特效。
+战斗反馈流程为：玩家成功使用武器后，`PlayerController` 会按武器 `recoil_force * fire_shake_per_recoil` 和 `front_recoil_force * fire_shake_per_recoil * 0.5` 向 `CombatCamera` 累加屏幕震动；玩家受到伤害时，会先检查 `damage_interval`，默认受伤后的 0.2 秒内忽略新的伤害、击退和受伤震动，再按伤害值和 `minimum_damage_shake` 计算本次受击震动。玩家和怪物受击时生成短促 `CombatBurstEffect`，生命归零时生成更大的死亡爆发特效。
 
-武器新增三项控制相关属性：`bullet_range` 仅远程武器使用，用于覆盖弹体最大飞行距离，未配置时兜底为 340 像素；`recoil_force` 表示开火后坐力，会把玩家向射击反方向推开；`impact_force` 表示命中冲击力，怪物会按自身韧性折算击退强度。当前远程测试武器采用短射程默认值，避免玩家在大地图上过早跨屏清怪：手枪 340、步枪 420、冲锋枪 280、磁轨炮 520、散射爆能枪 260。
+武器新增四项控制相关属性：`bullet_range` 仅远程武器使用，用于覆盖弹体最大飞行距离，未配置时兜底为 340 像素；`recoil_force` 表示开火后坐力，会把玩家向射击反方向推开；`front_recoil_force` 表示前坐力，会把玩家向攻击方向推开，适合近战突进或特殊枪械反馈；`impact_force` 表示命中冲击力，怪物会按自身韧性折算击退强度。当前远程测试武器采用短射程默认值，避免玩家在大地图上过早跨屏清怪：手枪 340、步枪 420、冲锋枪 280、磁轨炮 520、散射爆能枪 260。
 
 移动能力流程为：玩家按住 Shift 且存在移动输入时，`PlayerController` 每帧按 `sprint_energy_cost_per_second * delta` 扣除能量，并把本帧移动速度倍率提升到 `sprint_speed_multiplier`；玩家按下 Space 且当前存在移动输入时，先扣除 `dodge_energy_cost`，再按 `dodge_distance / dodge_duration` 朝当前移动方向突进。背包打开时战斗输入被锁定，疾跑和闪避也不会触发能量消耗。
 
@@ -103,15 +103,15 @@
 
 背包通过 E 键打开或关闭。背包打开时，`CombatHud` 会通过 `PlayerInputComponent.set_combat_input_enabled(false)` 禁用射击、近战和切换武器，避免拖拽装备时误触战斗输入；WASD 移动不受影响。
 
-背包界面采用左右分栏：左侧是当前装备的远程槽和近战槽，右侧是背包内未装备的武器。右侧提供“全部”“近战”“远程”分页筛选，背包物品槽第一行直接显示武器类型，避免把近战和远程武器混淆。鼠标悬停在任意有武器的槽位上时，会显示武器名称、类型、说明、能量消耗、后坐力、冲击力，以及远程或近战专属参数。
+背包界面采用左右分栏：左侧是当前装备的远程槽和近战槽，右侧是背包内未装备的武器。右侧提供“全部”“近战”“远程”分页筛选，背包物品槽第一行直接显示武器类型，避免把近战和远程武器混淆。鼠标悬停在任意有武器的槽位上时，会显示武器名称、类型、说明、能量消耗、冲击力，以及远程或近战专属参数；后坐力和前坐力只显示数值大于 0 的项，避免近战武器显示无意义的后坐力或远程武器显示无意义的前坐力。
 
 装备和背包使用单实例流转规则：一把武器资源同一时间只能存在于一个位置。右侧背包武器拖到左侧装备槽后，会从背包列表移除；如果目标装备槽已有武器，旧武器会回到原背包位置。左侧装备拖回右侧背包的空白区域或任意背包物品上都会卸下并插入背包；背包武器之间拖拽会移动原物品顺序，不会复制资源；远程装备槽之间拖拽会移动或交换同一个武器引用。
 
-地面掉落物使用同一套武器资源流转规则。怪物死亡时，`GameWorld` 会读取该怪物的 `weapon_drop_chance`，默认 0.03 表示 3% 概率从 `weapon_drop_table` 随机复制一把武器并生成 `WeaponDrop`。掉落物默认保持静止，不再播放上下浮动动画。玩家靠近地面武器时，HUD 左侧会显示附近掉落物列表；列表只在附近掉落物内容变化时重建按钮，鼠标悬停时也会暂停刷新，点击列表项会在鼠标按下时立即拾取指定武器，避免按钮重建导致点击失效。按 F 会拾取最近的一件，即使掉落物列表被关闭也可使用。鼠标悬停或点击掉落物列表时，HUD 会临时禁用射击、近战和切枪输入，避免点击拾取时触发开火。按 G 会常驻开启或关闭掉落物列表自动显示；关闭后，靠近掉落物不会自动展开列表，用于降低战斗中误触 UI 的概率。背包打开时，把右侧背包武器或左侧已装备武器拖到背包面板外，会从原位置移除该武器并在玩家附近生成地面掉落物；如果世界掉落生成失败，系统会把武器回滚到原背包位置或原装备槽。
+地面掉落物使用同一套武器资源流转规则。怪物死亡时，`GameWorld` 会读取该怪物的 `weapon_drop_chance`，默认 0.03 表示 3% 概率从 `weapon_drop_table` 随机复制一把武器并生成 `WeaponDrop`。掉落物默认保持静止，不再播放上下浮动动画。玩家靠近地面武器时，HUD 左侧会显示附近掉落物列表；列表只在附近掉落物内容变化时重建按钮，鼠标悬停时也会暂停刷新，点击列表项会在鼠标按下时立即拾取指定武器，避免按钮重建导致点击失效。按 F 会拾取最近的一件，即使掉落物列表被关闭也可使用。鼠标悬停或点击掉落物列表时，HUD 会临时禁用射击、近战和切枪输入，避免点击拾取时触发开火。按 G 会常驻开启或关闭掉落物列表自动显示；关闭后，HUD 会隐藏整个附近掉落物面板和标题，靠近掉落物也不会自动展开列表，用于降低战斗中误触 UI 的概率。背包打开时，把右侧背包武器或左侧已装备武器拖到背包面板外，会从原位置移除该武器并在玩家附近生成地面掉落物；如果世界掉落生成失败，系统会把武器回滚到原背包位置或原装备槽。
 
 ## 暂停与设置
 
-ESC 会打开战斗暂停菜单，并通过 `get_tree().paused` 暂停游戏世界。暂停菜单提供“继续游戏”“设置”“返回主菜单”，右侧会以正方形区域显示与 M 键大地图同源的完整地图和迷雾。返回主菜单前会先解除暂停，再切换到 `res://scenes/ui/main_menu.tscn`。
+ESC 会优先关闭当前打开的交互界面：背包打开时关闭背包，大地图打开时关闭大地图；没有这些界面时才打开战斗暂停菜单，并通过 `get_tree().paused` 暂停游戏世界。暂停菜单提供“继续游戏”“设置”“返回主菜单”，右侧会以正方形区域显示与 M 键大地图同源的完整地图和迷雾。返回主菜单前会先解除暂停，再切换到 `res://scenes/ui/main_menu.tscn`。
 
 玩家生命值降到 0 后，`CombatStatsComponent.died` 会通知 `CombatHud` 进入死亡状态。死亡状态会关闭背包、大地图和暂停菜单，暂停场景树，禁用战斗输入，并显示“角色死亡”提示和“返回主菜单”按钮；玩家只能通过该按钮解除暂停并返回主菜单。
 
@@ -181,7 +181,7 @@ ESC 会打开战斗暂停菜单，并通过 `get_tree().paused` 暂停游戏世�
 
 - 移动：`max_speed`、`acceleration`、`friction`、`stop_threshold`
 - 玩家移动能力：`sprint_speed_multiplier`、`sprint_energy_cost_per_second`、`dodge_energy_cost`、`dodge_distance`、`dodge_duration`、`knockback_decay`
-- 玩家战斗反馈：`camera_path`、`fire_shake_per_recoil`、`damage_shake_per_damage`、`minimum_damage_shake`、`hit_effect_color`、`death_effect_color`
+- 玩家战斗反馈：`camera_path`、`fire_shake_per_recoil`、`damage_shake_per_damage`、`minimum_damage_shake`、`damage_interval`、`hit_effect_color`、`death_effect_color`
 - 战斗相机：`shake_decay`、`max_shake_offset`、`max_shake_strength`
 - 远程攻击：`projectile_scene`、`projectile_speed`、`projectile_damage`、`fire_cooldown`、`fallback_muzzle_distance`、`muzzle_block_check_radius`、`muzzle_block_collision_mask`、`projectile_parent_path`
 - 近战攻击：`damage`、`cooldown_duration`、`active_duration`、`rotation_offset`
@@ -195,7 +195,7 @@ ESC 会打开战斗暂停菜单，并通过 `get_tree().paused` 暂停游戏世�
 - 掉落物：`drop_parent_path`、`weapon_drop_scene`、`weapon_drop_table`、`dropped_weapon_scatter_radius`、`weapon_data`、`pickup_radius`、`bob_amplitude`、`bob_speed`
 - 环境生成：`environment_parent_path`、`obstacle_scenes`、`obstacle_spawn_count`、`obstacle_spawn_min_distance_from_player`、`obstacle_spawn_edge_margin`、`obstacle_spawn_min_spacing`、`obstacle_spawn_attempts_per_item`、`obstacle_scale_min`、`obstacle_scale_max`
 - 角色占位属性：`stelle_max_health`、`stelle_max_energy`、`stelle_move_speed`、`caelus_max_health`、`caelus_max_energy`、`caelus_move_speed`、`silver_wolf_max_health`、`silver_wolf_max_energy`、`silver_wolf_move_speed`
-- 武器数据：`weapon_type`、`energy_cost`、`projectile_speed`、`bullet_range`、`ranged_damage`、`ranged_cooldown`、`recoil_force`、`impact_force`、`melee_damage`、`melee_cooldown`、`melee_active_duration`
+- 武器数据：`weapon_type`、`energy_cost`、`projectile_speed`、`bullet_range`、`ranged_damage`、`ranged_cooldown`、`recoil_force`、`front_recoil_force`、`impact_force`、`melee_damage`、`melee_cooldown`、`melee_active_duration`
 - 主菜单入口：`character_select_scene_path`
 - 角色选择：`game_scene_path`、`main_menu_scene_path`、`stat_bar_maximum`、`speed_bar_maximum`
 - 输入绑定：`SAVE_PATH`、`EVENT_TYPE_UNBOUND`、`_action_entries`

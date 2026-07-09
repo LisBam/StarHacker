@@ -259,10 +259,15 @@ func _get_weapon_tooltip_text() -> String:
 	var energy_cost: float = maxf(float(weapon_data.get("energy_cost")), 0.0)
 	# 武器后坐力；取值来自资源 recoil_force 字段，默认 0 表示不开火后推。
 	var recoil_force: float = maxf(float(weapon_data.get("recoil_force")), 0.0)
+	# 武器前坐力；取值来自资源 front_recoil_force 字段，默认 0 表示不向攻击方向推动使用者。
+	var front_recoil_force: float = maxf(float(weapon_data.get("front_recoil_force")), 0.0)
 	# 武器冲击力；取值来自资源 impact_force 字段，默认 0 表示不击退目标。
 	var impact_force: float = maxf(float(weapon_data.get("impact_force")), 0.0)
 	tooltip_lines.append("能量消耗：%d" % roundi(energy_cost))
-	tooltip_lines.append("后坐力：%d" % roundi(recoil_force))
+	if recoil_force > 0.0:
+		tooltip_lines.append("后坐力：%d" % roundi(recoil_force))
+	if front_recoil_force > 0.0:
+		tooltip_lines.append("前坐力：%d" % roundi(front_recoil_force))
 	tooltip_lines.append("冲击力：%d" % roundi(impact_force))
 
 	if weapon_type == "ranged":

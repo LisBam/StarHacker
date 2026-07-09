@@ -37,6 +37,8 @@ var _action_entries: Array[Dictionary] = [
 ]
 ## 默认输入事件缓存；键为动作名，值为 InputEvent 数组，用于恢复默认绑定。
 var _default_events_by_action: Dictionary = {}
+## 显式未绑定动作缓存；键为动作名字符串，值为 true，用于阻止空 InputMap 动作继续走物理默认键兜底。
+var _explicitly_unbound_actions: Dictionary = {}
 
 
 func _ready() -> void:
@@ -67,6 +69,10 @@ func get_action_display_text(action_name: StringName) -> String:
 		return "未绑定"
 
 	return get_event_display_text(events[0] as InputEvent)
+
+
+func is_action_explicitly_unbound(action_name: StringName) -> bool:
+	return bool(_explicitly_unbound_actions.get(str(action_name), false))
 
 
 func get_event_display_text(event: InputEvent) -> String:
@@ -100,12 +106,14 @@ func rebind_action(action_name: StringName, event: InputEvent) -> bool:
 	_erase_event_from_other_actions(action_name, normalized_event)
 	InputMap.action_erase_events(action_name)
 	InputMap.action_add_event(action_name, normalized_event)
+	_set_action_explicitly_unbound(action_name, false)
 	_save_bindings()
 	bindings_changed.emit()
 	return true
 
 
 func reset_to_defaults() -> void:
+	_explicitly_unbound_actions.clear()
 	# 默认绑定动作名遍历项；取值为 _default_events_by_action 的键，默认逐项恢复项目启动时的 InputMap。
 	for raw_action_name in _default_events_by_action.keys():
 		# 动作名；取值为 StringName，默认用于访问 InputMap。
@@ -167,6 +175,7 @@ func _load_saved_bindings() -> void:
 
 		if _is_serialized_unbound_event(serialized_event):
 			InputMap.action_erase_events(action_name)
+			_set_action_explicitly_unbound(action_name, true)
 			continue
 
 		# 还原事件；取值为 InputEvent 或 null，默认 null 表示配置不可用。
@@ -176,6 +185,7 @@ func _load_saved_bindings() -> void:
 
 		InputMap.action_erase_events(action_name)
 		InputMap.action_add_event(action_name, restored_event)
+		_set_action_explicitly_unbound(action_name, false)
 
 
 func _save_bindings() -> void:
@@ -193,9 +203,11 @@ func _save_bindings() -> void:
 		# 当前事件列表；元素为 InputEvent，默认保存第一个主绑定。
 		var events: Array = InputMap.action_get_events(action_name)
 		if events.is_empty() or not (events[0] is InputEvent):
+			_set_action_explicitly_unbound(action_name, true)
 			config_file.set_value("bindings", action_name_string, _serialize_unbound_event())
 			continue
 
+		_set_action_explicitly_unbound(action_name, false)
 		config_file.set_value("bindings", action_name_string, _serialize_event(events[0] as InputEvent))
 
 	config_file.save(SAVE_PATH)
@@ -239,9 +251,14 @@ func _erase_event_from_other_actions(target_action_name: StringName, event: Inpu
 		# 当前动作事件列表；元素为 InputEvent，默认遍历副本并删除与新绑定完全相同的事件。
 		var existing_events: Array = InputMap.action_get_events(action_name)
 		# 既有事件遍历项；取值为 InputEvent 或其他对象，默认只比较可识别输入事件。
+		var erased_event: bool = false
 		for existing_event in existing_events:
 			if existing_event is InputEvent and _events_match(existing_event as InputEvent, event):
 				InputMap.action_erase_event(action_name, existing_event as InputEvent)
+				erased_event = true
+
+		if erased_event and InputMap.action_get_events(action_name).is_empty():
+			_set_action_explicitly_unbound(action_name, true)
 
 
 func _events_match(first_event: InputEvent, second_event: InputEvent) -> bool:
@@ -274,6 +291,15 @@ func _get_key_event_identity(key_event: InputEventKey) -> Key:
 
 func _is_key_event_modifier(key_event: InputEventKey, modifier_key: Key) -> bool:
 	return key_event.physical_keycode == modifier_key or key_event.keycode == modifier_key
+
+
+func _set_action_explicitly_unbound(action_name: StringName, unbound: bool) -> void:
+	# 动作名字符串；取值为 StringName 转换结果，默认作为显式未绑定缓存键。
+	var action_name_string: String = str(action_name)
+	if unbound:
+		_explicitly_unbound_actions[action_name_string] = true
+	else:
+		_explicitly_unbound_actions.erase(action_name_string)
 
 
 func _serialize_event(event: InputEvent) -> Dictionary:

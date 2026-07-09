@@ -199,7 +199,19 @@ func _should_use_physical_fallback(action_name: StringName) -> bool:
 	if not InputMap.has_action(action_name):
 		return true
 
-	return InputMap.action_get_events(action_name).is_empty()
+	if not InputMap.action_get_events(action_name).is_empty():
+		return false
+
+	return not _is_action_explicitly_unbound(action_name)
+
+
+func _is_action_explicitly_unbound(action_name: StringName) -> bool:
+	# 输入绑定单例；取值为 AutoLoad InputBindings，默认用于区分玩家主动未绑定和 InputMap 配置缺失。
+	var input_bindings: Node = get_tree().root.get_node_or_null("InputBindings")
+	if input_bindings == null or not input_bindings.has_method("is_action_explicitly_unbound"):
+		return false
+
+	return bool(input_bindings.call("is_action_explicitly_unbound", action_name))
 
 
 func _should_use_direct_slot_fallback(slot_index: int) -> bool:

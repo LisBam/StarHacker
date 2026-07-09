@@ -29,6 +29,8 @@ class_name WeaponData
 @export_range(0.01, 5.0, 0.01) var ranged_cooldown: float = 0.16
 ## 武器后坐力；取值建议大于等于 0，默认 0 表示不推动使用者，远程开火时会把玩家向反方向推开。
 @export_range(0.0, 3000.0, 1.0, "or_greater") var recoil_force: float = 0.0
+## 武器前坐力；取值建议大于等于 0，默认 0 表示不向攻击方向推动使用者，适合近战突进或特殊枪械反馈，屏幕震动按后坐力的一半换算。
+@export_range(0.0, 3000.0, 1.0, "or_greater") var front_recoil_force: float = 0.0
 ## 武器冲击力；取值建议大于等于 0，默认 0 表示不造成击退，命中目标时会按目标韧性折算控制效果。
 @export_range(0.0, 5000.0, 1.0, "or_greater") var impact_force: float = 0.0
 ## 近战伤害；取值建议大于等于 0，默认 35，修改会影响近战命中后的伤害值。

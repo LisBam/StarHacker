@@ -55,24 +55,24 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		# 当前鼠标按钮事件；取值来自本帧输入事件强转，默认由事件系统提供，修改会影响左右键状态解析。
 		var mouse_event: InputEventMouseButton = event as InputEventMouseButton
-		if mouse_event.button_index == MOUSE_BUTTON_LEFT:
+		if mouse_event.button_index == MOUSE_BUTTON_LEFT and _should_use_physical_fallback(fire_action):
 			_left_mouse_down = mouse_event.pressed
-		elif mouse_event.button_index == MOUSE_BUTTON_RIGHT and mouse_event.pressed:
+		elif mouse_event.button_index == MOUSE_BUTTON_RIGHT and mouse_event.pressed and _should_use_physical_fallback(melee_action):
 			_right_mouse_requested = true
-		elif mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP and mouse_event.pressed:
+		elif mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP and mouse_event.pressed and _should_use_physical_fallback(switch_ranged_previous_action):
 			_ranged_cycle_request -= 1
-		elif mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN and mouse_event.pressed:
+		elif mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN and mouse_event.pressed and _should_use_physical_fallback(switch_ranged_next_action):
 			_ranged_cycle_request += 1
 	elif event is InputEventKey:
 		# 当前键盘事件；取值来自本帧输入事件强转，默认由事件系统提供，修改会影响数字键切枪解析。
 		var key_event: InputEventKey = event as InputEventKey
 		if key_event.pressed and not key_event.echo:
-			if key_event.physical_keycode == KEY_SPACE:
+			if key_event.physical_keycode == KEY_SPACE and _should_use_physical_fallback(dodge_action):
 				_dodge_requested = true
 
 			# 数字键对应远程槽索引；取值为 -1 或 0 到 8，默认由物理键位计算，修改会影响快捷槽映射。
 			var slot_index: int = _get_ranged_slot_index_from_key(key_event.physical_keycode)
-			if slot_index >= 0 and slot_index < max_direct_ranged_slots:
+			if _should_use_direct_slot_fallback(slot_index):
 				_ranged_slot_request = slot_index
 
 
@@ -82,13 +82,13 @@ func get_movement_vector() -> Vector2:
 	# 垂直输入合成值；取值范围通常为 -1 到 1，默认 0 表示无上下输入，修改会影响返回移动方向的 Y 分量。
 	var vertical: float = 0.0
 
-	if _is_action_pressed(move_left_action) or Input.is_physical_key_pressed(KEY_A):
+	if _is_action_pressed(move_left_action) or (_should_use_physical_fallback(move_left_action) and Input.is_physical_key_pressed(KEY_A)):
 		horizontal -= 1.0
-	if _is_action_pressed(move_right_action) or Input.is_physical_key_pressed(KEY_D):
+	if _is_action_pressed(move_right_action) or (_should_use_physical_fallback(move_right_action) and Input.is_physical_key_pressed(KEY_D)):
 		horizontal += 1.0
-	if _is_action_pressed(move_up_action) or Input.is_physical_key_pressed(KEY_W):
+	if _is_action_pressed(move_up_action) or (_should_use_physical_fallback(move_up_action) and Input.is_physical_key_pressed(KEY_W)):
 		vertical -= 1.0
-	if _is_action_pressed(move_down_action) or Input.is_physical_key_pressed(KEY_S):
+	if _is_action_pressed(move_down_action) or (_should_use_physical_fallback(move_down_action) and Input.is_physical_key_pressed(KEY_S)):
 		vertical += 1.0
 
 	return Vector2(horizontal, vertical).normalized()
@@ -107,7 +107,7 @@ func is_fire_requested() -> bool:
 	if not _combat_input_enabled:
 		return false
 
-	return _left_mouse_down or _is_action_pressed(fire_action) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	return _left_mouse_down or _is_action_pressed(fire_action) or (_should_use_physical_fallback(fire_action) and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT))
 
 
 func consume_melee_request() -> bool:
@@ -125,7 +125,7 @@ func is_sprint_pressed() -> bool:
 	if not _combat_input_enabled:
 		return false
 
-	return _is_action_pressed(sprint_action) or Input.is_physical_key_pressed(KEY_SHIFT) or Input.is_key_pressed(KEY_SHIFT)
+	return _is_action_pressed(sprint_action) or (_should_use_physical_fallback(sprint_action) and (Input.is_physical_key_pressed(KEY_SHIFT) or Input.is_key_pressed(KEY_SHIFT)))
 
 
 func consume_dodge_request() -> bool:
@@ -193,6 +193,25 @@ func _is_action_pressed(action_name: StringName) -> bool:
 
 func _is_action_just_pressed(action_name: StringName) -> bool:
 	return InputMap.has_action(action_name) and Input.is_action_just_pressed(action_name)
+
+
+func _should_use_physical_fallback(action_name: StringName) -> bool:
+	if not InputMap.has_action(action_name):
+		return true
+
+	return InputMap.action_get_events(action_name).is_empty()
+
+
+func _should_use_direct_slot_fallback(slot_index: int) -> bool:
+	if slot_index < 0 or slot_index >= max_direct_ranged_slots:
+		return false
+
+	if slot_index == 0:
+		return _should_use_physical_fallback(switch_ranged_1_action)
+	if slot_index == 1:
+		return _should_use_physical_fallback(switch_ranged_2_action)
+
+	return false
 
 
 func _get_ranged_slot_index_from_key(physical_keycode: Key) -> int:

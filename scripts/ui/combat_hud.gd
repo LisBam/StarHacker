@@ -7,6 +7,8 @@ class_name CombatHud
 
 ## 可拖拽武器槽控件脚本；默认预加载本项目 UI 控件，修改会影响所有装备槽和背包槽的生成方式。
 const WEAPON_SLOT_CONTROL_SCRIPT: Script = preload("res://scripts/ui/weapon_slot_control.gd")
+## 按键绑定面板脚本；默认用于暂停设置中动态创建可重绑定操作列表。
+const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_panel.gd")
 ## 背包全部分页标识；默认显示所有背包武器，修改会影响筛选按钮与背包网格过滤。
 const INVENTORY_FILTER_ALL: String = "all"
 ## 背包远程分页标识；默认匹配武器资源 weapon_type 的 ranged 值，修改会影响远程筛选页。
@@ -19,6 +21,8 @@ const CHARACTER_STELLE: String = "stelle"
 const CHARACTER_CAEULUS: String = "caelus"
 ## 银狼角色标识；默认与 SessionState 和 GameWorld 保持一致，修改会影响训练场切换角色目标。
 const CHARACTER_SILVER_WOLF: String = "silver_wolf"
+## 掉落物列表鼠标交互后的战斗输入抑制时长；默认 0.18 秒，用于覆盖鼠标按下到松开的短暂窗口。
+const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
 
 ## 玩家节点路径；默认指向同一游戏世界下的 Player，必须解析到玩家根节点，运行时通常不修改。
 @export var player_path: NodePath = ^"../Player"
@@ -32,6 +36,8 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export var toggle_large_map_action: StringName = &"toggle_large_map"
 ## 快速拾取输入动作名；默认 pickup_nearby 对应 F 键，运行时通常不修改，改名会影响附近掉落物快速拾取。
 @export var pickup_action: StringName = &"pickup_nearby"
+## 掉落物列表开关输入动作名；默认 toggle_drop_list 对应 G 键，运行时通常不修改，改名会影响自动展开开关。
+@export var toggle_drop_list_action: StringName = &"toggle_drop_list"
 ## 主菜单场景路径；默认返回项目主菜单，必须填写 tscn 资源，运行时通常不修改，改错会导致暂停菜单返回失败。
 @export_file("*.tscn") var main_menu_scene_path: String = "res://scenes/ui/main_menu.tscn"
 ## 远程装备槽最小尺寸；默认 80x54 适合底部低遮挡显示，运行时通常不修改，扩展槽数量时可调小。
@@ -83,6 +89,10 @@ var _master_bus_index: int = -1
 var _is_training_mode: bool = false
 ## 玩家是否已经死亡；取值为 true/false，默认 false，生命归零后用于阻止继续打开暂停、背包和大地图。
 var _is_player_dead: bool = false
+## 掉落物列表是否允许自动显示；取值为 true/false，默认 true，按 G 可切换以避免战斗时误触列表。
+var _drop_list_enabled: bool = true
+## 掉落物列表点击后的战斗输入抑制时间；取值大于等于 0，默认 0 表示不额外阻止射击。
+var _drop_list_combat_suppression_remaining: float = 0.0
 ## 附近掉落物面板缓存；默认运行时创建，显示玩家可拾取的地面武器列表。
 var _nearby_drop_panel: PanelContainer
 ## 附近掉落物列表容器缓存；默认运行时创建，按距离生成拾取按钮。
@@ -91,6 +101,10 @@ var _nearby_drop_list: VBoxContainer
 var _nearby_drop_buttons: Array[Button] = []
 ## 附近掉落物刷新剩余时间；取值大于等于 0，默认 0 表示下一帧可刷新列表。
 var _nearby_drop_refresh_remaining: float = 0.0
+## 当前掉落物列表签名；元素为掉落物实例 ID，默认用于避免列表内容未变化时频繁重建按钮。
+var _nearby_drop_signature: Array[int] = []
+## 暂停设置按键绑定面板缓存；默认运行时创建，显示并修改 InputMap 的玩家操作绑定。
+var _pause_key_binding_panel: Control
 
 ## HUD 根控件缓存；默认绑定 Root，用于动态挂载附近掉落物面板。
 @onready var _root_control: Control = get_node("Root") as Control
@@ -166,6 +180,8 @@ var _nearby_drop_refresh_remaining: float = 0.0
 @onready var _character_switch_back_button: Button = %CharacterSwitchBackButton
 ## 暂停设置主音量滑条缓存；默认绑定 PauseMasterVolumeSlider，取值 0 到 100，修改会影响全局 Master 音量。
 @onready var _pause_master_volume_slider: HSlider = %PauseMasterVolumeSlider
+## 暂停设置内容容器缓存；默认通过场景路径绑定，用于动态挂载按键绑定面板。
+@onready var _pause_settings_content: VBoxContainer = get_node("Root/PauseOverlay/PauseSettingsPanel/PauseSettingsMargin/PauseSettingsContent") as VBoxContainer
 ## 暂停设置主音量数值文本缓存；默认绑定 PauseMasterVolumeValueLabel，显示滑条当前百分比。
 @onready var _pause_master_volume_value_label: Label = %PauseMasterVolumeValueLabel
 ## 暂停设置返回按钮缓存；默认绑定 PauseSettingsBackButton，点击后返回暂停主菜单。
@@ -197,14 +213,21 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_refresh_cooldown_overlays()
+	_drop_list_combat_suppression_remaining = maxf(_drop_list_combat_suppression_remaining - delta, 0.0)
 	_nearby_drop_refresh_remaining = maxf(_nearby_drop_refresh_remaining - delta, 0.0)
 	if _nearby_drop_refresh_remaining <= 0.0:
 		_nearby_drop_refresh_remaining = maxf(nearby_drop_refresh_interval, 0.01)
-		_refresh_nearby_drop_panel()
+		if not _is_pointer_inside_nearby_drop_panel():
+			_refresh_nearby_drop_panel()
+
+	_refresh_combat_input_state()
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _is_player_dead:
+		return
+
+	if _is_key_binding_capture_active():
 		return
 
 	if event is InputEventKey:
@@ -225,6 +248,11 @@ func _unhandled_input(event: InputEvent) -> void:
 
 		if key_event.pressed and not key_event.echo and _is_toggle_large_map_event(key_event):
 			_toggle_large_map()
+			get_viewport().set_input_as_handled()
+			return
+
+		if key_event.pressed and not key_event.echo and _is_toggle_drop_list_event(key_event):
+			_toggle_drop_list_enabled()
 			get_viewport().set_input_as_handled()
 			return
 
@@ -469,6 +497,7 @@ func _build_nearby_drop_panel() -> void:
 	_nearby_drop_panel = PanelContainer.new()
 	_nearby_drop_panel.name = "NearbyDropPanel"
 	_nearby_drop_panel.visible = false
+	_nearby_drop_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	_nearby_drop_panel.custom_minimum_size = Vector2(220.0, 0.0)
 	_nearby_drop_panel.anchor_left = 0.0
 	_nearby_drop_panel.anchor_top = 0.5
@@ -478,18 +507,23 @@ func _build_nearby_drop_panel() -> void:
 	_nearby_drop_panel.offset_top = -110.0
 	_nearby_drop_panel.offset_right = 238.0
 	_nearby_drop_panel.offset_bottom = 110.0
+	_nearby_drop_panel.gui_input.connect(_on_nearby_drop_panel_gui_input)
 	_root_control.add_child(_nearby_drop_panel)
 
 	# 面板内边距；取值为动态创建的 MarginContainer，默认给掉落物列表留出点击空间。
 	var margin: MarginContainer = MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_STOP
 	margin.add_theme_constant_override("margin_left", 8)
 	margin.add_theme_constant_override("margin_top", 8)
 	margin.add_theme_constant_override("margin_right", 8)
 	margin.add_theme_constant_override("margin_bottom", 8)
+	margin.gui_input.connect(_on_nearby_drop_panel_gui_input)
 	_nearby_drop_panel.add_child(margin)
 
 	_nearby_drop_list = VBoxContainer.new()
+	_nearby_drop_list.mouse_filter = Control.MOUSE_FILTER_STOP
 	_nearby_drop_list.add_theme_constant_override("separation", 5)
+	_nearby_drop_list.gui_input.connect(_on_nearby_drop_panel_gui_input)
 	margin.add_child(_nearby_drop_list)
 
 
@@ -497,24 +531,32 @@ func _refresh_nearby_drop_panel() -> void:
 	if _nearby_drop_panel == null or _nearby_drop_list == null:
 		return
 
-	_clear_container(_nearby_drop_list)
-	_nearby_drop_buttons.clear()
 	if not _can_show_nearby_drops():
-		_nearby_drop_panel.visible = false
+		_hide_nearby_drop_panel()
 		return
 
 	# 附近掉落物列表；元素为 WeaponDrop Node2D，默认按距离从近到远排序。
 	var nearby_drops: Array[Node2D] = _get_nearby_weapon_drops()
 	if nearby_drops.is_empty():
-		_nearby_drop_panel.visible = false
+		_hide_nearby_drop_panel()
 		return
 
+	# 新掉落物列表签名；元素为实例 ID，默认用于判断是否需要重建按钮节点。
+	var next_signature: Array[int] = _get_nearby_drop_signature(nearby_drops)
+	if _nearby_drop_panel.visible and _nearby_drop_signature == next_signature:
+		return
+
+	_clear_container(_nearby_drop_list)
+	_nearby_drop_buttons.clear()
+	_nearby_drop_signature = next_signature
 	_nearby_drop_panel.visible = true
 	# 列表标题；取值为动态创建 Label，默认提示 F 快速拾取最近掉落物。
 	var title_label: Label = Label.new()
-	title_label.text = "附近掉落物  F拾取"
+	title_label.text = "附近掉落物  F拾取  G关闭"
+	title_label.mouse_filter = Control.MOUSE_FILTER_STOP
 	title_label.add_theme_font_size_override("font_size", 12)
 	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_label.gui_input.connect(_on_nearby_drop_panel_gui_input)
 	_nearby_drop_list.add_child(title_label)
 
 	# 附近掉落物遍历项；取值为按距离排序后的 WeaponDrop，默认逐个创建拾取按钮。
@@ -523,12 +565,30 @@ func _refresh_nearby_drop_panel() -> void:
 		var pickup_button: Button = Button.new()
 		pickup_button.text = _get_drop_button_text(drop_node)
 		pickup_button.focus_mode = Control.FOCUS_NONE
-		pickup_button.pressed.connect(Callable(self, "_on_pickup_drop_button_pressed").bind(drop_node))
+		pickup_button.mouse_filter = Control.MOUSE_FILTER_STOP
+		pickup_button.action_mode = BaseButton.ACTION_MODE_BUTTON_PRESS
+		pickup_button.gui_input.connect(Callable(self, "_on_pickup_drop_button_gui_input").bind(drop_node))
+		pickup_button.button_down.connect(Callable(self, "_on_pickup_drop_button_pressed").bind(drop_node))
 		_nearby_drop_list.add_child(pickup_button)
 		_nearby_drop_buttons.append(pickup_button)
 
 
+func _hide_nearby_drop_panel() -> void:
+	if _nearby_drop_panel != null:
+		_nearby_drop_panel.visible = false
+
+	if _nearby_drop_list != null:
+		_clear_container(_nearby_drop_list)
+
+	_nearby_drop_buttons.clear()
+	_nearby_drop_signature.clear()
+
+
 func _can_show_nearby_drops() -> bool:
+	return _drop_list_enabled and _can_pickup_nearby_drops()
+
+
+func _can_pickup_nearby_drops() -> bool:
 	return not _is_player_dead and not _inventory_panel.visible and not _large_map_overlay.visible and not _pause_overlay.visible and not _death_overlay.visible
 
 
@@ -605,6 +665,16 @@ func _get_drop_button_text(drop_node: Node2D) -> String:
 	return "%s  %.0f" % [drop_name, _get_drop_distance(drop_node)]
 
 
+func _get_nearby_drop_signature(drop_nodes: Array[Node2D]) -> Array[int]:
+	# 掉落物列表签名；元素为实例 ID，默认用于判断 UI 列表是否需要重建。
+	var signature: Array[int] = []
+	# 签名遍历项；取值为当前附近掉落物节点，默认按显示顺序写入。
+	for drop_node in drop_nodes:
+		signature.append(int(drop_node.get_instance_id()))
+
+	return signature
+
+
 func _toggle_inventory() -> void:
 	_set_inventory_visible(not _inventory_panel.visible)
 
@@ -633,8 +703,8 @@ func _set_large_map_visible(visible: bool) -> void:
 
 
 func _refresh_combat_input_state() -> void:
-	# 战斗输入启用状态；取值由背包、大地图和暂停菜单共同决定，默认任意界面打开都会禁用战斗输入。
-	var combat_input_enabled: bool = not _inventory_panel.visible and not _large_map_overlay.visible and not _pause_overlay.visible and not _death_overlay.visible and not _is_player_dead
+	# 战斗输入启用状态；取值由背包、大地图、暂停菜单和掉落物 UI 共同决定，默认任意交互界面打开都会禁用战斗输入。
+	var combat_input_enabled: bool = not _inventory_panel.visible and not _large_map_overlay.visible and not _pause_overlay.visible and not _death_overlay.visible and not _is_player_dead and not _should_drop_ui_block_combat_input()
 	_set_combat_input_enabled(combat_input_enabled)
 
 
@@ -680,8 +750,35 @@ func _bind_pause_menu() -> void:
 	_infinite_health_check_button.toggled.connect(_on_infinite_health_toggled)
 	_test_settings_back_button.pressed.connect(_on_test_settings_back_button_pressed)
 	_pause_master_volume_slider.value_changed.connect(_on_pause_master_volume_slider_value_changed)
+	_build_pause_key_binding_panel()
 	_sync_pause_master_volume_slider()
 	_sync_mode_controls()
+
+
+func _build_pause_key_binding_panel() -> void:
+	if _pause_settings_content == null:
+		return
+
+	if _pause_key_binding_panel != null:
+		return
+
+	# 按键绑定面板；取值为 KeyBindingPanel 实例，默认添加到暂停设置音量下方。
+	var key_binding_panel: Control = KEY_BINDING_PANEL_SCRIPT.new() as Control
+	if key_binding_panel == null:
+		return
+
+	key_binding_panel.name = "PauseKeyBindingPanel"
+	key_binding_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_pause_settings_content.add_child(key_binding_panel)
+	_pause_settings_content.move_child(key_binding_panel, maxi(_pause_settings_content.get_child_count() - 3, 0))
+	_pause_key_binding_panel = key_binding_panel
+
+
+func _is_key_binding_capture_active() -> bool:
+	if _pause_key_binding_panel == null or not _pause_key_binding_panel.has_method("is_waiting_for_binding"):
+		return false
+
+	return bool(_pause_key_binding_panel.call("is_waiting_for_binding"))
 
 
 func _resolve_training_mode() -> bool:
@@ -737,35 +834,59 @@ func _get_inventory_filter_label() -> String:
 
 
 func _is_toggle_inventory_event(key_event: InputEventKey) -> bool:
-	if key_event.physical_keycode == KEY_E:
+	if _should_use_physical_fallback(toggle_inventory_action) and key_event.physical_keycode == KEY_E:
 		return true
 
 	return InputMap.has_action(toggle_inventory_action) and Input.is_action_just_pressed(toggle_inventory_action)
 
 
 func _is_pause_event(key_event: InputEventKey) -> bool:
-	if key_event.physical_keycode == KEY_ESCAPE:
+	if _should_use_physical_fallback(pause_action) and key_event.physical_keycode == KEY_ESCAPE:
 		return true
 
 	return InputMap.has_action(pause_action) and Input.is_action_just_pressed(pause_action)
 
 
 func _is_toggle_large_map_event(key_event: InputEventKey) -> bool:
-	if key_event.physical_keycode == KEY_M:
+	if _should_use_physical_fallback(toggle_large_map_action) and key_event.physical_keycode == KEY_M:
 		return true
 
 	return InputMap.has_action(toggle_large_map_action) and Input.is_action_just_pressed(toggle_large_map_action)
 
 
+func _is_toggle_drop_list_event(key_event: InputEventKey) -> bool:
+	if _should_use_physical_fallback(toggle_drop_list_action) and key_event.physical_keycode == KEY_G:
+		return true
+
+	return InputMap.has_action(toggle_drop_list_action) and Input.is_action_just_pressed(toggle_drop_list_action)
+
+
 func _is_pickup_event(key_event: InputEventKey) -> bool:
-	if key_event.physical_keycode == KEY_F:
+	if _should_use_physical_fallback(pickup_action) and key_event.physical_keycode == KEY_F:
 		return true
 
 	return InputMap.has_action(pickup_action) and Input.is_action_just_pressed(pickup_action)
 
 
+func _should_use_physical_fallback(action_name: StringName) -> bool:
+	if not InputMap.has_action(action_name):
+		return true
+
+	return InputMap.action_get_events(action_name).is_empty()
+
+
+func _toggle_drop_list_enabled() -> void:
+	_drop_list_enabled = not _drop_list_enabled
+	if not _drop_list_enabled:
+		_hide_nearby_drop_panel()
+
+	_nearby_drop_refresh_remaining = 0.0
+	_refresh_nearby_drop_panel()
+	_refresh_combat_input_state()
+
+
 func _pickup_nearest_drop() -> void:
-	if not _can_show_nearby_drops():
+	if not _can_pickup_nearby_drops():
 		return
 
 	# 附近掉落物列表；元素为按距离排序的 WeaponDrop，默认第一个就是最近目标。
@@ -1303,7 +1424,51 @@ func _on_weapon_slot_drag_released_outside(drop_data: Dictionary) -> void:
 
 
 func _on_pickup_drop_button_pressed(drop_node: Node) -> void:
+	_suppress_drop_list_combat_input()
 	_pickup_drop(drop_node)
+	get_viewport().set_input_as_handled()
+
+
+func _on_pickup_drop_button_gui_input(event: InputEvent, drop_node: Node) -> void:
+	if not _is_pressed_mouse_event(event):
+		return
+
+	_suppress_drop_list_combat_input()
+	if _is_left_mouse_press_event(event):
+		_pickup_drop(drop_node)
+
+	get_viewport().set_input_as_handled()
+
+
+func _on_nearby_drop_panel_gui_input(event: InputEvent) -> void:
+	if not _is_pressed_mouse_event(event):
+		return
+
+	_suppress_drop_list_combat_input()
+	get_viewport().set_input_as_handled()
+
+
+func _suppress_drop_list_combat_input() -> void:
+	_drop_list_combat_suppression_remaining = DROP_LIST_COMBAT_SUPPRESSION_DURATION
+	_refresh_combat_input_state()
+
+
+func _is_pressed_mouse_event(event: InputEvent) -> bool:
+	if not (event is InputEventMouseButton):
+		return false
+
+	# 鼠标按钮事件；取值来自 UI gui_input，用于判断列表交互是否需要阻止战斗输入。
+	var mouse_event: InputEventMouseButton = event as InputEventMouseButton
+	return mouse_event.pressed
+
+
+func _is_left_mouse_press_event(event: InputEvent) -> bool:
+	if not (event is InputEventMouseButton):
+		return false
+
+	# 鼠标按钮事件；取值来自 UI gui_input，用于只在左键按下时执行点击拾取。
+	var mouse_event: InputEventMouseButton = event as InputEventMouseButton
+	return mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_LEFT
 
 
 func _is_pointer_inside_inventory_panel() -> bool:
@@ -1315,6 +1480,24 @@ func _is_pointer_inside_inventory_panel() -> bool:
 	# 背包面板全局矩形；取值来自 Control 布局结果，默认用于判断拖出背包的边界。
 	var inventory_rect: Rect2 = _inventory_panel.get_global_rect()
 	return inventory_rect.has_point(mouse_position)
+
+
+func _should_drop_ui_block_combat_input() -> bool:
+	if _drop_list_combat_suppression_remaining > 0.0:
+		return true
+
+	return _is_pointer_inside_nearby_drop_panel()
+
+
+func _is_pointer_inside_nearby_drop_panel() -> bool:
+	if _nearby_drop_panel == null or not _nearby_drop_panel.visible:
+		return false
+
+	# 鼠标屏幕位置；取值来自当前视口，用于判断掉落物列表是否正在被鼠标交互。
+	var mouse_position: Vector2 = get_viewport().get_mouse_position()
+	# 掉落物面板全局矩形；取值来自 Control 布局结果，默认用于屏蔽射击和暂停列表刷新。
+	var panel_rect: Rect2 = _nearby_drop_panel.get_global_rect()
+	return panel_rect.has_point(mouse_position)
 
 
 func _on_resume_button_pressed() -> void:

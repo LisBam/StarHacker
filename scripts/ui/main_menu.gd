@@ -8,6 +8,8 @@ extends Control
 const GAME_MODE_HACK: String = "hack"
 ## 训练场模式标识；默认写入 SessionState，修改会影响训练场入口进入后的模式判定。
 const GAME_MODE_TRAINING: String = "training"
+## 按键绑定面板脚本；默认用于主菜单设置中动态创建可重绑定操作列表。
+const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_panel.gd")
 ## 角色选择场景路径；默认进入独立角色选择场景，只允许填写 tscn 资源，运行时通常不动态修改，改错会导致入口无法继续。
 @export_file("*.tscn") var character_select_scene_path: String = "res://scenes/ui/character_select.tscn"
 
@@ -21,6 +23,8 @@ const GAME_MODE_TRAINING: String = "training"
 @onready var _quit_button: Button = %QuitButton
 ## 设置面板缓存；默认绑定唯一名 SettingsPanel，控制主菜单设置界面的显示和隐藏。
 @onready var _settings_panel: Control = %SettingsPanel
+## 设置内容容器缓存；默认通过场景路径绑定，用于动态挂载按键绑定面板。
+@onready var _settings_content: VBoxContainer = get_node("SettingsPanel/SettingsMargin/SettingsContent") as VBoxContainer
 ## 主音量滑条缓存；默认绑定唯一名 MasterVolumeSlider，取值 0 到 100，修改会影响全局 Master 音量。
 @onready var _master_volume_slider: HSlider = %MasterVolumeSlider
 ## 主音量数值文本缓存；默认绑定唯一名 MasterVolumeValueLabel，显示滑条当前百分比。
@@ -30,6 +34,8 @@ const GAME_MODE_TRAINING: String = "training"
 
 ## Master 音频总线索引；取值为 -1 或有效总线下标，默认 -1 表示尚未解析，修改会影响音量应用目标。
 var _master_bus_index: int = -1
+## 主菜单按键绑定面板缓存；默认运行时创建，显示并修改 InputMap 的玩家操作绑定。
+var _key_binding_panel: Control
 
 
 func _ready() -> void:
@@ -40,6 +46,7 @@ func _ready() -> void:
 	_quit_button.pressed.connect(_on_quit_button_pressed)
 	_master_volume_slider.value_changed.connect(_on_master_volume_slider_value_changed)
 	_settings_back_button.pressed.connect(_on_settings_back_button_pressed)
+	_build_key_binding_panel()
 	_settings_panel.visible = false
 	_sync_master_volume_slider()
 	_start_button.grab_focus()
@@ -114,3 +121,22 @@ func _apply_master_volume(value: float) -> void:
 
 func _refresh_master_volume_label(value: float) -> void:
 	_master_volume_value_label.text = "%d%%" % roundi(value)
+
+
+func _build_key_binding_panel() -> void:
+	if _settings_content == null:
+		return
+
+	if _key_binding_panel != null:
+		return
+
+	# 按键绑定面板；取值为 KeyBindingPanel 实例，默认添加到主菜单设置音量下方。
+	var key_binding_panel: Control = KEY_BINDING_PANEL_SCRIPT.new() as Control
+	if key_binding_panel == null:
+		return
+
+	key_binding_panel.name = "MainMenuKeyBindingPanel"
+	key_binding_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_settings_content.add_child(key_binding_panel)
+	_settings_content.move_child(key_binding_panel, maxi(_settings_content.get_child_count() - 3, 0))
+	_key_binding_panel = key_binding_panel

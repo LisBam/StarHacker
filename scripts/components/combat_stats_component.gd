@@ -8,6 +8,8 @@ class_name CombatStatsComponent
 signal health_changed(current_health: float, max_health: float)
 signal energy_changed(current_energy: float, max_energy: float)
 signal stats_changed
+## 死亡信号；生命首次降到 0 时派发一次，HUD 用它进入死亡暂停界面。
+signal died
 
 ## 最大生命值；取值应大于 0，默认 100 作为基础玩家血量，运行时修改会影响生命条上限。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var max_health: float = 100.0
@@ -24,6 +26,9 @@ signal stats_changed
 ## 是否启用无限能量；取值为 true/false，默认 false，训练场设置会运行时修改，启用后消耗能量不会降低能量。
 @export var infinite_energy: bool = false
 
+## 当前是否已经进入死亡状态；默认 false，生命归零后置为 true，避免死亡信号在连续伤害中重复派发。
+var _is_dead: bool = false
+
 
 func _ready() -> void:
 	current_health = clampf(current_health, 0.0, max_health)
@@ -32,6 +37,7 @@ func _ready() -> void:
 		current_health = max_health
 	if infinite_energy:
 		current_energy = max_energy
+	_is_dead = current_health <= 0.0
 	_emit_all_stats_changed()
 
 
@@ -90,6 +96,7 @@ func configure_max_stats(new_max_health: float, new_max_energy: float) -> void:
 	max_energy = resolved_max_energy
 	current_health = max_health
 	current_energy = max_energy
+	_is_dead = false
 	_emit_all_stats_changed()
 
 
@@ -115,11 +122,13 @@ func set_health(value: float) -> void:
 	# 标准化后的生命值；取值限制在 0 到 max_health，默认由传入值夹取，修改会影响信号派发前的最终生命。
 	var clamped_health: float = clampf(value, 0.0, max_health)
 	if is_equal_approx(clamped_health, current_health):
+		_update_death_state()
 		return
 
 	current_health = clamped_health
 	health_changed.emit(current_health, max_health)
 	stats_changed.emit()
+	_update_death_state()
 
 
 func get_health_ratio() -> float:
@@ -150,7 +159,27 @@ func is_infinite_energy_enabled() -> bool:
 	return infinite_energy
 
 
+func is_dead() -> bool:
+	return _is_dead
+
+
 func _emit_all_stats_changed() -> void:
 	health_changed.emit(current_health, max_health)
 	energy_changed.emit(current_energy, max_energy)
 	stats_changed.emit()
+
+
+func _update_death_state() -> void:
+	if infinite_health:
+		_is_dead = false
+		return
+
+	if current_health > 0.0:
+		_is_dead = false
+		return
+
+	if _is_dead:
+		return
+
+	_is_dead = true
+	died.emit()

@@ -39,8 +39,8 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	var selected_projectile_scene: PackedScene = _get_weapon_packed_scene(weapon_data, "projectile_scene", projectile_scene)
 	# 本次使用的弹体速度；取值来自武器数据或组件默认值，默认 projectile_speed，修改会影响本次弹体飞行速度。
 	var selected_projectile_speed: float = _get_weapon_float(weapon_data, "projectile_speed", projectile_speed)
-	# 本次使用的弹体射程；取值来自武器数据或弹体默认值，默认 960，修改会影响本次弹体飞行距离。
-	var selected_bullet_range: float = _get_weapon_float(weapon_data, "bullet_range", 960.0)
+	# 本次使用的弹体射程；取值来自武器数据或弹体默认值，默认 620，修改会影响本次弹体飞行距离。
+	var selected_bullet_range: float = _get_weapon_float(weapon_data, "bullet_range", 620.0)
 	# 本次使用的弹体伤害；取值来自武器数据或组件默认值，默认 projectile_damage，修改会影响本次弹体命中伤害。
 	var selected_projectile_damage: float = _get_weapon_float(weapon_data, "ranged_damage", projectile_damage)
 	# 本次使用的射击冷却；取值来自武器数据或组件默认值，默认 fire_cooldown，修改会影响下一次可射击时间。

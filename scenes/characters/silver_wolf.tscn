@@ -1,0 +1,95 @@
+[gd_scene format=3 uid="uid://b8ap3osklnsmt"]
+
+[ext_resource type="Script" uid="uid://mkfqfypf8jpw" path="res://scripts/player/player_controller.gd" id="1_player_controller"]
+[ext_resource type="Script" uid="uid://dy2ap8k4mwko" path="res://scripts/components/player_input_component.gd" id="2_player_input"]
+[ext_resource type="Script" uid="uid://74en02kvomio" path="res://scripts/components/top_down_movement_component.gd" id="3_movement"]
+[ext_resource type="Script" uid="uid://4ikx3pvekfnw" path="res://scripts/components/ranged_attack_component.gd" id="4_ranged_attack"]
+[ext_resource type="Script" uid="uid://cjmx0t0nt6ay" path="res://scripts/components/melee_attack_component.gd" id="5_melee_attack"]
+[ext_resource type="PackedScene" path="res://scenes/projectiles/player_projectile.tscn" id="6_player_projectile"]
+[ext_resource type="Script" uid="uid://c4nua6h4h6v0j" path="res://scripts/components/combat_stats_component.gd" id="7_stats"]
+[ext_resource type="Script" uid="uid://bnptom72jfqpo" path="res://scripts/components/inventory_component.gd" id="8_inventory"]
+[ext_resource type="Script" uid="uid://xouhfg5s44n0" path="res://scripts/components/equipment_component.gd" id="9_equipment"]
+[ext_resource type="Resource" path="res://data/weapons/quantum_pistol.tres" id="10_quantum_pistol"]
+[ext_resource type="Resource" path="res://data/weapons/pulse_rifle.tres" id="11_pulse_rifle"]
+[ext_resource type="Resource" path="res://data/weapons/phase_blade.tres" id="12_phase_blade"]
+[ext_resource type="Resource" path="res://data/weapons/ion_smg.tres" id="13_ion_smg"]
+[ext_resource type="Resource" path="res://data/weapons/rail_cannon.tres" id="14_rail_cannon"]
+[ext_resource type="Resource" path="res://data/weapons/scatter_blaster.tres" id="15_scatter_blaster"]
+[ext_resource type="Resource" path="res://data/weapons/quantum_dagger.tres" id="16_quantum_dagger"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_body"]
+radius = 18.0
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_melee"]
+size = Vector2(70, 42)
+
+[node name="SilverWolf" type="CharacterBody2D" unique_id=410244712]
+position = Vector2(781, 479)
+script = ExtResource("1_player_controller")
+
+[node name="Body" type="Polygon2D" parent="." unique_id=1276275859]
+color = Color(0.407843, 0.792157, 1, 1)
+polygon = PackedVector2Array(0, -24, 16, -6, 13, 18, 0, 24, -13, 18, -16, -6)
+
+[node name="Core" type="Polygon2D" parent="." unique_id=1357854149]
+color = Color(0.917647, 0.976471, 1, 1)
+polygon = PackedVector2Array(0, -10, 8, 0, 0, 11, -8, 0)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=1031982079]
+shape = SubResource("CircleShape2D_body")
+
+[node name="AimPivot" type="Node2D" parent="." unique_id=363280953]
+
+[node name="WeaponLine" type="Line2D" parent="AimPivot" unique_id=932548072]
+points = PackedVector2Array(12, 0, 38, 0)
+width = 5.0
+default_color = Color(0.596078, 0.913725, 1, 1)
+begin_cap_mode = 2
+end_cap_mode = 2
+
+[node name="Muzzle" type="Marker2D" parent="AimPivot" unique_id=422236958]
+position = Vector2(40, 0)
+
+[node name="InputComponent" type="Node2D" parent="." unique_id=1431247363]
+script = ExtResource("2_player_input")
+
+[node name="MovementComponent" type="Node" parent="." unique_id=718880751]
+script = ExtResource("3_movement")
+
+[node name="StatsComponent" type="Node" parent="." unique_id=345942444]
+script = ExtResource("7_stats")
+
+[node name="InventoryComponent" type="Node" parent="." unique_id=990293600]
+script = ExtResource("8_inventory")
+initial_items = Array[Resource]([ExtResource("10_quantum_pistol"), ExtResource("11_pulse_rifle"), ExtResource("12_phase_blade"), ExtResource("13_ion_smg"), ExtResource("14_rail_cannon"), ExtResource("15_scatter_blaster"), ExtResource("16_quantum_dagger")])
+
+[node name="EquipmentComponent" type="Node" parent="." unique_id=1247807795]
+script = ExtResource("9_equipment")
+starting_ranged_weapons = Array[Resource]([ExtResource("10_quantum_pistol"), ExtResource("11_pulse_rifle")])
+starting_melee_weapon = ExtResource("12_phase_blade")
+
+[node name="RangedAttackComponent" type="Node2D" parent="." unique_id=948818008]
+script = ExtResource("4_ranged_attack")
+projectile_scene = ExtResource("6_player_projectile")
+
+[node name="MeleeAttackComponent" type="Area2D" parent="." unique_id=895008768]
+collision_layer = 4
+collision_mask = 2
+monitoring = false
+monitorable = false
+script = ExtResource("5_melee_attack")
+
+[node name="HitboxShape" type="CollisionShape2D" parent="MeleeAttackComponent" unique_id=1235241484]
+position = Vector2(56, 0)
+shape = SubResource("RectangleShape2D_melee")
+disabled = true
+
+[node name="HitboxVisual" type="Polygon2D" parent="MeleeAttackComponent" unique_id=651912627]
+visible = false
+color = Color(0.494118, 0.913725, 1, 0.32)
+polygon = PackedVector2Array(20, -22, 72, -22, 92, 0, 72, 22, 20, 22)
+
+[node name="Camera2D" type="Camera2D" parent="." unique_id=389718966]
+zoom = Vector2(0.95, 0.95)
+position_smoothing_enabled = true
+position_smoothing_speed = 8.0

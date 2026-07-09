@@ -1,0 +1,26 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/projectiles/player_projectile.gd" id="1_player_projectile"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_projectile"]
+radius = 5.0
+
+[node name="PlayerProjectile" type="Area2D"]
+collision_layer = 8
+collision_mask = 2
+monitorable = false
+script = ExtResource("1_player_projectile")
+
+[node name="Trail" type="Line2D" parent="."]
+points = PackedVector2Array(-14, 0, 3, 0)
+width = 3.0
+default_color = Color(0.423529, 0.827451, 1, 0.65)
+begin_cap_mode = 2
+end_cap_mode = 2
+
+[node name="Body" type="Polygon2D" parent="."]
+color = Color(0.87451, 0.972549, 1, 1)
+polygon = PackedVector2Array(-6, -4, 7, 0, -6, 4, -3, 0)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_projectile")

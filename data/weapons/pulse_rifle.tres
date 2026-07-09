@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/weapon_data.gd" id="1_weapon_data"]
+[ext_resource type="PackedScene" path="res://scenes/projectiles/player_projectile.tscn" id="2_projectile"]
+
+[resource]
+script = ExtResource("1_weapon_data")
+weapon_id = "pulse_rifle"
+display_name = "脉冲步枪"
+weapon_type = "ranged"
+description = "射速更快但能量消耗更高的远程武器。"
+icon_text = "R"
+energy_cost = 9.0
+projectile_scene = ExtResource("2_projectile")
+projectile_speed = 1120.0
+ranged_damage = 8.0
+ranged_cooldown = 0.09

@@ -20,10 +20,21 @@ func _ready() -> void:
 
 
 func add_item(item_data: Resource) -> bool:
-	if item_data == null:
+	if item_data == null or has_item(item_data):
 		return false
 
 	_items.append(item_data)
+	inventory_changed.emit()
+	return true
+
+
+func add_item_at(item_data: Resource, target_index: int) -> bool:
+	if item_data == null or has_item(item_data):
+		return false
+
+	# 标准化后的插入索引；取值限制在 0 到当前物品数量，默认由投放槽位计算，修改会影响物品插入位置。
+	var clamped_index: int = clampi(target_index, 0, _items.size())
+	_items.insert(clamped_index, item_data)
 	inventory_changed.emit()
 	return true
 
@@ -35,6 +46,28 @@ func remove_item(item_data: Resource) -> bool:
 		return false
 
 	_items.remove_at(item_index)
+	inventory_changed.emit()
+	return true
+
+
+func move_item(source_index: int, target_index: int) -> bool:
+	if source_index < 0 or source_index >= _items.size() or target_index < 0 or target_index > _items.size():
+		return false
+
+	if source_index == target_index or target_index == source_index + 1:
+		return true
+
+	# 被移动的物品资源；取值为背包内有效 Resource，默认由 source_index 读取，修改会影响移动结果。
+	var moved_item: Resource = _items[source_index]
+	_items.remove_at(source_index)
+
+	# 移除源项后的插入索引；取值限制在当前数组范围，默认用于把拖拽物品放到目标物品前，修改会影响排序行为。
+	var insert_index: int = target_index
+	if target_index > source_index:
+		insert_index -= 1
+	insert_index = clampi(insert_index, 0, _items.size())
+
+	_items.insert(insert_index, moved_item)
 	inventory_changed.emit()
 	return true
 

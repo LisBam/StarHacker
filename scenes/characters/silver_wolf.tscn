@@ -25,6 +25,7 @@ size = Vector2(70, 42)
 
 [node name="SilverWolf" type="CharacterBody2D" unique_id=410244712]
 position = Vector2(781, 479)
+collision_mask = 16
 script = ExtResource("1_player_controller")
 
 [node name="Body" type="Polygon2D" parent="." unique_id=1276275859]

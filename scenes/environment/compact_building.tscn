@@ -1,0 +1,25 @@
+[gd_scene load_steps=2 format=3]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_building"]
+size = Vector2(256, 180)
+
+[node name="CompactBuilding" type="StaticBody2D" groups=["environment_obstacles"]]
+collision_layer = 16
+collision_mask = 0
+
+[node name="Visual" type="Polygon2D" parent="."]
+color = Color(0.117647, 0.156863, 0.188235, 1)
+polygon = PackedVector2Array(-128, -90, 128, -90, 128, 90, -128, 90)
+
+[node name="InnerPanel" type="Polygon2D" parent="."]
+color = Color(0.0705882, 0.0941176, 0.113725, 1)
+polygon = PackedVector2Array(-96, -58, 96, -58, 96, 58, -96, 58)
+
+[node name="Edge" type="Line2D" parent="."]
+points = PackedVector2Array(-128, -90, 128, -90, 128, 90, -128, 90, -128, -90)
+width = 3.0
+default_color = Color(0.454902, 0.698039, 0.756863, 0.7)
+closed = true
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_building")

@@ -61,8 +61,8 @@ func get_character_profile(character_id: String) -> Dictionary:
 			"display_name": "穹",
 			"role": "均衡型开拓者",
 			"description": "生命上限较高，能量上限偏低，适合测试更稳定的近距离战斗节奏。",
-			"health_range": Vector2(130.0, 165.0),
-			"energy_range": Vector2(80.0, 110.0),
+			"max_health": 150.0,
+			"max_energy": 95.0,
 			"passive": "被动技能：待配置",
 			"active": "主动技能：待配置"
 		}
@@ -72,8 +72,8 @@ func get_character_profile(character_id: String) -> Dictionary:
 			"display_name": "银狼",
 			"role": "高能量骇客",
 			"description": "生命上限偏低，能量上限较高，适合测试高频武器和持续消耗型动作。",
-			"health_range": Vector2(90.0, 120.0),
-			"energy_range": Vector2(130.0, 170.0),
+			"max_health": 105.0,
+			"max_energy": 155.0,
 			"passive": "被动技能：待配置",
 			"active": "主动技能：待配置"
 		}
@@ -83,8 +83,8 @@ func get_character_profile(character_id: String) -> Dictionary:
 		"display_name": "星",
 		"role": "标准型开拓者",
 		"description": "生命和能量上限都较平衡，适合验证默认战斗、背包和武器流程。",
-		"health_range": Vector2(115.0, 145.0),
-		"energy_range": Vector2(95.0, 125.0),
+		"max_health": 130.0,
+		"max_energy": 110.0,
 		"passive": "被动技能：待配置",
 		"active": "主动技能：待配置"
 	}

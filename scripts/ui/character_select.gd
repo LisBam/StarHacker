@@ -34,13 +34,13 @@ var _selected_character_id: String = CHARACTER_STELLE
 @onready var _character_role_label: Label = %CharacterRoleLabel
 ## 角色说明文本缓存；默认绑定 CharacterDescriptionLabel，显示当前查看角色的占位说明。
 @onready var _character_description_label: Label = %CharacterDescriptionLabel
-## 生命数值文本缓存；默认绑定 HealthValueLabel，显示当前查看角色的生命上限随机范围。
+## 生命数值文本缓存；默认绑定 HealthValueLabel，显示当前查看角色的固定生命上限。
 @onready var _health_value_label: Label = %HealthValueLabel
-## 生命数值条缓存；默认绑定 HealthPreviewBar，用于表现生命范围中值。
+## 生命数值条缓存；默认绑定 HealthPreviewBar，用于表现固定生命上限。
 @onready var _health_preview_bar: ProgressBar = %HealthPreviewBar
-## 能量数值文本缓存；默认绑定 EnergyValueLabel，显示当前查看角色的能量上限随机范围。
+## 能量数值文本缓存；默认绑定 EnergyValueLabel，显示当前查看角色的固定能量上限。
 @onready var _energy_value_label: Label = %EnergyValueLabel
-## 能量数值条缓存；默认绑定 EnergyPreviewBar，用于表现能量范围中值。
+## 能量数值条缓存；默认绑定 EnergyPreviewBar，用于表现固定能量上限。
 @onready var _energy_preview_bar: ProgressBar = %EnergyPreviewBar
 ## 被动技能文本缓存；默认绑定 PassiveLabel，显示后续被动技能占位信息。
 @onready var _passive_label: Label = %PassiveLabel
@@ -88,25 +88,21 @@ func _set_button_states() -> void:
 func _refresh_character_detail() -> void:
 	# 当前角色档案；取值来自 SessionState，默认返回星的占位档案，修改会影响详情面板全部显示内容。
 	var profile: Dictionary = _get_character_profile(_selected_character_id)
-	# 生命范围；取值为 Vector2(x 最小上限, y 最大上限)，默认用于文字和条形预览。
-	var health_range: Vector2 = profile.get("health_range", Vector2.ZERO)
-	# 能量范围；取值为 Vector2(x 最小上限, y 最大上限)，默认用于文字和条形预览。
-	var energy_range: Vector2 = profile.get("energy_range", Vector2.ZERO)
+	# 固定生命上限；取值来自角色档案，默认用于文字和条形预览。
+	var max_health: float = float(profile.get("max_health", 0.0))
+	# 固定能量上限；取值来自角色档案，默认用于文字和条形预览。
+	var max_energy: float = float(profile.get("max_energy", 0.0))
 	_character_name_label.text = str(profile.get("display_name", "角色"))
 	_character_role_label.text = str(profile.get("role", "未配置定位"))
 	_character_description_label.text = str(profile.get("description", "暂无角色说明"))
-	_health_value_label.text = "生命上限  %d - %d" % [roundi(health_range.x), roundi(health_range.y)]
-	_energy_value_label.text = "能量上限  %d - %d" % [roundi(energy_range.x), roundi(energy_range.y)]
+	_health_value_label.text = "生命上限  %d" % roundi(max_health)
+	_energy_value_label.text = "能量上限  %d" % roundi(max_energy)
 	_health_preview_bar.max_value = stat_bar_maximum
 	_energy_preview_bar.max_value = stat_bar_maximum
-	_health_preview_bar.value = _get_range_average(health_range)
-	_energy_preview_bar.value = _get_range_average(energy_range)
+	_health_preview_bar.value = clampf(max_health, 0.0, stat_bar_maximum)
+	_energy_preview_bar.value = clampf(max_energy, 0.0, stat_bar_maximum)
 	_passive_label.text = str(profile.get("passive", "被动技能：待配置"))
 	_active_label.text = str(profile.get("active", "主动技能：待配置"))
-
-
-func _get_range_average(value_range: Vector2) -> float:
-	return clampf((value_range.x + value_range.y) * 0.5, 0.0, stat_bar_maximum)
 
 
 func _get_session_state() -> Node:
@@ -153,8 +149,8 @@ func _get_character_profile(character_id: String) -> Dictionary:
 		"display_name": "星",
 		"role": "标准型开拓者",
 		"description": "生命和能量上限都较平衡，适合验证默认战斗流程。",
-		"health_range": Vector2(115.0, 145.0),
-		"energy_range": Vector2(95.0, 125.0),
+		"max_health": 130.0,
+		"max_energy": 110.0,
 		"passive": "被动技能：待配置",
 		"active": "主动技能：待配置"
 	}

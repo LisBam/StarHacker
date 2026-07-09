@@ -9,6 +9,12 @@ signal died
 
 ## 战斗爆发特效脚本；默认通过路径预加载，避免怪物脚本依赖 Godot 全局类名缓存解析顺序。
 const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat_burst_effect.gd")
+## AI 空闲状态；默认表示怪物没有玩家记忆，会回到出生点附近巡逻或待机警戒。
+const TARGET_AI_STATE_IDLE: int = 0
+## AI 可见追击状态；默认表示怪物拥有无遮挡视线，会直接锁定玩家并寻路追击。
+const TARGET_AI_STATE_VISIBLE: int = 1
+## AI 丢失搜查状态；默认表示玩家被障碍遮挡，怪物只根据最后线索前往遮挡物背后和附近区域搜索。
+const TARGET_AI_STATE_SEARCHING: int = 2
 
 ## 最大血量；取值应大于 0，默认 60 用于训练场怪物强度，运行时修改会影响怪物承伤能力。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var max_health: float = 60.0
@@ -48,7 +54,8 @@ const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat
 @export_range(0.0, 30.0, 0.1) var target_memory_duration: float = 8.0
 ## 搜索到达距离；取值建议大于怪物半径，默认 54 像素，怪物靠近推断位置或当前搜索点后会进入扫荡或切换下一个搜索点。
 @export_range(1.0, 512.0, 1.0) var search_arrive_distance: float = 54.0
-## 隔墙警觉追踪范围倍率；取值建议大于 1，默认 1.85 表示怪物已经发现玩家后，会在更大范围内根据动向继续追踪墙后的玩家。
+## 旧隔墙警觉追踪范围倍率；取值建议大于 1，默认 1.85，当前三阶段索敌不会读取墙后玩家实时位置。
+## 该值保留为旧场景配置兼容，后续如需警戒范围衰减可复用。
 @export_range(1.0, 6.0, 0.05, "or_greater") var hidden_target_tracking_range_multiplier: float = 1.85
 ## 目标预测时间；取值建议 0 到 2 秒，默认 0.55 会按最近移动趋势把搜索点向玩家移动方向前推。
 @export_range(0.0, 5.0, 0.05) var target_prediction_time: float = 0.55
@@ -58,6 +65,12 @@ const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat
 @export_range(0.0, 30.0, 0.1) var target_search_duration_after_arrival: float = 4.0
 ## 到达推断位置后的搜索半径；取值建议大于怪物半径，默认 180 像素，修改会影响怪物在墙后区域的扫荡范围。
 @export_range(0.0, 2000.0, 1.0) var target_search_radius: float = 180.0
+## 卡视野脱战次数阈值；取值建议 2 到 5，默认 3，玩家多次依靠障碍遮挡脱离视线后怪物会彻底丢失目标。
+@export_range(1, 12, 1) var occlusion_break_forget_count: int = 3
+## 遮挡物背后搜查偏移；取值建议接近建筑墙厚或入口宽度，默认 96 像素，用于从视线命中点向玩家消失方向推导搜查锚点。
+@export_range(0.0, 600.0, 1.0) var lost_search_occlusion_offset: float = 96.0
+## 搜查点选择尝试次数；取值建议 1 到 12，默认 6，用于在搜查锚点周边优先挑选不会直接撞墙的巡逻点。
+@export_range(1, 24, 1) var lost_search_destination_attempts: int = 6
 ## 游荡半径；取值建议大于等于 0，默认 180 表示怪物无目标时围绕出生点小范围移动，修改会影响巡游范围。
 @export_range(0.0, 2000.0, 1.0) var wander_radius: float = 180.0
 ## 游荡速度倍率；取值建议 0 到 1，默认 0.35 表示无目标时慢速移动，修改会影响游荡节奏。
@@ -109,6 +122,8 @@ var _target: Node2D
 var _has_target: bool = false
 ## 当前目标是否处于可见状态；取值为 true/false，默认 false，墙体遮挡时会变为 false。
 var _target_is_visible: bool = false
+## 当前 AI 索敌状态；取值为 TARGET_AI_STATE_* 常量，默认空闲状态用于区分可见追击和丢失搜查。
+var _target_ai_state: int = TARGET_AI_STATE_IDLE
 ## 最后一次看见或推断目标的位置；取值为世界坐标，默认零向量，仅在 _has_last_known_target_position 为 true 时有效。
 var _last_known_target_position: Vector2 = Vector2.ZERO
 ## 是否存在最后目标位置；取值为 true/false，默认 false，失去视野后用于决定是否继续搜索。
@@ -117,6 +132,12 @@ var _has_last_known_target_position: bool = false
 var _target_memory_remaining: float = 0.0
 ## 目标最近估算速度；取值为世界坐标速度向量，默认零向量，用于失去视野后预测玩家可能移动方向。
 var _estimated_target_velocity: Vector2 = Vector2.ZERO
+## 视线最后一次被遮挡的位置；取值为世界坐标，默认零向量，仅在 _has_last_occlusion_position 为 true 时用于推导遮挡物背后搜查点。
+var _last_occlusion_position: Vector2 = Vector2.ZERO
+## 是否存在视线遮挡位置；取值为 true/false，默认 false，只有射线命中环境遮挡物后才会变为 true。
+var _has_last_occlusion_position: bool = false
+## 当前交战中被障碍遮挡脱离视线的次数；取值从 0 递增，达到 occlusion_break_forget_count 后清空目标记忆。
+var _line_of_sight_loss_count: int = 0
 ## 搜索锚点位置；取值为世界坐标，默认零向量，到达推断点后怪物会围绕该点继续搜索。
 var _target_search_anchor_position: Vector2 = Vector2.ZERO
 ## 当前搜索点位置；取值为世界坐标，默认零向量，仅在 _has_target_search_destination 为 true 时有效。
@@ -125,6 +146,8 @@ var _target_search_destination: Vector2 = Vector2.ZERO
 var _has_target_search_destination: bool = false
 ## 到达推断位置后的搜索剩余时间；取值大于等于 0，默认 0，递减到 0 后怪物才真正放弃目标。
 var _target_search_remaining: float = 0.0
+## 是否已经到达丢失视野后的初始搜查锚点；取值为 true/false，默认 false，到达后才切换为周边巡逻搜查。
+var _has_reached_lost_search_anchor: bool = false
 ## 当前攻击冷却剩余时间；取值大于等于 0，默认 0 表示可立即攻击，修改会影响下次攻击时机。
 var _attack_cooldown_remaining: float = 0.0
 ## 个体移动速度倍率；取值由出生时随机生成，默认 1 表示不改变检查器中的基础速度。
@@ -189,9 +212,12 @@ func set_target(target_node: Node) -> void:
 	_target = target_node as Node2D
 	_has_target = false
 	_target_is_visible = false
+	_target_ai_state = TARGET_AI_STATE_IDLE
 	_has_last_known_target_position = false
 	_target_memory_remaining = 0.0
 	_estimated_target_velocity = Vector2.ZERO
+	_has_last_occlusion_position = false
+	_line_of_sight_loss_count = 0
 	_reset_target_search()
 	_clear_navigation_path()
 
@@ -236,28 +262,92 @@ func apply_damage(damage: float, source: Node) -> void:
 func _update_target_state(target_distance: float, delta: float) -> void:
 	# 本帧有效视野范围；取值为基础视野或脱战扩展视野，默认让已锁定目标在视野边缘更稳定。
 	var active_vision_range: float = vision_range * lose_target_range_multiplier if _has_target else vision_range
+	# 目标是否位于有效视野距离内；取值为 true/false，默认距离过远时不会尝试射线索敌。
+	var target_within_vision_range: bool = target_distance <= active_vision_range
+	# 视线遮挡命中结果；取值为空字典表示无遮挡，默认只在目标进入视野距离后执行射线检测。
+	var line_of_sight_hit: Dictionary = {}
+	if target_within_vision_range and vision_requires_line_of_sight and is_instance_valid(_target):
+		line_of_sight_hit = _get_vision_line_of_sight_hit()
+
 	# 本帧是否能看见目标；取值由距离和视线共同决定，默认墙体会阻挡首次索敌。
-	var can_see_target: bool = target_distance <= active_vision_range and _has_vision_line_of_sight_to_target()
-	_target_is_visible = can_see_target
+	var can_see_target: bool = target_within_vision_range and (not vision_requires_line_of_sight or line_of_sight_hit.is_empty())
 	if can_see_target:
-		_has_target = true
-		_remember_target_position(_target.global_position, delta)
-		_reset_target_search()
+		_enter_visible_target_state(delta)
 		return
 
 	if not _has_target:
 		return
 
-	if _can_track_hidden_target(target_distance):
-		_track_hidden_target_position(delta)
+	# 本帧是否因环境遮挡丢失视野；取值为 true/false，默认只统计玩家利用墙体、箱体或建筑卡视野的脱离。
+	var occlusion_blocked_view: bool = target_within_vision_range and vision_requires_line_of_sight and not line_of_sight_hit.is_empty()
+	if _target_ai_state == TARGET_AI_STATE_VISIBLE or _target_is_visible:
+		_begin_lost_target_search(occlusion_blocked_view, line_of_sight_hit)
 		return
 
+	_target_is_visible = false
 	_target_memory_remaining = maxf(_target_memory_remaining - delta, 0.0)
-	_target_search_remaining = maxf(_target_search_remaining - delta, 0.0)
+	if _has_reached_lost_search_anchor:
+		_target_search_remaining = maxf(_target_search_remaining - delta, 0.0)
+
 	if _should_continue_lost_target_search():
 		return
 
 	_forget_target()
+
+
+func _enter_visible_target_state(delta: float) -> void:
+	if not is_instance_valid(_target):
+		return
+
+	# 进入可见状态前的 AI 状态；取值用于判断是否刚从搜查或空闲切回追击。
+	var previous_ai_state: int = _target_ai_state
+	if not _has_target:
+		_has_target = true
+
+	_target_is_visible = true
+	_target_ai_state = TARGET_AI_STATE_VISIBLE
+	_has_last_occlusion_position = false
+	_remember_target_position(_target.global_position, delta)
+	_reset_target_search()
+	if previous_ai_state != TARGET_AI_STATE_VISIBLE:
+		_clear_navigation_path()
+
+
+func _begin_lost_target_search(occlusion_blocked_view: bool, line_of_sight_hit: Dictionary) -> void:
+	if not _has_last_known_target_position:
+		_forget_target()
+		return
+
+	_target_is_visible = false
+	_target_ai_state = TARGET_AI_STATE_SEARCHING
+	if occlusion_blocked_view:
+		_line_of_sight_loss_count += 1
+		_remember_occlusion_position(line_of_sight_hit)
+
+	if _line_of_sight_loss_count >= maxi(occlusion_break_forget_count, 1):
+		_forget_target()
+		return
+
+	# 初始搜查锚点；取值来自遮挡物背后或最后可见位置预测，默认模拟敌人前往最后线索处排查。
+	var initial_search_anchor: Vector2 = _get_lost_target_search_anchor()
+	_target_search_anchor_position = initial_search_anchor
+	_target_search_destination = initial_search_anchor
+	_has_target_search_destination = true
+	_has_reached_lost_search_anchor = false
+	_target_memory_remaining = maxf(_target_memory_remaining, target_memory_duration)
+	_target_search_remaining = 0.0
+	_clear_navigation_path()
+
+
+func _remember_occlusion_position(line_of_sight_hit: Dictionary) -> void:
+	if not line_of_sight_hit.has("position"):
+		return
+
+	# 遮挡命中位置；取值为 PhysicsRayQueryParameters2D 的 position 字段，默认用于推导遮挡物背后的搜查锚点。
+	var raw_position: Variant = line_of_sight_hit["position"]
+	if raw_position is Vector2:
+		_last_occlusion_position = raw_position
+		_has_last_occlusion_position = true
 
 
 func _try_attack_target() -> void:
@@ -272,35 +362,36 @@ func _try_attack_target() -> void:
 
 func _has_vision_line_of_sight_to_target() -> bool:
 	if not vision_requires_line_of_sight:
-		return true
+		return is_instance_valid(_target)
 
 	if not is_instance_valid(_target):
 		return false
+
+	return _get_vision_line_of_sight_hit().is_empty()
+
+
+func _get_vision_line_of_sight_hit() -> Dictionary:
+	if not vision_requires_line_of_sight or not is_instance_valid(_target):
+		# 空命中结果；取值为空字典，默认表示没有可记录的环境遮挡点。
+		var empty_hit_result: Dictionary = {}
+		return empty_hit_result
 
 	# 视线检测参数；取值为怪物到玩家之间的线段，默认只检测环境墙体和建筑。
 	var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(global_position, _target.global_position, vision_line_of_sight_collision_mask, [get_rid()])
 	query.collide_with_areas = false
 	query.collide_with_bodies = true
-	# 视线命中结果；取值为空表示无遮挡，默认用于决定怪物是否能发现或持续看见玩家。
-	var hit_result: Dictionary = get_world_2d().direct_space_state.intersect_ray(query)
-	return hit_result.is_empty()
+	# 视线命中结果；取值为空表示无遮挡，非空时包含遮挡物和命中位置，默认用于决定发现或启动搜查。
+	return get_world_2d().direct_space_state.intersect_ray(query)
 
 
-func _can_track_hidden_target(target_distance: float) -> bool:
-	if not is_instance_valid(_target):
-		return false
-
-	# 隔墙警觉追踪范围；取值为基础视野乘倍率，默认只允许已经发现玩家的怪物在有限范围内继续追踪。
-	var hidden_tracking_range: float = vision_range * maxf(hidden_target_tracking_range_multiplier, 1.0)
-	return target_distance <= hidden_tracking_range
+func _can_track_hidden_target(_target_distance: float) -> bool:
+	# 当前三阶段索敌不允许隔墙读取玩家实时位置；该兼容函数固定返回 false，避免旧调用恢复无脑追踪。
+	return false
 
 
-func _track_hidden_target_position(delta: float) -> void:
-	if not is_instance_valid(_target):
-		return
-
-	_remember_target_position(_target.global_position, delta)
-	_reset_target_search()
+func _track_hidden_target_position(_delta: float) -> void:
+	# 当前三阶段索敌不再写入墙后玩家实时坐标；失去视野后必须通过 _begin_lost_target_search 进入搜查。
+	return
 
 
 func _remember_target_position(target_position: Vector2, delta: float = 0.0) -> void:
@@ -317,9 +408,12 @@ func _remember_target_position(target_position: Vector2, delta: float = 0.0) -> 
 func _forget_target() -> void:
 	_has_target = false
 	_target_is_visible = false
+	_target_ai_state = TARGET_AI_STATE_IDLE
 	_has_last_known_target_position = false
 	_target_memory_remaining = 0.0
 	_estimated_target_velocity = Vector2.ZERO
+	_has_last_occlusion_position = false
+	_line_of_sight_loss_count = 0
 	_reset_target_search()
 	_clear_navigation_path()
 
@@ -341,6 +435,19 @@ func _should_continue_lost_target_search() -> bool:
 	if _has_target_search_destination:
 		# 当前搜索点距离；取值为怪物到搜索点的距离，默认用于判断是否需要切换下一个搜索点。
 		var search_point_distance: float = global_position.distance_to(_target_search_destination)
+		if not _has_reached_lost_search_anchor:
+			if search_point_distance > search_arrive_distance:
+				return _target_memory_remaining > 0.0
+
+			_has_reached_lost_search_anchor = true
+			_target_search_anchor_position = _target_search_destination
+			_target_search_remaining = maxf(target_search_duration_after_arrival, 0.0)
+			if _target_search_remaining <= 0.0:
+				return false
+
+			_pick_next_target_search_destination()
+			return true
+
 		if search_point_distance <= search_arrive_distance:
 			_pick_next_target_search_destination()
 
@@ -349,18 +456,34 @@ func _should_continue_lost_target_search() -> bool:
 	if not _has_last_known_target_position:
 		return false
 
-	# 推断目标点；取值由最后目标位置和估算速度计算，用于失去视野后继续追踪。
-	var predicted_target_position: Vector2 = _get_predicted_target_position()
-	# 推断目标距离；取值为怪物到推断点的距离，默认决定是否已经到达搜索区域。
-	var predicted_target_distance: float = global_position.distance_to(predicted_target_position)
-	if predicted_target_distance > search_arrive_distance and _target_memory_remaining > 0.0:
-		return true
+	if _target_memory_remaining <= 0.0:
+		return false
 
-	if target_search_duration_after_arrival <= 0.0:
-		return _target_memory_remaining > 0.0
+	# 兜底搜查锚点；取值来自最后线索，默认用于异常情况下恢复丢失搜查移动。
+	var fallback_search_anchor: Vector2 = _get_lost_target_search_anchor()
+	_target_search_anchor_position = fallback_search_anchor
+	_target_search_destination = fallback_search_anchor
+	_has_target_search_destination = true
+	_has_reached_lost_search_anchor = false
+	return true
 
-	_start_target_search(predicted_target_position)
-	return _target_search_remaining > 0.0
+
+func _get_lost_target_search_anchor() -> Vector2:
+	# 预测兜底点；取值来自最后可见坐标和最后可见阶段估算速度，默认用于没有遮挡命中点时继续搜查。
+	var fallback_anchor: Vector2 = _get_predicted_target_position()
+	if not _has_last_occlusion_position:
+		return fallback_anchor
+
+	# 遮挡物背后方向；取值为怪物指向遮挡命中点的方向，默认模拟敌人从自己视角绕到遮挡物背面。
+	var occlusion_direction: Vector2 = _last_occlusion_position - global_position
+	if occlusion_direction.is_zero_approx() and _has_last_known_target_position:
+		occlusion_direction = _last_known_target_position - global_position
+	if occlusion_direction.is_zero_approx():
+		return fallback_anchor
+
+	# 遮挡物背后锚点；取值为命中点沿遮挡方向推进，默认交给 A* 自动寻找入口或可走近邻格。
+	var occlusion_anchor: Vector2 = _last_occlusion_position + occlusion_direction.normalized() * maxf(lost_search_occlusion_offset, 0.0)
+	return occlusion_anchor
 
 
 func _get_predicted_target_position() -> Vector2:
@@ -380,6 +503,7 @@ func _get_predicted_target_position() -> Vector2:
 func _start_target_search(anchor_position: Vector2) -> void:
 	_target_search_anchor_position = anchor_position
 	_target_search_remaining = maxf(target_search_duration_after_arrival, 0.0)
+	_has_reached_lost_search_anchor = true
 	_pick_next_target_search_destination()
 
 
@@ -395,17 +519,35 @@ func _pick_next_target_search_destination() -> void:
 		_has_target_search_destination = true
 		return
 
-	# 搜索角度；取值为 0 到 TAU 的随机弧度，默认让怪物在目标消失点附近不固定走同一方向。
-	var search_angle: float = _random.randf_range(0.0, TAU)
-	# 搜索距离；取值为搜索半径的 35% 到 100%，默认避免所有搜索点都挤在锚点中心。
-	var search_distance: float = _random.randf_range(resolved_search_radius * 0.35, resolved_search_radius)
-	_target_search_destination = _target_search_anchor_position + Vector2.RIGHT.rotated(search_angle) * search_distance
+	# 兜底搜索点；取值为锚点，默认在多次随机点都不适合时至少保持在最后线索附近。
+	var fallback_destination: Vector2 = _target_search_anchor_position
+	# 搜索点尝试次数；取值至少为 1，默认优先挑选不会让怪物刚起步就贴墙的方向。
+	var attempt_count: int = maxi(lost_search_destination_attempts, 1)
+	for attempt_index in range(attempt_count):
+		# 搜索角度；取值为 0 到 TAU 的随机弧度，默认让怪物在目标消失点附近不固定走同一方向。
+		var search_angle: float = _random.randf_range(0.0, TAU)
+		# 搜索距离；取值为搜索半径的 35% 到 100%，默认避免所有搜索点都挤在锚点中心。
+		var search_distance: float = _random.randf_range(resolved_search_radius * 0.35, resolved_search_radius)
+		# 候选搜索点；取值为锚点周边坐标，默认用于搜查遮挡物后方、入口和室内周边。
+		var candidate_destination: Vector2 = _target_search_anchor_position + Vector2.RIGHT.rotated(search_angle) * search_distance
+		if attempt_index == 0:
+			fallback_destination = candidate_destination
+
+		# 候选起步方向；取值为怪物到候选点的方向，默认用于过滤明显会立即撞墙的巡逻点。
+		var candidate_direction: Vector2 = candidate_destination - global_position
+		if candidate_direction.is_zero_approx() or not _is_direction_blocked(candidate_direction.normalized()):
+			_target_search_destination = candidate_destination
+			_has_target_search_destination = true
+			return
+
+	_target_search_destination = fallback_destination
 	_has_target_search_destination = true
 
 
 func _reset_target_search() -> void:
 	_has_target_search_destination = false
 	_target_search_remaining = 0.0
+	_has_reached_lost_search_anchor = false
 
 
 func _update_target_behavior(_delta: float, target_distance: float) -> void:

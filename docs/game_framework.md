@@ -5,9 +5,9 @@
 ## 场景入口
 
 - `res://scenes/ui/main_menu.tscn` 是项目主场景，由 `project.godot` 的 `run/main_scene` 指向。
-- 主菜单脚本 `res://scripts/ui/main_menu.gd` 通过 `game_scene_path` 加载游戏世界，默认按钮文案为“测试战斗”，进入 `res://scenes/game/game_world.tscn`。
+- 主菜单脚本 `res://scripts/ui/main_menu.gd` 通过 `game_scene_path` 加载游戏世界，默认按钮文案为“训练场”，进入 `res://scenes/game/game_world.tscn`。
 - 主菜单提供“设置”入口，当前设置项为全局 Master 主音量，设置值直接写入 `AudioServer`。
-- `res://scenes/game/game_world.tscn` 是当前测试战斗场景，负责放置玩家、怪物、地图和掉落物。它的脚本会绘制调试网格，并在进入场景后随机刷新测试怪物。
+- `res://scenes/game/game_world.tscn` 是当前训练场场景，负责放置玩家、怪物、地图和掉落物。它的脚本会绘制调试网格，并在进入场景后随机刷新训练怪物。
 
 ## 玩家角色
 
@@ -52,7 +52,7 @@
 - `InventoryDropArea`：接收拖到背包空白区域的武器拖拽数据，并转发给 HUD 按背包末尾投放处理。
 - `CombatHud`：底部中心显示玩家生命、能量和武器栏，E 键打开背包，ESC 打开暂停菜单，监听组件信号并处理拖拽装备和卸下。
 - `BasicMonster`：基础怪物，维护血量、攻击力、移速、视野范围、索敌追击和近身攻击。
-- `GameWorld`：测试战斗承载脚本，绘制调试网格，并按配置随机刷新怪物。
+- `GameWorld`：训练场承载脚本，绘制调试网格，并按配置随机刷新怪物。
 
 ## 武器与装备
 
@@ -92,7 +92,9 @@ ESC 会打开战斗暂停菜单，并通过 `get_tree().paused` 暂停游戏世�
 
 暂停设置和主菜单设置共用同一条 Master 音量规则：滑条范围为 0 到 100，0 会静音 Master 总线，大于 0 时使用 `linear_to_db()` 写入音量。
 
-## 怪物与测试战斗
+训练场暂停菜单额外提供“测试设置”面板。该面板包含“清空场上怪物”“重新生成怪物”两个按钮，以及“无限能量”“无限血量”两个开关。无限能量通过 `CombatStatsComponent.set_infinite_energy()` 生效，开启后武器、疾跑和闪避消耗都不会降低能量；无限血量通过 `CombatStatsComponent.set_infinite_health()` 生效，开启后怪物攻击不会降低玩家生命。
+
+## 怪物与训练场
 
 当前怪物场景为 `res://scenes/enemies/basic_monster.tscn`，脚本为 `res://scripts/enemies/basic_monster.gd`。怪物使用 `CharacterBody2D`，碰撞层为 2，玩家弹体和近战命中框通过碰撞层 2 命中怪物。
 
@@ -104,8 +106,11 @@ ESC 会打开战斗暂停菜单，并通过 `get_tree().paused` 暂停游戏世�
 - `vision_range`：视野范围，玩家进入范围后怪物锁定并追击。
 - `attack_range`：攻击距离，玩家进入后怪物停止移动并按冷却攻击。
 - `attack_cooldown`：攻击冷却。
+- `wander_radius`、`wander_speed_multiplier`、`wander_arrive_distance`、`wander_wait_min`、`wander_wait_max`：无目标游荡参数。怪物未发现玩家时会围绕出生点随机选点移动，到达后等待一小段时间再选下一个点。
 
-`GameWorld` 通过 `monster_scene`、`monster_spawn_count`、`monster_spawn_min_distance`、`monster_spawn_max_distance` 和 `monster_parent_path` 控制测试战斗怪物生成。默认进入测试战斗时，以玩家位置为中心，在最小和最大距离之间随机生成 8 个怪物，并调用怪物的 `set_target(player)` 设置索敌目标。
+`GameWorld` 通过 `monster_scene`、`monster_spawn_count`、`monster_spawn_min_distance`、`monster_spawn_max_distance` 和 `monster_parent_path` 控制训练场怪物生成。默认进入训练场时，以玩家位置为中心，在最小和最大距离之间随机生成 8 个怪物，并调用怪物的 `set_target(player)` 设置索敌目标。
+
+训练场提供 `clear_monsters()` 和 `respawn_monsters()` 两个接口给 HUD 测试设置调用。清怪只清理 `monster_parent_path` 指向的怪物容器，重新生成会先清空再按当前配置刷新。
 
 ## 可调参数
 
@@ -116,10 +121,10 @@ ESC 会打开战斗暂停菜单，并通过 `get_tree().paused` 暂停游戏世�
 - 远程攻击：`projectile_scene`、`projectile_speed`、`projectile_damage`、`fire_cooldown`、`fallback_muzzle_distance`
 - 近战攻击：`damage`、`cooldown_duration`、`active_duration`、`rotation_offset`
 - 弹体：`speed`、`lifetime`、`max_distance`、`damage`、`destroy_on_hit`
-- 战斗属性：`max_health`、`current_health`、`max_energy`、`current_energy`、`energy_regeneration_per_second`
+- 战斗属性：`max_health`、`current_health`、`max_energy`、`current_energy`、`energy_regeneration_per_second`、`infinite_health`、`infinite_energy`
 - 装备：`ranged_slot_count`、`starting_ranged_weapons`、`starting_melee_weapon`
-- 怪物：`max_health`、`current_health`、`attack_damage`、`move_speed`、`vision_range`、`attack_range`、`attack_cooldown`、`lose_target_range_multiplier`
-- 测试战斗生成：`monster_scene`、`monster_spawn_count`、`monster_spawn_min_distance`、`monster_spawn_max_distance`、`monster_parent_path`
+- 怪物：`max_health`、`current_health`、`attack_damage`、`move_speed`、`vision_range`、`attack_range`、`attack_cooldown`、`lose_target_range_multiplier`、`wander_radius`、`wander_speed_multiplier`、`wander_arrive_distance`、`wander_wait_min`、`wander_wait_max`
+- 训练场生成：`monster_scene`、`monster_spawn_count`、`monster_spawn_min_distance`、`monster_spawn_max_distance`、`monster_parent_path`
 - 武器数据：`weapon_type`、`energy_cost`、`projectile_speed`、`ranged_damage`、`ranged_cooldown`、`melee_damage`、`melee_cooldown`、`melee_active_duration`
 - HUD：`ranged_slot_minimum_size`、`melee_slot_minimum_size`、`inventory_slot_minimum_size`、`toggle_inventory_action`、`pause_action`、`main_menu_scene_path`
 

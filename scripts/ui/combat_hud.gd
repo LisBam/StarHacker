@@ -16,6 +16,8 @@ const INVENTORY_FILTER_MELEE: String = "melee"
 
 ## 玩家节点路径；默认指向同一游戏世界下的 SilverWolf，必须解析到玩家根节点，运行时通常不修改。
 @export var player_path: NodePath = ^"../SilverWolf"
+## 游戏世界节点路径；默认指向 HUD 父节点 GameWorld，必须解析到提供训练场测试接口的节点。
+@export var game_world_path: NodePath = ^".."
 ## 背包开关输入动作名；默认 toggle_inventory 对应 E 键，运行时通常不修改，改名会影响背包打开/关闭。
 @export var toggle_inventory_action: StringName = &"toggle_inventory"
 ## 暂停输入动作名；默认 pause_game 对应 ESC，运行时通常不修改，改名会影响暂停菜单打开方式。
@@ -31,6 +33,8 @@ const INVENTORY_FILTER_MELEE: String = "melee"
 
 ## 玩家节点缓存；默认按 player_path 获取，允许为空但 HUD 不会显示有效状态，修改会影响所有组件绑定。
 var _player: Node
+## 游戏世界节点缓存；默认按 game_world_path 获取，允许为空但测试设置无法清怪或重刷怪物。
+var _game_world: Node
 ## 战斗属性组件缓存；默认从玩家子节点 StatsComponent 获取，允许为空但生命和能量无法刷新。
 var _stats_component: Node
 ## 装备组件缓存；默认从玩家子节点 EquipmentComponent 获取，允许为空但装备栏无法刷新。
@@ -100,8 +104,22 @@ var _master_bus_index: int = -1
 @onready var _resume_button: Button = %ResumeButton
 ## 暂停设置按钮缓存；默认绑定 PauseSettingsButton，点击后打开暂停设置面板。
 @onready var _pause_settings_button: Button = %PauseSettingsButton
+## 测试设置按钮缓存；默认绑定 TestSettingsButton，点击后打开训练场测试设置面板。
+@onready var _test_settings_button: Button = %TestSettingsButton
 ## 返回主菜单按钮缓存；默认绑定 ReturnMainMenuButton，点击后解除暂停并切换到主菜单。
 @onready var _return_main_menu_button: Button = %ReturnMainMenuButton
+## 测试设置面板缓存；默认绑定 TestSettingsPanel，显示清怪、重刷和无限属性开关。
+@onready var _test_settings_panel: Control = %TestSettingsPanel
+## 清空怪物按钮缓存；默认绑定 ClearMonstersButton，点击后清空训练场怪物。
+@onready var _clear_monsters_button: Button = %ClearMonstersButton
+## 重新生成怪物按钮缓存；默认绑定 RespawnMonstersButton，点击后按当前训练场配置重新刷新怪物。
+@onready var _respawn_monsters_button: Button = %RespawnMonstersButton
+## 无限能量开关缓存；默认绑定 InfiniteEnergyCheckButton，切换后修改玩家属性组件的无限能量状态。
+@onready var _infinite_energy_check_button: CheckButton = %InfiniteEnergyCheckButton
+## 无限血量开关缓存；默认绑定 InfiniteHealthCheckButton，切换后修改玩家属性组件的无限血量状态。
+@onready var _infinite_health_check_button: CheckButton = %InfiniteHealthCheckButton
+## 测试设置返回按钮缓存；默认绑定 TestSettingsBackButton，点击后返回暂停主菜单。
+@onready var _test_settings_back_button: Button = %TestSettingsBackButton
 ## 暂停设置主音量滑条缓存；默认绑定 PauseMasterVolumeSlider，取值 0 到 100，修改会影响全局 Master 音量。
 @onready var _pause_master_volume_slider: HSlider = %PauseMasterVolumeSlider
 ## 暂停设置主音量数值文本缓存；默认绑定 PauseMasterVolumeValueLabel，显示滑条当前百分比。
@@ -113,6 +131,7 @@ var _master_bus_index: int = -1
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_master_bus_index = AudioServer.get_bus_index("Master")
+	_bind_game_world()
 	_bind_player_components()
 	_bind_inventory_filter_buttons()
 	_bind_inventory_drop_area()
@@ -135,9 +154,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 
+		if _pause_overlay.visible:
+			return
+
 		if key_event.pressed and not key_event.echo and _is_toggle_inventory_event(key_event):
 			_toggle_inventory()
 			get_viewport().set_input_as_handled()
+
+
+func _bind_game_world() -> void:
+	_game_world = get_node_or_null(game_world_path)
 
 
 func _bind_player_components() -> void:
@@ -399,8 +425,14 @@ func _bind_inventory_drop_area() -> void:
 func _bind_pause_menu() -> void:
 	_resume_button.pressed.connect(_on_resume_button_pressed)
 	_pause_settings_button.pressed.connect(_on_pause_settings_button_pressed)
+	_test_settings_button.pressed.connect(_on_test_settings_button_pressed)
 	_return_main_menu_button.pressed.connect(_on_return_main_menu_button_pressed)
 	_pause_settings_back_button.pressed.connect(_on_pause_settings_back_button_pressed)
+	_clear_monsters_button.pressed.connect(_on_clear_monsters_button_pressed)
+	_respawn_monsters_button.pressed.connect(_on_respawn_monsters_button_pressed)
+	_infinite_energy_check_button.toggled.connect(_on_infinite_energy_toggled)
+	_infinite_health_check_button.toggled.connect(_on_infinite_health_toggled)
+	_test_settings_back_button.pressed.connect(_on_test_settings_back_button_pressed)
 	_pause_master_volume_slider.value_changed.connect(_on_pause_master_volume_slider_value_changed)
 	_sync_pause_master_volume_slider()
 
@@ -462,6 +494,10 @@ func _toggle_pause_menu() -> void:
 		_show_pause_settings(false)
 		return
 
+	if _pause_overlay.visible and _test_settings_panel.visible:
+		_show_test_settings(false)
+		return
+
 	_set_pause_menu_visible(not _pause_overlay.visible)
 
 
@@ -469,6 +505,7 @@ func _set_pause_menu_visible(visible: bool) -> void:
 	_pause_overlay.visible = visible
 	_pause_menu_panel.visible = visible
 	_pause_settings_panel.visible = false
+	_test_settings_panel.visible = false
 	get_tree().paused = visible
 	if visible:
 		if _inventory_panel.visible:
@@ -483,11 +520,37 @@ func _set_pause_menu_visible(visible: bool) -> void:
 func _show_pause_settings(visible: bool) -> void:
 	_pause_menu_panel.visible = not visible
 	_pause_settings_panel.visible = visible
+	_test_settings_panel.visible = false
 	if visible:
 		_sync_pause_master_volume_slider()
 		_pause_settings_back_button.grab_focus()
 	else:
 		_pause_settings_button.grab_focus()
+
+
+func _show_test_settings(visible: bool) -> void:
+	_pause_menu_panel.visible = not visible
+	_pause_settings_panel.visible = false
+	_test_settings_panel.visible = visible
+	if visible:
+		_sync_test_settings_controls()
+		_clear_monsters_button.grab_focus()
+	else:
+		_test_settings_button.grab_focus()
+
+
+func _sync_test_settings_controls() -> void:
+	if _stats_component == null:
+		_infinite_energy_check_button.set_pressed_no_signal(false)
+		_infinite_health_check_button.set_pressed_no_signal(false)
+		return
+
+	# 无限能量状态；取值来自属性组件，默认 false，修改会影响测试设置开关显示。
+	var infinite_energy_enabled: bool = bool(_stats_component.get("infinite_energy"))
+	# 无限血量状态；取值来自属性组件，默认 false，修改会影响测试设置开关显示。
+	var infinite_health_enabled: bool = bool(_stats_component.get("infinite_health"))
+	_infinite_energy_check_button.set_pressed_no_signal(infinite_energy_enabled)
+	_infinite_health_check_button.set_pressed_no_signal(infinite_health_enabled)
 
 
 func _sync_pause_master_volume_slider() -> void:
@@ -693,6 +756,36 @@ func _get_inventory_item_count() -> int:
 	return int(_inventory_component.call("get_item_count"))
 
 
+func _clear_training_monsters() -> void:
+	if _game_world == null or not _game_world.has_method("clear_monsters"):
+		return
+
+	_game_world.call("clear_monsters")
+
+
+func _respawn_training_monsters() -> void:
+	if _game_world == null or not _game_world.has_method("respawn_monsters"):
+		return
+
+	_game_world.call("respawn_monsters")
+
+
+func _set_infinite_energy_enabled(enabled: bool) -> void:
+	if _stats_component == null or not _stats_component.has_method("set_infinite_energy"):
+		return
+
+	_stats_component.call("set_infinite_energy", enabled)
+	_refresh_stats()
+
+
+func _set_infinite_health_enabled(enabled: bool) -> void:
+	if _stats_component == null or not _stats_component.has_method("set_infinite_health"):
+		return
+
+	_stats_component.call("set_infinite_health", enabled)
+	_refresh_stats()
+
+
 func _is_current_ranged_source(source_kind: String, source_index: int) -> bool:
 	if source_kind != "ranged" or not _equipment_component.has_method("get_current_ranged_slot"):
 		return false
@@ -760,6 +853,10 @@ func _on_pause_settings_button_pressed() -> void:
 	_show_pause_settings(true)
 
 
+func _on_test_settings_button_pressed() -> void:
+	_show_test_settings(true)
+
+
 func _on_return_main_menu_button_pressed() -> void:
 	get_tree().paused = false
 	get_tree().change_scene_to_file(main_menu_scene_path)
@@ -767,6 +864,26 @@ func _on_return_main_menu_button_pressed() -> void:
 
 func _on_pause_settings_back_button_pressed() -> void:
 	_show_pause_settings(false)
+
+
+func _on_clear_monsters_button_pressed() -> void:
+	_clear_training_monsters()
+
+
+func _on_respawn_monsters_button_pressed() -> void:
+	_respawn_training_monsters()
+
+
+func _on_infinite_energy_toggled(enabled: bool) -> void:
+	_set_infinite_energy_enabled(enabled)
+
+
+func _on_infinite_health_toggled(enabled: bool) -> void:
+	_set_infinite_health_enabled(enabled)
+
+
+func _on_test_settings_back_button_pressed() -> void:
+	_show_test_settings(false)
 
 
 func _on_pause_master_volume_slider_value_changed(value: float) -> void:

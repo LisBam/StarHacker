@@ -16,9 +16,9 @@ extends Node2D
 @export var axis_color: Color = Color(0.28, 0.52, 0.72, 0.62)
 ## 玩家节点路径；默认指向当前场景 SilverWolf，必须解析到 Node2D，修改会影响怪物索敌目标。
 @export var player_path: NodePath = ^"SilverWolf"
-## 测试战斗怪物场景；默认由 game_world.tscn 指向 BasicMonster，必须实例化为 Node2D，修改会影响随机生成的敌人类型。
+## 训练场怪物场景；默认由 game_world.tscn 指向 BasicMonster，必须实例化为 Node2D，修改会影响随机生成的敌人类型。
 @export var monster_scene: PackedScene
-## 测试战斗怪物生成数量；取值建议 0 到 64，默认 8，运行时修改会影响开局战斗压力。
+## 训练场怪物生成数量；取值建议 0 到 64，默认 8，运行时修改会影响开局战斗压力。
 @export_range(0, 64, 1) var monster_spawn_count: int = 8
 ## 怪物生成最小距离；取值应大于等于 0，默认 280 像素，运行时修改会影响怪物是否离玩家过近。
 @export_range(0.0, 4000.0, 1.0) var monster_spawn_min_distance: float = 280.0
@@ -27,7 +27,7 @@ extends Node2D
 ## 怪物父节点路径；默认指向 Enemies 容器，允许为空并回退到 GameWorld，修改会影响怪物节点层级。
 @export var monster_parent_path: NodePath = ^"Enemies"
 
-## 随机数生成器；默认新建并在 ready 随机化，修改会影响测试战斗怪物刷新位置。
+## 随机数生成器；默认新建并在 ready 随机化，修改会影响训练场怪物刷新位置。
 var _random: RandomNumberGenerator = RandomNumberGenerator.new()
 
 ## 玩家节点缓存；默认按 player_path 获取，允许为空并以世界原点作为生成中心。
@@ -63,7 +63,7 @@ func _spawn_test_monsters() -> void:
 	if monster_scene == null or monster_spawn_count <= 0:
 		return
 
-	# 怪物挂载父节点；取值为 Enemies 容器或 GameWorld，默认用于组织测试战斗生成物。
+	# 怪物挂载父节点；取值为 Enemies 容器或 GameWorld，默认用于组织训练场生成物。
 	var spawn_parent: Node = _monster_parent if _monster_parent != null else self
 	# 怪物生成循环索引；取值为 0 到 monster_spawn_count - 1，默认逐个生成怪物，修改循环范围会影响生成数量。
 	for _spawn_index in range(monster_spawn_count):
@@ -76,6 +76,20 @@ func _spawn_test_monsters() -> void:
 		monster.global_position = _get_random_monster_spawn_position()
 		if monster.has_method("set_target"):
 			monster.call("set_target", _player)
+
+
+func clear_monsters() -> void:
+	# 怪物挂载父节点；取值为 Enemies 容器或 GameWorld，默认用于查找需要清空的测试怪物。
+	var spawn_parent: Node = _monster_parent if _monster_parent != null else self
+	# 现有怪物节点遍历项；取值为怪物父节点下的子节点，默认全部移除，修改循环来源会影响清怪范围。
+	for monster_node in spawn_parent.get_children():
+		spawn_parent.remove_child(monster_node)
+		monster_node.queue_free()
+
+
+func respawn_monsters() -> void:
+	clear_monsters()
+	_spawn_test_monsters()
 
 
 func _get_random_monster_spawn_position() -> Vector2:

@@ -25,6 +25,14 @@ func configure(next_game_mode: String, next_character_id: String) -> void:
 	selected_character_id = normalize_character_id(next_character_id)
 
 
+func set_game_mode(next_game_mode: String) -> void:
+	game_mode = normalize_game_mode(next_game_mode)
+
+
+func set_selected_character(next_character_id: String) -> void:
+	selected_character_id = normalize_character_id(next_character_id)
+
+
 func is_training_mode() -> bool:
 	return game_mode == MODE_TRAINING
 
@@ -35,6 +43,51 @@ func get_selected_character_id() -> String:
 
 func get_selected_character_name() -> String:
 	return get_character_display_name(selected_character_id)
+
+
+func get_game_mode_label() -> String:
+	if game_mode == MODE_TRAINING:
+		return "训练场"
+
+	return "骇入"
+
+
+func get_character_profile(character_id: String) -> Dictionary:
+	# 标准化角色标识；取值为三个可选角色之一，默认兜底为星，修改会影响档案分支。
+	var normalized_character_id: String = normalize_character_id(character_id)
+	if normalized_character_id == CHARACTER_CAEULUS:
+		return {
+			"id": CHARACTER_CAEULUS,
+			"display_name": "穹",
+			"role": "均衡型开拓者",
+			"description": "生命上限较高，能量上限偏低，适合测试更稳定的近距离战斗节奏。",
+			"health_range": Vector2(130.0, 165.0),
+			"energy_range": Vector2(80.0, 110.0),
+			"passive": "被动技能：待配置",
+			"active": "主动技能：待配置"
+		}
+	if normalized_character_id == CHARACTER_SILVER_WOLF:
+		return {
+			"id": CHARACTER_SILVER_WOLF,
+			"display_name": "银狼",
+			"role": "高能量骇客",
+			"description": "生命上限偏低，能量上限较高，适合测试高频武器和持续消耗型动作。",
+			"health_range": Vector2(90.0, 120.0),
+			"energy_range": Vector2(130.0, 170.0),
+			"passive": "被动技能：待配置",
+			"active": "主动技能：待配置"
+		}
+
+	return {
+		"id": CHARACTER_STELLE,
+		"display_name": "星",
+		"role": "标准型开拓者",
+		"description": "生命和能量上限都较平衡，适合验证默认战斗、背包和武器流程。",
+		"health_range": Vector2(115.0, 145.0),
+		"energy_range": Vector2(95.0, 125.0),
+		"passive": "被动技能：待配置",
+		"active": "主动技能：待配置"
+	}
 
 
 func normalize_game_mode(value: String) -> String:

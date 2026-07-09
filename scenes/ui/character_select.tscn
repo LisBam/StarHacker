@@ -1,0 +1,203 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/character_select.gd" id="1_character_select"]
+
+[node name="CharacterSelect" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_character_select")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.0431373, 0.054902, 0.0705882, 1)
+
+[node name="RootMargin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 48
+theme_override_constants/margin_top = 34
+theme_override_constants/margin_right = 48
+theme_override_constants/margin_bottom = 36
+
+[node name="RootContent" type="VBoxContainer" parent="RootMargin"]
+layout_mode = 2
+theme_override_constants/separation = 18
+
+[node name="TitleLabel" type="Label" parent="RootMargin/RootContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.721569, 0.894118, 1, 1)
+theme_override_font_sizes/font_size = 30
+text = "骇入 - 角色选择"
+horizontal_alignment = 1
+
+[node name="MainColumns" type="HBoxContainer" parent="RootMargin/RootContent"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 18
+
+[node name="CharacterListPanel" type="PanelContainer" parent="RootMargin/RootContent/MainColumns"]
+custom_minimum_size = Vector2(260, 0)
+layout_mode = 2
+
+[node name="CharacterListMargin" type="MarginContainer" parent="RootMargin/RootContent/MainColumns/CharacterListPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 14
+
+[node name="CharacterListContent" type="VBoxContainer" parent="RootMargin/RootContent/MainColumns/CharacterListPanel/CharacterListMargin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ListTitle" type="Label" parent="RootMargin/RootContent/MainColumns/CharacterListPanel/CharacterListMargin/CharacterListContent"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "角色"
+horizontal_alignment = 1
+
+[node name="StelleButton" type="Button" parent="RootMargin/RootContent/MainColumns/CharacterListPanel/CharacterListMargin/CharacterListContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 58)
+layout_mode = 2
+toggle_mode = true
+text = "星"
+
+[node name="CaelusButton" type="Button" parent="RootMargin/RootContent/MainColumns/CharacterListPanel/CharacterListMargin/CharacterListContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 58)
+layout_mode = 2
+toggle_mode = true
+text = "穹"
+
+[node name="SilverWolfButton" type="Button" parent="RootMargin/RootContent/MainColumns/CharacterListPanel/CharacterListMargin/CharacterListContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 58)
+layout_mode = 2
+toggle_mode = true
+text = "银狼"
+
+[node name="ListSpacer" type="Control" parent="RootMargin/RootContent/MainColumns/CharacterListPanel/CharacterListMargin/CharacterListContent"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="DetailPanel" type="PanelContainer" parent="RootMargin/RootContent/MainColumns"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="DetailMargin" type="MarginContainer" parent="RootMargin/RootContent/MainColumns/DetailPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 22
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 22
+theme_override_constants/margin_bottom = 18
+
+[node name="DetailContent" type="VBoxContainer" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="CharacterNameLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "星"
+
+[node name="CharacterRoleLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.721569, 0.894118, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "标准型开拓者"
+
+[node name="CharacterDescriptionLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "生命和能量上限都较平衡，适合验证默认战斗、背包和武器流程。"
+autowrap_mode = 2
+
+[node name="StatsPanel" type="PanelContainer" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent"]
+layout_mode = 2
+
+[node name="StatsMargin" type="MarginContainer" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent/StatsPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 12
+
+[node name="StatsContent" type="VBoxContainer" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent/StatsPanel/StatsMargin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="HealthValueLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent/StatsPanel/StatsMargin/StatsContent"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "生命上限  115 - 145"
+
+[node name="HealthPreviewBar" type="ProgressBar" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent/StatsPanel/StatsMargin/StatsContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 14)
+layout_mode = 2
+max_value = 200.0
+value = 130.0
+show_percentage = false
+
+[node name="EnergyValueLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent/StatsPanel/StatsMargin/StatsContent"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "能量上限  95 - 125"
+
+[node name="EnergyPreviewBar" type="ProgressBar" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent/StatsPanel/StatsMargin/StatsContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 14)
+layout_mode = 2
+max_value = 200.0
+value = 110.0
+show_percentage = false
+
+[node name="PassiveLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "被动技能：待配置"
+autowrap_mode = 2
+
+[node name="ActiveLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "主动技能：待配置"
+autowrap_mode = 2
+
+[node name="DetailSpacer" type="Control" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="BottomActions" type="HBoxContainer" parent="RootMargin/RootContent"]
+layout_mode = 2
+theme_override_constants/separation = 12
+alignment = 2
+
+[node name="BackButton" type="Button" parent="RootMargin/RootContent/BottomActions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(140, 44)
+layout_mode = 2
+text = "返回"
+
+[node name="ConfirmButton" type="Button" parent="RootMargin/RootContent/BottomActions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 44)
+layout_mode = 2
+text = "进入骇入"

@@ -5,14 +5,15 @@
 ## 场景入口
 
 - `res://scenes/ui/main_menu.tscn` 是项目主场景，由 `project.godot` 的 `run/main_scene` 指向。
-- 主菜单脚本 `res://scripts/ui/main_menu.gd` 通过 `game_scene_path` 加载游戏世界，默认第一行按钮文案为“骇入”。主菜单同时保留“训练场”按钮，两者都会先打开角色选择面板，再进入 `res://scenes/game/game_world.tscn`。
+- 主菜单脚本 `res://scripts/ui/main_menu.gd` 通过 `character_select_scene_path` 加载独立角色选择场景，默认第一行按钮文案为“骇入”。主菜单同时保留“训练场”按钮，两者都会先写入当前模式，再进入 `res://scenes/ui/character_select.tscn`。
+- `res://scenes/ui/character_select.tscn` 是进入战斗前的角色选择场景。玩家在左侧选择“星”“穹”“银狼”，右侧会显示角色名称、定位、说明、生命上限范围、能量上限范围和技能占位信息，点击确认后进入 `res://scenes/game/game_world.tscn`。
 - 主菜单提供“设置”入口，当前设置项为全局 Master 主音量，设置值直接写入 `AudioServer`。
 - `res://scripts/game/session_state.gd` 通过 `project.godot` 自动加载为 `SessionState`，负责保存本次进入的模式和角色，避免把入口参数写进场景路径。
 - `res://scenes/game/game_world.tscn` 是当前战斗承载场景，负责放置玩家、怪物、地图和掉落物。它的脚本会在进入场景后随机生成大型地图，并随机生成一批怪物。
 
 ## 玩家角色
 
-- `res://scenes/characters/silver_wolf.tscn` 当前作为通用玩家预制体使用，根节点为 `CharacterBody2D`。实际显示角色由入口角色选择决定。
+- `res://scenes/characters/silver_wolf.tscn` 当前作为通用玩家预制体使用，根节点为 `CharacterBody2D`。实际显示角色由独立角色选择场景决定。
 - 当前可选角色为“星”“穹”“银狼”。三名角色暂时只提供占位属性：进入骇入、进入训练场或在训练场内切换角色时，会随机设置生命上限和能量上限；主动技能和被动技能后续再接入。
 - `res://scripts/player/player_controller.gd` 是聚合脚本，只负责调度输入、移动、远程攻击、近战攻击和瞄准朝向。聚合脚本通过节点路径获取组件，不直接强类型依赖自定义组件类，避免新项目或缓存刷新时出现全局类名解析顺序问题。
 - 玩家视觉、碰撞、摄像机、枪口、输入组件、移动组件、远程攻击组件和近战攻击组件都以子节点形式挂载，便于逐项替换。
@@ -52,7 +53,7 @@
 - `EquipmentComponent`：维护远程武器槽、当前远程槽索引和近战武器槽，负责切换与装备状态，不直接执行攻击。
 - `WeaponSlotControl`：显示单个武器槽或背包物品槽，负责拖拽数据、投放校验和白色冷却遮罩绘制，不直接修改装备数据。
 - `InventoryDropArea`：接收拖到背包空白区域的武器拖拽数据，并转发给 HUD 按背包末尾投放处理。
-- `CombatHud`：底部中心显示玩家生命、能量和武器栏，E 键打开背包，ESC 打开暂停菜单，监听组件信号并处理拖拽装备和卸下。
+- `CombatHud`：底部中心显示当前角色名、玩家生命、能量和武器栏，E 键打开背包，ESC 打开暂停菜单，监听组件信号并处理拖拽装备和卸下。
 - `BasicMonster`：基础怪物，维护血量、攻击力、移速、视野范围、索敌追击和近身攻击。
 - `SessionState`：入口会话状态，保存当前模式和当前角色，供主菜单、GameWorld 和训练场角色切换复用。
 - `GameWorld`：战斗承载脚本，随机生成大型地图、绘制网格，按配置随机生成怪物，并根据当前角色刷新玩家占位属性。
@@ -81,7 +82,7 @@
 
 移动能力流程为：玩家按住 Shift 且存在移动输入时，`PlayerController` 每帧按 `sprint_energy_cost_per_second * delta` 扣除能量，并把本帧移动速度倍率提升到 `sprint_speed_multiplier`；玩家按下 Space 且当前存在移动输入时，先扣除 `dodge_energy_cost`，再按 `dodge_distance / dodge_duration` 朝当前移动方向突进。背包打开时战斗输入被锁定，疾跑和闪避也不会触发能量消耗。
 
-战斗 HUD 布局固定为底部中心，并保持紧凑尺寸以降低视野遮挡：生命条和能量条在武器栏上方，远程武器槽和近战武器槽在下方。使用武器后，对应武器槽会绘制白色半透明冷却遮罩，冷却刚开始时覆盖整个槽位，随后随 `get_cooldown_ratio()` 返回值降低而缩短。
+战斗 HUD 布局固定为底部中心，并保持紧凑尺寸以降低视野遮挡：当前角色名、生命条和能量条在武器栏上方，远程武器槽和近战武器槽在下方。使用武器后，对应武器槽会绘制白色半透明冷却遮罩，冷却刚开始时覆盖整个槽位，随后随 `get_cooldown_ratio()` 返回值降低而缩短。
 
 背包通过 E 键打开或关闭。背包打开时，`CombatHud` 会通过 `PlayerInputComponent.set_combat_input_enabled(false)` 禁用射击、近战和切换武器，避免拖拽装备时误触战斗输入；WASD 移动不受影响。
 
@@ -133,6 +134,8 @@ ESC 会打开战斗暂停菜单，并通过 `get_tree().paused` 暂停游戏世�
 - 训练场生成：`monster_scene`、`monster_spawn_count`、`monster_spawn_min_distance`、`monster_spawn_max_distance`、`monster_parent_path`
 - 角色占位属性：`stelle_health_range`、`stelle_energy_range`、`caelus_health_range`、`caelus_energy_range`、`silver_wolf_health_range`、`silver_wolf_energy_range`
 - 武器数据：`weapon_type`、`energy_cost`、`projectile_speed`、`ranged_damage`、`ranged_cooldown`、`melee_damage`、`melee_cooldown`、`melee_active_duration`
+- 主菜单入口：`character_select_scene_path`
+- 角色选择：`game_scene_path`、`main_menu_scene_path`、`stat_bar_maximum`
 - HUD：`ranged_slot_minimum_size`、`melee_slot_minimum_size`、`inventory_slot_minimum_size`、`toggle_inventory_action`、`pause_action`、`main_menu_scene_path`
 
 调参优先在 Godot 检查器中完成，只有新增规则或默认值需要沉淀时再修改脚本。

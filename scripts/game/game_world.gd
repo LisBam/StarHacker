@@ -201,6 +201,10 @@ func get_selected_character_id() -> String:
 	return _selected_character_id
 
 
+func get_selected_character_name() -> String:
+	return _get_character_display_name(_selected_character_id)
+
+
 func switch_character(character_id: String) -> void:
 	_selected_character_id = _normalize_character_id(character_id)
 

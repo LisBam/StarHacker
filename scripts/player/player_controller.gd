@@ -43,6 +43,8 @@ const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat
 @export_range(0.0, 2.0, 0.01) var damage_shake_per_damage: float = 0.16
 ## 最小受伤震动；取值建议 0 到 8，默认 1.6 保证小伤害也有轻微反馈。
 @export_range(0.0, 32.0, 0.1) var minimum_damage_shake: float = 1.6
+## 玩家受伤间隔；取值建议 0 到 1，默认 0.2 秒用于合并同一瞬间的多颗子弹命中和击退，运行时修改会影响受击容错。
+@export_range(0.0, 5.0, 0.01) var damage_interval: float = 0.2
 ## 玩家受击特效颜色；默认浅青色，修改会影响玩家被命中时的爆发特效颜色。
 @export var hit_effect_color: Color = Color(0.55, 0.90, 1.0, 0.95)
 ## 玩家死亡特效颜色；默认偏红白色，修改会影响玩家死亡时的爆发特效颜色。
@@ -56,6 +58,8 @@ var _dodge_direction: Vector2 = Vector2.ZERO
 var _dodge_time_remaining: float = 0.0
 ## 当前外部击退速度；取值为 Vector2，默认零向量，修改会影响后坐力和受击击退叠加到移动上的强度。
 var _knockback_velocity: Vector2 = Vector2.ZERO
+## 当前受伤间隔剩余时间；取值大于等于 0，默认 0 表示可以受伤，修改会影响连续受伤过滤。
+var _damage_interval_remaining: float = 0.0
 
 ## 输入组件实例缓存；默认在 ready 阶段按路径获取，保持动态类型以降低脚本类名缓存依赖，修改会影响移动与攻击输入读取。
 @onready var _input_component = get_node(input_component_path)
@@ -76,6 +80,7 @@ var _knockback_velocity: Vector2 = Vector2.ZERO
 
 
 func _physics_process(delta: float) -> void:
+	_damage_interval_remaining = maxf(_damage_interval_remaining - delta, 0.0)
 	_handle_weapon_switch_input()
 
 	# 当前帧移动方向；取值为归一化 Vector2 或 Vector2.ZERO，无持久默认值，修改会直接影响本帧移动速度方向。
@@ -104,6 +109,10 @@ func _physics_process(delta: float) -> void:
 
 
 func apply_damage(damage: float, source: Node) -> void:
+	if not _can_receive_damage(damage):
+		return
+
+	_damage_interval_remaining = maxf(damage_interval, 0.0)
 	# 受伤前死亡状态；取值来自属性组件，默认用于避免死亡特效重复生成。
 	var was_dead: bool = _is_stats_dead()
 	if _stats_component.has_method("take_damage"):
@@ -152,7 +161,8 @@ func _try_fire_ranged_weapon() -> void:
 		return
 
 	_apply_weapon_recoil(current_weapon, _last_aim_direction)
-	_shake_screen_for_weapon_fire(current_weapon)
+	_apply_weapon_front_recoil(current_weapon, _last_aim_direction)
+	_shake_screen_for_weapon_use(current_weapon)
 	if _stats_component.has_method("spend_energy"):
 		_stats_component.call("spend_energy", energy_cost)
 
@@ -173,7 +183,13 @@ func _try_use_melee_weapon() -> void:
 
 	# 本次近战攻击是否成功开启命中框；取值为 true/false，默认由近战组件返回，修改会影响是否扣除能量。
 	var attack_succeeded: bool = _melee_attack_component.try_attack(_last_aim_direction, current_weapon)
-	if attack_succeeded and _stats_component.has_method("spend_energy"):
+	if not attack_succeeded:
+		return
+
+	_apply_weapon_recoil(current_weapon, _last_aim_direction)
+	_apply_weapon_front_recoil(current_weapon, _last_aim_direction)
+	_shake_screen_for_weapon_use(current_weapon)
+	if _stats_component.has_method("spend_energy"):
 		_stats_component.call("spend_energy", energy_cost)
 
 
@@ -261,6 +277,18 @@ func _apply_weapon_recoil(weapon_data: Resource, attack_direction: Vector2) -> v
 	apply_knockback(-attack_direction.normalized(), recoil_force)
 
 
+func _apply_weapon_front_recoil(weapon_data: Resource, attack_direction: Vector2) -> void:
+	if weapon_data == null or attack_direction.is_zero_approx():
+		return
+
+	# 武器前坐力；取值来自武器资源 front_recoil_force，默认 0 表示不把玩家推向攻击方向。
+	var front_recoil_force: float = _get_weapon_front_recoil_force(weapon_data)
+	if front_recoil_force <= 0.0:
+		return
+
+	apply_knockback(attack_direction.normalized(), front_recoil_force)
+
+
 func _get_weapon_recoil_force(weapon_data: Resource) -> float:
 	if weapon_data == null:
 		return 0.0
@@ -268,13 +296,24 @@ func _get_weapon_recoil_force(weapon_data: Resource) -> float:
 	return maxf(float(weapon_data.get("recoil_force")), 0.0)
 
 
-func _shake_screen_for_weapon_fire(weapon_data: Resource) -> void:
+func _get_weapon_front_recoil_force(weapon_data: Resource) -> float:
+	if weapon_data == null:
+		return 0.0
+
+	return maxf(float(weapon_data.get("front_recoil_force")), 0.0)
+
+
+func _shake_screen_for_weapon_use(weapon_data: Resource) -> void:
 	# 武器后坐力；取值来自武器资源 recoil_force，默认用于换算射击屏幕震动强度。
 	var recoil_force: float = _get_weapon_recoil_force(weapon_data)
-	if recoil_force <= 0.0:
+	# 武器前坐力；取值来自武器资源 front_recoil_force，默认按后坐力一半倍率换算震动强度。
+	var front_recoil_force: float = _get_weapon_front_recoil_force(weapon_data)
+	# 武器使用震动强度；取值由后坐力和前坐力共同换算，默认 0 表示不震动。
+	var shake_amount: float = recoil_force * fire_shake_per_recoil + front_recoil_force * fire_shake_per_recoil * 0.5
+	if shake_amount <= 0.0:
 		return
 
-	_shake_screen(recoil_force * fire_shake_per_recoil)
+	_shake_screen(shake_amount)
 
 
 func _shake_screen_for_damage(damage: float) -> void:
@@ -284,6 +323,16 @@ func _shake_screen_for_damage(damage: float) -> void:
 	# 受伤震动强度；取值由伤害和最小震动共同决定，默认让高伤害反馈更强。
 	var shake_amount: float = maxf(damage * damage_shake_per_damage, minimum_damage_shake)
 	_shake_screen(shake_amount)
+
+
+func _can_receive_damage(damage: float) -> bool:
+	if damage <= 0.0:
+		return false
+
+	if _damage_interval_remaining > 0.0:
+		return false
+
+	return not _is_stats_dead()
 
 
 func _shake_screen(amount: float) -> void:

@@ -8,10 +8,10 @@ class_name WeaponDrop
 @export var weapon_data: Resource
 ## 可拾取距离；取值建议大于玩家半径，默认 96 像素，HUD 使用该距离判断是否进入附近列表。
 @export_range(1.0, 400.0, 1.0, "or_greater") var pickup_radius: float = 96.0
-## 掉落物悬浮幅度；取值建议 0 到 12，默认 4 像素，修改会影响地面武器轻微浮动表现。
-@export_range(0.0, 32.0, 0.5) var bob_amplitude: float = 4.0
-## 掉落物悬浮速度；取值建议大于 0，默认 3，修改会影响地面武器浮动频率。
-@export_range(0.0, 20.0, 0.1) var bob_speed: float = 3.0
+## 掉落物悬浮幅度；取值建议 0 到 12，默认 0 表示地面武器保持静止，修改会影响地面武器轻微浮动表现。
+@export_range(0.0, 32.0, 0.5) var bob_amplitude: float = 0.0
+## 掉落物悬浮速度；取值建议大于等于 0，默认 0 表示不播放浮动动画，修改会影响地面武器浮动频率。
+@export_range(0.0, 20.0, 0.1) var bob_speed: float = 0.0
 
 ## 掉落物基础视觉位置；取值为 ready 时视觉节点 position，默认用于叠加悬浮动画。
 var _visual_base_position: Vector2 = Vector2.ZERO
@@ -30,6 +30,7 @@ func _ready() -> void:
 	add_to_group("weapon_drops")
 	if _visual_root != null:
 		_visual_base_position = _visual_root.position
+	set_process(bob_amplitude > 0.0 and bob_speed > 0.0)
 	_refresh_visual()
 
 
@@ -77,6 +78,7 @@ func pickup_to_inventory(inventory_component: Node) -> bool:
 		return false
 
 	remove_from_group("weapon_drops")
+	weapon_data = null
 	visible = false
 	queue_free()
 	return true

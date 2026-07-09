@@ -33,6 +33,10 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export_range(16.0, 2048.0, 1.0, "or_greater") var exploration_cell_size: float = 256.0
 ## 玩家探索半径；取值应大于等于 0，默认 760 像素，修改会影响玩家走过后大地图可见区域大小。
 @export_range(0.0, 6000.0, 1.0) var exploration_radius: float = 760.0
+## 探索格更新间隔；取值建议 0.1 到 0.5 秒，默认 0.2 秒，修改会影响大地图迷雾刷新频率和每帧 CPU 开销。
+@export_range(0.02, 5.0, 0.01) var exploration_update_interval: float = 0.2
+## 探索格强制更新移动距离；取值建议小于探索格子尺寸，默认 96 像素，玩家移动超过该距离会立即刷新探索缓存。
+@export_range(0.0, 2048.0, 1.0) var exploration_update_distance: float = 96.0
 ## 边界墙厚度；取值应大于 0，默认 64 像素，用于在地图四周生成一圈阻挡玩家和怪物离场的墙体。
 @export_range(1.0, 1024.0, 1.0, "or_greater") var boundary_wall_thickness: float = 64.0
 ## 边界墙颜色；取值为 RGBA，默认深蓝灰，修改会影响地图边缘墙体的可视表现。
@@ -120,10 +124,20 @@ var _random: RandomNumberGenerator = RandomNumberGenerator.new()
 var _active_map_seed: int = 0
 ## 小地图障碍矩形缓存；元素为世界坐标 Rect2，默认由随机环境碰撞形状生成，修改会影响小地图绘制内容。
 var _environment_obstacle_rects: Array[Rect2] = []
+## 小地图障碍版本号；取值从 0 递增，默认用于地图 UI 判断是否需要重新复制障碍矩形。
+var _environment_obstacle_version: int = 0
 ## 已探索迷雾格子缓存；键为 Vector2i，值为 true，默认由玩家位置持续写入，修改会影响大地图可见区域。
 var _explored_cells: Dictionary = {}
+## 已探索格版本号；取值从 0 递增，默认仅在新增探索格时变化，供地图 UI 避免重复构建查询表。
+var _explored_cells_version: int = 0
 ## 导航网格缓存；键为寻路格尺寸与代理半径组合，值为 AStarGrid2D，用于避免每只怪物重复重建整张地图网格。
 var _navigation_grid_cache: Dictionary = {}
+## 探索更新剩余时间；取值大于等于 0，默认 0 表示下一帧允许检查探索格刷新。
+var _exploration_update_remaining: float = 0.0
+## 上次刷新探索格时的玩家位置；取值为世界坐标，默认零向量，仅在 _has_last_exploration_update_position 为 true 时有效。
+var _last_exploration_update_position: Vector2 = Vector2.ZERO
+## 是否已有上次探索刷新位置；取值为 true/false，默认 false 用于首次强制刷新探索格。
+var _has_last_exploration_update_position: bool = false
 ## 当前是否为训练场模式；默认 false 表示正式骇入，修改会影响 HUD 是否显示训练场设置。
 var _is_training_mode: bool = false
 ## 当前选择角色标识；取值为 stelle、caelus 或 silver_wolf，默认 stelle，用于角色切换和属性随机。
@@ -164,14 +178,15 @@ func _ready() -> void:
 	_navigation_grid_cache.clear()
 	_spawn_boundary_walls()
 	_spawn_random_environment()
+	_environment_obstacle_version += 1
 	_spawn_monster_batch()
-	_update_explored_cells()
+	_update_explored_cells(true)
 
 
 func _process(delta: float) -> void:
 	_update_survival_time(delta)
 	_update_extraction_state(delta)
-	_update_explored_cells()
+	_update_explored_cells_if_needed(delta)
 
 
 func _draw() -> void:
@@ -233,6 +248,10 @@ func get_minimap_obstacle_rects() -> Array[Rect2]:
 	return result
 
 
+func get_minimap_obstacle_version() -> int:
+	return _environment_obstacle_version
+
+
 func get_explored_cells() -> Array[Vector2i]:
 	# 已探索格子列表；元素为 Vector2i，默认从字典键复制，供大地图迷雾绘制使用。
 	var result: Array[Vector2i] = []
@@ -242,6 +261,10 @@ func get_explored_cells() -> Array[Vector2i]:
 			result.append(explored_cell)
 
 	return result
+
+
+func get_explored_cells_version() -> int:
+	return _explored_cells_version
 
 
 func get_exploration_cell_size() -> float:
@@ -670,10 +693,45 @@ func _is_player_dead() -> bool:
 	return false
 
 
-func _update_explored_cells() -> void:
+func _update_explored_cells_if_needed(delta: float) -> void:
 	if _player == null:
 		return
 
+	_exploration_update_remaining = maxf(_exploration_update_remaining - maxf(delta, 0.0), 0.0)
+	if _should_update_explored_cells():
+		_update_explored_cells(false)
+
+
+func _should_update_explored_cells() -> bool:
+	if _player == null:
+		return false
+
+	if not _has_last_exploration_update_position:
+		return true
+
+	if _exploration_update_remaining <= 0.0:
+		return true
+
+	# 本次探索刷新距离阈值；取值至少为 0，默认让玩家快速移动时不等待固定计时器。
+	var update_distance: float = maxf(exploration_update_distance, 0.0)
+	if update_distance <= 0.0:
+		return false
+
+	return _player.global_position.distance_to(_last_exploration_update_position) >= update_distance
+
+
+func _update_explored_cells(force_update: bool) -> void:
+	if _player == null:
+		return
+
+	if not force_update and not _should_update_explored_cells():
+		return
+
+	_last_exploration_update_position = _player.global_position
+	_has_last_exploration_update_position = true
+	_exploration_update_remaining = maxf(exploration_update_interval, 0.02)
+	# 是否新增探索格；取值为 true/false，默认只在实际扩展迷雾缓存时递增版本号。
+	var explored_cells_changed: bool = false
 	# 有效探索格子尺寸；取值至少 1，默认防止配置错误导致除零。
 	var cell_size: float = get_exploration_cell_size()
 	# 玩家所在探索格；取值为玩家当前全局坐标转换后的格子坐标。
@@ -691,7 +749,14 @@ func _update_explored_cells() -> void:
 
 			# 当前探索格；取值为玩家中心格加偏移，默认写入已探索字典。
 			var explored_cell: Vector2i = center_cell + Vector2i(offset_x, offset_y)
+			if _explored_cells.has(explored_cell):
+				continue
+
 			_explored_cells[explored_cell] = true
+			explored_cells_changed = true
+
+	if explored_cells_changed:
+		_explored_cells_version += 1
 
 
 func _world_position_to_exploration_cell(world_position: Vector2) -> Vector2i:

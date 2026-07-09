@@ -57,7 +57,12 @@ func set_empty_text(new_empty_text: String) -> void:
 
 
 func set_cooldown_ratio(new_cooldown_ratio: float) -> void:
-	cooldown_ratio = clampf(new_cooldown_ratio, 0.0, 1.0)
+	# 标准化冷却比例；取值为 0 到 1，默认用于判断是否需要重绘冷却遮罩。
+	var resolved_cooldown_ratio: float = clampf(new_cooldown_ratio, 0.0, 1.0)
+	if is_equal_approx(cooldown_ratio, resolved_cooldown_ratio):
+		return
+
+	cooldown_ratio = resolved_cooldown_ratio
 	queue_redraw()
 
 
@@ -137,8 +142,14 @@ func _notification(what: int) -> void:
 	if _active_drag_data.is_empty():
 		return
 
+	# 当前视口；取值可能在场景切换或节点释放期间为空，默认为空时只清理拖拽状态。
+	var current_viewport: Viewport = get_viewport()
+	if current_viewport == null:
+		_active_drag_data = {}
+		return
+
 	# 拖拽是否被目标成功接收；取值来自 Viewport，默认 false 表示释放在无效区域。
-	var drag_successful: bool = get_viewport().gui_is_drag_successful()
+	var drag_successful: bool = current_viewport.gui_is_drag_successful()
 	if not drag_successful:
 		drag_released_outside.emit(_active_drag_data)
 

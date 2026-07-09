@@ -105,7 +105,9 @@ func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
 	# 被拖拽武器资源；取值为 Resource，默认来自拖拽数据，修改会影响槽位类型校验。
 	var dragged_weapon: Resource = drop_data["weapon_data"] as Resource
 	if slot_context == "inventory":
-		return str(drop_data.get("source_context", "")) == "equipment"
+		# 拖拽来源上下文；取值为 equipment 或 inventory，默认空字符串表示非法来源，修改会影响背包槽可接收的来源。
+		var source_context: String = str(drop_data.get("source_context", ""))
+		return source_context == "equipment" or source_context == "inventory"
 
 	if slot_kind == "ranged":
 		return str(dragged_weapon.get("weapon_type")) == "ranged"
@@ -166,13 +168,15 @@ func _refresh_text() -> void:
 
 
 func _get_slot_title() -> String:
+	if slot_context == "inventory" and weapon_data != null:
+		return _get_weapon_type_label(weapon_data)
+	if slot_kind == "inventory_drop":
+		return "放入"
 	if slot_kind == "ranged":
 		return "远程 %d" % (slot_index + 1)
 	if slot_kind == "melee":
 		return "近战"
-	if slot_kind == "inventory_drop":
-		return "卸下"
-	return "背包"
+	return "空位"
 
 
 func _get_weapon_display_name(target_weapon_data: Resource, fallback_name: String) -> String:
@@ -197,3 +201,17 @@ func _get_weapon_detail_text() -> String:
 		return "能量 0"
 
 	return "能量 %d" % roundi(energy_cost)
+
+
+func _get_weapon_type_label(target_weapon_data: Resource) -> String:
+	if target_weapon_data == null:
+		return "空位"
+
+	# 武器类型字段；取值为 ranged 或 melee，默认由武器资源配置，修改会影响背包槽标题显示。
+	var weapon_type: String = str(target_weapon_data.get("weapon_type"))
+	if weapon_type == "ranged":
+		return "远程"
+	if weapon_type == "melee":
+		return "近战"
+
+	return "未知"

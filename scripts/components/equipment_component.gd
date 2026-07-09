@@ -31,7 +31,7 @@ var _melee_weapon: Resource
 
 func _ready() -> void:
 	_initialize_equipment_slots()
-	_register_starting_items_to_inventory()
+	_remove_equipped_items_from_inventory()
 	call_deferred("_emit_full_equipment_changed")
 
 
@@ -43,7 +43,6 @@ func equip_ranged_weapon(slot_index: int, weapon_data: Resource) -> bool:
 	if get_current_ranged_weapon() == null:
 		_current_ranged_slot = slot_index
 
-	_register_item_to_inventory(weapon_data)
 	ranged_weapon_changed.emit(_current_ranged_slot, get_current_ranged_weapon())
 	equipment_changed.emit()
 	return true
@@ -54,7 +53,6 @@ func equip_melee_weapon(weapon_data: Resource) -> bool:
 		return false
 
 	_melee_weapon = weapon_data
-	_register_item_to_inventory(weapon_data)
 	melee_weapon_changed.emit(_melee_weapon)
 	equipment_changed.emit()
 	return true
@@ -171,23 +169,20 @@ func _initialize_equipment_slots() -> void:
 	_current_ranged_slot = _find_first_available_ranged_slot()
 
 
-func _register_starting_items_to_inventory() -> void:
-	# 已装备远程武器登记遍历项；取值为 Resource 或 null，默认来自远程槽数组，修改循环来源会影响背包装备同步。
+func _remove_equipped_items_from_inventory() -> void:
+	# 已装备远程武器清理遍历项；取值为 Resource 或 null，默认来自远程槽数组，修改循环来源会影响背包装备同步。
 	for weapon_data in _ranged_weapons:
-		_register_item_to_inventory(weapon_data)
+		_remove_item_from_inventory(weapon_data)
 
-	_register_item_to_inventory(_melee_weapon)
+	_remove_item_from_inventory(_melee_weapon)
 
 
-func _register_item_to_inventory(item_data: Resource) -> void:
+func _remove_item_from_inventory(item_data: Resource) -> void:
 	if item_data == null or _inventory_component == null:
 		return
 
-	if _inventory_component.has_method("has_item") and _inventory_component.call("has_item", item_data):
-		return
-
-	if _inventory_component.has_method("add_item"):
-		_inventory_component.call("add_item", item_data)
+	if _inventory_component.has_method("remove_item"):
+		_inventory_component.call("remove_item", item_data)
 
 
 func _find_first_available_ranged_slot() -> int:

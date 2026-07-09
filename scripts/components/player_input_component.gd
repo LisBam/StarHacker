@@ -17,6 +17,10 @@ class_name PlayerInputComponent
 @export var fire_action: StringName = &"attack_fire"
 ## 近战攻击输入动作名；默认 attack_melee 对应鼠标右键，运行时通常不修改，改名会影响近战触发。
 @export var melee_action: StringName = &"attack_melee"
+## 疾跑输入动作名；默认 sprint 对应 Shift，运行时通常不修改，改名会影响按住疾跑触发。
+@export var sprint_action: StringName = &"sprint"
+## 闪避输入动作名；默认 dodge 对应 Space，运行时通常不修改，改名会影响单次突进触发。
+@export var dodge_action: StringName = &"dodge"
 ## 切换到第 1 个远程槽的输入动作名；默认 switch_ranged_1 对应数字键 1，运行时通常不修改，改名会影响快捷切枪。
 @export var switch_ranged_1_action: StringName = &"switch_ranged_1"
 ## 切换到第 2 个远程槽的输入动作名；默认 switch_ranged_2 对应数字键 2，运行时通常不修改，改名会影响快捷切枪。
@@ -34,6 +38,8 @@ class_name PlayerInputComponent
 var _left_mouse_down: bool = false
 ## 鼠标右键单次请求缓存；取值为 true/false，默认 false 表示无待处理近战，消费后清空以避免一次点击重复攻击。
 var _right_mouse_requested: bool = false
+## 闪避单次请求缓存；取值为 true/false，默认 false 表示无待处理闪避，消费后清空以避免一次按键重复突进。
+var _dodge_requested: bool = false
 ## 远程槽单次切换请求；取值为 -1 或有效槽索引，默认 -1 表示无请求，消费后清空以避免重复切换。
 var _ranged_slot_request: int = -1
 ## 远程武器循环切换请求；取值为负数、0 或正数，默认 0 表示无滚轮切换，消费后清空以避免重复切换。
@@ -61,6 +67,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		# 当前键盘事件；取值来自本帧输入事件强转，默认由事件系统提供，修改会影响数字键切枪解析。
 		var key_event: InputEventKey = event as InputEventKey
 		if key_event.pressed and not key_event.echo:
+			if key_event.physical_keycode == KEY_SPACE:
+				_dodge_requested = true
+
 			# 数字键对应远程槽索引；取值为 -1 或 0 到 8，默认由物理键位计算，修改会影响快捷槽映射。
 			var slot_index: int = _get_ranged_slot_index_from_key(key_event.physical_keycode)
 			if slot_index >= 0 and slot_index < max_direct_ranged_slots:
@@ -112,6 +121,24 @@ func consume_melee_request() -> bool:
 	return requested
 
 
+func is_sprint_pressed() -> bool:
+	if not _combat_input_enabled:
+		return false
+
+	return _is_action_pressed(sprint_action) or Input.is_physical_key_pressed(KEY_SHIFT) or Input.is_key_pressed(KEY_SHIFT)
+
+
+func consume_dodge_request() -> bool:
+	if not _combat_input_enabled:
+		_dodge_requested = false
+		return false
+
+	# 本帧闪避请求结果；取值为 true/false，默认由缓存和 InputMap 合成，修改会影响 Space 是否产生一次突进。
+	var requested: bool = _dodge_requested or _is_action_just_pressed(dodge_action)
+	_dodge_requested = false
+	return requested
+
+
 func consume_ranged_slot_request() -> int:
 	if not _combat_input_enabled:
 		_ranged_slot_request = -1
@@ -155,6 +182,7 @@ func set_combat_input_enabled(enabled: bool) -> void:
 
 	_left_mouse_down = false
 	_right_mouse_requested = false
+	_dodge_requested = false
 	_ranged_slot_request = -1
 	_ranged_cycle_request = 0
 

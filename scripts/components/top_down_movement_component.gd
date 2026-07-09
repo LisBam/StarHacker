@@ -14,9 +14,11 @@ class_name TopDownMovementComponent
 @export_range(0.0, 20.0, 0.1) var stop_threshold: float = 4.0
 
 
-func move(body: CharacterBody2D, direction: Vector2, delta: float) -> void:
+func move(body: CharacterBody2D, direction: Vector2, delta: float, speed_multiplier: float = 1.0) -> void:
+	# 标准化速度倍率；取值大于等于 0，默认 1 表示正常移动，修改会影响疾跑等临时速度加成。
+	var clamped_speed_multiplier: float = maxf(speed_multiplier, 0.0)
 	# 目标速度；取值由方向和最大速度计算，默认随输入实时变化，修改会直接影响本帧期望移动速度。
-	var target_velocity: Vector2 = direction * max_speed
+	var target_velocity: Vector2 = direction * max_speed * clamped_speed_multiplier
 	# 当前速度变化率；取值在 acceleration 与 friction 间切换，默认由是否有输入决定，修改会影响本帧加减速力度。
 	var change_rate: float = acceleration if not direction.is_zero_approx() else friction
 	body.velocity = body.velocity.move_toward(target_velocity, change_rate * delta)

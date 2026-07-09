@@ -20,9 +20,23 @@ class_name PlayerController
 @export var equipment_component_path: NodePath = ^"EquipmentComponent"
 ## 瞄准旋转轴路径；默认指向 AimPivot，必须解析到 Node2D，修改会影响武器朝向和枪口位置。
 @export var aim_pivot_path: NodePath = ^"AimPivot"
+## 疾跑速度倍率；取值建议大于等于 1，默认 1.55 表示按住 Shift 时移动速度提升 55%，运行时修改会影响疾跑手感。
+@export_range(1.0, 4.0, 0.05, "or_greater") var sprint_speed_multiplier: float = 1.55
+## 疾跑每秒能量消耗；取值建议大于等于 0，默认 24 表示持续疾跑会稳定消耗能量，运行时修改会影响疾跑续航。
+@export_range(0.0, 9999.0, 0.1, "or_greater") var sprint_energy_cost_per_second: float = 24.0
+## 闪避单次能量消耗；取值建议大于等于 0，默认 18 表示每次 Space 突进需要付出固定能量，运行时修改会影响闪避频率。
+@export_range(0.0, 9999.0, 0.1, "or_greater") var dodge_energy_cost: float = 18.0
+## 闪避突进距离；取值建议大于 0，默认 140 像素适合当前角色尺寸，运行时修改会影响 Space 突进位移。
+@export_range(1.0, 1200.0, 1.0, "or_greater") var dodge_distance: float = 140.0
+## 闪避持续时间；取值建议 0.05 到 0.5 秒，默认 0.16 秒，运行时修改会影响突进速度和无敌等后续扩展窗口。
+@export_range(0.01, 2.0, 0.01) var dodge_duration: float = 0.16
 
 ## 最近一次有效瞄准方向；取值为单位向量，默认向右保证鼠标贴近角色时仍有攻击方向，修改会影响无有效鼠标方向时的攻击朝向。
 var _last_aim_direction: Vector2 = Vector2.RIGHT
+## 当前闪避方向；取值为单位向量或 Vector2.ZERO，默认空向量表示未闪避，修改会影响突进移动方向。
+var _dodge_direction: Vector2 = Vector2.ZERO
+## 当前闪避剩余时间；取值大于等于 0，默认 0 表示未闪避，修改会影响突进持续帧数。
+var _dodge_time_remaining: float = 0.0
 
 ## 输入组件实例缓存；默认在 ready 阶段按路径获取，保持动态类型以降低脚本类名缓存依赖，修改会影响移动与攻击输入读取。
 @onready var _input_component = get_node(input_component_path)
@@ -45,13 +59,20 @@ func _physics_process(delta: float) -> void:
 
 	# 当前帧移动方向；取值为归一化 Vector2 或 Vector2.ZERO，无持久默认值，修改会直接影响本帧移动速度方向。
 	var movement_direction: Vector2 = _input_component.get_movement_vector()
-	_movement_component.move(self, movement_direction, delta)
 
 	# 当前帧瞄准方向；取值为归一化 Vector2 或 Vector2.ZERO，无持久默认值，修改会影响本帧武器旋转和攻击朝向缓存。
 	var aim_direction: Vector2 = _input_component.get_aim_direction(global_position)
 	if not aim_direction.is_zero_approx():
 		_last_aim_direction = aim_direction
 		_aim_pivot.rotation = _last_aim_direction.angle()
+
+	_handle_dodge_request(movement_direction)
+	if _dodge_time_remaining > 0.0:
+		_move_dodge(delta)
+	else:
+		# 当前帧移动速度倍率；取值大于等于 1，默认由疾跑状态和能量消耗计算，修改会影响普通移动速度。
+		var movement_speed_multiplier: float = _get_movement_speed_multiplier(movement_direction, delta)
+		_movement_component.move(self, movement_direction, delta, movement_speed_multiplier)
 
 	if _input_component.is_fire_requested():
 		_try_fire_ranged_weapon()
@@ -115,6 +136,63 @@ func _try_use_melee_weapon() -> void:
 	var attack_succeeded: bool = _melee_attack_component.try_attack(_last_aim_direction, current_weapon)
 	if attack_succeeded and _stats_component.has_method("spend_energy"):
 		_stats_component.call("spend_energy", energy_cost)
+
+
+func _handle_dodge_request(movement_direction: Vector2) -> void:
+	if not _input_component.has_method("consume_dodge_request"):
+		return
+
+	# 本帧是否请求闪避；取值为 true/false，默认由输入组件消费 Space 得出，修改会影响是否尝试突进。
+	var dodge_requested: bool = bool(_input_component.call("consume_dodge_request"))
+	if not dodge_requested or _dodge_time_remaining > 0.0:
+		return
+
+	if movement_direction.is_zero_approx():
+		return
+
+	if not _spend_energy(dodge_energy_cost):
+		return
+
+	_dodge_direction = movement_direction.normalized()
+	_dodge_time_remaining = maxf(dodge_duration, 0.01)
+
+
+func _move_dodge(delta: float) -> void:
+	# 有效闪避时长；取值至少 0.01 秒，默认由 dodge_duration 夹取，修改会影响突进速度计算。
+	var effective_dodge_duration: float = maxf(dodge_duration, 0.01)
+	# 闪避速度；取值为距离除以时长，默认确保总位移接近 dodge_distance，修改会影响突进帧速度。
+	var dodge_speed: float = maxf(dodge_distance, 0.0) / effective_dodge_duration
+	velocity = _dodge_direction * dodge_speed
+	move_and_slide()
+	_dodge_time_remaining = maxf(_dodge_time_remaining - delta, 0.0)
+	if _dodge_time_remaining <= 0.0:
+		_dodge_direction = Vector2.ZERO
+		velocity = Vector2.ZERO
+
+
+func _get_movement_speed_multiplier(movement_direction: Vector2, delta: float) -> float:
+	if movement_direction.is_zero_approx():
+		return 1.0
+
+	if not _input_component.has_method("is_sprint_pressed") or not bool(_input_component.call("is_sprint_pressed")):
+		return 1.0
+
+	# 本帧疾跑能量消耗；取值大于等于 0，默认由每秒消耗乘 delta 得出，修改会影响疾跑扣能节奏。
+	var sprint_energy_cost: float = maxf(sprint_energy_cost_per_second, 0.0) * delta
+	if not _spend_energy(sprint_energy_cost):
+		return 1.0
+
+	return maxf(sprint_speed_multiplier, 1.0)
+
+
+func _spend_energy(amount: float) -> bool:
+	if amount <= 0.0:
+		return true
+
+	if not _stats_component.has_method("spend_energy"):
+		return true
+
+	return bool(_stats_component.call("spend_energy", amount))
 
 
 func _get_weapon_energy_cost(weapon_data: Resource) -> float:

@@ -49,8 +49,8 @@
 - `RangedAttackComponent`：按冷却生成弹体，弹体从 `AimPivot/Muzzle` 位置发射，并把武器射程、伤害、速度和冲击力写入弹体。
 - `MeleeAttackComponent`：在短时间内开启朝向鼠标方向的 `Area2D` 命中框，支持命中去重、近战冲击力和敌方子弹消除。
 - `PlayerProjectile`：按方向移动，按寿命或最大距离自动销毁，通过射线提前检测怪物和环境墙体，命中可调用目标的 `apply_damage(damage, source)`。
-- `EnemyProjectile`：远程怪物发射的敌方弹体，会命中玩家或被环境阻挡，也能被玩家近战命中框消除。
-- `CombatStatsComponent`：维护玩家生命、能量和能量恢复，武器成功使用后由玩家控制器调用 `spend_energy()` 扣除能量。
+- `EnemyProjectile`：远程怪物发射的敌方弹体，会命中玩家或被环境阻挡，也能被玩家近战命中框消除。弹体内部有一次性命中锁，扫线检测和 `body_entered` 即使同帧触发，也只会结算一次伤害和击退。
+- `CombatStatsComponent`：维护玩家生命、能量、能量恢复和死亡状态，武器成功使用后由玩家控制器调用 `spend_energy()` 扣除能量，生命降到 0 时只派发一次 `died` 信号。
 - `InventoryComponent`：维护玩家拥有的物品资源列表，当前主要存放武器资源，后续可扩展消耗品、材料和任务道具。
 - `EquipmentComponent`：维护远程武器槽、当前远程槽索引和近战武器槽，负责切换与装备状态，不直接执行攻击。
 - `WeaponSlotControl`：显示单个武器槽或背包物品槽，负责拖拽数据、投放校验和白色冷却遮罩绘制，不直接修改装备数据。
@@ -84,7 +84,7 @@
 
 近战攻击流程为：玩家输入右键 -> `PlayerController` 读取当前近战武器 -> 检查能量是否足够 -> `MeleeAttackComponent.try_attack(direction, weapon_data)` 成功开启命中框 -> 命中怪物时按武器 `impact_force` 击退，命中敌方子弹时直接消除 -> 扣除武器 `energy_cost`。
 
-武器新增三项控制相关属性：`bullet_range` 仅远程武器使用，用于覆盖弹体最大飞行距离；`recoil_force` 表示开火后坐力，会把玩家向射击反方向推开；`impact_force` 表示命中冲击力，怪物会按自身韧性折算击退强度。
+武器新增三项控制相关属性：`bullet_range` 仅远程武器使用，用于覆盖弹体最大飞行距离，未配置时兜底为 620 像素；`recoil_force` 表示开火后坐力，会把玩家向射击反方向推开；`impact_force` 表示命中冲击力，怪物会按自身韧性折算击退强度。当前远程测试武器采用中短射程默认值，避免玩家在大地图上过早跨屏清怪：手枪 620、步枪 700、冲锋枪 520、磁轨炮 980、散射爆能枪 460。
 
 移动能力流程为：玩家按住 Shift 且存在移动输入时，`PlayerController` 每帧按 `sprint_energy_cost_per_second * delta` 扣除能量，并把本帧移动速度倍率提升到 `sprint_speed_multiplier`；玩家按下 Space 且当前存在移动输入时，先扣除 `dodge_energy_cost`，再按 `dodge_distance / dodge_duration` 朝当前移动方向突进。背包打开时战斗输入被锁定，疾跑和闪避也不会触发能量消耗。
 
@@ -101,6 +101,8 @@
 ## 暂停与设置
 
 ESC 会打开战斗暂停菜单，并通过 `get_tree().paused` 暂停游戏世界。暂停菜单提供“继续游戏”“设置”“返回主菜单”，右侧会显示与 M 键大地图同源的完整地图和迷雾。返回主菜单前会先解除暂停，再切换到 `res://scenes/ui/main_menu.tscn`。
+
+玩家生命值降到 0 后，`CombatStatsComponent.died` 会通知 `CombatHud` 进入死亡状态。死亡状态会关闭背包、大地图和暂停菜单，暂停场景树，禁用战斗输入，并显示“角色死亡”提示和“返回主菜单”按钮；玩家只能通过该按钮解除暂停并返回主菜单。
 
 暂停设置和主菜单设置共用同一条 Master 音量规则：滑条范围为 0 到 100，0 会静音 Master 总线，大于 0 时使用 `linear_to_db()` 写入音量。
 

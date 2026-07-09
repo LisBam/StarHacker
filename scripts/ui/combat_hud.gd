@@ -73,6 +73,8 @@ var _inventory_filter: String = INVENTORY_FILTER_ALL
 var _master_bus_index: int = -1
 ## 当前是否为训练场模式；取值为 true/false，默认 false，修改会影响训练场设置按钮和角色切换入口是否可见。
 var _is_training_mode: bool = false
+## 玩家是否已经死亡；取值为 true/false，默认 false，生命归零后用于阻止继续打开暂停、背包和大地图。
+var _is_player_dead: bool = false
 
 ## 角色名称文本缓存；默认绑定 CharacterNameLabel，显示当前选择角色名称，节点缺失会导致 HUD 无法展示角色名。
 @onready var _character_name_label: Label = %CharacterNameLabel
@@ -152,6 +154,10 @@ var _is_training_mode: bool = false
 @onready var _pause_settings_back_button: Button = %PauseSettingsBackButton
 ## 大地图遮罩缓存；默认绑定 LargeMapOverlay，M 键切换显示，显示时锁定战斗输入。
 @onready var _large_map_overlay: Control = %LargeMapOverlay
+## 死亡遮罩缓存；默认绑定 DeathOverlay，玩家生命归零时显示并暂停场景树。
+@onready var _death_overlay: Control = %DeathOverlay
+## 死亡返回主菜单按钮缓存；默认绑定 DeathReturnMainMenuButton，点击后解除暂停并切换回主菜单。
+@onready var _death_return_main_menu_button: Button = %DeathReturnMainMenuButton
 
 
 func _ready() -> void:
@@ -166,6 +172,8 @@ func _ready() -> void:
 	_set_inventory_visible(false)
 	_set_large_map_visible(false)
 	_set_pause_menu_visible(false)
+	if not _is_player_dead:
+		_set_death_overlay_visible(false)
 
 
 func _process(_delta: float) -> void:
@@ -173,6 +181,9 @@ func _process(_delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _is_player_dead:
+		return
+
 	if event is InputEventKey:
 		# 当前键盘事件；取值来自输入系统，默认用于识别 E 键和背包动作，修改会影响背包开关响应。
 		var key_event: InputEventKey = event as InputEventKey
@@ -214,6 +225,10 @@ func _bind_player_components() -> void:
 	if _stats_component != null:
 		_stats_component.connect("health_changed", Callable(self, "_on_health_changed"))
 		_stats_component.connect("energy_changed", Callable(self, "_on_energy_changed"))
+		if _stats_component.has_signal("died"):
+			_stats_component.connect("died", Callable(self, "_on_player_died"))
+		if _stats_component.has_method("is_dead") and bool(_stats_component.call("is_dead")):
+			_on_player_died()
 
 	if _equipment_component != null:
 		_equipment_component.connect("equipment_changed", Callable(self, "_on_equipment_changed"))
@@ -450,7 +465,7 @@ func _set_large_map_visible(visible: bool) -> void:
 
 func _refresh_combat_input_state() -> void:
 	# 战斗输入启用状态；取值由背包、大地图和暂停菜单共同决定，默认任意界面打开都会禁用战斗输入。
-	var combat_input_enabled: bool = not _inventory_panel.visible and not _large_map_overlay.visible and not _pause_overlay.visible
+	var combat_input_enabled: bool = not _inventory_panel.visible and not _large_map_overlay.visible and not _pause_overlay.visible and not _death_overlay.visible and not _is_player_dead
 	_set_combat_input_enabled(combat_input_enabled)
 
 
@@ -483,6 +498,7 @@ func _bind_pause_menu() -> void:
 	_pause_settings_button.pressed.connect(_on_pause_settings_button_pressed)
 	_test_settings_button.pressed.connect(_on_test_settings_button_pressed)
 	_return_main_menu_button.pressed.connect(_on_return_main_menu_button_pressed)
+	_death_return_main_menu_button.pressed.connect(_on_death_return_main_menu_button_pressed)
 	_pause_settings_back_button.pressed.connect(_on_pause_settings_back_button_pressed)
 	_clear_monsters_button.pressed.connect(_on_clear_monsters_button_pressed)
 	_respawn_monsters_button.pressed.connect(_on_respawn_monsters_button_pressed)
@@ -573,6 +589,9 @@ func _is_toggle_large_map_event(key_event: InputEventKey) -> bool:
 
 
 func _toggle_pause_menu() -> void:
+	if _is_player_dead:
+		return
+
 	if _pause_overlay.visible and _pause_settings_panel.visible:
 		_show_pause_settings(false)
 		return
@@ -589,6 +608,9 @@ func _toggle_pause_menu() -> void:
 
 
 func _set_pause_menu_visible(visible: bool) -> void:
+	if _is_player_dead:
+		return
+
 	_pause_overlay.visible = visible
 	_pause_menu_panel.visible = visible
 	_pause_settings_panel.visible = false
@@ -963,6 +985,11 @@ func _on_ranged_weapon_fired(_projectile: Node2D) -> void:
 	_last_cooling_ranged_slot = int(_equipment_component.call("get_current_ranged_slot"))
 
 
+func _on_player_died() -> void:
+	_is_player_dead = true
+	_set_death_overlay_visible(true)
+
+
 func _on_inventory_filter_all_pressed() -> void:
 	_set_inventory_filter(INVENTORY_FILTER_ALL)
 
@@ -996,8 +1023,11 @@ func _on_test_settings_button_pressed() -> void:
 
 
 func _on_return_main_menu_button_pressed() -> void:
-	get_tree().paused = false
-	get_tree().change_scene_to_file(main_menu_scene_path)
+	_return_to_main_menu()
+
+
+func _on_death_return_main_menu_button_pressed() -> void:
+	_return_to_main_menu()
 
 
 func _on_pause_settings_back_button_pressed() -> void:
@@ -1046,3 +1076,25 @@ func _on_test_settings_back_button_pressed() -> void:
 
 func _on_pause_master_volume_slider_value_changed(value: float) -> void:
 	_apply_pause_master_volume(value)
+
+
+func _set_death_overlay_visible(visible: bool) -> void:
+	_death_overlay.visible = visible
+	if visible:
+		_inventory_panel.visible = false
+		_large_map_overlay.visible = false
+		_pause_overlay.visible = false
+		_pause_menu_panel.visible = false
+		_pause_settings_panel.visible = false
+		_test_settings_panel.visible = false
+		_character_switch_panel.visible = false
+		get_tree().paused = true
+		_refresh_combat_input_state()
+		_death_return_main_menu_button.grab_focus()
+	else:
+		_refresh_combat_input_state()
+
+
+func _return_to_main_menu() -> void:
+	get_tree().paused = false
+	get_tree().change_scene_to_file(main_menu_scene_path)

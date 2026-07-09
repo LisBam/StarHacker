@@ -16,8 +16,8 @@ class_name RangedMonster
 @export_range(0.0, 9999.0, 1.0, "or_greater") var ranged_projectile_damage: float = 10.0
 ## 敌方弹体射程；取值建议大于 0，默认 1400 像素，修改会影响弹体自动销毁距离。
 @export_range(1.0, 12000.0, 1.0, "or_greater") var ranged_projectile_range: float = 1400.0
-## 敌方弹体冲击力；取值建议大于等于 0，默认 180，命中玩家时会造成击退。
-@export_range(0.0, 5000.0, 1.0, "or_greater") var ranged_projectile_impact_force: float = 180.0
+## 敌方弹体冲击力；取值建议大于等于 0，默认 90，命中玩家时会造成短距离击退。
+@export_range(0.0, 5000.0, 1.0, "or_greater") var ranged_projectile_impact_force: float = 90.0
 ## 射击冷却；取值应大于 0，默认 1.25 秒，修改会影响远程怪物连续开火频率。
 @export_range(0.05, 10.0, 0.05) var shoot_cooldown: float = 1.25
 ## 枪口偏移；取值为相对怪物中心的局部坐标，默认向前 24 像素，修改会影响子弹出生点。

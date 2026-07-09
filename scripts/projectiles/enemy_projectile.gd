@@ -14,8 +14,8 @@ signal hit_body(body: Node, damage: float)
 @export_range(1.0, 12000.0, 1.0, "or_greater") var max_distance: float = 1400.0
 ## 弹体伤害；取值建议大于等于 0，默认 10，运行时修改会影响命中玩家后的生命损失。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var damage: float = 10.0
-## 弹体冲击力；取值建议大于等于 0，默认 180，命中玩家时会造成击退。
-@export_range(0.0, 5000.0, 1.0, "or_greater") var impact_force: float = 180.0
+## 弹体冲击力；取值建议大于等于 0，默认 90，命中玩家时会造成短距离击退。
+@export_range(0.0, 5000.0, 1.0, "or_greater") var impact_force: float = 90.0
 
 ## 当前弹体速度向量；取值为方向乘速度，默认向右用于未 launch 时的兜底移动。
 var _velocity: Vector2 = Vector2.RIGHT
@@ -23,6 +23,8 @@ var _velocity: Vector2 = Vector2.RIGHT
 var _age: float = 0.0
 ## 弹体出生位置；取值为全局坐标，默认 ready 时记录，用于最大距离销毁。
 var _start_position: Vector2
+## 是否已经完成命中或销毁流程；默认 false，命中后置为 true，避免扫线检测和 body_entered 在同一帧重复结算伤害与击退。
+var _has_hit: bool = false
 
 
 func _ready() -> void:
@@ -31,6 +33,9 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if _has_hit:
+		return
+
 	# 本帧目标位置；取值为当前位置加速度位移，默认用于射线检测和最终位移。
 	var target_position: Vector2 = global_position + _velocity * delta
 	if _handle_swept_collision(target_position):
@@ -60,6 +65,10 @@ func configure_projectile(new_damage: float, new_impact_force: float, new_max_di
 
 
 func destroy_by_melee(_source: Node) -> void:
+	if _has_hit:
+		return
+
+	_has_hit = true
 	queue_free()
 
 
@@ -75,11 +84,17 @@ func get_knockback_direction() -> Vector2:
 
 
 func _on_body_entered(body: Node) -> void:
+	if _has_hit:
+		return
+
 	if _apply_hit(body):
 		hit_body.emit(body, damage)
 
 
 func _handle_swept_collision(target_position: Vector2) -> bool:
+	if _has_hit:
+		return true
+
 	# 射线查询参数；取值为当前位置到目标位置，默认使用弹体碰撞掩码检测玩家和环境。
 	var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(global_position, target_position, collision_mask, [get_rid()])
 	query.collide_with_areas = false
@@ -97,6 +112,7 @@ func _handle_swept_collision(target_position: Vector2) -> bool:
 	# 命中对象；取值为 Node 或 null，默认用于沿用普通 body 命中流程。
 	var collider: Node = hit_result.get("collider", null) as Node
 	if collider == null:
+		_has_hit = true
 		queue_free()
 		return true
 
@@ -107,6 +123,10 @@ func _handle_swept_collision(target_position: Vector2) -> bool:
 
 
 func _apply_hit(target: Node) -> bool:
+	if _has_hit:
+		return false
+
+	_has_hit = true
 	if target.has_method("apply_damage"):
 		target.call("apply_damage", damage, self)
 

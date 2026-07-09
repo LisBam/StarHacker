@@ -1,7 +1,7 @@
 extends Control
 
 ## 小地图控件以 GameWorld 提供的地图边界和障碍矩形为数据源。
-## 当前只显示玩家与墙体/建筑，不显示怪物，避免训练场怪物数量变化干扰地图结构观察。
+## 当前显示玩家、墙体/建筑和已标记撤离点，不显示怪物，避免训练场怪物数量变化干扰地图结构观察。
 
 ## 局部小地图模式；默认用于右上角 HUD，只显示玩家周围一段范围。
 const DISPLAY_MODE_LOCAL: int = 0
@@ -28,8 +28,12 @@ const DISPLAY_MODE_FULL: int = 1
 @export var fog_overlay_color: Color = Color(0.0, 0.0, 0.0, 0.58)
 ## 小地图玩家颜色；默认亮青色，修改会影响玩家点可见度。
 @export var player_color: Color = Color(0.34, 0.93, 1.0, 1.0)
+## 撤离点标记颜色；默认亮绿色，只有 GameWorld 标记撤离点后才绘制。
+@export var extraction_marker_color: Color = Color(0.35, 1.0, 0.72, 1.0)
 ## 玩家点半径；取值建议大于 0，默认 4 像素，修改会影响小地图上玩家标记大小。
 @export_range(1.0, 20.0, 0.5) var player_marker_radius: float = 4.0
+## 撤离点标记半径；取值建议大于玩家点半径，默认 6 像素，修改会影响地图上撤离点识别度。
+@export_range(2.0, 32.0, 0.5) var extraction_marker_radius: float = 6.0
 
 ## 游戏世界节点缓存；默认按 game_world_path 获取，允许为空并使用兜底地图尺寸。
 @onready var _game_world: Node = get_node_or_null(game_world_path)
@@ -53,6 +57,7 @@ func _draw() -> void:
 	draw_rect(minimap_rect, minimap_background_color, true)
 	_draw_obstacles(world_view_rect)
 	_draw_fog(world_view_rect)
+	_draw_extraction_marker(world_view_rect)
 	_draw_player_marker(world_view_rect)
 	draw_rect(minimap_rect, minimap_border_color, false, 2.0)
 
@@ -116,6 +121,24 @@ func _draw_player_marker(world_view_rect: Rect2) -> void:
 	draw_circle(player_position, player_marker_radius, player_color)
 
 
+func _draw_extraction_marker(world_view_rect: Rect2) -> void:
+	if not _is_extraction_marker_visible():
+		return
+
+	# 撤离点世界坐标；取值来自 GameWorld，默认只在地图标记时间到达后使用。
+	var extraction_position: Vector2 = _get_extraction_marker_position()
+	if not world_view_rect.has_point(extraction_position):
+		return
+
+	# 撤离点小地图坐标；取值为撤离点世界坐标映射到控件本地空间。
+	var marker_position: Vector2 = _world_position_to_minimap_position(extraction_position, world_view_rect)
+	# 标记半径；取值至少为 2，默认让撤离点比玩家点更易识别。
+	var marker_radius: float = maxf(extraction_marker_radius, 2.0)
+	draw_circle(marker_position, marker_radius, extraction_marker_color)
+	draw_line(marker_position + Vector2(-marker_radius * 1.7, 0.0), marker_position + Vector2(marker_radius * 1.7, 0.0), extraction_marker_color, 2.0)
+	draw_line(marker_position + Vector2(0.0, -marker_radius * 1.7), marker_position + Vector2(0.0, marker_radius * 1.7), extraction_marker_color, 2.0)
+
+
 func _get_obstacle_rects() -> Array[Rect2]:
 	if _game_world == null or not _game_world.has_method("get_minimap_obstacle_rects"):
 		# 空障碍列表；取值为空数组，默认用于 GameWorld 缺失时跳过障碍绘制。
@@ -132,6 +155,25 @@ func _get_obstacle_rects() -> Array[Rect2]:
 			result.append(raw_rect)
 
 	return result
+
+
+func _is_extraction_marker_visible() -> bool:
+	if _game_world == null or not _game_world.has_method("is_extraction_point_marked_on_map"):
+		return false
+
+	return bool(_game_world.call("is_extraction_point_marked_on_map"))
+
+
+func _get_extraction_marker_position() -> Vector2:
+	if _game_world == null or not _game_world.has_method("get_extraction_point_position"):
+		return Vector2.ZERO
+
+	# 原始撤离点位置；取值可能为 Variant，默认只接收 Vector2。
+	var raw_position: Variant = _game_world.call("get_extraction_point_position")
+	if raw_position is Vector2:
+		return raw_position
+
+	return Vector2.ZERO
 
 
 func _get_explored_cell_lookup() -> Dictionary:

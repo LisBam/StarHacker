@@ -29,12 +29,5 @@ polygon = PackedVector2Array(0, -22, 17, -8, 14, 14, 0, 22, -14, 14, -17, -8)
 color = Color(1, 0.858824, 0.494118, 1)
 polygon = PackedVector2Array(0, -8, 7, 0, 0, 8, -7, 0)
 
-[node name="MuzzleHint" type="Line2D" parent="." unique_id=492784493]
-points = PackedVector2Array(4, 0, 26, 0)
-width = 4.0
-default_color = Color(1, 0.741176, 0.384314, 0.85)
-begin_cap_mode = 2
-end_cap_mode = 2
-
 [node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=646621478]
 shape = SubResource("CircleShape2D_body")

@@ -23,7 +23,7 @@ radius = 18.0
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_melee"]
 size = Vector2(70, 42)
 
-[node name="SilverWolf" type="CharacterBody2D" unique_id=410244712]
+[node name="PlayerCharacter" type="CharacterBody2D" unique_id=410244712]
 position = Vector2(781, 479)
 collision_mask = 16
 script = ExtResource("1_player_controller")
@@ -40,13 +40,6 @@ polygon = PackedVector2Array(0, -10, 8, 0, 0, 11, -8, 0)
 shape = SubResource("CircleShape2D_body")
 
 [node name="AimPivot" type="Node2D" parent="." unique_id=363280953]
-
-[node name="WeaponLine" type="Line2D" parent="AimPivot" unique_id=932548072]
-points = PackedVector2Array(12, 0, 38, 0)
-width = 5.0
-default_color = Color(0.596078, 0.913725, 1, 1)
-begin_cap_mode = 2
-end_cap_mode = 2
 
 [node name="Muzzle" type="Marker2D" parent="AimPivot" unique_id=422236958]
 position = Vector2(40, 0)

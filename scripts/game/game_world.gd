@@ -221,6 +221,7 @@ func find_navigation_path(start_position: Vector2, end_position: Vector2, agent_
 	navigation_grid.region = navigation_region
 	navigation_grid.cell_size = Vector2(resolved_cell_size, resolved_cell_size)
 	navigation_grid.offset = Vector2(resolved_cell_size * 0.5, resolved_cell_size * 0.5)
+	navigation_grid.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_NEVER
 	navigation_grid.update()
 	_mark_navigation_obstacles(navigation_grid, navigation_region, resolved_cell_size, maxf(agent_radius, 0.0))
 

@@ -62,8 +62,8 @@
 - `CombatCamera`：玩家子节点上的战斗相机，关闭 Camera2D 位置平滑并使用物理帧回调跟随玩家，避免物理移动和渲染相机不同步造成移动抖动；屏幕震动只修改相机 `offset`，不会改变玩家或相机节点真实位置。
 - `CombatHud`：顶部中心显示战斗存活时间和撤离状态，底部中心显示当前角色名、玩家生命、能量和武器栏，右上角显示玩家周围小地图，E 键打开背包，M 键打开完整大地图，ESC 打开暂停菜单，监听组件信号并处理拖拽装备、卸下、地面掉落列表、点击拾取、F 快速拾取、背包武器拖出丢弃和撤离确认。
 - `MiniMapControl`：读取 GameWorld 的地图边界、探索格、环境障碍矩形和撤离点标记状态，局部模式绘制玩家周围地图，完整模式绘制整张地图和未探索区域迷雾；障碍和探索数据按版本号缓存，控件只在玩家移动、尺寸变化、撤离点变化或刷新间隔到期时重绘，撤离点达到标记时间后会在对应地图中显示，当前不显示怪物。
-- `BasicMonster`：基础怪物，维护血量、攻击力、韧性、冲击力、移速、个体移动速度随机倍率、个体攻击冷却随机倍率、墙体遮挡索敌、隔墙警觉追踪、目标位置预测、到点扫荡搜索、A* 网格寻路、局部随机绕障、卡住重算、游荡和近身攻击。
-- `RangedMonster`：远程测试怪物，继承基础怪物受击、韧性、索敌记忆、绕障、个体移动差异和游荡逻辑，发现玩家后保持距离并按个体射击冷却差异发射敌方子弹。
+- `BasicMonster`：基础怪物，维护血量、攻击力、韧性、冲击力、移速、个体移动速度随机倍率、个体攻击冷却随机倍率、三阶段视野索敌、遮挡物背后搜查、卡视野脱战、A* 网格寻路、局部随机绕障、卡住重算、游荡和近身攻击。
+- `RangedMonster`：远程测试怪物，继承基础怪物受击、韧性、索敌记忆、绕障、个体移动差异和游荡逻辑，只有基础索敌确认玩家可见且射击线无遮挡时才保持距离并按个体射击冷却差异发射敌方子弹。
 - `WeaponDrop`：地面武器掉落物，保存单把武器资源并加入 `weapon_drops` 组，HUD 按距离扫描后生成附近掉落列表；拾取成功后会把同一个武器资源加入背包并释放掉落物节点。
 - `CombatBurstEffect`：代码绘制的短促战斗爆发特效，用于玩家和怪物受击、死亡反馈；默认挂到当前场景根节点，保证死亡节点释放后特效仍能播放完成。
 - `SessionState`：入口会话状态，保存当前模式和当前角色，供主菜单、GameWorld 和训练场角色切换复用。
@@ -140,18 +140,19 @@ ESC 会优先关闭当前打开的交互界面：背包打开时关闭背包，�
 - `attack_cooldown_random_multiplier_min` / `attack_cooldown_random_multiplier_max`：个体近战攻击冷却随机倍率范围。每只怪物出生时只随机一次，并会随机初始攻击冷却，用于错开近战攻击节奏。
 - `lose_target_range_multiplier`：脱战视野倍率，怪物已经锁定玩家后，会在无遮挡情况下使用扩展视野减少边缘反复丢失目标。
 - `vision_requires_line_of_sight`、`vision_line_of_sight_collision_mask`：索敌视线参数。默认开启墙体遮挡检测，并只检测第 5 层环境墙体和建筑；玩家站在墙后时，怪物不会直接获得目标。
-- `target_memory_duration`、`search_arrive_distance`：失去视野后的基础搜索参数。怪物看见玩家时会记录最后可见或推断位置；被墙体遮挡后，会在记忆时间内尝试绕到该位置搜索。
-- `hidden_target_tracking_range_multiplier`：隔墙警觉追踪范围倍率。怪物必须先通过无遮挡视线发现玩家；一旦锁定目标，即使玩家跑到墙后，只要仍在该范围内，怪物会继续根据动向追踪推断位置，避免玩家刚绕墙就让怪物脱战。
-- `target_prediction_time`、`target_prediction_max_distance`：目标预测参数。怪物会根据最近目标位置变化估算移动趋势，并把搜索目标短距离前推；最大距离用于限制预测过头。
-- `target_search_duration_after_arrival`、`target_search_radius`：到达推断位置后的扫荡参数。怪物靠近推断位置后不会立刻放弃，而是在锚点周围随机选点搜索，直到搜索时间耗尽。
+- `target_memory_duration`、`search_arrive_distance`：失去视野后的基础搜索参数。怪物看见玩家时只记录最后可见位置和最后可见阶段的移动趋势；被墙体、箱子或建筑遮挡后，不再读取墙后玩家实时坐标，而是在记忆时间内尝试绕到最后线索处搜索。
+- `hidden_target_tracking_range_multiplier`：旧隔墙追踪配置保留项。当前三阶段索敌不会使用该值继续追踪墙后玩家，后续如需做警戒范围衰减可复用。
+- `target_prediction_time`、`target_prediction_max_distance`：目标预测参数。怪物只会根据最后可见阶段的历史位置估算移动趋势，并把初始搜查目标短距离前推；最大距离用于限制预测过头。
+- `target_search_duration_after_arrival`、`target_search_radius`：到达搜查锚点后的扫荡参数。怪物靠近遮挡物背后或最后线索点后不会立刻放弃，而是在锚点周围随机选点搜索，直到搜索时间耗尽。
+- `occlusion_break_forget_count`、`lost_search_occlusion_offset`、`lost_search_destination_attempts`：卡视野脱战和遮挡物背后搜查参数。怪物从可见追击切到遮挡搜查时会统计一次卡视野，达到阈值后清空玩家记忆并回到巡逻；遮挡命中点会沿怪物视角向遮挡物背后推进形成初始搜查锚点，随机搜查点会多次尝试避开起步即撞墙的方向。
 - `wander_radius`、`wander_speed_multiplier`、`wander_arrive_distance`、`wander_wait_min`、`wander_wait_max`：无目标游荡参数。怪物未发现玩家时会围绕出生点随机选点移动，到达后等待一小段时间再选下一个点。
 - `avoidance_probe_distance`、`avoidance_angle_step_degrees`、`avoidance_candidate_count`：局部绕障参数。怪物追击或游荡时会先尝试直线方向，若前方被墙体挡住，则按每只怪物随机生成的左右偏好寻找可移动方向。
-- `pathfinding_enabled`、`pathfinding_cell_size`、`pathfinding_agent_radius`、`path_recalculation_min_interval`、`path_recalculation_max_interval`、`path_destination_refresh_distance`、`path_waypoint_arrive_distance`、`path_random_goal_radius`、`path_max_point_count`：网格寻路参数。怪物会检测自身到目标点的中心线是否被环境阻挡，一旦玩家在墙体或建筑后方就提前向 `GameWorld.find_navigation_path()` 请求无斜向穿角的 A* 路径，而不是先直线贴墙移动。默认寻路格子为 32 像素、代理半径为 18 像素，和当前怪物碰撞半径接近，可保留建筑入口通行能力；路径终点随机偏移只在目标可见时使用，失去视野后的追踪和搜索会使用准确推断点，减少墙边来回抖动。目标位置明显变化、路径为空、怪物卡住，或目标仍被障碍阻挡且路径重算计时结束时会重新请求路径。
+- `pathfinding_enabled`、`pathfinding_cell_size`、`pathfinding_agent_radius`、`path_recalculation_min_interval`、`path_recalculation_max_interval`、`path_destination_refresh_distance`、`path_waypoint_arrive_distance`、`path_random_goal_radius`、`path_max_point_count`：网格寻路参数。怪物会检测自身到目标点的中心线是否被环境阻挡，一旦追击点、遮挡物背后搜查点或巡逻点被墙体建筑隔开，就提前向 `GameWorld.find_navigation_path()` 请求无斜向穿角的 A* 路径，而不是先直线贴墙移动。默认寻路格子为 32 像素、代理半径为 18 像素，和当前怪物碰撞半径接近，可保留建筑入口通行能力；路径终点随机偏移只在目标可见时使用，失去视野后的搜查会使用确定的最后线索点和遮挡物背后锚点，减少墙边来回抖动。目标位置明显变化、路径为空、怪物卡住，或目标仍被障碍阻挡且路径重算计时结束时会重新请求路径。
 - `stuck_detection_time`、`stuck_minimum_movement`：卡住检测参数。怪物持续有移动意图但实际位移过小时，会翻转局部绕障偏好并清空缓存路径，下一帧重新请求路径。
 - `knockback_decay`：击退衰减速度，控制怪物被玩家武器命中后滑退多久。
 - `hit_effect_color`、`death_effect_color`：怪物受击和死亡特效颜色，只影响视觉反馈，不影响战斗数值。
 
-远程怪物额外属性包括 `projectile_scene`、`shoot_range`、`keep_distance`、`ranged_projectile_speed`、`ranged_projectile_damage`、`ranged_projectile_range`、`ranged_projectile_impact_force`、`shoot_cooldown`、`shoot_cooldown_random_multiplier_min`、`shoot_cooldown_random_multiplier_max`、`muzzle_offset`、`line_of_sight_collision_mask` 和 `projectile_parent_path`。远程怪物只有在玩家进入射击距离且与怪物之间没有环境墙体遮挡时才会开火；如果距离太远或视线被挡，会先绕障接近；如果玩家太近，会尝试后撤保持距离。每只远程怪物出生时会随机射击冷却倍率和初始射击冷却，避免同一批远程怪物同时开火。
+远程怪物额外属性包括 `projectile_scene`、`shoot_range`、`keep_distance`、`ranged_projectile_speed`、`ranged_projectile_damage`、`ranged_projectile_range`、`ranged_projectile_impact_force`、`shoot_cooldown`、`shoot_cooldown_random_multiplier_min`、`shoot_cooldown_random_multiplier_max`、`muzzle_offset`、`line_of_sight_collision_mask` 和 `projectile_parent_path`。远程怪物只有在基础索敌状态确认玩家可见、玩家进入射击距离且与怪物之间没有环境墙体遮挡时才会开火；如果距离太远或视线被挡，会先绕障接近或按最后线索搜查；如果玩家太近，会尝试后撤保持距离。每只远程怪物出生时会随机射击冷却倍率和初始射击冷却，避免同一批远程怪物同时开火。
 
 敌方远程怪物默认开火距离为 500 像素，弹体默认最大飞行距离为 520 像素，避免远程怪物在训练场中过早跨屏命中玩家。
 
@@ -192,7 +193,7 @@ ESC 会优先关闭当前打开的交互界面：背包打开时关闭背包，�
 - 弹体：`speed`、`lifetime`、`max_distance`、`damage`、`destroy_on_hit`、`impact_force`
 - 战斗属性：`max_health`、`current_health`、`max_energy`、`current_energy`、`energy_regeneration_per_second`、`infinite_health`、`infinite_energy`
 - 装备：`ranged_slot_count`、`starting_ranged_weapons`、`starting_melee_weapon`
-- 怪物：`max_health`、`current_health`、`weapon_drop_chance`、`attack_damage`、`toughness`、`attack_impact_force`、`move_speed`、`move_speed_random_multiplier_min`、`move_speed_random_multiplier_max`、`vision_range`、`attack_range`、`attack_cooldown`、`attack_cooldown_random_multiplier_min`、`attack_cooldown_random_multiplier_max`、`lose_target_range_multiplier`、`vision_requires_line_of_sight`、`vision_line_of_sight_collision_mask`、`target_memory_duration`、`search_arrive_distance`、`hidden_target_tracking_range_multiplier`、`target_prediction_time`、`target_prediction_max_distance`、`target_search_duration_after_arrival`、`target_search_radius`、`wander_radius`、`wander_speed_multiplier`、`wander_arrive_distance`、`wander_wait_min`、`wander_wait_max`、`avoidance_probe_distance`、`avoidance_angle_step_degrees`、`avoidance_candidate_count`、`pathfinding_enabled`、`pathfinding_cell_size`、`pathfinding_agent_radius`、`path_recalculation_min_interval`、`path_recalculation_max_interval`、`path_destination_refresh_distance`、`path_waypoint_arrive_distance`、`path_random_goal_radius`、`path_max_point_count`、`stuck_detection_time`、`stuck_minimum_movement`、`knockback_decay`、`hit_effect_color`、`death_effect_color`
+- 怪物：`max_health`、`current_health`、`weapon_drop_chance`、`attack_damage`、`toughness`、`attack_impact_force`、`move_speed`、`move_speed_random_multiplier_min`、`move_speed_random_multiplier_max`、`vision_range`、`attack_range`、`attack_cooldown`、`attack_cooldown_random_multiplier_min`、`attack_cooldown_random_multiplier_max`、`lose_target_range_multiplier`、`vision_requires_line_of_sight`、`vision_line_of_sight_collision_mask`、`target_memory_duration`、`search_arrive_distance`、`hidden_target_tracking_range_multiplier`、`target_prediction_time`、`target_prediction_max_distance`、`target_search_duration_after_arrival`、`target_search_radius`、`occlusion_break_forget_count`、`lost_search_occlusion_offset`、`lost_search_destination_attempts`、`wander_radius`、`wander_speed_multiplier`、`wander_arrive_distance`、`wander_wait_min`、`wander_wait_max`、`avoidance_probe_distance`、`avoidance_angle_step_degrees`、`avoidance_candidate_count`、`pathfinding_enabled`、`pathfinding_cell_size`、`pathfinding_agent_radius`、`path_recalculation_min_interval`、`path_recalculation_max_interval`、`path_destination_refresh_distance`、`path_waypoint_arrive_distance`、`path_random_goal_radius`、`path_max_point_count`、`stuck_detection_time`、`stuck_minimum_movement`、`knockback_decay`、`hit_effect_color`、`death_effect_color`
 - 远程怪物：`projectile_scene`、`shoot_range`、`keep_distance`、`ranged_projectile_speed`、`ranged_projectile_damage`、`ranged_projectile_range`、`ranged_projectile_impact_force`、`shoot_cooldown`、`shoot_cooldown_random_multiplier_min`、`shoot_cooldown_random_multiplier_max`、`muzzle_offset`、`line_of_sight_collision_mask`、`projectile_parent_path`
 - 战斗地图：`grid_size`、`grid_extent`、`map_seed`、`base_floor_color`、`grid_color`、`axis_color`、`exploration_cell_size`、`exploration_radius`、`exploration_update_interval`、`exploration_update_distance`、`boundary_wall_thickness`、`boundary_wall_color`、`extraction_spawn_time_seconds`、`extraction_map_marker_time_seconds`、`extraction_hold_duration_seconds`、`extraction_radius`、`extraction_spawn_edge_margin`、`extraction_spawn_min_distance_from_player`、`extraction_spawn_attempt_count`、`extraction_fill_color`、`extraction_ring_color`
 - 训练场生成：`monster_scene`、`monster_scenes`、`monster_spawn_count`、`monster_spawn_min_distance`、`monster_spawn_max_distance`、`monster_parent_path`

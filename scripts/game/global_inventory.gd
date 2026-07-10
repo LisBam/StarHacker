@@ -80,6 +80,10 @@ var _run_gained_resources: Array[Resource] = []
 var _last_run_outcome: Dictionary = {}
 ## 存档是否已排队；默认 false，同一帧多次拖拽操作只在帧末写盘一次。
 var _save_queued: bool = false
+## 耐久变化合并存档间隔；默认 0.5 秒，高射速连续射击期间最多每半秒触发一次实际存档写入。
+@export_range(0.05, 10.0, 0.05) var durability_save_delay_seconds: float = 0.5
+## 是否已有耐久存档等待执行；默认 false，用于把短时间内多次射击合并为一次磁盘写入。
+var _durability_save_queued: bool = false
 ## 服务随机数生成器；默认启动时随机化，用于失败结算随机保留 20% 背包物品。
 var _random: RandomNumberGenerator = RandomNumberGenerator.new()
 ## 局外金币余额；取值大于等于 0，默认 0，只在主菜单仓库出售永久物品时增加。
@@ -256,6 +260,17 @@ func adjust_coins(amount: int) -> int:
 	return _coins
 
 
+func clear_warehouse_items() -> int:
+	# 清空前记录组数；返回值用于开发者菜单提供明确反馈，强化石堆叠按一组统计。
+	var cleared_record_count: int = _warehouse_records.size()
+	if cleared_record_count <= 0:
+		return 0
+	_warehouse_records.clear()
+	_queue_save_inventory()
+	warehouse_changed.emit()
+	return cleared_record_count
+
+
 func grant_all_known_weapons_to_warehouse() -> int:
 	# 实际发放数量；默认从 0 累加，只统计成功加载并写入永久仓库的武器资源。
 	var granted_count: int = 0
@@ -353,6 +368,14 @@ func sell_warehouse_resource(item_resource: Resource) -> bool:
 
 
 func sell_storage_resource(item_resource: Resource, source_location: String) -> bool:
+	# 整组出售数量；兼容原公开接口，内部统一转发到可指定数量的原子出售能力。
+	var stored_quantity: int = get_storage_resource_quantity(item_resource, source_location)
+	return sell_storage_resource_quantity(item_resource, source_location, stored_quantity)
+
+
+func sell_storage_resource_quantity(item_resource: Resource, source_location: String, requested_quantity: int) -> bool:
+	if requested_quantity <= 0:
+		return false
 	# 出售来源记录数组；局外仓库界面允许出售永久仓库或已展开的随身背包物品。
 	var source_records: Array[Dictionary] = _get_storage_records(source_location)
 	# 待出售索引；使用资源实例身份精确定位重复武器或强化石堆叠。
@@ -361,19 +384,37 @@ func sell_storage_resource(item_resource: Resource, source_location: String) -> 
 		return false
 	# 待出售记录；强化石出售整组，武器数量固定为 1。
 	var stored_record: Dictionary = source_records[record_index]
+	# 当前库存数量；武器固定为 1，强化石堆叠限制在 1 到 99。
+	var stored_quantity: int = maxi(int(stored_record.get("quantity", 1)), 1)
+	# 实际出售数量；请求值限制在当前库存范围，避免旧弹窗确认后物品数量变化造成负数。
+	var sell_quantity: int = clampi(requested_quantity, 1, stored_quantity)
 	# 单件售价；武器使用强化后动态售价，强化石使用资源基础售价。
 	var unit_sell_price: int = _get_resource_sell_price(item_resource)
 	# 出售总价；堆叠资源乘以当前数量。
-	var total_sell_price: int = unit_sell_price * maxi(int(stored_record.get("quantity", 1)), 1)
+	var total_sell_price: int = unit_sell_price * sell_quantity
 	if total_sell_price <= 0:
 		return false
 
-	source_records.remove_at(record_index)
+	# 剩余数量；部分出售时保留原记录与资源实例，全部出售时移除整条所有权记录。
+	var remaining_quantity: int = stored_quantity - sell_quantity
+	if remaining_quantity > 0:
+		stored_record["quantity"] = remaining_quantity
+	else:
+		source_records.remove_at(record_index)
 	_coins += total_sell_price
 	_queue_save_inventory()
 	_emit_storage_changed(source_location)
 	coins_changed.emit()
 	return true
+
+
+func get_storage_resource_quantity(item_resource: Resource, source_location: String) -> int:
+	# 来源记录；使用资源实例身份定位，返回 0 表示物品已经移动、消费或出售。
+	var record_index: int = _find_storage_record_index(source_location, item_resource)
+	var source_records: Array[Dictionary] = _get_storage_records(source_location)
+	if record_index < 0 or record_index >= source_records.size():
+		return 0
+	return maxi(int(source_records[record_index].get("quantity", 1)), 1)
 
 
 func get_storage_resource_sell_price(item_resource: Resource, source_location: String) -> int:
@@ -387,6 +428,20 @@ func get_storage_resource_sell_price(item_resource: Resource, source_location: S
 
 func use_enhancement_stone(stone_resource: Resource, source_location: String, weapon_resource: Resource) -> bool:
 	return bool(use_enhancement_stone_with_result(stone_resource, source_location, weapon_resource).get("success", false))
+
+
+func notify_weapon_runtime_state_changed(weapon_resource: Resource) -> void:
+	if not _is_owned_weapon_resource(weapon_resource) or _durability_save_queued:
+		return
+	_durability_save_queued = true
+	# 合并存档计时器；暂停场景树时仍继续计时，避免暂停后立即退出导致耐久状态长期停留在内存。
+	var save_timer: SceneTreeTimer = get_tree().create_timer(maxf(durability_save_delay_seconds, 0.05), true, false, true)
+	save_timer.timeout.connect(_flush_queued_durability_save, CONNECT_ONE_SHOT)
+
+
+func _flush_queued_durability_save() -> void:
+	_durability_save_queued = false
+	_queue_save_inventory()
 
 
 func use_enhancement_stone_with_result(stone_resource: Resource, source_location: String, weapon_resource: Resource) -> Dictionary:
@@ -410,16 +465,35 @@ func use_enhancement_stone_with_result(stone_resource: Resource, source_location
 	var modifiers: Dictionary = stone_resource.call("get_normalized_modifiers") as Dictionary if stone_resource.has_method("get_normalized_modifiers") else EnhancementRules.normalize_modifiers(stone_resource.get("modifiers") as Dictionary)
 	if modifiers.is_empty() or not weapon_resource.has_method("apply_enhancement"):
 		return failed_result
+	# 强化石品质；用于在使用瞬间选择对应的增强与削弱随机数值区间。
+	var stone_quality_id: String = str(stone_resource.call("get_resolved_quality_id")) if stone_resource.has_method("get_resolved_quality_id") else str(stone_resource.get("quality_id"))
+	# 本次实际强化词典；资源本身仍只保存方向，每次消耗一颗时独立生成具体百分比。
+	var rolled_modifiers: Dictionary = {}
+	# 可强化属性遍历项；按规则目录稳定顺序生成本次实际比例，便于结果展示和测试复现。
+	for stat_name in EnhancementRules.STAT_KEYS:
+		if not modifiers.has(stat_name):
+			continue
+		# 本次词条实际比例；正负方向继承强化石，绝对值由品质区间随机生成。
+		var rolled_modifier_ratio: float = EnhancementRules.roll_quality_modifier_ratio(_random, stone_quality_id, stat_name, modifiers.get(stat_name, 1))
+		if not is_zero_approx(rolled_modifier_ratio):
+			rolled_modifiers[stat_name] = rolled_modifier_ratio
+	if rolled_modifiers.is_empty():
+		return failed_result
+	# 强化前售价；强化结果弹窗用它与强化后售价对比，数值由武器动态售价接口统一计算。
+	var sell_price_before: int = _get_resource_sell_price(weapon_resource)
 	# 武器强化结果；新资源返回完整变化明细，旧扩展资源仍可通过 bool 接口完成强化。
 	var enhancement_result: Dictionary = failed_result.duplicate(true)
 	if weapon_resource.has_method("apply_enhancement_with_result"):
-		enhancement_result = weapon_resource.call("apply_enhancement_with_result", modifiers) as Dictionary
+		enhancement_result = weapon_resource.call("apply_enhancement_with_result", rolled_modifiers) as Dictionary
 	else:
-		enhancement_result["success"] = bool(weapon_resource.call("apply_enhancement", modifiers))
+		enhancement_result["success"] = bool(weapon_resource.call("apply_enhancement", rolled_modifiers))
 	if not bool(enhancement_result.get("success", false)):
 		return failed_result
 	enhancement_result["weapon"] = weapon_resource
 	enhancement_result["stone"] = stone_resource
+	enhancement_result["rolled_modifiers"] = rolled_modifiers
+	enhancement_result["sell_price_before"] = sell_price_before
+	enhancement_result["sell_price_after"] = _get_resource_sell_price(weapon_resource)
 
 	# 强化石记录；成功应用后才扣除一颗，失败不会消耗材料。
 	var stone_record: Dictionary = source_records[stone_record_index]
@@ -1251,7 +1325,7 @@ func _save_inventory() -> void:
 
 	# 存档根字典；保存版本、排序计数、永久仓库、随身背包、装备和局外金币状态。
 	var save_data: Dictionary = {
-		"version": 4,
+		"version": 5,
 		"acquisition_sequence": _acquisition_sequence,
 		"last_extraction_epoch": _last_extraction_epoch,
 		"current_ranged_slot": _current_ranged_slot,
@@ -1361,6 +1435,7 @@ func _serialize_record(record: Dictionary) -> Dictionary:
 	}
 	if _is_enhancement_stone(item_resource):
 		# 强化石品质；版本 4 起与实际百分比一起保存，旧存档读取时回退为低级。
+		# 方向化存档补充：当前版本只保存品质、属性和方向，旧百分比读取后会归一化为 +/-1。
 		serialized_record["quality_id"] = str(item_resource.get("quality_id"))
 		serialized_record["display_name"] = str(item_resource.get("display_name"))
 		serialized_record["description"] = str(item_resource.get("description"))
@@ -1369,6 +1444,7 @@ func _serialize_record(record: Dictionary) -> Dictionary:
 		serialized_record["modifiers"] = EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary)
 	elif item_resource.has_method("get_enhancement_ratio"):
 		serialized_record["enhancement_modifiers"] = (item_resource.get("enhancement_modifiers") as Dictionary).duplicate(true)
+		serialized_record["current_durability"] = maxf(float(item_resource.get("current_durability")), 0.0)
 	return serialized_record
 
 
@@ -1399,6 +1475,13 @@ func _deserialize_record(serialized_record: Dictionary) -> Dictionary:
 		return {}
 	if item_kind != "enhancement_stone" and serialized_record.get("enhancement_modifiers") is Dictionary:
 		item_resource.set("enhancement_modifiers", (serialized_record.get("enhancement_modifiers") as Dictionary).duplicate(true))
+	if item_kind != "enhancement_stone":
+		# 恢复耐久；旧存档缺少字段时按模板最大耐久恢复满值，避免升级后全部旧武器意外损坏。
+		var restored_durability: float = float(serialized_record.get("current_durability", item_resource.get("max_durability")))
+		if item_resource.has_method("set_current_durability"):
+			item_resource.call("set_current_durability", restored_durability)
+		else:
+			item_resource.set("current_durability", restored_durability)
 	# 恢复记录；保留编号和获得时间，序号缺失时使用当前递增值。
 	var record: Dictionary = _create_record(item_resource, float(serialized_record.get("acquired_at", 0.0)), str(serialized_record.get("record_id", "")))
 	record["acquisition_sequence"] = int(serialized_record.get("acquisition_sequence", record.get("acquisition_sequence", 0)))

@@ -6,12 +6,36 @@ class_name EnhancementResultDialog
 
 ## 弹窗默认宽度；默认 560 像素可完整容纳属性名、百分比、基础值和变化值。
 @export_range(360, 960, 1) var dialog_width: int = 560
+## 弹窗默认高度；默认 430 像素，为多词条结果、价格变化和底部确定按钮保留稳定空间。
+@export_range(260, 720, 1) var dialog_height: int = 430
+
+## 增益属性颜色；默认亮绿色，与强化石详情和武器属性变化保持一致。
+const BENEFICIAL_COLOR: String = "#70e889"
+## 减益属性颜色；默认亮红色，与强化石详情和武器属性变化保持一致。
+const DETRIMENTAL_COLOR: String = "#ff7070"
+## 中性价格颜色；默认浅蓝白色，用于价格没有变化的情况。
+const NEUTRAL_COLOR: String = "#d8e8ee"
+
+## 强化结果富文本；默认在 ready 创建并覆盖系统纯文本标签，用于逐条渲染玩法利弊颜色。
+var _result_label: RichTextLabel
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	title = "强化完成"
 	get_ok_button().text = "确定"
+	get_label().visible = false
+	_result_label = RichTextLabel.new()
+	_result_label.bbcode_enabled = true
+	_result_label.fit_content = false
+	_result_label.scroll_active = true
+	_result_label.mouse_filter = Control.MOUSE_FILTER_STOP
+	_result_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_result_label.offset_left = 18.0
+	_result_label.offset_top = 44.0
+	_result_label.offset_right = -18.0
+	_result_label.offset_bottom = -62.0
+	add_child(_result_label)
 
 
 func present(enhancement_result: Dictionary) -> void:
@@ -31,8 +55,20 @@ func present(enhancement_result: Dictionary) -> void:
 	var detrimental_changes: Array = enhancement_result.get("detrimental_changes", []) as Array
 	_append_change_section(result_lines, "提升属性", beneficial_changes, "无")
 	_append_change_section(result_lines, "削弱属性", detrimental_changes, "无")
-	dialog_text = "\n".join(result_lines)
-	popup_centered(Vector2i(dialog_width, 0))
+	# 强化前售价；由 GlobalInventory 在应用词条前读取，避免弹窗自行复算历史状态。
+	var sell_price_before: int = maxi(int(enhancement_result.get("sell_price_before", 0)), 0)
+	# 强化后售价；包含本次随机强化产生的全部价格影响。
+	var sell_price_after: int = maxi(int(enhancement_result.get("sell_price_after", sell_price_before)), 0)
+	# 售价变化；正数显式显示加号，负数保留减号，0 表示本次词条综合后价格不变。
+	var sell_price_change: int = sell_price_after - sell_price_before
+	result_lines.append("")
+	result_lines.append("价格变化")
+	# 价格颜色；价格上升为绿色、下降为红色、无变化使用中性色。
+	var price_color: String = BENEFICIAL_COLOR if sell_price_change > 0 else (DETRIMENTAL_COLOR if sell_price_change < 0 else NEUTRAL_COLOR)
+	result_lines.append("[color=%s]%d → %d 金币（%s%d）[/color]" % [price_color, sell_price_before, sell_price_after, "+" if sell_price_change >= 0 else "", sell_price_change])
+	dialog_text = ""
+	_result_label.text = "\n".join(result_lines)
+	popup_centered(Vector2i(dialog_width, dialog_height))
 
 
 func _append_change_section(target_lines: PackedStringArray, section_title: String, changes: Array, empty_text: String) -> void:
@@ -65,7 +101,12 @@ func _format_change_line(change: Dictionary) -> String:
 	var percentage_text: String = "%s%d%%" % ["+" if modifier_ratio >= 0.0 else "-", roundi(absf(modifier_ratio) * 100.0)]
 	# 带符号变化值；正数显式加号，负数保留减号。
 	var change_text: String = "%s%s" % ["+" if change_value >= 0.0 else "", _format_number(change_value)]
-	return "%s：%s（基础 %s，变化 %s，强化后 %s）" % [
+	# 玩法收益；冷却、能量消耗、扩散和后坐力降低等负方向收益同样使用绿色。
+	var is_beneficial: bool = EnhancementRules.is_direction_beneficial(stat_name, modifier_ratio)
+	# 词条颜色；严格按玩法收益而不是数值正负选择。
+	var color_code: String = BENEFICIAL_COLOR if is_beneficial else DETRIMENTAL_COLOR
+	return "[color=%s]%s：%s（基础 %s，变化 %s，强化后 %s）[/color]" % [
+		color_code,
 		EnhancementRules.get_stat_label(stat_name),
 		percentage_text,
 		_format_number(base_value),

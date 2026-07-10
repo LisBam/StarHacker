@@ -4,6 +4,7 @@ class_name EnhancementRules
 ## 强化规则目录集中维护强化石属性名称、方向、实际步长和利弊判断。
 ## 强化石资源只保存 +1 或 -1 方向，所有数值换算和 UI 颜色都通过本目录完成，避免各模块产生不同解释。
 ## 品质化强化石会直接保存实际百分比；旧版 +1/-1 方向数据仍会通过固定 10% 步长自动迁移。
+## 方向化重构后强化石资源统一只保存 +1/-1；品质百分比区间仅在消耗强化石时用于生成本次实际幅度。
 
 ## 单次强化固定比例；默认 0.10 表示每颗强化石的每条有效词条改变对应武器基础属性 10%。
 const ENHANCEMENT_STEP_RATIO: float = 0.10
@@ -123,16 +124,40 @@ static func normalize_modifiers(modifiers: Dictionary) -> Dictionary:
 			# 实际词条比例；保留品质随机的幅度，同时忽略无效的 0% 词条。
 			var modifier_ratio: float = normalize_modifier_ratio(modifiers.get(stat_name, 0.0))
 			if not is_zero_approx(modifier_ratio):
-				normalized_modifiers[stat_name] = modifier_ratio
+				# 方向化强化石只持久化 +1 或 -1；旧存档中的具体百分比读取后仅保留方向，实际幅度延迟到使用瞬间生成。
+				normalized_modifiers[stat_name] = normalize_direction(modifier_ratio)
 	return normalized_modifiers
 
 
-static func build_modifier_token(stat_name: String, direction: Variant, include_percentage: bool = true) -> String:
+static func build_modifier_token(stat_name: String, direction: Variant, include_percentage: bool = false) -> String:
 	# 标准化比例；旧强化石会在此自动转换为 10%，新强化石保留实际整数百分点。
 	var modifier_ratio: float = normalize_modifier_ratio(direction)
 	# 方向文本；搜索可使用不带百分比版本，物品详情默认展示完整数值。
 	var direction_text: String = "%s%s" % [get_stat_label(stat_name), get_direction_symbol(normalize_direction(modifier_ratio))]
 	return "%s%d%%" % [direction_text, roundi(absf(modifier_ratio) * 100.0)] if include_percentage else direction_text
+
+
+static func roll_quality_modifier_ratio(random_source: RandomNumberGenerator, quality_id: String, stat_name: String, direction: Variant) -> float:
+	if random_source == null or stat_name not in STAT_KEYS:
+		return 0.0
+	# 方向化词条；资源只保存正负方向，实际强化幅度在每次使用时根据品质重新抽取。
+	var modifier_direction: int = normalize_direction(direction)
+	# 品质配置；增强和削弱分别使用各品质独立区间，保证低级、中级、高级和极品的幅度差异集中维护。
+	var quality_config: Dictionary = get_quality_config(quality_id)
+	# 是否为玩法增强；冷却、扩散和后坐力的负方向仍属于增强，不按数值正负误判收益。
+	var beneficial: bool = is_direction_beneficial(stat_name, modifier_direction)
+	# 最小随机比例；削弱区间缺失时回退增强区间，兼容旧存档中理论上不会生成的异常品质方向组合。
+	var minimum_ratio: float = float(quality_config.get("beneficial_min" if beneficial else "detrimental_min", 0.0))
+	# 最大随机比例；与最小值共同形成闭区间整数百分点抽取范围。
+	var maximum_ratio: float = float(quality_config.get("beneficial_max" if beneficial else "detrimental_max", 0.0))
+	if maximum_ratio <= 0.0:
+		minimum_ratio = float(quality_config.get("beneficial_min", ENHANCEMENT_STEP_RATIO))
+		maximum_ratio = float(quality_config.get("beneficial_max", ENHANCEMENT_STEP_RATIO))
+	# 最小整数百分点；例如 0.10 转换为 10，避免浮点随机造成不可追踪的小数精度。
+	var minimum_percent: int = roundi(minf(minimum_ratio, maximum_ratio) * 100.0)
+	# 最大整数百分点；例如 0.60 转换为 60，与最小值组成闭区间。
+	var maximum_percent: int = roundi(maxf(minimum_ratio, maximum_ratio) * 100.0)
+	return float(random_source.randi_range(minimum_percent, maximum_percent)) / 100.0 * float(modifier_direction)
 
 
 static func get_quality_display_name(quality_id: String) -> String:

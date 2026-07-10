@@ -20,6 +20,12 @@ class_name WeaponData
 @export var icon_text: String = "?"
 ## 局外出售价格；取值大于等于 0，默认 0 表示不可出售，只在永久仓库出售时兑换为局外金币且运行时通常不修改。
 @export_range(0, 999999, 1) var sell_price: int = 0
+## 武器最大耐久；取值大于 0，默认 100，运行时通常不修改，调整会影响耐久比例、读条与价格折损速度。
+@export_range(1.0, 999999.0, 1.0, "or_greater") var max_durability: float = 100.0
+## 武器当前耐久；取值会限制在 0 到最大耐久，默认 100，归零后武器保留但不可继续使用。
+@export_range(0.0, 999999.0, 1.0) var current_durability: float = 100.0
+## 每次成功使用消耗的耐久；取值大于等于 0，默认 1，远程射击和近战挥击成功后各扣除一次。
+@export_range(0.0, 999999.0, 0.1, "or_greater") var durability_cost_per_use: float = 1.0
 ## 每次成功使用武器消耗的能量；取值建议大于等于 0，默认 0 表示免费攻击，修改会影响玩家能量消耗节奏。
 @export_range(0.0, 9999.0, 0.1, "or_greater") var energy_cost: float = 0.0
 ## 远程武器使用的弹体场景；默认空表示不能发射，必须实例化为 Node2D，修改会影响远程攻击生成对象。
@@ -67,6 +73,35 @@ func is_ranged() -> bool:
 
 func is_melee() -> bool:
 	return weapon_type == "melee"
+
+
+func get_durability_ratio() -> float:
+	return clampf(current_durability / maxf(max_durability, 1.0), 0.0, 1.0)
+
+
+func is_broken() -> bool:
+	return current_durability <= 0.0 or is_zero_approx(current_durability)
+
+
+func can_be_used() -> bool:
+	return not is_broken()
+
+
+func set_current_durability(value: float) -> void:
+	current_durability = clampf(value, 0.0, maxf(max_durability, 1.0))
+
+
+func consume_durability(amount: float = -1.0) -> bool:
+	if is_broken():
+		return false
+	# 实际消耗量；负数使用武器自身单次消耗配置，显式传值用于以后技能或特殊弹药扩展。
+	var resolved_amount: float = durability_cost_per_use if amount < 0.0 else amount
+	if resolved_amount <= 0.0:
+		return false
+	# 消耗前耐久；用于判断本次调用是否实际改变了资源状态。
+	var durability_before: float = current_durability
+	set_current_durability(current_durability - resolved_amount)
+	return not is_equal_approx(durability_before, current_durability)
 
 
 func get_base_stat(stat_name: String) -> float:
@@ -138,6 +173,7 @@ func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
 		# 强化前数值；包含历史累计强化，用于计算本次实际变化量。
 		var before_value: float = get_effective_stat(stat_name)
 		# 新累计比例；每条词条按固定 10% 步长累计，强化允许正负相抵且基础属性始终保持不变。
+		# 品质随机补充：正常强化流程传入使用瞬间生成的 5% 至 60% 实际比例，固定 10% 仅保留给旧方向值直接调用兼容。
 		var accumulated_ratio: float = float(enhancement_modifiers.get(stat_name, 0.0)) + modifier_ratio
 		enhancement_modifiers[stat_name] = snappedf(accumulated_ratio, 0.01)
 		# 强化后数值；已应用属性下限保护，可以直接交给弹窗和战斗组件使用。
@@ -171,7 +207,10 @@ func get_effective_sell_price() -> int:
 				# 累计方向；用于判断该属性最终变化对武器是增强还是削弱。
 				var accumulated_direction: int = EnhancementRules.normalize_direction(accumulated_ratio)
 				sell_price_ratio += absf(accumulated_ratio) if EnhancementRules.is_direction_beneficial(str(raw_stat_name), accumulated_direction) else -absf(accumulated_ratio)
-	return maxi(roundi(float(sell_price) * maxf(1.0 + sell_price_ratio, MINIMUM_SELL_PRICE_MULTIPLIER)), 0)
+	# 强化后基础售价；先应用强化利弊，保证耐久折损与强化价格变化可以稳定组合。
+	var enhanced_sell_price: float = float(sell_price) * maxf(1.0 + sell_price_ratio, MINIMUM_SELL_PRICE_MULTIPLIER)
+	# 最终售价；按当前耐久比例线性折损，损坏武器耐久为 0 因此售价为 0。
+	return maxi(roundi(enhanced_sell_price * get_durability_ratio()), 0)
 
 
 func _resolve_base_property_name(stat_name: String) -> String:

@@ -4,6 +4,7 @@ class_name EnhancementStoneData
 ## 强化石数据资源描述可堆叠的武器强化材料及其属性方向词条。
 ## 同一属性集合与增减方向完全一致的强化石拥有相同堆叠签名，仓库和背包最多将其合并为 99 个一组。
 ## 品质化强化石使用“品质 + 属性 + 实际百分比”作为堆叠条件，增强词条始终排在削弱词条之前。
+## 方向化重构后堆叠条件改为“品质 + 属性 + 方向”，同组每颗强化石使用时都会重新随机具体幅度。
 
 ## 物品类型；固定为 enhancement_stone，供库存、分类和 UI 与武器资源解耦识别。
 @export var item_kind: String = "enhancement_stone"
@@ -40,7 +41,8 @@ func get_stack_signature() -> String:
 	for modifier_key in sorted_keys:
 		# 词条百分比；按 0.01 精度序列化，只有品质、属性和数值都一致时才能堆叠。
 		var modifier_ratio: float = float(normalized_modifiers.get(modifier_key, 0.0))
-		signature_parts.append("%s=%.2f" % [modifier_key, modifier_ratio])
+		# 方向化堆叠签名；同品质、同属性、同方向的强化石合并，使用时再各自随机实际幅度。
+		signature_parts.append("%s=%d" % [modifier_key, EnhancementRules.normalize_direction(modifier_ratio)])
 	return "|".join(signature_parts)
 
 
@@ -121,6 +123,7 @@ static func create_random(random_source: RandomNumberGenerator, minimum_modifier
 
 	# 随机方向词典；每项只保存 +1 或 -1，不再生成具体百分比。
 	# 品质化数值补充；当前字典实际保存带方向的 0.05 至 0.60 比例，上述方向说明仅用于旧存档语义。
+	# 方向化生成补充；当前字典只写入 +1 或 -1，品质范围由使用流程延迟抽取。
 	var generated_modifiers: Dictionary = {}
 	# 增强词条数；必定至少一条，中级、高级和极品可按各自概率增加第二条。
 	var beneficial_modifier_count: int = 1 + (1 if rolled_extra_beneficial else 0)
@@ -131,17 +134,13 @@ static func create_random(random_source: RandomNumberGenerator, minimum_modifier
 		var stat_name: String = shuffled_stats[stat_index]
 		# 有利方向；不同属性的增强方向不同，例如伤害增加、冷却减少。
 		var beneficial_direction: int = EnhancementRules.get_beneficial_direction(stat_name)
-		# 增强幅度；按品质范围生成整数百分点，确保相同数值的强化石可稳定堆叠。
-		var beneficial_ratio: float = _roll_ratio(random_source, float(quality_config.get("beneficial_min", 0.10)), float(quality_config.get("beneficial_max", 0.20)))
-		generated_modifiers[stat_name] = beneficial_ratio * float(beneficial_direction)
+		generated_modifiers[stat_name] = beneficial_direction
 	if has_detrimental_modifier and beneficial_modifier_count < shuffled_stats.size():
 		# 削弱属性；使用尚未被增强词条占用的下一个属性，避免同属性在一颗石头上自我抵消。
 		var detrimental_stat_name: String = shuffled_stats[beneficial_modifier_count]
 		# 削弱数值方向；始终与该属性的有利方向相反。
 		var detrimental_direction: int = -EnhancementRules.get_beneficial_direction(detrimental_stat_name)
-		# 削弱幅度；按品质配置生成整数百分点。
-		var detrimental_ratio: float = _roll_ratio(random_source, float(quality_config.get("detrimental_min", 0.0)), float(quality_config.get("detrimental_max", 0.0)))
-		generated_modifiers[detrimental_stat_name] = detrimental_ratio * float(detrimental_direction)
+		generated_modifiers[detrimental_stat_name] = detrimental_direction
 
 	# 强化石资源；名称保持统一以提升同类识别，售价按词条数量线性增长。
 	var enhancement_stone: EnhancementStoneData = EnhancementStoneData.new()
@@ -161,7 +160,7 @@ func _append_modifier_tokens(target_tokens: PackedStringArray, normalized_modifi
 		var modifier_ratio: float = float(normalized_modifiers.get(stat_name, 0.0))
 		if EnhancementRules.is_direction_beneficial(stat_name, modifier_ratio) != beneficial:
 			continue
-		target_tokens.append(EnhancementRules.build_modifier_token(stat_name, modifier_ratio))
+		target_tokens.append(EnhancementRules.build_modifier_token(stat_name, modifier_ratio, false))
 
 
 static func _roll_ratio(random_source: RandomNumberGenerator, minimum_ratio: float, maximum_ratio: float) -> float:

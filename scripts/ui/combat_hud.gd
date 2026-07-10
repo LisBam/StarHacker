@@ -25,6 +25,8 @@ const INVENTORY_FILTER_RANGED: String = "ranged"
 const INVENTORY_FILTER_MELEE: String = "melee"
 ## 背包强化石分页标识；默认匹配 item_kind 为 enhancement_stone 的可堆叠资源。
 const INVENTORY_FILTER_STONES: String = "enhancement_stones"
+## 背包道具分页标识；默认匹配 item_kind 为 repair_kit 的可用道具资源。
+const INVENTORY_FILTER_ITEMS: String = "items"
 ## 局内强化石操作菜单使用项编号；固定为 1，选择后进入背包或装备栏武器选择状态。
 const INVENTORY_ITEM_ACTION_USE: int = 1
 ## 局内武器操作菜单装备项编号；固定为 2，远程武器替换当前手持槽，近战武器替换近战槽。
@@ -115,6 +117,8 @@ var _inventory_primary_weapons_button: Button
 var _inventory_primary_resources_button: Button
 ## 背包强化石筛选按钮；默认运行时追加到现有筛选栏，点击后显示正方形强化石格子。
 var _inventory_filter_stones_button: Button
+## 背包道具筛选按钮；默认运行时追加到资源筛选栏，点击后只显示修复包等道具。
+var _inventory_filter_items_button: Button
 ## 背包关键词搜索框；默认空字符串，按名称、说明和强化词条实时筛选。
 var _inventory_search_edit: LineEdit
 ## 背包排序下拉框；默认获得时间，可切换物品价值降序。
@@ -507,14 +511,14 @@ func _refresh_equipment() -> void:
 		var ranged_weapon: Resource = _equipment_component.call("get_ranged_weapon", slot_index) as Resource
 		_ranged_slot_controls[slot_index].call("set_slot_data", "equipment", "ranged", slot_index, ranged_weapon, slot_index == current_slot)
 		_ranged_slot_controls[slot_index].call("set_empty_text", "空远程")
-		_ranged_slot_controls[slot_index].call("set_enhancement_target_highlight", _inventory_panel.visible and _pending_combat_stone_resource != null)
+		_ranged_slot_controls[slot_index].call("set_enhancement_target_highlight", _inventory_panel.visible and _can_pending_combat_repair_target(ranged_weapon))
 
 	if _melee_slot_control != null:
 		# 当前近战武器资源；取值为 Resource 或 null，默认来自装备组件，修改会影响近战槽显示内容。
 		var melee_weapon: Resource = _equipment_component.call("get_melee_weapon") as Resource
 		_melee_slot_control.call("set_slot_data", "equipment", "melee", -1, melee_weapon, true)
 		_melee_slot_control.call("set_empty_text", "空近战")
-		_melee_slot_control.call("set_enhancement_target_highlight", _inventory_panel.visible and _pending_combat_stone_resource != null)
+		_melee_slot_control.call("set_enhancement_target_highlight", _inventory_panel.visible and _can_pending_combat_repair_target(melee_weapon))
 
 
 func _rebuild_inventory_slots() -> void:
@@ -575,7 +579,7 @@ func _rebuild_inventory_slots() -> void:
 			var inventory_slot: Control = _create_weapon_slot_control(inventory_slot_minimum_size)
 			inventory_slot.call("set_slot_data", "inventory", "inventory", source_index, item_data, false)
 			inventory_slot.call("set_empty_text", "空")
-			inventory_slot.call("set_enhancement_target_highlight", _pending_combat_stone_resource != null)
+			inventory_slot.call("set_enhancement_target_highlight", _can_pending_combat_repair_target(item_data))
 			_inventory_weapon_grid.add_child(inventory_slot)
 			_inventory_slot_controls.append(inventory_slot)
 
@@ -624,14 +628,14 @@ func _refresh_inventory_equipment_slots() -> void:
 		var ranged_weapon: Resource = _equipment_component.call("get_ranged_weapon", slot_index) as Resource
 		_inventory_equipment_ranged_controls[slot_index].call("set_slot_data", "equipment", "ranged", slot_index, ranged_weapon, slot_index == current_slot)
 		_inventory_equipment_ranged_controls[slot_index].call("set_empty_text", "空远程")
-		_inventory_equipment_ranged_controls[slot_index].call("set_enhancement_target_highlight", _pending_combat_stone_resource != null)
+		_inventory_equipment_ranged_controls[slot_index].call("set_enhancement_target_highlight", _can_pending_combat_repair_target(ranged_weapon))
 
 	if _inventory_equipment_melee_control != null:
 		# 背包界面当前近战武器资源；取值为 Resource 或 null，默认来自装备组件，修改会影响左侧近战槽显示。
 		var melee_weapon: Resource = _equipment_component.call("get_melee_weapon") as Resource
 		_inventory_equipment_melee_control.call("set_slot_data", "equipment", "melee", -1, melee_weapon, true)
 		_inventory_equipment_melee_control.call("set_empty_text", "空近战")
-		_inventory_equipment_melee_control.call("set_enhancement_target_highlight", _pending_combat_stone_resource != null)
+		_inventory_equipment_melee_control.call("set_enhancement_target_highlight", _can_pending_combat_repair_target(melee_weapon))
 
 
 func _refresh_cooldown_overlays() -> void:
@@ -1205,6 +1209,12 @@ func _bind_inventory_filter_buttons() -> void:
 		_inventory_filter_stones_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_inventory_filter_stones_button.pressed.connect(_on_inventory_filter_stones_pressed)
 		filter_parent.add_child(_inventory_filter_stones_button)
+		_inventory_filter_items_button = Button.new()
+		_inventory_filter_items_button.text = "道具"
+		_inventory_filter_items_button.toggle_mode = true
+		_inventory_filter_items_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_inventory_filter_items_button.pressed.connect(_on_inventory_filter_items_pressed)
+		filter_parent.add_child(_inventory_filter_items_button)
 
 		# 背包内容容器；查询栏和一级分类栏会插入现有二级分类栏之前。
 		var backpack_content: VBoxContainer = filter_parent.get_parent() as VBoxContainer
@@ -1398,6 +1408,8 @@ func _resolve_training_mode() -> bool:
 
 func _sync_mode_controls() -> void:
 	_test_settings_button.visible = _is_training_mode
+	# 返回主菜单按钮文本；训练场没有物品损失结算，因此使用“离开”并直接返回主菜单。
+	_return_main_menu_button.text = "离开" if _is_training_mode else "逃跑"
 	if not _can_use_training_tools():
 		_test_settings_panel.visible = false
 		_character_switch_panel.visible = false
@@ -1405,6 +1417,16 @@ func _sync_mode_controls() -> void:
 
 func _can_use_training_tools() -> bool:
 	return _is_training_mode or _developer_training_access_unlocked
+
+
+func _can_pending_combat_repair_target(weapon_resource: Resource) -> bool:
+	if _pending_combat_stone_resource == null or weapon_resource == null or str(weapon_resource.get("weapon_type")) not in ["ranged", "melee"]:
+		return false
+	# 当前耐久；只有存在耐久缺口的武器才应被绿色高亮为修复包目标。
+	var current_durability: float = maxf(float(weapon_resource.get("current_durability")), 0.0)
+	# 最大耐久；至少为 1，避免旧资源数据异常导致比较无效。
+	var maximum_durability: float = maxf(float(weapon_resource.get("max_durability")), 1.0)
+	return current_durability < maximum_durability
 
 
 func _set_inventory_filter(new_filter: String) -> void:
@@ -1428,12 +1450,16 @@ func _refresh_inventory_filter_buttons() -> void:
 	_inventory_filter_ranged_button.set_pressed_no_signal(_inventory_filter == INVENTORY_FILTER_RANGED)
 	if _inventory_filter_stones_button != null:
 		_inventory_filter_stones_button.set_pressed_no_signal(_inventory_filter == INVENTORY_FILTER_STONES)
+	if _inventory_filter_items_button != null:
+		_inventory_filter_items_button.set_pressed_no_signal(_inventory_filter == INVENTORY_FILTER_ITEMS)
 	# 二级分类可见性；武器显示全部/近战/远程，资源显示全部/强化石。
 	var weapon_category_visible: bool = _inventory_primary_category == InventoryQuery.PRIMARY_WEAPONS
 	_inventory_filter_melee_button.visible = weapon_category_visible
 	_inventory_filter_ranged_button.visible = weapon_category_visible
 	if _inventory_filter_stones_button != null:
 		_inventory_filter_stones_button.visible = not weapon_category_visible
+	if _inventory_filter_items_button != null:
+		_inventory_filter_items_button.visible = not weapon_category_visible
 	if _inventory_stone_attribute_option != null:
 		_inventory_stone_attribute_option.visible = not weapon_category_visible
 
@@ -1445,6 +1471,8 @@ func _get_inventory_filter_label() -> String:
 		return "远程"
 	if _inventory_filter == INVENTORY_FILTER_STONES:
 		return "资源 · 强化石"
+	if _inventory_filter == INVENTORY_FILTER_ITEMS:
+		return "资源 · 道具"
 	if _inventory_primary_category == InventoryQuery.PRIMARY_RESOURCES:
 		return "资源 · 全部"
 
@@ -2160,6 +2188,10 @@ func _on_inventory_filter_stones_pressed() -> void:
 	_set_inventory_filter(INVENTORY_FILTER_STONES)
 
 
+func _on_inventory_filter_items_pressed() -> void:
+	_set_inventory_filter(INVENTORY_FILTER_ITEMS)
+
+
 func _on_inventory_primary_category_pressed(category_name: String) -> void:
 	_inventory_primary_category = category_name
 	_inventory_filter = INVENTORY_FILTER_ALL
@@ -2534,10 +2566,13 @@ func _on_unstuck_button_pressed() -> void:
 
 
 func _on_return_main_menu_button_pressed() -> void:
+	if _is_training_mode:
+		_return_to_main_menu()
+		return
 	if _escape_confirmation_dialog == null:
 		return
-	# 逃跑警告；正式模式明确说明背包损失规则，训练模式说明不会进行战利品保留结算。
-	_escape_confirmation_dialog.dialog_text = "确认逃跑并返回主菜单吗？\n正式战斗中，背包物品约 50% 会被保留、约 50% 会丢失；已装备物品不参与损失。" if not _is_training_mode else "确认结束训练并返回主菜单吗？训练模式不会产生正式战斗物品损失。"
+	# 逃跑警告；正式模式明确说明背包损失规则，训练场已在入口处直接离开而不会打开二次确认。
+	_escape_confirmation_dialog.dialog_text = "确认逃跑并返回主菜单吗？\n正式战斗中，背包物品约 50% 会被保留、约 50% 会丢失；已装备物品不参与损失。"
 	_escape_confirmation_dialog.popup_centered(Vector2i(520, 0))
 
 

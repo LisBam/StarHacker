@@ -396,6 +396,7 @@ game_world_path = NodePath("../../../../../..")
 player_path = NodePath("../../../../../../Player")
 display_mode = 1
 player_marker_radius = 4.5
+allow_navigation_marker_input = false
 
 [node name="PauseMenuPanel" type="PanelContainer" parent="BattleHUD/Root/PauseOverlay"]
 unique_name_in_owner = true
@@ -693,17 +694,17 @@ mouse_filter = 0
 color = Color(0, 0, 0, 0.68)
 
 [node name="DeathPanel" type="PanelContainer" parent="BattleHUD/Root/DeathOverlay"]
-custom_minimum_size = Vector2(380, 220)
+custom_minimum_size = Vector2(620, 520)
 layout_mode = 1
 anchors_preset = -1
 anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -190.0
-offset_top = -110.0
-offset_right = 190.0
-offset_bottom = 110.0
+offset_left = -310.0
+offset_top = -260.0
+offset_right = 310.0
+offset_bottom = 260.0
 grow_horizontal = 2
 grow_vertical = 2
 
@@ -719,15 +720,22 @@ layout_mode = 2
 theme_override_constants/separation = 12
 
 [node name="DeathTitle" type="Label" parent="BattleHUD/Root/DeathOverlay/DeathPanel/DeathMargin/DeathContent"]
+unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 26
 text = "角色死亡"
 horizontal_alignment = 1
 
-[node name="DeathMessage" type="Label" parent="BattleHUD/Root/DeathOverlay/DeathPanel/DeathMargin/DeathContent"]
+[node name="DeathScroll" type="ScrollContainer" parent="BattleHUD/Root/DeathOverlay/DeathPanel/DeathMargin/DeathContent"]
 layout_mode = 2
+size_flags_vertical = 3
+
+[node name="DeathMessage" type="Label" parent="BattleHUD/Root/DeathOverlay/DeathPanel/DeathMargin/DeathContent/DeathScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
 text = "生命值已归零"
-horizontal_alignment = 1
+autowrap_mode = 2
 
 [node name="DeathSpacer" type="Control" parent="BattleHUD/Root/DeathOverlay/DeathPanel/DeathMargin/DeathContent"]
 custom_minimum_size = Vector2(0, 18)

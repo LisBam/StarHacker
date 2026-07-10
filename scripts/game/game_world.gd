@@ -66,11 +66,25 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 ## 随机怪物场景池；默认由场景填入近战和远程怪物，非空时会优先从池中随机选择生成对象。
 @export var monster_scenes: Array[PackedScene] = []
 ## 怪物生成数量；取值建议 0 到 64，默认 8，运行时修改会影响开局战斗压力。
-@export_range(0, 64, 1) var monster_spawn_count: int = 8
+## 全地图布怪补充：项目当前默认生成 48 名敌人，旧 8 名说明保留用于追溯原型基线。
+@export_range(0, 256, 1) var monster_spawn_count: int = 48
 ## 怪物生成最小距离；取值应大于等于 0，默认 280 像素，运行时修改会影响怪物是否离玩家过近。
-@export_range(0.0, 4000.0, 1.0) var monster_spawn_min_distance: float = 280.0
+## 全地图布怪补充：项目当前默认至少离玩家 900 像素，避免开局和补充刷新直接出现在屏幕附近。
+@export_range(0.0, 8000.0, 1.0) var monster_spawn_min_distance: float = 900.0
 ## 怪物生成最大距离；取值应大于最小距离，默认 900 像素，运行时修改会影响怪物分布范围。
 @export_range(1.0, 8000.0, 1.0, "or_greater") var monster_spawn_max_distance: float = 900.0
+## 是否在整张地图均匀生成敌人；默认 true，关闭后恢复以玩家为中心的最小/最大距离环形生成。
+@export var monster_spawn_across_full_map: bool = true
+## 全地图敌人生成边界留白；默认 256 像素，防止敌人贴着边界墙或生成到地图外侧。
+@export_range(0.0, 4000.0, 1.0) var monster_spawn_edge_margin: float = 256.0
+## 正式战斗最低存活敌人数；默认 36，低于该值时会在玩家安全范围外分批补充敌人。
+@export_range(0, 256, 1) var monster_minimum_alive_count: int = 36
+## 敌人补充检查间隔；默认 2 秒，避免每帧统计和生成大量节点。
+@export_range(0.1, 60.0, 0.1) var monster_replenish_interval: float = 2.0
+## 单次补充敌人数量；默认 4，实际生成数不会超过恢复到最低存活数量所需的缺口。
+@export_range(1, 32, 1) var monster_replenish_batch_size: int = 4
+## 敌人尺寸与属性随机波动比例；默认 0.3 表示每只敌人的大小和战斗属性分别在 70% 到 130% 范围内生成。
+@export_range(0.0, 0.9, 0.05) var monster_spawn_variation_ratio: float = 0.3
 ## 怪物父节点路径；默认指向 Enemies 容器，允许为空并回退到 GameWorld，修改会影响怪物节点层级。
 @export var monster_parent_path: NodePath = ^"Enemies"
 ## 掉落物父节点路径；默认指向 Drops 容器，允许为空并回退到 GameWorld，修改会影响武器掉落物节点层级。
@@ -158,6 +172,12 @@ var _player_inside_extraction_area: bool = false
 var _extraction_hold_elapsed_seconds: float = 0.0
 ## 是否已经满足撤离条件；取值为 true/false，默认 false，达到驻留时长且仍在范围内时变为 true。
 var _extraction_ready_to_leave: bool = false
+## 敌人补充检查剩余时间；取值大于等于 0，默认按配置间隔初始化，正式战斗中持续递减。
+var _monster_replenish_remaining: float = 0.0
+## 玩家导航标点位置；取值为世界坐标，仅在 _has_navigation_marker 为 true 时有效。
+var _navigation_marker_position: Vector2 = Vector2.ZERO
+## 是否存在玩家导航标点；默认 false，大地图左键设置后由大小地图共同读取。
+var _has_navigation_marker: bool = false
 
 ## 玩家节点缓存；默认按 player_path 获取，允许为空并以世界原点作为生成中心。
 @onready var _player: Node2D = get_node_or_null(player_path) as Node2D
@@ -173,6 +193,7 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_random.randomize()
 	_apply_session_state()
+	_begin_global_inventory_run()
 	_prepare_map_seed()
 	_environment_obstacle_rects.clear()
 	_navigation_grid_cache.clear()
@@ -180,6 +201,7 @@ func _ready() -> void:
 	_spawn_random_environment()
 	_environment_obstacle_version += 1
 	_spawn_monster_batch()
+	_monster_replenish_remaining = monster_replenish_interval
 	_update_explored_cells(true)
 
 
@@ -187,6 +209,7 @@ func _process(delta: float) -> void:
 	_update_survival_time(delta)
 	_update_extraction_state(delta)
 	_update_explored_cells_if_needed(delta)
+	_update_monster_replenishment(delta)
 
 
 func _draw() -> void:
@@ -301,6 +324,24 @@ func get_extraction_hold_duration_seconds() -> float:
 
 func get_extraction_point_position() -> Vector2:
 	return _extraction_point_position
+
+
+func set_navigation_marker(marker_position: Vector2) -> void:
+	_navigation_marker_position = _clamp_position_to_map(marker_position)
+	_has_navigation_marker = true
+
+
+func clear_navigation_marker() -> void:
+	_has_navigation_marker = false
+	_navigation_marker_position = Vector2.ZERO
+
+
+func has_navigation_marker() -> bool:
+	return _has_navigation_marker
+
+
+func get_navigation_marker_position() -> Vector2:
+	return _navigation_marker_position
 
 
 func find_navigation_path(start_position: Vector2, end_position: Vector2, agent_radius: float = 24.0, navigation_cell_size: float = 96.0, max_path_points: int = 64) -> Array[Vector2]:
@@ -467,6 +508,16 @@ func _apply_session_state() -> void:
 
 func _get_session_state() -> Node:
 	return get_tree().root.get_node_or_null("SessionState")
+
+
+func _begin_global_inventory_run() -> void:
+	if _is_training_mode:
+		return
+
+	# 全局背包服务；默认由自动加载提供，正式骇入开始时记录本局物品快照用于撤离和失败结算。
+	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+	if global_inventory != null and global_inventory.has_method("begin_combat_run"):
+		global_inventory.call("begin_combat_run")
 
 
 func _apply_selected_character() -> void:
@@ -1054,14 +1105,16 @@ func _get_rects_bounds(rects: Array[Rect2]) -> Rect2:
 	return merged_bounds
 
 
-func _spawn_monster_batch() -> void:
-	if not _has_monster_scene_available() or monster_spawn_count <= 0:
+func _spawn_monster_batch(requested_count: int = -1) -> void:
+	# 实际生成数量；负值使用开局配置，补充刷新会传入当前缺口对应的批次数量。
+	var resolved_spawn_count: int = monster_spawn_count if requested_count < 0 else requested_count
+	if not _has_monster_scene_available() or resolved_spawn_count <= 0:
 		return
 
 	# 怪物挂载父节点；取值为 Enemies 容器或 GameWorld，默认用于组织随机生成物。
 	var spawn_parent: Node = _monster_parent if _monster_parent != null else self
-	# 怪物生成循环索引；取值为 0 到 monster_spawn_count - 1，默认逐个生成怪物，修改循环范围会影响生成数量。
-	for _spawn_index in range(monster_spawn_count):
+	# 怪物生成循环索引；取值为 0 到实际生成数量减一，默认逐个生成并分散到整张地图。
+	for _spawn_index in range(resolved_spawn_count):
 		# 本次怪物场景；取值来自 monster_scenes 随机池或 monster_scene 兜底，默认用于生成不同怪物类型。
 		var selected_monster_scene: PackedScene = _get_random_monster_scene()
 		if selected_monster_scene == null:
@@ -1072,6 +1125,7 @@ func _spawn_monster_batch() -> void:
 		if monster == null:
 			continue
 
+		_apply_monster_spawn_variation(monster)
 		monster.add_to_group(TRAINING_MONSTER_GROUP)
 		spawn_parent.add_child(monster)
 		monster.global_position = _get_random_monster_spawn_position()
@@ -1117,6 +1171,55 @@ func clear_monsters() -> void:
 
 func respawn_monsters() -> void:
 	_spawn_monster_batch()
+
+
+func _update_monster_replenishment(delta: float) -> void:
+	if _is_training_mode or monster_minimum_alive_count <= 0:
+		return
+
+	_monster_replenish_remaining = maxf(_monster_replenish_remaining - delta, 0.0)
+	if _monster_replenish_remaining > 0.0:
+		return
+	_monster_replenish_remaining = maxf(monster_replenish_interval, 0.1)
+
+	# 当前存活敌人数；取值为怪物组内有效且未排队释放的节点数量。
+	var alive_monster_count: int = _get_alive_monster_count()
+	if alive_monster_count >= monster_minimum_alive_count:
+		return
+
+	# 当前敌人缺口；取值为最低数量减存活数量，用于限制单次补充不会超过目标总数。
+	var monster_deficit: int = monster_minimum_alive_count - alive_monster_count
+	# 本次补充数量；取值为缺口与批次上限较小值，避免瞬间生成过多节点。
+	var replenish_count: int = mini(monster_deficit, maxi(monster_replenish_batch_size, 1))
+	_spawn_monster_batch(replenish_count)
+
+
+func _get_alive_monster_count() -> int:
+	# 存活数量；默认从 0 开始统计组内有效敌人。
+	var alive_count: int = 0
+	# 怪物组成员；取值可能包含即将释放节点，默认逐项校验。
+	var grouped_monsters: Array = get_tree().get_nodes_in_group(TRAINING_MONSTER_GROUP)
+	# 怪物组遍历项；取值为 Variant，只统计有效 Node 且未排队释放的成员。
+	for grouped_monster in grouped_monsters:
+		if grouped_monster is Node and is_instance_valid(grouped_monster) and not (grouped_monster as Node).is_queued_for_deletion():
+			alive_count += 1
+	return alive_count
+
+
+func _apply_monster_spawn_variation(monster: Node2D) -> void:
+	if monster == null:
+		return
+
+	# 标准化波动比例；取值为 0 到 0.9，默认 0.3 形成 70% 到 130% 范围。
+	var variation_ratio: float = clampf(monster_spawn_variation_ratio, 0.0, 0.9)
+	# 尺寸倍率；取值在 1±波动范围内，每只敌人独立随机并直接影响视觉与碰撞尺寸。
+	var size_multiplier: float = _random.randf_range(1.0 - variation_ratio, 1.0 + variation_ratio)
+	# 属性倍率；与尺寸独立随机，避免大体型敌人必然拥有完全相同强度趋势。
+	var attribute_multiplier: float = _random.randf_range(1.0 - variation_ratio, 1.0 + variation_ratio)
+	if monster.has_method("apply_spawn_variation"):
+		monster.call("apply_spawn_variation", size_multiplier, attribute_multiplier)
+	else:
+		monster.scale *= Vector2(size_multiplier, size_multiplier)
 
 
 func _on_monster_died(monster_node: Node) -> void:
@@ -1200,12 +1303,14 @@ func _free_monster_node(monster_node: Node) -> void:
 
 
 func _get_random_monster_spawn_position() -> Vector2:
-	# 怪物生成尝试次数；取值为固定 18 次，默认用于避开墙体和建筑内部。
-	var spawn_attempt_count: int = 18
+	# 怪物生成尝试次数；取值为固定 48 次，默认用于同时满足玩家安全距离、地图边界和障碍避让。
+	var spawn_attempt_count: int = 48
 	# 怪物生成尝试索引；取值为 0 到 spawn_attempt_count - 1，默认逐次寻找不被障碍覆盖的位置。
 	for _attempt_index in range(spawn_attempt_count):
 		# 候选生成点；取值来自环形随机位置并夹取到地图内，默认用于检测是否避开环境障碍。
 		var candidate_position: Vector2 = _get_random_monster_spawn_candidate()
+		if _player != null and candidate_position.distance_to(_player.global_position) < monster_spawn_min_distance:
+			continue
 		if not _is_position_blocked_by_environment(candidate_position, 36.0):
 			return candidate_position
 
@@ -1213,6 +1318,18 @@ func _get_random_monster_spawn_position() -> Vector2:
 
 
 func _get_random_monster_spawn_candidate() -> Vector2:
+	if monster_spawn_across_full_map:
+		# 地图半边长；取值来自当前地图尺寸，用于整图均匀采样。
+		var half_size: float = get_map_half_size()
+		# 实际边界留白；取值至少为一个网格尺寸且不超过地图半边长，防止生成区反转。
+		var edge_margin: float = clampf(maxf(monster_spawn_edge_margin, grid_size), 0.0, maxf(half_size - 1.0, 0.0))
+		# 可生成坐标上限；取值为地图半边长减留白，默认在正负范围内均匀分布。
+		var spawn_limit: float = maxf(half_size - edge_margin, 1.0)
+		return Vector2(
+			_random.randf_range(-spawn_limit, spawn_limit),
+			_random.randf_range(-spawn_limit, spawn_limit)
+		)
+
 	# 生成中心点；取值为玩家位置或世界原点，默认让怪物围绕玩家随机刷新。
 	var spawn_center: Vector2 = _player.global_position if _player != null else Vector2.ZERO
 	# 标准化最大生成距离；取值至少为最小距离，默认防止配置错误导致随机范围反转。

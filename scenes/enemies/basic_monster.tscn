@@ -3,6 +3,7 @@
 [ext_resource type="Script" uid="uid://dgnhkofrd166y" path="res://scripts/enemies/basic_monster.gd" id="1_basic_monster"]
 [ext_resource type="Script" uid="uid://7p7q431vfibk" path="res://scripts/components/enemy_perception_component.gd" id="2_perception"]
 [ext_resource type="Script" uid="uid://w6i2gkvfa1xa" path="res://scripts/components/enemy_movement_component.gd" id="3_movement"]
+[ext_resource type="Script" uid="uid://dsehe0vkkedhn" path="res://scripts/components/enemy_tactical_component.gd" id="4_tactical"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_body"]
 radius = 17.0
@@ -11,6 +12,7 @@ radius = 17.0
 collision_layer = 2
 collision_mask = 17
 script = ExtResource("1_basic_monster")
+vision_range = 500.0
 
 [node name="Body" type="Polygon2D" parent="." unique_id=1256472028]
 color = Color(0.956863, 0.286275, 0.360784, 1)
@@ -28,3 +30,6 @@ script = ExtResource("2_perception")
 
 [node name="EnemyMovementComponent" type="Node" parent="." unique_id=1242520127]
 script = ExtResource("3_movement")
+
+[node name="EnemyTacticalComponent" type="Node" parent="." unique_id=1052468130]
+script = ExtResource("4_tactical")

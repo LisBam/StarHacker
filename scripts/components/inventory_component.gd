@@ -12,14 +12,26 @@ signal inventory_changed
 
 ## 运行时物品列表；默认由 initial_items 复制得到，数组元素为 Resource，修改会影响背包查询和装备可用物品。
 var _items: Array[Resource] = []
+## 全局背包服务；默认从自动加载 GlobalInventory 获取，缺失时回退原有场景内本地数组行为。
+var _global_inventory: Node
 
 
 func _ready() -> void:
+	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
+	if _global_inventory != null and _global_inventory.has_method("get_backpack_resources"):
+		if _global_inventory.has_signal("inventory_changed"):
+			_global_inventory.connect("inventory_changed", Callable(self, "_on_global_inventory_changed"))
+		_sync_from_global_inventory()
+		inventory_changed.emit()
+		return
+
 	_items = initial_items.duplicate()
 	inventory_changed.emit()
 
 
 func add_item(item_data: Resource) -> bool:
+	if _global_inventory != null and _global_inventory.has_method("add_backpack_resource"):
+		return bool(_global_inventory.call("add_backpack_resource", item_data))
 	if item_data == null or has_item(item_data):
 		return false
 
@@ -29,6 +41,8 @@ func add_item(item_data: Resource) -> bool:
 
 
 func add_item_at(item_data: Resource, target_index: int) -> bool:
+	if _global_inventory != null and _global_inventory.has_method("add_backpack_resource"):
+		return bool(_global_inventory.call("add_backpack_resource", item_data, target_index))
 	if item_data == null or has_item(item_data):
 		return false
 
@@ -40,6 +54,8 @@ func add_item_at(item_data: Resource, target_index: int) -> bool:
 
 
 func remove_item(item_data: Resource) -> bool:
+	if _global_inventory != null and _global_inventory.has_method("remove_backpack_resource"):
+		return bool(_global_inventory.call("remove_backpack_resource", item_data))
 	# 待移除物品索引；取值为 -1 或有效数组下标，默认由背包查找得到，修改会影响移除目标。
 	var item_index: int = _items.find(item_data)
 	if item_index < 0:
@@ -51,6 +67,8 @@ func remove_item(item_data: Resource) -> bool:
 
 
 func move_item(source_index: int, target_index: int) -> bool:
+	if _global_inventory != null and _global_inventory.has_method("move_backpack_item"):
+		return bool(_global_inventory.call("move_backpack_item", source_index, target_index))
 	if source_index < 0 or source_index >= _items.size() or target_index < 0 or target_index > _items.size():
 		return false
 
@@ -73,18 +91,26 @@ func move_item(source_index: int, target_index: int) -> bool:
 
 
 func has_item(item_data: Resource) -> bool:
+	if _global_inventory != null and _global_inventory.has_method("has_backpack_resource"):
+		return bool(_global_inventory.call("has_backpack_resource", item_data))
 	return item_data != null and _items.has(item_data)
 
 
 func get_items() -> Array[Resource]:
+	if _global_inventory != null:
+		_sync_from_global_inventory()
 	return _items.duplicate()
 
 
 func get_item_count() -> int:
+	if _global_inventory != null and _global_inventory.has_method("get_backpack_count"):
+		return int(_global_inventory.call("get_backpack_count"))
 	return _items.size()
 
 
 func get_items_by_weapon_type(weapon_type: String) -> Array[Resource]:
+	if _global_inventory != null:
+		_sync_from_global_inventory()
 	# 指定类型的物品结果；默认空数组，元素为符合 weapon_type 的 Resource，修改会影响背包筛选返回值。
 	var matched_items: Array[Resource] = []
 
@@ -99,3 +125,27 @@ func get_items_by_weapon_type(weapon_type: String) -> Array[Resource]:
 			matched_items.append(item_data)
 
 	return matched_items
+
+
+func discard_detached_item(item_data: Resource) -> bool:
+	if _global_inventory == null or not _global_inventory.has_method("discard_detached_resource"):
+		return true
+	return bool(_global_inventory.call("discard_detached_resource", item_data))
+
+
+func _sync_from_global_inventory() -> void:
+	if _global_inventory == null or not _global_inventory.has_method("get_backpack_resources"):
+		return
+
+	# 全局背包原始数组；取值为 Resource 或其他 Variant，默认只同步合法资源实例。
+	var raw_items: Array = _global_inventory.call("get_backpack_resources")
+	_items.clear()
+	# 全局物品遍历项；取值可能为任意 Variant，默认只接收 Resource。
+	for raw_item in raw_items:
+		if raw_item is Resource:
+			_items.append(raw_item)
+
+
+func _on_global_inventory_changed() -> void:
+	_sync_from_global_inventory()
+	inventory_changed.emit()

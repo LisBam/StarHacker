@@ -196,9 +196,9 @@ func _build_developer_overlay() -> void:
 	developer_menu.anchor_right = 0.5
 	developer_menu.anchor_bottom = 0.5
 	developer_menu.offset_left = -260.0
-	developer_menu.offset_top = -240.0
+	developer_menu.offset_top = -285.0
 	developer_menu.offset_right = 260.0
-	developer_menu.offset_bottom = 240.0
+	developer_menu.offset_bottom = 285.0
 	developer_menu.connect("closed", Callable(self, "_on_developer_menu_closed"))
 	developer_overlay.add_child(developer_menu)
 	_developer_menu = developer_menu
@@ -242,7 +242,16 @@ func _on_settings_back_button_pressed() -> void:
 func _open_character_select(game_mode: String) -> void:
 	_settings_panel.visible = false
 	_set_session_game_mode(game_mode)
-	get_tree().change_scene_to_file(character_select_scene_path)
+	_change_scene_with_transition(character_select_scene_path)
+
+
+func _change_scene_with_transition(scene_path: String) -> void:
+	# 全局转场服务；默认由 AutoLoad 提供，缺失时回退引擎直接切换以保留场景独立运行能力。
+	var scene_transition: Node = get_tree().root.get_node_or_null("SceneTransition")
+	if scene_transition != null and scene_transition.has_method("change_scene_to_file"):
+		scene_transition.call("change_scene_to_file", scene_path)
+	else:
+		get_tree().change_scene_to_file(scene_path)
 
 
 func _set_session_game_mode(game_mode: String) -> void:

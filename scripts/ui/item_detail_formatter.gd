@@ -96,6 +96,7 @@ static func _append_stone_lines(detail_lines: Array[String], item_resource: Reso
 	detail_lines.append("[b]强化词条[/b]")
 	# 强化词典；值只表示数值增减方向，详情不显示具体百分比。
 	# 品质化显示补充；当前详情保留每条实际百分比，并先显示增强、后显示削弱。
+	# 方向化显示补充；当前详情只显示属性与 +/-，具体百分比仅在强化完成弹窗中公开。
 	var modifiers: Dictionary = EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary)
 	_append_stone_lines_by_benefit(detail_lines, modifiers, true)
 	_append_stone_lines_by_benefit(detail_lines, modifiers, false)
@@ -111,9 +112,9 @@ static func _append_stone_lines_by_benefit(detail_lines: Array[String], modifier
 		var modifier_direction: float = float(modifiers.get(modifier_key, 0.0))
 		if EnhancementRules.is_direction_beneficial(modifier_key, modifier_direction) != beneficial:
 			continue
-		# 词条颜色；按玩法效果判断增强或削弱，而不是简单按正负号判断。
+		# 词条颜色；按玩法利弊渲染，冷却-、能量消耗-、扩散-和后坐力-等降低型增益统一显示绿色。
 		var color_code: String = POSITIVE_COLOR if beneficial else NEGATIVE_COLOR
-		detail_lines.append("[color=%s]%s[/color]" % [color_code, EnhancementRules.build_modifier_token(modifier_key, modifier_direction)])
+		detail_lines.append("[color=%s]%s[/color]" % [color_code, EnhancementRules.build_modifier_token(modifier_key, modifier_direction, false)])
 
 
 static func _append_weapon_lines(detail_lines: Array[String], item_resource: Resource) -> void:
@@ -140,10 +141,12 @@ static func _append_weapon_stat_line(detail_lines: Array[String], item_resource:
 	var effective_value: float = float(item_resource.call("get_effective_stat", stat_name)) if item_resource.has_method("get_effective_stat") else base_value
 	# 强化差值；只用于展示，不覆盖武器基础资源字段。
 	var enhancement_value: float = effective_value - base_value
-	# 总值颜色；高于基础为绿、低于基础为红、相同为中性色。
-	var total_color: String = POSITIVE_COLOR if effective_value > base_value else (NEGATIVE_COLOR if effective_value < base_value else NEUTRAL_COLOR)
-	# 差值颜色；正数为绿、负数为红，0 使用中性色。
-	var delta_color: String = POSITIVE_COLOR if enhancement_value > 0.0 else (NEGATIVE_COLOR if enhancement_value < 0.0 else NEUTRAL_COLOR)
+	# 强化是否为玩法增益；数值降低不等于减益，冷却、能耗、扩散和后坐力降低均按规则目录判定为增益。
+	var enhancement_is_beneficial: bool = not is_zero_approx(enhancement_value) and EnhancementRules.is_direction_beneficial(stat_name, enhancement_value)
+	# 总值颜色；存在强化时按玩法收益显示绿色或红色，未变化时使用中性色。
+	var total_color: String = (POSITIVE_COLOR if enhancement_is_beneficial else NEGATIVE_COLOR) if not is_zero_approx(enhancement_value) else NEUTRAL_COLOR
+	# 差值颜色；与总值使用同一玩法收益判断，避免冷却减少等正收益被误标为红色。
+	var delta_color: String = total_color
 	# 数值格式；按属性精度生成 0.0 或 0.00 等稳定格式。
 	var value_format: String = "%%.%df" % decimals
 	# 总值文本；示例为“伤害：1200（1000+200）”，强化差值始终显式带正负号。

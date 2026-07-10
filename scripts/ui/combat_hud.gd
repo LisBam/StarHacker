@@ -135,6 +135,16 @@ var _combat_action_weapon_source_index: int = -1
 var _inventory_cancel_stone_use_button: Button
 ## 局内强化结果弹窗；默认运行时创建一次并在每次成功强化时复用。
 var _enhancement_result_dialog: AcceptDialog
+## 强化选择前主分类；默认资源分类，成功使用强化石后恢复到玩家跳转前的资源页面。
+var _combat_stone_return_primary_category: String = InventoryQuery.PRIMARY_RESOURCES
+## 强化选择前子分类；默认强化石，成功使用强化石后恢复原分页。
+var _combat_stone_return_filter: String = INVENTORY_FILTER_STONES
+## 强化选择前搜索文本；默认空字符串，成功强化后恢复原查询内容。
+var _combat_stone_return_search_text: String = ""
+## 强化选择前属性筛选；默认空字符串表示全部属性，成功强化后恢复原筛选。
+var _combat_stone_return_attribute_filter: String = ""
+## 是否存在待恢复的强化石页面；默认 false，只有点击“使用”触发页面跳转后才恢复，拖拽强化不会改变当前页面。
+var _combat_stone_return_view_pending: bool = false
 ## Master 音频总线索引；取值为 -1 或有效总线下标，默认 -1 表示尚未解析，修改会影响暂停设置音量应用目标。
 var _master_bus_index: int = -1
 ## 当前是否为训练场模式；取值为 true/false，默认 false，修改会影响训练场设置按钮和角色切换入口是否可见。
@@ -197,6 +207,14 @@ var _combat_developer_menu: Control
 var _developer_sequence_index: int = 0
 ## 是否已解锁正式模式训练工具；默认 false，完成 LISBAM 后允许打开训练场设置和切换角色。
 var _developer_training_access_unlocked: bool = false
+## 逃跑二次确认弹窗；默认运行时创建并在暂停状态处理输入，确认后才执行正式战斗损失结算。
+var _escape_confirmation_dialog: ConfirmationDialog
+## 当前结算结构化结果；默认空字典，结算弹窗打开后缓存获得与丢失条目供分类按钮重复重建。
+var _settlement_outcome: Dictionary = {}
+## 结算获得物品主分类；取值为 weapons 或 resources，默认 weapons 与战斗背包分类入口一致。
+var _settlement_primary_category: String = InventoryQuery.PRIMARY_WEAPONS
+## 结算获得物品子分类；取值随主分类变化，默认 all 表示展示当前主分类全部条目。
+var _settlement_subcategory: String = InventoryQuery.SUBCATEGORY_ALL
 
 ## HUD 根控件缓存；默认绑定 Root，用于动态挂载附近掉落物面板。
 @onready var _root_control: Control = get_node("Root") as Control
@@ -244,6 +262,8 @@ var _developer_training_access_unlocked: bool = false
 @onready var _pause_settings_button: Button = %PauseSettingsButton
 ## 训练场设置按钮缓存；默认绑定 TestSettingsButton，点击后打开训练场设置面板。
 @onready var _test_settings_button: Button = %TestSettingsButton
+## 脱离卡死按钮缓存；默认绑定 UnstuckButton，点击后请求 GameWorld 把玩家传送到附近无障碍位置。
+@onready var _unstuck_button: Button = %UnstuckButton
 ## 返回主菜单按钮缓存；默认绑定 ReturnMainMenuButton，点击后解除暂停并切换到主菜单。
 @onready var _return_main_menu_button: Button = %ReturnMainMenuButton
 ## 训练场设置面板缓存；默认绑定 TestSettingsPanel，显示清怪、重刷和无限属性开关。
@@ -254,6 +274,8 @@ var _developer_training_access_unlocked: bool = false
 @onready var _respawn_monsters_button: Button = %RespawnMonstersButton
 ## 切换角色按钮缓存；默认绑定 SwitchCharacterButton，仅训练场显示，点击后打开角色切换面板。
 @onready var _switch_character_button: Button = %SwitchCharacterButton
+## 增加游戏时间按钮缓存；默认绑定 AddGameTimeButton，每次点击调用 GameWorld 增加 60 秒生存时间并立即刷新撤离阶段。
+@onready var _add_game_time_button: Button = %AddGameTimeButton
 ## 无限能量开关缓存；默认绑定 InfiniteEnergyCheckButton，切换后修改玩家属性组件的无限能量状态。
 @onready var _infinite_energy_check_button: CheckButton = %InfiniteEnergyCheckButton
 ## 无限血量开关缓存；默认绑定 InfiniteHealthCheckButton，切换后修改玩家属性组件的无限血量状态。
@@ -299,6 +321,7 @@ func _ready() -> void:
 	_build_inventory_item_action_menu()
 	_bind_inventory_drop_area()
 	_bind_pause_menu()
+	_build_escape_confirmation_dialog()
 	_build_combat_status_panel()
 	_build_nearby_drop_panel()
 	_build_combat_developer_overlay()
@@ -536,6 +559,7 @@ func _rebuild_inventory_slots() -> void:
 			# 强化石资源格；复用仓库控件的方形布局和带颜色悬停详情，不参与武器装备拖拽。
 			var resource_slot: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
 			resource_slot.call("configure", item_data, "backpack", source_index, false, "", quantity)
+			resource_slot.call("set_weapon_slot_visual_style", true)
 			resource_slot.custom_minimum_size = inventory_slot_minimum_size
 			resource_slot.connect("item_action_requested", Callable(self, "_on_combat_resource_action_requested"))
 			_inventory_weapon_grid.add_child(resource_slot)
@@ -974,6 +998,7 @@ func _set_inventory_visible(visible: bool) -> void:
 		_rebuild_inventory_slots()
 	else:
 		_pending_combat_stone_resource = null
+		_combat_stone_return_view_pending = false
 		_combat_action_stone_resource = null
 		_combat_action_weapon_resource = null
 		_combat_action_weapon_source_index = -1
@@ -1235,6 +1260,7 @@ func _build_inventory_item_action_menu() -> void:
 	_inventory_cancel_stone_use_button.visible = false
 	_inventory_cancel_stone_use_button.custom_minimum_size = Vector2(0.0, 32.0)
 	_inventory_cancel_stone_use_button.pressed.connect(_on_cancel_combat_stone_use_pressed)
+	_apply_danger_button_style(_inventory_cancel_stone_use_button)
 	# 背包标题容器；默认为 VBoxContainer，节点结构异常时按钮挂到背包面板作为兜底。
 	var title_parent: Node = _inventory_title_label.get_parent()
 	title_parent.add_child(_inventory_cancel_stone_use_button)
@@ -1254,12 +1280,14 @@ func _bind_pause_menu() -> void:
 	_resume_button.pressed.connect(_on_resume_button_pressed)
 	_pause_settings_button.pressed.connect(_on_pause_settings_button_pressed)
 	_test_settings_button.pressed.connect(_on_test_settings_button_pressed)
+	_unstuck_button.pressed.connect(_on_unstuck_button_pressed)
 	_return_main_menu_button.pressed.connect(_on_return_main_menu_button_pressed)
 	_death_return_main_menu_button.pressed.connect(_on_death_return_main_menu_button_pressed)
 	_pause_settings_back_button.pressed.connect(_on_pause_settings_back_button_pressed)
 	_clear_monsters_button.pressed.connect(_on_clear_monsters_button_pressed)
 	_respawn_monsters_button.pressed.connect(_on_respawn_monsters_button_pressed)
 	_switch_character_button.pressed.connect(_on_switch_character_button_pressed)
+	_add_game_time_button.pressed.connect(_on_add_game_time_button_pressed)
 	_switch_character_stelle_button.pressed.connect(_on_switch_character_stelle_button_pressed)
 	_switch_character_caelus_button.pressed.connect(_on_switch_character_caelus_button_pressed)
 	_switch_character_silver_wolf_button.pressed.connect(_on_switch_character_silver_wolf_button_pressed)
@@ -1271,6 +1299,18 @@ func _bind_pause_menu() -> void:
 	_build_pause_key_binding_navigation()
 	_sync_pause_master_volume_slider()
 	_sync_mode_controls()
+
+
+func _build_escape_confirmation_dialog() -> void:
+	if _escape_confirmation_dialog != null:
+		return
+	_escape_confirmation_dialog = ConfirmationDialog.new()
+	_escape_confirmation_dialog.title = "确认逃跑"
+	_escape_confirmation_dialog.ok_button_text = "确认逃跑"
+	_escape_confirmation_dialog.cancel_button_text = "取消"
+	_escape_confirmation_dialog.process_mode = Node.PROCESS_MODE_ALWAYS
+	_escape_confirmation_dialog.confirmed.connect(_on_escape_confirmed)
+	_root_control.add_child(_escape_confirmation_dialog)
 
 
 func _build_pause_key_binding_navigation() -> void:
@@ -2127,6 +2167,7 @@ func _on_inventory_item_action_menu_id_pressed(action_id: int) -> void:
 	if action_id == INVENTORY_ITEM_ACTION_USE and _combat_action_stone_resource != null:
 		_pending_combat_stone_resource = _combat_action_stone_resource
 		_combat_action_stone_resource = null
+		_capture_combat_stone_return_view()
 		# 强化目标选择页；自动显示全部背包武器并清空资源属性筛选和关键词。
 		_inventory_primary_category = InventoryQuery.PRIMARY_WEAPONS
 		_inventory_filter = INVENTORY_FILTER_ALL
@@ -2188,7 +2229,11 @@ func _apply_combat_enhancement(stone_resource: Resource, weapon_resource: Resour
 	# 局内强化结果；点击选择和拖动投放共用同一个消费与弹窗流程。
 	var enhancement_result: Dictionary = _inventory_component.call("use_enhancement_stone_with_result", stone_resource, weapon_resource) as Dictionary
 	if bool(enhancement_result.get("success", false)):
+		# 是否需要恢复页面；只有点击“使用”进入武器选择页时为 true，直接拖拽强化保持当前页面。
+		var should_restore_stone_view: bool = _pending_combat_stone_resource != null and _combat_stone_return_view_pending
 		_pending_combat_stone_resource = null
+		if should_restore_stone_view:
+			_restore_combat_stone_return_view()
 		_present_combat_enhancement_result(enhancement_result)
 	_refresh_equipment()
 	_rebuild_inventory_slots()
@@ -2197,6 +2242,8 @@ func _apply_combat_enhancement(stone_resource: Resource, weapon_resource: Resour
 func _on_cancel_combat_stone_use_pressed() -> void:
 	_pending_combat_stone_resource = null
 	_combat_action_stone_resource = null
+	if _combat_stone_return_view_pending:
+		_restore_combat_stone_return_view()
 	_refresh_equipment()
 	_rebuild_inventory_slots()
 
@@ -2204,6 +2251,53 @@ func _on_cancel_combat_stone_use_pressed() -> void:
 func _present_combat_enhancement_result(enhancement_result: Dictionary) -> void:
 	if _enhancement_result_dialog != null and _enhancement_result_dialog.has_method("present"):
 		_enhancement_result_dialog.call("present", enhancement_result)
+
+
+func _capture_combat_stone_return_view() -> void:
+	_combat_stone_return_view_pending = true
+	_combat_stone_return_primary_category = _inventory_primary_category
+	_combat_stone_return_filter = _inventory_filter
+	_combat_stone_return_search_text = _inventory_search_edit.text if _inventory_search_edit != null else ""
+	_combat_stone_return_attribute_filter = _inventory_stone_attribute_filter
+
+
+func _restore_combat_stone_return_view() -> void:
+	_combat_stone_return_view_pending = false
+	_inventory_primary_category = _combat_stone_return_primary_category
+	_inventory_filter = _combat_stone_return_filter
+	_inventory_stone_attribute_filter = _combat_stone_return_attribute_filter
+	if _inventory_search_edit != null:
+		_inventory_search_edit.text = _combat_stone_return_search_text
+	if _inventory_stone_attribute_option != null:
+		# 属性选项索引；默认 0 表示全部属性，匹配到原筛选键时恢复对应选项。
+		var attribute_option_index: int = 0
+		# 属性选项遍历索引；取值为下拉框合法下标，用于查找原筛选键。
+		for option_index in range(_inventory_stone_attribute_option.item_count):
+			if str(_inventory_stone_attribute_option.get_item_metadata(option_index)) == _combat_stone_return_attribute_filter:
+				attribute_option_index = option_index
+				break
+		_inventory_stone_attribute_option.select(attribute_option_index)
+	_refresh_inventory_filter_buttons()
+
+
+func _apply_danger_button_style(button: Button) -> void:
+	if button == null:
+		return
+	# 普通危险按钮样式；红色背景用于明确取消当前强化选择状态。
+	var normal_style: StyleBoxFlat = StyleBoxFlat.new()
+	normal_style.bg_color = Color(0.42, 0.08, 0.10, 0.96)
+	normal_style.border_color = Color(0.95, 0.24, 0.28, 1.0)
+	normal_style.set_border_width_all(2)
+	# 悬停危险按钮样式；提高亮度提供可点击反馈。
+	var hover_style: StyleBoxFlat = normal_style.duplicate() as StyleBoxFlat
+	hover_style.bg_color = Color(0.58, 0.10, 0.13, 1.0)
+	# 按下危险按钮样式；使用更深红色表示按钮已经触发。
+	var pressed_style: StyleBoxFlat = normal_style.duplicate() as StyleBoxFlat
+	pressed_style.bg_color = Color(0.30, 0.04, 0.06, 1.0)
+	button.add_theme_stylebox_override("normal", normal_style)
+	button.add_theme_stylebox_override("hover", hover_style)
+	button.add_theme_stylebox_override("pressed", pressed_style)
+	button.add_theme_color_override("font_color", Color(1.0, 0.92, 0.92, 1.0))
 
 
 func _on_inventory_drop_area_drop_received(drop_data: Dictionary) -> void:
@@ -2362,11 +2456,28 @@ func _on_test_settings_button_pressed() -> void:
 	_show_test_settings(true)
 
 
+func _on_unstuck_button_pressed() -> void:
+	if _game_world == null or not _game_world.has_method("teleport_player_to_nearest_clear_position"):
+		return
+	# 是否成功脱离；成功后直接关闭暂停菜单并恢复游戏，失败时保留菜单供玩家再次操作。
+	var unstuck_succeeded: bool = bool(_game_world.call("teleport_player_to_nearest_clear_position"))
+	if unstuck_succeeded:
+		_set_pause_menu_visible(false)
+
+
 func _on_return_main_menu_button_pressed() -> void:
+	if _escape_confirmation_dialog == null:
+		return
+	# 逃跑警告；正式模式明确说明背包损失规则，训练模式说明不会进行战利品保留结算。
+	_escape_confirmation_dialog.dialog_text = "确认逃跑并返回主菜单吗？\n正式战斗中，背包物品仅约 20% 会被保留，约 80% 会丢失；已装备物品不参与损失。" if not _is_training_mode else "确认结束训练并返回主菜单吗？训练模式不会产生正式战斗物品损失。"
+	_escape_confirmation_dialog.popup_centered(Vector2i(520, 0))
+
+
+func _on_escape_confirmed() -> void:
 	if _is_training_mode:
 		_return_to_main_menu()
 		return
-	_show_failure_settlement("主动退出战斗")
+	_show_failure_settlement("逃跑")
 
 
 func _on_death_return_main_menu_button_pressed() -> void:
@@ -2399,6 +2510,14 @@ func _on_respawn_monsters_button_pressed() -> void:
 
 func _on_switch_character_button_pressed() -> void:
 	_show_character_switch(true)
+
+
+func _on_add_game_time_button_pressed() -> void:
+	if _game_world == null or not _game_world.has_method("add_training_survival_time"):
+		return
+	_game_world.call("add_training_survival_time")
+	_last_survival_time_whole_seconds = -1
+	_refresh_combat_status()
 
 
 func _on_switch_character_stelle_button_pressed() -> void:
@@ -2453,7 +2572,12 @@ func _set_death_overlay_visible(visible: bool) -> void:
 
 func _return_to_main_menu() -> void:
 	get_tree().paused = false
-	get_tree().change_scene_to_file(main_menu_scene_path)
+	# 全局转场服务；战斗结算确认后使用统一 0.3 秒黑屏过渡返回主菜单。
+	var scene_transition: Node = get_tree().root.get_node_or_null("SceneTransition")
+	if scene_transition != null and scene_transition.has_method("change_scene_to_file"):
+		scene_transition.call("change_scene_to_file", main_menu_scene_path)
+	else:
+		get_tree().change_scene_to_file(main_menu_scene_path)
 
 
 func _show_success_settlement() -> void:
@@ -2490,8 +2614,11 @@ func _show_failure_settlement(reason: String) -> void:
 func _present_run_outcome(outcome: Dictionary) -> void:
 	# 结算结果类型；success 表示撤离成功，其他值统一按失败展示。
 	var result_type: String = str(outcome.get("result", "failure"))
+	_settlement_outcome = outcome.duplicate()
+	_settlement_primary_category = InventoryQuery.PRIMARY_WEAPONS
+	_settlement_subcategory = InventoryQuery.SUBCATEGORY_ALL
 	_death_title_label.text = str(outcome.get("title", "战斗结算"))
-	_rebuild_settlement_list(outcome)
+	_rebuild_settlement_list()
 	_death_return_main_menu_button.text = "确定"
 	if result_type == "success":
 		_death_title_label.add_theme_color_override("font_color", Color(0.35, 1.0, 0.72, 1.0))
@@ -2500,24 +2627,90 @@ func _present_run_outcome(outcome: Dictionary) -> void:
 	_set_death_overlay_visible(true)
 
 
-func _rebuild_settlement_list(outcome: Dictionary) -> void:
+func _rebuild_settlement_list() -> void:
 	_clear_container(_death_settlement_list)
 	# 结算结果类型；success 使用撤离说明，失败只说明损失规则，不展示随机保留物品列表。
-	var result_type: String = str(outcome.get("result", "failure"))
+	var result_type: String = str(_settlement_outcome.get("result", "failure"))
 	# 结算说明；明确列表统计口径，避免把自己丢弃后重新捡回的开局物品误认为战利品。
 	var summary_label: Label = Label.new()
 	summary_label.text = "已保留本次撤离携带的全部物品，物品仍在随身背包中，可返回仓库后手动存放。下方仅统计本局首次获得的战利品。" if result_type == "success" else "背包物品按规则随机保留约 20%，已装备物品不参与损失。下方仅展示本局首次获得与实际丢失的物品。"
 	summary_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	summary_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_death_settlement_list.add_child(summary_label)
+	_build_settlement_category_controls()
 
 	# 本局获得条目；优先读取包含 Resource 的结构化列表，鼠标悬停时可显示完整物品属性。
-	var gained_entries: Array = outcome.get("gained_entries", [])
+	var gained_entries: Array = _settlement_outcome.get("gained_entries", [])
+	# 分类后获得条目；复用背包查询器，保证武器、资源、近战、远程与强化石判定完全一致。
+	var filtered_gained_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(
+		gained_entries,
+		_settlement_primary_category,
+		_settlement_subcategory,
+		"",
+		"",
+		InventoryQuery.SORT_ACQUIRED_TIME
+	)
 	# 实际丢失条目；失败结算展示被移出背包的约 80% 物品，成功结算保持空数组。
-	var lost_entries: Array = outcome.get("lost_entries", [])
-	_build_settlement_section("本局获得", gained_entries, "本局没有获得新物品", Color(0.35, 1.0, 0.72, 1.0))
+	var lost_entries: Array = _settlement_outcome.get("lost_entries", [])
+	_build_settlement_section("本局获得", filtered_gained_entries, "当前分类没有获得物品", Color(0.35, 1.0, 0.72, 1.0))
 	if result_type != "success":
 		_build_settlement_section("丢失物品", lost_entries, "本次没有丢失背包物品", Color(1.0, 0.46, 0.52, 1.0))
+
+
+func _build_settlement_category_controls() -> void:
+	# 主分类栏；结构与战斗背包一致，武器和资源各自维护独立子分类集合。
+	var primary_bar: HBoxContainer = HBoxContainer.new()
+	primary_bar.add_theme_constant_override("separation", 6)
+	_death_settlement_list.add_child(primary_bar)
+	# 武器主分类按钮；按下后默认回到武器全部子分类。
+	var weapons_button: Button = Button.new()
+	weapons_button.text = "武器"
+	weapons_button.toggle_mode = true
+	weapons_button.button_pressed = _settlement_primary_category == InventoryQuery.PRIMARY_WEAPONS
+	weapons_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	weapons_button.pressed.connect(Callable(self, "_on_settlement_primary_category_pressed").bind(InventoryQuery.PRIMARY_WEAPONS))
+	primary_bar.add_child(weapons_button)
+	# 资源主分类按钮；按下后默认回到资源全部子分类。
+	var resources_button: Button = Button.new()
+	resources_button.text = "资源"
+	resources_button.toggle_mode = true
+	resources_button.button_pressed = _settlement_primary_category == InventoryQuery.PRIMARY_RESOURCES
+	resources_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	resources_button.pressed.connect(Callable(self, "_on_settlement_primary_category_pressed").bind(InventoryQuery.PRIMARY_RESOURCES))
+	primary_bar.add_child(resources_button)
+
+	# 子分类栏；根据当前主分类生成全部、近战、远程或强化石按钮。
+	var subcategory_bar: HBoxContainer = HBoxContainer.new()
+	subcategory_bar.add_theme_constant_override("separation", 6)
+	_death_settlement_list.add_child(subcategory_bar)
+	_add_settlement_subcategory_button(subcategory_bar, "全部", InventoryQuery.SUBCATEGORY_ALL)
+	if _settlement_primary_category == InventoryQuery.PRIMARY_WEAPONS:
+		_add_settlement_subcategory_button(subcategory_bar, "近战", InventoryQuery.SUBCATEGORY_MELEE)
+		_add_settlement_subcategory_button(subcategory_bar, "远程", InventoryQuery.SUBCATEGORY_RANGED)
+	else:
+		_add_settlement_subcategory_button(subcategory_bar, "强化石", InventoryQuery.SUBCATEGORY_ENHANCEMENT_STONES)
+
+
+func _add_settlement_subcategory_button(parent_bar: HBoxContainer, button_text: String, subcategory: String) -> void:
+	# 子分类按钮；使用绑定参数切换查询条件，重建后按钮选中状态由当前分类字段恢复。
+	var category_button: Button = Button.new()
+	category_button.text = button_text
+	category_button.toggle_mode = true
+	category_button.button_pressed = _settlement_subcategory == subcategory
+	category_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	category_button.pressed.connect(Callable(self, "_on_settlement_subcategory_pressed").bind(subcategory))
+	parent_bar.add_child(category_button)
+
+
+func _on_settlement_primary_category_pressed(primary_category: String) -> void:
+	_settlement_primary_category = primary_category
+	_settlement_subcategory = InventoryQuery.SUBCATEGORY_ALL
+	_rebuild_settlement_list()
+
+
+func _on_settlement_subcategory_pressed(subcategory: String) -> void:
+	_settlement_subcategory = subcategory
+	_rebuild_settlement_list()
 
 
 func _build_settlement_section(section_name: String, entries: Array, empty_text: String, accent_color: Color) -> void:

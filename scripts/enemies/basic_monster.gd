@@ -30,7 +30,8 @@ const TARGET_AI_STATE_BLOCKADE: int = 3
 ## 当前血量；取值会被限制在 0 到 max_health，默认 60 表示满血生成，运行时修改会影响怪物当前生存状态。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var current_health: float = 60.0
 ## 武器掉落概率；取值为 0 到 1，默认 0.03 表示 3% 概率掉落随机武器，运行时修改会影响该怪物死亡奖励。
-@export_range(0.0, 1.0, 0.001) var weapon_drop_chance: float = 0.03
+## 当前掉落配置补充：默认值已提高为 0.20，即每次实际击杀独立有 20% 概率掉落武器。
+@export_range(0.0, 1.0, 0.001) var weapon_drop_chance: float = 0.20
 ## 攻击力；取值建议大于等于 0，默认 12 表示每次近身攻击造成的伤害，运行时修改会影响玩家受击压力。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var attack_damage: float = 12.0
 ## 韧性；取值为百分比，默认 0 表示不减免控制，1 表示减少 1% 击退效果，100 表示完全免疫击退。

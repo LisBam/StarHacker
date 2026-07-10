@@ -33,6 +33,8 @@ var _quantity: int = 1
 var _stone_summary_label: RichTextLabel
 ## 是否将当前武器标记为强化目标；默认 false，选择强化武器期间会临时点亮所有武器卡片。
 var _enhancement_target_highlight: bool = false
+## 是否采用战斗武器槽视觉；默认 false 保持仓库宽卡布局，战斗背包开启后会同步深色背景、边框和三行排版。
+var _weapon_slot_visual_style_enabled: bool = false
 
 
 func configure(item_resource: Resource, location: String, item_index: int, quick_action_enabled: bool, extraction_prefix: String = "", quantity: int = 1) -> void:
@@ -64,6 +66,13 @@ func configure(item_resource: Resource, location: String, item_index: int, quick
 func set_enhancement_target_highlight(enabled: bool) -> void:
 	_enhancement_target_highlight = enabled and _is_weapon_resource()
 	_refresh_enhancement_target_highlight()
+
+
+func set_weapon_slot_visual_style(enabled: bool) -> void:
+	_weapon_slot_visual_style_enabled = enabled
+	_apply_weapon_slot_visual_style()
+	if _stone_summary_label != null and _is_enhancement_stone():
+		_stone_summary_label.text = _build_stone_card_bbcode("")
 
 
 func _get_drag_data(_at_position: Vector2) -> Variant:
@@ -175,20 +184,54 @@ func _ensure_stone_summary_label() -> void:
 	_stone_summary_label.offset_right = -6.0
 	_stone_summary_label.offset_bottom = -5.0
 	add_child(_stone_summary_label)
+	_apply_weapon_slot_visual_style()
+
+
+func _apply_weapon_slot_visual_style() -> void:
+	flat = false
+	if not _weapon_slot_visual_style_enabled:
+		remove_theme_stylebox_override("normal")
+		remove_theme_stylebox_override("hover")
+		remove_theme_stylebox_override("pressed")
+		return
+	# 普通样式；颜色、边框宽度与 WeaponSlotControl 的绘制参数保持一致。
+	var normal_style: StyleBoxFlat = StyleBoxFlat.new()
+	normal_style.bg_color = Color(0.06, 0.075, 0.09, 0.92)
+	normal_style.border_color = Color(0.22, 0.30, 0.36, 1.0)
+	normal_style.set_border_width_all(2)
+	# 悬停样式；在不改变整体深色风格的前提下提供鼠标反馈。
+	var hover_style: StyleBoxFlat = normal_style.duplicate() as StyleBoxFlat
+	hover_style.bg_color = Color(0.09, 0.12, 0.15, 0.96)
+	hover_style.border_color = Color(0.42, 0.72, 0.82, 1.0)
+	# 按下样式；短暂加亮背景，保持与武器槽相同的紧凑边界。
+	var pressed_style: StyleBoxFlat = normal_style.duplicate() as StyleBoxFlat
+	pressed_style.bg_color = Color(0.12, 0.17, 0.20, 1.0)
+	pressed_style.border_color = Color(0.55, 0.92, 1.0, 1.0)
+	add_theme_stylebox_override("normal", normal_style)
+	add_theme_stylebox_override("hover", hover_style)
+	add_theme_stylebox_override("pressed", pressed_style)
 
 
 func _build_stone_card_bbcode(extraction_prefix: String) -> String:
 	# 卡片文本行；名称、彩色方向词条、数量与整组价值固定居中显示。
 	var card_lines: Array[String] = []
-	card_lines.append("[center][b]%s%s[/b]  x%d[/center]" % [extraction_prefix, _get_item_display_name(), _quantity])
+	if _weapon_slot_visual_style_enabled:
+		card_lines.append("[center][font_size=10]资源[/font_size][/center]")
+		card_lines.append("[center][font_size=12][b]%s%s[/b]  x%d[/font_size][/center]" % [extraction_prefix, _get_item_display_name(), _quantity])
+	else:
+		card_lines.append("[center][b]%s%s[/b]  x%d[/center]" % [extraction_prefix, _get_item_display_name(), _quantity])
 	# 归一化词典；按规则目录顺序生成稳定且可堆叠识别的词条组合。
 	var modifiers: Dictionary = EnhancementRules.normalize_modifiers(_item_resource.get("modifiers") as Dictionary)
 	# 彩色词条；增强为绿色，削弱为红色，不显示具体百分比。
 	# 品质化数值补充；当前卡片会直接显示每条实际百分比，上述颜色规则保持不变。
+	# 方向化显示补充；当前卡片只显示属性与 +/-，具体百分比在使用时随机后由结果弹窗展示。
 	var colored_tokens: PackedStringArray = PackedStringArray()
 	_append_colored_stone_tokens(colored_tokens, modifiers, true)
 	_append_colored_stone_tokens(colored_tokens, modifiers, false)
-	card_lines.append("[center]%s  ·  售价 %d[/center]" % [(" ".join(colored_tokens) if not colored_tokens.is_empty() else "无词条"), _get_sell_price() * _quantity])
+	if _weapon_slot_visual_style_enabled:
+		card_lines.append("[center][font_size=9]%s[/font_size][/center]" % (" ".join(colored_tokens) if not colored_tokens.is_empty() else "无词条"))
+	else:
+		card_lines.append("[center]%s  ·  售价 %d[/center]" % [(" ".join(colored_tokens) if not colored_tokens.is_empty() else "无词条"), _get_sell_price() * _quantity])
 	return "\n".join(card_lines)
 
 
@@ -201,6 +244,6 @@ func _append_colored_stone_tokens(target_tokens: PackedStringArray, modifiers: D
 		var modifier_ratio: float = float(modifiers.get(stat_name, 0.0))
 		if EnhancementRules.is_direction_beneficial(stat_name, modifier_ratio) != beneficial:
 			continue
-		# 词条颜色；由玩法利弊决定。
+		# 词条颜色；严格按玩法利弊显示，降低型增益为绿色，增加型减益为红色。
 		var color_code: String = STONE_BENEFICIAL_COLOR if beneficial else STONE_DETRIMENTAL_COLOR
-		target_tokens.append("[color=%s]%s[/color]" % [color_code, EnhancementRules.build_modifier_token(stat_name, modifier_ratio)])
+		target_tokens.append("[color=%s]%s[/color]" % [color_code, EnhancementRules.build_modifier_token(stat_name, modifier_ratio, false)])

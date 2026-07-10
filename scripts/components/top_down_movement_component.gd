@@ -13,6 +13,9 @@ class_name TopDownMovementComponent
 ## 停止阈值；取值建议大于等于 0，默认 4 用于清除极小残余速度，运行时修改会影响停稳判定。
 @export_range(0.0, 20.0, 0.1) var stop_threshold: float = 4.0
 
+## 组件内部基础移动速度；默认零向量，只保存玩家输入产生的速度，避免把上帧外部后坐力再次累加进基础移动。
+var _movement_velocity: Vector2 = Vector2.ZERO
+
 
 func move(body: CharacterBody2D, direction: Vector2, delta: float, speed_multiplier: float = 1.0, external_velocity: Vector2 = Vector2.ZERO) -> void:
 	# 标准化速度倍率；取值大于等于 0，默认 1 表示正常移动，修改会影响疾跑等临时速度加成。
@@ -21,17 +24,21 @@ func move(body: CharacterBody2D, direction: Vector2, delta: float, speed_multipl
 	var target_velocity: Vector2 = direction * max_speed * clamped_speed_multiplier
 	# 当前速度变化率；取值在 acceleration 与 friction 间切换，默认由是否有输入决定，修改会影响本帧加减速力度。
 	var change_rate: float = acceleration if not direction.is_zero_approx() else friction
-	body.velocity = body.velocity.move_toward(target_velocity, change_rate * delta)
+	_movement_velocity = _movement_velocity.move_toward(target_velocity, change_rate * delta)
 
-	if target_velocity.is_zero_approx() and body.velocity.length() <= stop_threshold:
-		body.velocity = Vector2.ZERO
+	if target_velocity.is_zero_approx() and _movement_velocity.length() <= stop_threshold:
+		_movement_velocity = Vector2.ZERO
 
-	body.velocity += external_velocity
+	body.velocity = _movement_velocity + external_velocity
 	body.move_and_slide()
 
 
 func configure_max_speed(new_max_speed: float) -> void:
 	max_speed = maxf(new_max_speed, 1.0)
+
+
+func reset_motion() -> void:
+	_movement_velocity = Vector2.ZERO
 
 
 func get_max_speed() -> float:

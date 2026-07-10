@@ -15,13 +15,23 @@ const EQUIPMENT_STORAGE_SLOT_SCRIPT: Script = preload("res://scripts/ui/equipmen
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
 ## 强化结果弹窗脚本；仓库和局内背包共用同一数值说明格式。
 const ENHANCEMENT_RESULT_DIALOG_SCRIPT: Script = preload("res://scripts/ui/enhancement_result_dialog.gd")
+## 堆叠出售数量弹窗脚本；默认同时提供滑条和数字输入，确认后由仓库面板调用全局库存服务。
+const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
+## 仓库与背包垂直分隔拖条脚本；默认只计算布局占比，不访问库存数据。
+const VERTICAL_SPLIT_HANDLE_SCRIPT: Script = preload("res://scripts/ui/vertical_split_handle.gd")
 ## 操作菜单出售项编号；固定为 1，选择后出售当前仓库或背包整条记录。
 const ITEM_ACTION_SELL: int = 1
 ## 操作菜单使用项编号；固定为 2，只对强化石显示并进入武器选择状态。
 const ITEM_ACTION_USE: int = 2
+## 操作菜单全部出售项编号；固定为 3，只在数量大于 1 的堆叠物品上显示。
+const ITEM_ACTION_SELL_ALL: int = 3
+## 操作菜单装备项编号；固定为 4，只对展开背包内的武器显示。
+const ITEM_ACTION_EQUIP: int = 4
 
 ## 面板最小尺寸；默认 960x620，适配当前 1280x720 主菜单并保留边缘空间。
 @export var panel_minimum_size: Vector2 = Vector2(960.0, 620.0)
+## 展开背包时永久仓库占可分配高度的比例；默认 0.38，可通过界面拖条在 0.20 至 0.75 间动态调整。
+@export_range(0.20, 0.75, 0.01) var warehouse_split_ratio: float = 0.38
 
 ## 全局背包服务；默认从自动加载 GlobalInventory 获取，缺失时面板显示不可用提示。
 var _global_inventory: Node
@@ -41,6 +51,8 @@ var _loadout_list: VBoxContainer
 var _backpack_section: VBoxContainer
 ## 新版仓库滚动容器；默认填充纯仓库模式，展开背包后限制高度给下半区留出空间。
 var _warehouse_scroll: ScrollContainer
+## 仓库与背包分隔拖条；默认运行时创建，仅展开背包时显示并允许调整上下区域占比。
+var _storage_split_handle: Control
 ## 新版模式切换按钮；默认显示“展开背包”，点击后在纯仓库和仓库背包联合模式间切换。
 var _mode_toggle_button: Button
 ## 新版金币标签；默认显示局外金币余额，出售永久仓库物品后即时刷新。
@@ -81,6 +93,22 @@ var _pending_stone_location: String = ""
 var _cancel_stone_use_button: Button
 ## 强化结果弹窗；默认运行时创建一次，每次成功强化时复用。
 var _enhancement_result_dialog: AcceptDialog
+## 堆叠出售数量弹窗；默认运行时创建一次，重复出售时复用并刷新最大数量和单价。
+var _sell_quantity_dialog: ConfirmationDialog
+## 数量出售待处理资源；默认 null，打开数量弹窗后保存精确资源实例直到玩家确认或覆盖下一次操作。
+var _quantity_sale_item_resource: Resource
+## 数量出售待处理位置；取值 warehouse 或 backpack，默认空字符串表示没有有效出售请求。
+var _quantity_sale_item_location: String = ""
+## 强化选择前主分类；默认资源分类，成功强化后用于返回跳转之前的强化石页面。
+var _stone_return_primary_category: String = InventoryQuery.PRIMARY_RESOURCES
+## 强化选择前子分类；默认强化石，成功强化后用于恢复原页面筛选。
+var _stone_return_subcategory: String = InventoryQuery.SUBCATEGORY_ENHANCEMENT_STONES
+## 强化选择前搜索文本；默认空字符串，成功强化后恢复玩家原查询。
+var _stone_return_search_text: String = ""
+## 强化选择前属性筛选；默认空字符串表示全部属性，成功强化后恢复原筛选。
+var _stone_return_attribute_filter: String = ""
+## 是否存在待恢复的强化石页面；默认 false，点击“使用”跳转武器页后设为 true，取消或成功强化后清除。
+var _stone_return_view_pending: bool = false
 
 
 func _ready() -> void:
@@ -151,6 +179,7 @@ func _build_storage_interface() -> void:
 	_cancel_stone_use_button.text = "取消使用"
 	_cancel_stone_use_button.visible = false
 	_cancel_stone_use_button.pressed.connect(_on_cancel_stone_use_pressed)
+	_apply_danger_button_style(_cancel_stone_use_button)
 	header.add_child(_cancel_stone_use_button)
 	# 顶部关闭按钮；固定在标题栏内，展开背包后不会被下方内容推到窗口外。
 	var close_button: Button = Button.new()
@@ -222,6 +251,10 @@ func _build_storage_interface() -> void:
 	_warehouse_drop_area.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
 	_warehouse_scroll.add_child(_warehouse_drop_area)
 	_warehouse_item_list = _warehouse_drop_area.call("get_content_container") as GridContainer
+	_storage_split_handle = VERTICAL_SPLIT_HANDLE_SCRIPT.new() as Control
+	_storage_split_handle.call("configure", warehouse_split_ratio)
+	_storage_split_handle.connect("split_ratio_changed", Callable(self, "_on_storage_split_ratio_changed"))
+	content.add_child(_storage_split_handle)
 
 	_backpack_section = VBoxContainer.new()
 	_backpack_section.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -273,6 +306,9 @@ func _build_storage_interface() -> void:
 	add_child(_item_action_menu)
 	_enhancement_result_dialog = ENHANCEMENT_RESULT_DIALOG_SCRIPT.new() as AcceptDialog
 	add_child(_enhancement_result_dialog)
+	_sell_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as ConfirmationDialog
+	_sell_quantity_dialog.connect("quantity_confirmed", Callable(self, "_on_sell_quantity_confirmed"))
+	add_child(_sell_quantity_dialog)
 	_apply_storage_display_mode()
 	_refresh_storage_category_buttons()
 
@@ -472,11 +508,15 @@ func _get_storage_summary_text(warehouse_entries: Array, backpack_entries: Array
 
 func _apply_storage_display_mode() -> void:
 	_backpack_section.visible = _backpack_expanded
+	if _storage_split_handle != null:
+		_storage_split_handle.visible = _backpack_expanded
 	_mode_toggle_button.text = "收起背包 E" if _backpack_expanded else "展开背包 E"
-	_warehouse_scroll.custom_minimum_size = Vector2(0.0, 120.0 if _backpack_expanded else 386.0)
+	_warehouse_scroll.custom_minimum_size = Vector2(0.0, 80.0 if _backpack_expanded else 386.0)
 	if _carried_drop_area != null:
-		_carried_drop_area.custom_minimum_size = Vector2(0.0, 180.0 if _backpack_expanded else 215.0)
-	_warehouse_scroll.size_flags_vertical = Control.SIZE_SHRINK_BEGIN if _backpack_expanded else Control.SIZE_EXPAND_FILL
+		_carried_drop_area.custom_minimum_size = Vector2(0.0, 100.0 if _backpack_expanded else 215.0)
+	_warehouse_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_warehouse_scroll.size_flags_stretch_ratio = warehouse_split_ratio if _backpack_expanded else 1.0
+	_backpack_section.size_flags_stretch_ratio = 1.0 - warehouse_split_ratio
 	if _cancel_stone_use_button != null:
 		_cancel_stone_use_button.visible = _pending_stone_resource != null
 
@@ -508,10 +548,19 @@ func _on_item_action_requested(item_resource: Resource, source_location: String)
 	_item_action_menu.clear()
 	# 出售总价；强化石按整组数量计算，强化武器按动态售价计算。
 	var total_sell_price: int = int(_global_inventory.call("get_storage_resource_sell_price", item_resource, source_location))
-	_item_action_menu.add_item("出售（+%d）" % total_sell_price, ITEM_ACTION_SELL)
+	# 当前库存数量；数量大于 1 时提供指定数量出售和全部出售两个独立入口。
+	var stored_quantity: int = int(_global_inventory.call("get_storage_resource_quantity", item_resource, source_location))
+	if stored_quantity > 1:
+		_item_action_menu.add_item("出售指定数量…", ITEM_ACTION_SELL)
+		_item_action_menu.add_item("全部出售（+%d）" % total_sell_price, ITEM_ACTION_SELL_ALL)
+		_item_action_menu.set_item_disabled(_item_action_menu.get_item_index(ITEM_ACTION_SELL_ALL), total_sell_price <= 0)
+	else:
+		_item_action_menu.add_item("出售（+%d）" % total_sell_price, ITEM_ACTION_SELL)
 	_item_action_menu.set_item_disabled(_item_action_menu.get_item_index(ITEM_ACTION_SELL), total_sell_price <= 0)
 	if str(item_resource.get("item_kind")) == "enhancement_stone":
 		_item_action_menu.add_item("使用", ITEM_ACTION_USE)
+	elif source_location == "backpack" and str(item_resource.get("weapon_type")) in ["ranged", "melee"]:
+		_item_action_menu.add_item("装备", ITEM_ACTION_EQUIP)
 	_item_action_menu.position = Vector2i(get_viewport().get_mouse_position())
 	_item_action_menu.popup()
 
@@ -520,10 +569,18 @@ func _on_item_action_menu_id_pressed(action_id: int) -> void:
 	if _global_inventory == null or _action_item_resource == null:
 		return
 	if action_id == ITEM_ACTION_SELL:
+		# 当前数量；堆叠物品进入数量弹窗，单件物品保持一次点击直接出售。
+		var stored_quantity: int = int(_global_inventory.call("get_storage_resource_quantity", _action_item_resource, _action_item_location))
+		if stored_quantity > 1:
+			_open_sell_quantity_dialog(_action_item_resource, _action_item_location, stored_quantity)
+		else:
+			_global_inventory.call("sell_storage_resource", _action_item_resource, _action_item_location)
+	elif action_id == ITEM_ACTION_SELL_ALL:
 		_global_inventory.call("sell_storage_resource", _action_item_resource, _action_item_location)
 	elif action_id == ITEM_ACTION_USE and str(_action_item_resource.get("item_kind")) == "enhancement_stone":
 		_pending_stone_resource = _action_item_resource
 		_pending_stone_location = _action_item_location
+		_capture_stone_return_view()
 		_backpack_expanded = true
 		# 强化目标选择页；自动切回全部武器并清空查询条件，确保仓库、背包和装备栏目标立即可见。
 		_storage_primary_category = InventoryQuery.PRIMARY_WEAPONS
@@ -535,6 +592,8 @@ func _on_item_action_menu_id_pressed(action_id: int) -> void:
 		_refresh_storage_category_buttons()
 		_apply_storage_display_mode()
 		_rebuild_storage_content()
+	elif action_id == ITEM_ACTION_EQUIP and _action_item_location == "backpack":
+		_equip_backpack_weapon(_action_item_resource)
 	_action_item_resource = null
 	_action_item_location = ""
 
@@ -547,6 +606,7 @@ func _on_enhancement_weapon_selected(weapon_resource: Resource) -> void:
 	if bool(enhancement_result.get("success", false)):
 		_pending_stone_resource = null
 		_pending_stone_location = ""
+		_restore_stone_return_view()
 		_present_enhancement_result(enhancement_result)
 	_apply_storage_display_mode()
 	_rebuild_storage_content()
@@ -565,6 +625,8 @@ func _on_enhancement_drop_requested(stone_resource: Resource, source_location: S
 func _on_cancel_stone_use_pressed() -> void:
 	_pending_stone_resource = null
 	_pending_stone_location = ""
+	if _stone_return_view_pending:
+		_restore_stone_return_view()
 	_apply_storage_display_mode()
 	_rebuild_storage_content()
 
@@ -572,6 +634,97 @@ func _on_cancel_stone_use_pressed() -> void:
 func _present_enhancement_result(enhancement_result: Dictionary) -> void:
 	if _enhancement_result_dialog != null and _enhancement_result_dialog.has_method("present"):
 		_enhancement_result_dialog.call("present", enhancement_result)
+
+
+func _open_sell_quantity_dialog(item_resource: Resource, source_location: String, maximum_quantity: int) -> void:
+	if _sell_quantity_dialog == null or item_resource == null:
+		return
+	_quantity_sale_item_resource = item_resource
+	_quantity_sale_item_location = source_location
+	# 单件售价；整组总价除以当前数量，统一复用 GlobalInventory 的动态售价结果。
+	var total_sell_price: int = int(_global_inventory.call("get_storage_resource_sell_price", item_resource, source_location))
+	# 有效最大数量；至少为 1，防止旧操作菜单确认时物品已经发生变化。
+	var resolved_maximum_quantity: int = maxi(maximum_quantity, 1)
+	# 单件售价；整数总价由单价乘数量形成，因此整除不会丢失有效金币。
+	var unit_sell_price: int = total_sell_price / resolved_maximum_quantity
+	# 物品名称；统一由详情格式化器解析显示名，避免武器旧资源名称为空。
+	var item_display_name: String = str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", item_resource))
+	_sell_quantity_dialog.call("present", item_display_name, resolved_maximum_quantity, unit_sell_price)
+
+
+func _on_sell_quantity_confirmed(quantity: int) -> void:
+	if _global_inventory == null or _quantity_sale_item_resource == null or _quantity_sale_item_location.is_empty():
+		return
+	_global_inventory.call("sell_storage_resource_quantity", _quantity_sale_item_resource, _quantity_sale_item_location, quantity)
+	_quantity_sale_item_resource = null
+	_quantity_sale_item_location = ""
+
+
+func _equip_backpack_weapon(weapon_resource: Resource) -> void:
+	if _global_inventory == null or weapon_resource == null:
+		return
+	# 武器类型；远程武器替换当前手持槽，近战武器替换唯一近战槽，与战斗背包点击装备逻辑一致。
+	var weapon_type: String = str(weapon_resource.get("weapon_type"))
+	# 装备目标位置；远程目标由当前选中槽组成，近战目标使用稳定 melee 标识。
+	var target_location: String = "melee"
+	if weapon_type == "ranged":
+		# 当前远程槽；取值来自全局装备服务，默认 0 用于缺少接口时的安全兜底。
+		var current_ranged_slot: int = int(_global_inventory.call("get_current_ranged_slot")) if _global_inventory.has_method("get_current_ranged_slot") else 0
+		target_location = "ranged_%d" % current_ranged_slot
+	elif weapon_type != "melee":
+		return
+	_global_inventory.call("transfer_storage_to_equipment", weapon_resource, "backpack", target_location)
+
+
+func _on_storage_split_ratio_changed(ratio: float) -> void:
+	warehouse_split_ratio = clampf(ratio, 0.20, 0.75)
+	_apply_storage_display_mode()
+
+
+func _capture_stone_return_view() -> void:
+	_stone_return_view_pending = true
+	_stone_return_primary_category = _storage_primary_category
+	_stone_return_subcategory = _storage_subcategory
+	_stone_return_search_text = _storage_search_edit.text
+	_stone_return_attribute_filter = _stone_attribute_filter
+
+
+func _restore_stone_return_view() -> void:
+	_stone_return_view_pending = false
+	_storage_primary_category = _stone_return_primary_category
+	_storage_subcategory = _stone_return_subcategory
+	_stone_attribute_filter = _stone_return_attribute_filter
+	_storage_search_edit.text = _stone_return_search_text
+	# 属性选项索引；默认 0 表示全部属性，匹配到原筛选键时恢复对应下拉项。
+	var attribute_option_index: int = 0
+	# 属性选项遍历索引；取值为下拉框合法下标，用于查找原筛选键。
+	for option_index in range(_stone_attribute_option.item_count):
+		if str(_stone_attribute_option.get_item_metadata(option_index)) == _stone_return_attribute_filter:
+			attribute_option_index = option_index
+			break
+	_stone_attribute_option.select(attribute_option_index)
+	_rebuild_storage_subcategory_buttons()
+	_refresh_storage_category_buttons()
+
+
+func _apply_danger_button_style(button: Button) -> void:
+	if button == null:
+		return
+	# 普通危险按钮样式；深红背景和亮红边框用于明确取消当前强化操作。
+	var normal_style: StyleBoxFlat = StyleBoxFlat.new()
+	normal_style.bg_color = Color(0.42, 0.08, 0.10, 0.96)
+	normal_style.border_color = Color(0.95, 0.24, 0.28, 1.0)
+	normal_style.set_border_width_all(2)
+	# 悬停危险按钮样式；提高亮度但保持红色语义。
+	var hover_style: StyleBoxFlat = normal_style.duplicate() as StyleBoxFlat
+	hover_style.bg_color = Color(0.58, 0.10, 0.13, 1.0)
+	# 按下危险按钮样式；使用更深红色提供明确点击反馈。
+	var pressed_style: StyleBoxFlat = normal_style.duplicate() as StyleBoxFlat
+	pressed_style.bg_color = Color(0.30, 0.04, 0.06, 1.0)
+	button.add_theme_stylebox_override("normal", normal_style)
+	button.add_theme_stylebox_override("hover", hover_style)
+	button.add_theme_stylebox_override("pressed", pressed_style)
+	button.add_theme_color_override("font_color", Color(1.0, 0.92, 0.92, 1.0))
 
 
 func _on_item_drop_requested(drag_data: Dictionary, target_location: String, target_index: int) -> void:
@@ -624,5 +777,6 @@ func _clear_container(container: Node) -> void:
 func _on_close_pressed() -> void:
 	_pending_stone_resource = null
 	_pending_stone_location = ""
+	_stone_return_view_pending = false
 	_apply_storage_display_mode()
 	closed.emit()

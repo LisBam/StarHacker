@@ -404,7 +404,7 @@ allow_navigation_marker_input = false
 
 [node name="PauseMenuPanel" type="PanelContainer" parent="BattleHUD/Root/PauseOverlay"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(360, 350)
+custom_minimum_size = Vector2(360, 410)
 layout_mode = 1
 anchors_preset = -1
 anchor_left = 0.5
@@ -412,9 +412,9 @@ anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
 offset_left = -180.0
-offset_top = -175.0
+offset_top = -205.0
 offset_right = 180.0
-offset_bottom = 175.0
+offset_bottom = 205.0
 grow_horizontal = 2
 grow_vertical = 2
 
@@ -457,11 +457,17 @@ custom_minimum_size = Vector2(0, 44)
 layout_mode = 2
 text = "训练场设置"
 
+[node name="UnstuckButton" type="Button" parent="BattleHUD/Root/PauseOverlay/PauseMenuPanel/PauseMenuMargin/PauseMenuContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+text = "脱离卡死"
+
 [node name="ReturnMainMenuButton" type="Button" parent="BattleHUD/Root/PauseOverlay/PauseMenuPanel/PauseMenuMargin/PauseMenuContent"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 44)
 layout_mode = 2
-text = "返回主菜单"
+text = "逃跑"
 
 [node name="PauseSettingsPanel" type="PanelContainer" parent="BattleHUD/Root/PauseOverlay"]
 unique_name_in_owner = true
@@ -536,7 +542,7 @@ text = "返回"
 [node name="TestSettingsPanel" type="PanelContainer" parent="BattleHUD/Root/PauseOverlay"]
 unique_name_in_owner = true
 visible = false
-custom_minimum_size = Vector2(420, 360)
+custom_minimum_size = Vector2(420, 414)
 layout_mode = 1
 anchors_preset = -1
 anchor_left = 0.5
@@ -544,9 +550,9 @@ anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
 offset_left = -210.0
-offset_top = -180.0
+offset_top = -207.0
 offset_right = 210.0
-offset_bottom = 180.0
+offset_bottom = 207.0
 grow_horizontal = 2
 grow_vertical = 2
 
@@ -584,6 +590,12 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
 text = "切换角色"
+
+[node name="AddGameTimeButton" type="Button" parent="BattleHUD/Root/PauseOverlay/TestSettingsPanel/TestSettingsMargin/TestSettingsContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+text = "游戏时间+1分钟"
 
 [node name="InfiniteEnergyCheckButton" type="CheckButton" parent="BattleHUD/Root/PauseOverlay/TestSettingsPanel/TestSettingsMargin/TestSettingsContent"]
 unique_name_in_owner = true

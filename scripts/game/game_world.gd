@@ -61,6 +61,12 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export_range(0.1, 8.0, 0.05) var obstacle_scale_min: float = 0.65
 ## 环境物最大随机缩放；取值应大于等于最小缩放，默认 1.9，修改会影响墙体和建筑最大体积。
 @export_range(0.1, 8.0, 0.05) var obstacle_scale_max: float = 1.9
+## 脱离卡死搜索格尺寸；默认 48 像素，用于在玩家当前位置附近逐圈寻找安全传送点。
+@export_range(16.0, 256.0, 1.0) var unstuck_search_cell_size: float = 48.0
+## 脱离卡死障碍安全半径；默认 26 像素，大于玩家 18 像素碰撞半径以保留墙体间距。
+@export_range(18.0, 128.0, 1.0) var unstuck_clearance_radius: float = 26.0
+## 脱离卡死最大搜索圈数；默认 12 圈，在 48 像素格配置下最多搜索约 576 像素范围。
+@export_range(1, 64, 1) var unstuck_max_search_radius: int = 12
 ## 随机怪物场景；默认由 game_world.tscn 指向 BasicMonster，必须实例化为 Node2D，修改会影响随机生成的敌人类型。
 @export var monster_scene: PackedScene
 ## 随机怪物场景池；默认由场景填入近战和远程怪物，非空时会优先从池中随机选择生成对象。
@@ -103,7 +109,8 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 ## 武器掉落随机池；元素为 WeaponData 资源，怪物死亡掉落时会从中随机复制一把作为独立掉落物。
 @export var weapon_drop_table: Array[Resource] = []
 ## 强化石死亡掉落概率；默认 0.05 表示每只被击杀怪物独立有 5% 概率生成一颗随机强化石。
-@export_range(0.0, 1.0, 0.001) var enhancement_stone_drop_chance: float = 0.05
+## 当前掉落配置补充：默认值已提高为 0.10，即每次实际击杀独立有 10% 概率掉落强化石。
+@export_range(0.0, 1.0, 0.001) var enhancement_stone_drop_chance: float = 0.10
 ## 单颗强化石最少词条数量；默认 1，运行时随机数量会限制在最少与最多词条之间。
 @export_range(1, 9, 1) var enhancement_stone_min_modifier_count: int = 1
 ## 单颗强化石最多词条数量；默认 3，允许一颗强化石同时包含多种正负属性。
@@ -119,6 +126,8 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export_range(1.0, 7200.0, 1.0, "or_greater") var extraction_spawn_time_seconds: float = 120.0
 ## 撤离点地图标记时间；取值为进入战斗后的秒数，默认 300 表示存活 5 分钟后在地图上显示撤离点标记。
 @export_range(1.0, 7200.0, 1.0, "or_greater") var extraction_map_marker_time_seconds: float = 300.0
+## 训练工具单次增加的游戏时长；默认 60 秒即 1 分钟，运行时修改会影响调试按钮加速撤离点生成与地图标记的幅度。
+@export_range(1.0, 3600.0, 1.0, "or_greater") var training_time_addition_seconds: float = 60.0
 ## 撤离驻留时长；取值应大于 0，默认 5 秒，玩家在撤离范围内连续停留满该时间后可按闪避撤离。
 @export_range(0.1, 120.0, 0.1, "or_greater") var extraction_hold_duration_seconds: float = 5.0
 ## 撤离点半径；取值建议大于玩家碰撞半径，默认 96 像素，修改会影响可驻留撤离范围。
@@ -330,6 +339,13 @@ func get_survival_time_seconds() -> float:
 	return maxf(_survival_time_seconds, 0.0)
 
 
+func add_training_survival_time() -> float:
+	# 增加后的存活时间；使用统一导出参数，确保训练按钮与撤离阶段判定共享同一数值来源。
+	_survival_time_seconds += maxf(training_time_addition_seconds, 1.0)
+	_update_extraction_timeline()
+	return get_survival_time_seconds()
+
+
 func get_alive_monster_count() -> int:
 	return _get_alive_monster_count()
 
@@ -378,6 +394,67 @@ func has_navigation_marker() -> bool:
 
 func get_navigation_marker_position() -> Vector2:
 	return _navigation_marker_position
+
+
+func teleport_player_to_nearest_clear_position() -> bool:
+	if _player == null:
+		return false
+	# 搜索格尺寸；至少 16 像素，避免过细网格造成不必要的整图导航缓存开销。
+	var resolved_cell_size: float = maxf(unstuck_search_cell_size, 16.0)
+	# 安全半径；至少等于玩家碰撞半径 18，确保候选点周围不会紧贴障碍物。
+	var resolved_clearance_radius: float = maxf(unstuck_clearance_radius, 18.0)
+	# 脱离导航网格；复用 GameWorld 的障碍缓存，并按玩家安全半径扩张所有障碍。
+	var navigation_grid: AStarGrid2D = _get_cached_navigation_grid(resolved_cell_size, resolved_clearance_radius)
+	# 导航区域；用于限制逐圈候选格始终位于地图内。
+	var navigation_region: Rect2i = navigation_grid.region
+	# 玩家原始格；从当前世界坐标转换并限制在合法导航区域。
+	var origin_cell: Vector2i = _clamp_navigation_cell_to_region(_world_position_to_navigation_cell(_player.global_position, resolved_cell_size), navigation_region)
+	# 最终安全位置；默认零向量，仅在找到候选点后使用。
+	var safe_position: Vector2 = Vector2.ZERO
+	# 是否找到安全位置；默认 false，搜索成功后终止后续外圈遍历。
+	var safe_position_found: bool = false
+	# 搜索圈半径；从玩家所在格外侧第一圈开始，避免按钮执行后仍停留在原地。
+	for search_radius in range(1, maxi(unstuck_max_search_radius, 1) + 1):
+		# 当前搜索圈候选位置；先收集同一圈全部安全格，再选择真实距离最近者。
+		var ring_candidates: Array[Vector2] = []
+		# 横向格偏移；遍历当前方形搜索圈的完整宽度。
+		for offset_x in range(-search_radius, search_radius + 1):
+			# 纵向格偏移；与横向偏移共同筛选当前搜索圈边界格。
+			for offset_y in range(-search_radius, search_radius + 1):
+				if abs(offset_x) != search_radius and abs(offset_y) != search_radius:
+					continue
+				# 候选格；由原始格加当前外圈偏移形成。
+				var candidate_cell: Vector2i = origin_cell + Vector2i(offset_x, offset_y)
+				if not _is_navigation_cell_in_region(candidate_cell, navigation_region) or navigation_grid.is_point_solid(candidate_cell):
+					continue
+				# 候选世界坐标；使用格子中心并再次通过障碍矩形精确检查安全半径。
+				var candidate_position: Vector2 = _navigation_cell_to_world_position(candidate_cell, resolved_cell_size)
+				if _is_position_blocked_by_environment(candidate_position, resolved_clearance_radius):
+					continue
+				ring_candidates.append(candidate_position)
+		if ring_candidates.is_empty():
+			continue
+		# 最近候选距离；默认使用本圈第一个候选初始化，随后选择离玩家当前位置最近的安全点。
+		var nearest_distance: float = _player.global_position.distance_squared_to(ring_candidates[0])
+		safe_position = ring_candidates[0]
+		# 本圈安全候选；逐个比较与玩家当前位置的真实距离，选择最近点。
+		for candidate_position in ring_candidates:
+			# 当前候选距离；使用平方距离避免无意义开方。
+			var candidate_distance: float = _player.global_position.distance_squared_to(candidate_position)
+			if candidate_distance < nearest_distance:
+				nearest_distance = candidate_distance
+				safe_position = candidate_position
+		safe_position_found = true
+		break
+	if not safe_position_found:
+		return false
+	_player.global_position = safe_position
+	if _player.has_method("clear_external_motion"):
+		_player.call("clear_external_motion")
+	elif _player is CharacterBody2D:
+		(_player as CharacterBody2D).velocity = Vector2.ZERO
+	_update_explored_cells(true)
+	return true
 
 
 func find_navigation_path(start_position: Vector2, end_position: Vector2, agent_radius: float = 24.0, navigation_cell_size: float = 96.0, max_path_points: int = 64) -> Array[Vector2]:
@@ -634,6 +711,10 @@ func _update_survival_time(delta: float) -> void:
 		return
 
 	_survival_time_seconds += maxf(delta, 0.0)
+	_update_extraction_timeline()
+
+
+func _update_extraction_timeline() -> void:
 	if not _has_extraction_point and _survival_time_seconds >= maxf(extraction_spawn_time_seconds, 1.0):
 		_spawn_extraction_point()
 
@@ -1325,6 +1406,7 @@ func _try_spawn_monster_weapon_drop(monster_node: Node2D) -> void:
 		return
 
 	# 怪物武器掉落概率；取值来自怪物 weapon_drop_chance，默认 0.03，修改会影响当前怪物死亡掉落判定。
+	# 当前默认补充：怪物未覆盖该参数时按 0.20 处理。
 	var drop_chance: float = _get_monster_weapon_drop_chance(monster_node)
 	if drop_chance <= 0.0 or _random.randf() > drop_chance:
 		return
@@ -1344,7 +1426,7 @@ func _get_monster_weapon_drop_chance(monster_node: Node) -> float:
 	# 原始掉落概率；取值可能来自怪物导出属性，默认转为 0 到 1 范围。
 	var raw_drop_chance: Variant = monster_node.get("weapon_drop_chance")
 	if raw_drop_chance == null:
-		return 0.03
+		return 0.20
 
 	return clampf(float(raw_drop_chance), 0.0, 1.0)
 

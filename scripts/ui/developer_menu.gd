@@ -10,7 +10,7 @@ signal infinite_energy_toggled(enabled: bool)
 signal training_settings_requested
 
 ## 菜单最小尺寸；默认 520x470，适合在主菜单中央显示武器、强化石和金币调试操作。
-@export var panel_minimum_size: Vector2 = Vector2(520.0, 470.0)
+@export var panel_minimum_size: Vector2 = Vector2(520.0, 540.0)
 ## 单次金币调整数量；默认 1000，对应增加和减少按钮的固定测试步长。
 @export_range(1, 9999999, 1) var coin_step: int = 1000
 ## 单次随机强化石发放数量；默认 10，修改会同步按钮文案和实际永久仓库发放数量。
@@ -30,6 +30,8 @@ var _grant_stones_button: Button
 var _add_coins_button: Button
 ## 减少金币按钮；默认运行时创建，金币最低限制为 0。
 var _remove_coins_button: Button
+## 清空仓库按钮；默认运行时创建，点击后先弹出确认框再移除永久仓库中的全部物品。
+var _clear_warehouse_button: Button
 ## 隐藏入口提示标签；默认显示 LISBAM 说明，战斗模式会改为局内调试提示。
 var _hint_label: Label
 ## 局外经济控件列表；元素为金币标签、武器、强化石和两个金币按钮，战斗模式中统一隐藏。
@@ -48,6 +50,8 @@ var _combat_context_enabled: bool = false
 var _configured_infinite_health: bool = false
 ## 待同步无限能量状态；默认 false，允许在控件 ready 前先配置战斗状态。
 var _configured_infinite_energy: bool = false
+## 清空仓库确认框；默认运行时创建，防止开发者调试时误触不可逆的永久仓库清理。
+var _clear_warehouse_confirmation: ConfirmationDialog
 
 
 func _ready() -> void:
@@ -130,6 +134,19 @@ func _build_interface() -> void:
 	_remove_coins_button.pressed.connect(_on_remove_coins_pressed)
 	content.add_child(_remove_coins_button)
 	_economy_controls.append(_remove_coins_button)
+	_clear_warehouse_button = Button.new()
+	_clear_warehouse_button.custom_minimum_size = Vector2(0.0, 46.0)
+	_clear_warehouse_button.text = "清空仓库物品"
+	_clear_warehouse_button.pressed.connect(_on_clear_warehouse_pressed)
+	content.add_child(_clear_warehouse_button)
+	_economy_controls.append(_clear_warehouse_button)
+	_clear_warehouse_confirmation = ConfirmationDialog.new()
+	_clear_warehouse_confirmation.title = "确认清空仓库"
+	_clear_warehouse_confirmation.dialog_text = "将永久删除仓库中的全部物品，随身背包和装备不会受影响。"
+	_clear_warehouse_confirmation.get_ok_button().text = "确认清空"
+	_clear_warehouse_confirmation.get_cancel_button().text = "取消"
+	_clear_warehouse_confirmation.confirmed.connect(_on_clear_warehouse_confirmed)
+	add_child(_clear_warehouse_confirmation)
 
 	# 战斗调试容器；仅在 CombatHud 配置战斗上下文后显示，不访问具体玩家组件。
 	_combat_controls_container = VBoxContainer.new()
@@ -180,11 +197,13 @@ func _refresh_availability() -> void:
 	_grant_stones_button.disabled = not service_available
 	_add_coins_button.disabled = not service_available
 	_remove_coins_button.disabled = not service_available
+	_clear_warehouse_button.disabled = not service_available
 	if not service_available:
 		_status_label.text = "GlobalInventory 服务不可用"
 
 
 func _refresh_context_visibility() -> void:
+	custom_minimum_size = Vector2(panel_minimum_size.x, 470.0 if _combat_context_enabled else panel_minimum_size.y)
 	if _hint_label != null:
 		_hint_label.text = "战斗暂停时输入 LISBAM 开启" if _combat_context_enabled else "隐藏调试功能 · 输入序列 LISBAM 开启"
 	# 局外经济控件遍历项；战斗模式隐藏，避免把永久仓库和金币操作混入当前战斗工具。
@@ -227,6 +246,20 @@ func _on_add_coins_pressed() -> void:
 
 func _on_remove_coins_pressed() -> void:
 	_adjust_coins(-coin_step)
+
+
+func _on_clear_warehouse_pressed() -> void:
+	if _clear_warehouse_confirmation == null:
+		return
+	_clear_warehouse_confirmation.popup_centered(Vector2i(520, 0))
+
+
+func _on_clear_warehouse_confirmed() -> void:
+	if _global_inventory == null or not _global_inventory.has_method("clear_warehouse_items"):
+		return
+	# 清空记录组数；武器每件一组，强化石按当前堆叠组统计，用于开发者操作反馈。
+	var cleared_record_count: int = int(_global_inventory.call("clear_warehouse_items"))
+	_status_label.text = "已清空永久仓库，共移除 %d 组物品" % cleared_record_count
 
 
 func _adjust_coins(amount: int) -> void:

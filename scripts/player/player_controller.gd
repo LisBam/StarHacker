@@ -4,6 +4,8 @@ class_name PlayerController
 ## 玩家聚合脚本只负责把输入、移动、远程攻击、近战攻击等组件串起来。
 ## 具体能力放在独立组件中实现，后续替换角色、武器或控制方式时可以局部替换节点。
 
+signal weapon_durability_changed(weapon_data: Resource)
+
 ## 战斗爆发特效脚本；默认通过路径预加载，避免依赖 Godot 全局类名缓存解析顺序。
 const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat_burst_effect.gd")
 
@@ -37,6 +39,8 @@ const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat
 @export_range(0.01, 2.0, 0.01) var dodge_duration: float = 0.16
 ## 击退速度衰减；取值建议大于 0，默认 1800 像素每秒平方，修改会影响后坐力和受击击退持续时间。
 @export_range(1.0, 12000.0, 1.0, "or_greater") var knockback_decay: float = 1800.0
+## 外部击退最大累计速度；默认 720 像素每秒，限制高射速武器连续后坐力不会无限叠加并长期压住移动输入。
+@export_range(1.0, 6000.0, 1.0, "or_greater") var max_accumulated_knockback_speed: float = 720.0
 ## 射击震动后坐力倍率；取值建议 0 到 0.1，默认 0.035 会让高后坐力武器产生更强屏幕震动。
 @export_range(0.0, 1.0, 0.001) var fire_shake_per_recoil: float = 0.035
 ## 受伤震动伤害倍率；取值建议 0 到 1，默认 0.16 会让高伤害受击产生更强屏幕震动。
@@ -99,6 +103,7 @@ func _physics_process(delta: float) -> void:
 		# 当前帧移动速度倍率；取值大于等于 1，默认由疾跑状态和能量消耗计算，修改会影响普通移动速度。
 		var movement_speed_multiplier: float = _get_movement_speed_multiplier(movement_direction, delta)
 		_movement_component.move(self, movement_direction, delta, movement_speed_multiplier, _knockback_velocity)
+		_cancel_blocked_knockback_components()
 		_decay_knockback(delta)
 
 	if _input_component.is_fire_requested():
@@ -147,7 +152,7 @@ func _try_fire_ranged_weapon() -> void:
 
 	# 当前远程武器资源；取值为 Resource 或 null，默认来自装备组件，修改会影响本次左键攻击参数。
 	var current_weapon: Resource = _equipment_component.call("get_current_ranged_weapon") as Resource
-	if current_weapon == null:
+	if current_weapon == null or not _can_use_weapon(current_weapon):
 		return
 
 	# 本次远程攻击能量消耗；取值大于等于 0，默认来自武器数据，修改会影响是否允许开火和扣能量数值。
@@ -165,6 +170,7 @@ func _try_fire_ranged_weapon() -> void:
 	_shake_screen_for_weapon_use(current_weapon)
 	if _stats_component.has_method("spend_energy"):
 		_stats_component.call("spend_energy", energy_cost)
+	_consume_weapon_durability(current_weapon)
 
 
 func _try_use_melee_weapon() -> void:
@@ -173,7 +179,7 @@ func _try_use_melee_weapon() -> void:
 
 	# 当前近战武器资源；取值为 Resource 或 null，默认来自装备组件，修改会影响本次右键攻击参数。
 	var current_weapon: Resource = _equipment_component.call("get_melee_weapon") as Resource
-	if current_weapon == null:
+	if current_weapon == null or not _can_use_weapon(current_weapon):
 		return
 
 	# 本次近战攻击能量消耗；取值大于等于 0，默认来自武器数据，修改会影响是否允许挥击和扣能量数值。
@@ -191,6 +197,25 @@ func _try_use_melee_weapon() -> void:
 	_shake_screen_for_weapon_use(current_weapon)
 	if _stats_component.has_method("spend_energy"):
 		_stats_component.call("spend_energy", energy_cost)
+	_consume_weapon_durability(current_weapon)
+
+
+func _can_use_weapon(weapon_data: Resource) -> bool:
+	if weapon_data == null:
+		return false
+	return bool(weapon_data.call("can_be_used")) if weapon_data.has_method("can_be_used") else true
+
+
+func _consume_weapon_durability(weapon_data: Resource) -> void:
+	if weapon_data == null or not weapon_data.has_method("consume_durability"):
+		return
+	# 是否实际消耗耐久；耐久消耗为 0 或武器已损坏时不触发持久化和 UI 刷新。
+	var durability_changed: bool = bool(weapon_data.call("consume_durability"))
+	if not durability_changed:
+		return
+	if _equipment_component.has_method("notify_weapon_runtime_state_changed"):
+		_equipment_component.call("notify_weapon_runtime_state_changed", weapon_data)
+	weapon_durability_changed.emit(weapon_data)
 
 
 func _handle_dodge_request(movement_direction: Vector2) -> void:
@@ -219,6 +244,7 @@ func _move_dodge(delta: float) -> void:
 	var dodge_speed: float = maxf(dodge_distance, 0.0) / effective_dodge_duration
 	velocity = _dodge_direction * dodge_speed + _knockback_velocity
 	move_and_slide()
+	_cancel_blocked_knockback_components()
 	_decay_knockback(delta)
 	_dodge_time_remaining = maxf(_dodge_time_remaining - delta, 0.0)
 	if _dodge_time_remaining <= 0.0:
@@ -265,6 +291,10 @@ func apply_knockback(direction: Vector2, force: float) -> void:
 		return
 
 	_knockback_velocity += direction.normalized() * force
+	# 限制后击退速度；连续射击或多次受击只保留可控上限，避免衰减时间随叠加次数无限增长。
+	var resolved_max_knockback_speed: float = maxf(max_accumulated_knockback_speed, 1.0)
+	if _knockback_velocity.length() > resolved_max_knockback_speed:
+		_knockback_velocity = _knockback_velocity.normalized() * resolved_max_knockback_speed
 
 
 func _apply_weapon_recoil(weapon_data: Resource, attack_direction: Vector2) -> void:
@@ -435,3 +465,29 @@ func _decay_knockback(delta: float) -> void:
 		return
 
 	_knockback_velocity = _knockback_velocity.move_toward(Vector2.ZERO, maxf(knockback_decay, 1.0) * delta)
+
+
+func _cancel_blocked_knockback_components() -> void:
+	if _knockback_velocity.is_zero_approx():
+		return
+	# 碰撞索引；只检查本次 move_and_slide 产生的碰撞，将持续推向墙体的后坐力分量立即移除。
+	for collision_index in range(get_slide_collision_count()):
+		# 滑动碰撞；包含墙体法线，用于分离被阻挡与仍可沿墙移动的外部速度。
+		var slide_collision: KinematicCollision2D = get_slide_collision(collision_index)
+		if slide_collision == null:
+			continue
+		# 碰撞法线；指向远离墙体的方向，击退与法线点积为负时表示正在持续压向墙体。
+		var collision_normal: Vector2 = slide_collision.get_normal()
+		# 被阻挡投影；负值表示外部速度朝向墙体，移除后保留沿墙切向分量供玩家立即移动。
+		var blocked_projection: float = _knockback_velocity.dot(collision_normal)
+		if blocked_projection < 0.0:
+			_knockback_velocity -= collision_normal * blocked_projection
+
+
+func clear_external_motion() -> void:
+	_knockback_velocity = Vector2.ZERO
+	_dodge_direction = Vector2.ZERO
+	_dodge_time_remaining = 0.0
+	velocity = Vector2.ZERO
+	if _movement_component != null and _movement_component.has_method("reset_motion"):
+		_movement_component.call("reset_motion")

@@ -17,6 +17,10 @@ const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_form
 const WEAPON_DURABILITY_BAR_SCRIPT: Script = preload("res://scripts/ui/weapon_durability_bar.gd")
 ## 不可选武器灰色滤镜；默认保留一定透明度以继续显示武器名称和耐久信息。
 const UNAVAILABLE_TARGET_FILTER_COLOR: Color = Color(0.42, 0.42, 0.42, 0.78)
+## 可选装备悬停缩放；默认 1.03，仅在绿色修复目标状态中启用。
+const TARGET_HOVER_SCALE: float = 1.03
+## 可选装备悬停动画时长；默认 0.12 秒，进入和退出共用。
+const TARGET_HOVER_DURATION: float = 0.12
 
 ## 当前装备资源；默认 null 表示空槽，空槽可以接收兼容武器但不能作为拖拽来源。
 var _item_resource: Resource
@@ -32,6 +36,8 @@ var _enhancement_target_highlight: bool = false
 var _weapon_target_selection_blocked: bool = false
 ## 武器耐久条缓存；默认首次配置时创建，空槽隐藏，有武器时显示剩余耐久。
 var _durability_bar: Control
+## 当前目标悬停补间；默认 null，用于避免连续悬停产生重复缩放。
+var _target_hover_tween: Tween
 
 
 func configure(slot_label: String, location: String, accepted_weapon_type: String, item_resource: Resource, detail_tooltip: String = "") -> void:
@@ -47,6 +53,10 @@ func configure(slot_label: String, location: String, accepted_weapon_type: Strin
 	mouse_default_cursor_shape = Control.CURSOR_DRAG if _item_resource != null else Control.CURSOR_POINTING_HAND
 	if not pressed.is_connected(_on_pressed):
 		pressed.connect(_on_pressed)
+	if not mouse_entered.is_connected(_on_mouse_entered):
+		mouse_entered.connect(_on_mouse_entered)
+	if not mouse_exited.is_connected(_on_mouse_exited):
+		mouse_exited.connect(_on_mouse_exited)
 	_refresh_enhancement_target_highlight()
 
 
@@ -134,9 +144,51 @@ func _refresh_enhancement_target_highlight() -> void:
 	# 装备槽色调；浅绿色明确表示当前可作为强化目标，取消后恢复原主题。
 	# 修复目标补充；当前不可选武器会优先应用灰色滤镜，可选武器继续沿用浅绿色反馈。
 	if _weapon_target_selection_blocked:
-		self_modulate = UNAVAILABLE_TARGET_FILTER_COLOR
+		modulate = UNAVAILABLE_TARGET_FILTER_COLOR
+		_stop_target_hover(true)
 	else:
-		self_modulate = Color(0.68, 1.0, 0.76, 1.0) if _enhancement_target_highlight else Color.WHITE
+		modulate = Color(0.68, 1.0, 0.76, 1.0) if _enhancement_target_highlight else Color.WHITE
+	_refresh_disabled_hover_style()
+
+
+func _refresh_disabled_hover_style() -> void:
+	remove_theme_stylebox_override("hover")
+	remove_theme_stylebox_override("pressed")
+	if not _weapon_target_selection_blocked:
+		return
+	# 禁用悬停样式；满耐久等不可选装备经过鼠标时保持原始灰色外观。
+	var normal_style: StyleBox = get_theme_stylebox("normal").duplicate()
+	add_theme_stylebox_override("hover", normal_style.duplicate())
+	add_theme_stylebox_override("pressed", normal_style.duplicate())
+
+
+func _on_mouse_entered() -> void:
+	if _weapon_target_selection_blocked or not _enhancement_target_highlight:
+		return
+	_play_target_hover(TARGET_HOVER_SCALE)
+
+
+func _on_mouse_exited() -> void:
+	if _enhancement_target_highlight:
+		_play_target_hover(1.0)
+	else:
+		_stop_target_hover(true)
+
+
+func _play_target_hover(target_scale: float) -> void:
+	if _target_hover_tween != null and _target_hover_tween.is_valid():
+		_target_hover_tween.kill()
+	pivot_offset = size * 0.5
+	_target_hover_tween = create_tween()
+	_target_hover_tween.tween_property(self, "scale", Vector2.ONE * target_scale, TARGET_HOVER_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+
+func _stop_target_hover(reset_immediately: bool) -> void:
+	if _target_hover_tween != null and _target_hover_tween.is_valid():
+		_target_hover_tween.kill()
+	_target_hover_tween = null
+	if reset_immediately:
+		scale = Vector2.ONE
 
 
 func _ensure_durability_bar() -> void:

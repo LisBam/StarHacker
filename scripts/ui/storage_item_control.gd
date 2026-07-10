@@ -20,6 +20,10 @@ const STONE_BENEFICIAL_COLOR: String = "#70e889"
 const STONE_DETRIMENTAL_COLOR: String = "#ff7070"
 ## 不可选武器灰色滤镜；默认降低亮度和饱和度，用于修复包目标选择期间明确区分满耐久武器。
 const UNAVAILABLE_TARGET_FILTER_COLOR: Color = Color(0.42, 0.42, 0.42, 0.78)
+## 可选目标悬停缩放；默认 1.03，仅在绿色高亮目标上播放。
+const SELECTABLE_TARGET_HOVER_SCALE: float = 1.03
+## 可选目标悬停动画时长；默认 0.12 秒，用于平滑进入和退出目标反馈。
+const SELECTABLE_TARGET_HOVER_DURATION: float = 0.12
 ## 武器耐久条组件；用于仓库、展开背包和结算卡片统一显示武器剩余耐久。
 const WEAPON_DURABILITY_BAR_SCRIPT: Script = preload("res://scripts/ui/weapon_durability_bar.gd")
 
@@ -54,14 +58,22 @@ var _drag_enabled: bool = true
 var _weapon_slot_visual_style_enabled: bool = false
 ## 武器耐久条缓存；默认按需创建，资源卡片隐藏，武器卡片始终贴在 UI 最底部。
 var _durability_bar: Control
+## 当前绿色目标悬停补间；默认 null，新悬停状态会终止旧补间以避免缩放叠加。
+var _selection_hover_tween: Tween
+## 当前卡片价值标签；默认“售价”，物资撤离面板会改为“撤离收费”。
+var _price_label: String = "售价"
+## 当前卡片价格覆盖值；默认 -1 使用物品有效售价，物资撤离面板传入实际运费。
+var _displayed_price_override: int = -1
 
 
-func configure(item_resource: Resource, location: String, item_index: int, quick_action_enabled: bool, extraction_prefix: String = "", quantity: int = 1) -> void:
+func configure(item_resource: Resource, location: String, item_index: int, quick_action_enabled: bool, extraction_prefix: String = "", quantity: int = 1, price_label: String = "售价", displayed_price_override: int = -1) -> void:
 	_item_resource = item_resource
 	_location = location
 	_item_index = item_index
 	_quick_action_enabled = quick_action_enabled
 	_quantity = clampi(quantity, 1, 99)
+	_price_label = price_label if not price_label.is_empty() else "售价"
+	_displayed_price_override = displayed_price_override
 	# 物品摘要；强化石和修复包共用紧凑富文本资源卡，武器保持两列宽卡片显示分类和动态售价。
 	if _is_enhancement_stone() or _is_repair_kit():
 		text = ""
@@ -69,18 +81,22 @@ func configure(item_resource: Resource, location: String, item_index: int, quick
 		_stone_summary_label.visible = true
 		_stone_summary_label.text = _build_stone_card_bbcode(extraction_prefix) if _is_enhancement_stone() else _build_repair_kit_card_bbcode(extraction_prefix)
 	else:
-		text = "%s%s · %s · 售价 %d" % [extraction_prefix, _get_item_display_name(), _get_weapon_type_label(), _get_sell_price()]
+		text = "%s%s · %s · %s %d" % [extraction_prefix, _get_item_display_name(), _get_weapon_type_label(), _price_label, _get_displayed_price()]
 		if _stone_summary_label != null:
 			_stone_summary_label.visible = false
 	_ensure_durability_bar()
 	_durability_bar.call("configure", _item_resource)
-	tooltip_text = ITEM_DETAIL_FORMATTER.call("build_plain_text", _item_resource, _quantity)
+	tooltip_text = ITEM_DETAIL_FORMATTER.call("build_plain_text", _item_resource, _quantity, _price_label if _price_label != "售价" else "出售价格", _displayed_price_override)
 	disabled = _item_resource == null
 	custom_minimum_size = Vector2(0.0, 48.0)
 	# 鼠标指针形态；可操作容器使用手型，结算只读条目使用普通箭头。
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if not _location.is_empty() and _item_index >= 0 else Control.CURSOR_ARROW
 	if not pressed.is_connected(_on_pressed):
 		pressed.connect(_on_pressed)
+	if not mouse_entered.is_connected(_on_mouse_entered):
+		mouse_entered.connect(_on_mouse_entered)
+	if not mouse_exited.is_connected(_on_mouse_exited):
+		mouse_exited.connect(_on_mouse_exited)
 	_refresh_enhancement_target_highlight()
 
 
@@ -123,7 +139,7 @@ func refresh_durability() -> void:
 	if _durability_bar != null:
 		_durability_bar.call("refresh")
 	if _is_weapon_resource():
-		text = "%s · %s · 售价 %d" % [_get_item_display_name(), _get_weapon_type_label(), _get_sell_price()]
+		text = "%s · %s · %s %d" % [_get_item_display_name(), _get_weapon_type_label(), _price_label, _get_displayed_price()]
 
 
 func _get_drag_data(_at_position: Vector2) -> Variant:
@@ -197,12 +213,18 @@ func _get_sell_price() -> int:
 	return int(ITEM_DETAIL_FORMATTER.call("get_item_sell_price", _item_resource))
 
 
+func _get_displayed_price() -> int:
+	if _displayed_price_override >= 0:
+		return _displayed_price_override
+	return _get_sell_price() if _is_weapon_resource() else _get_sell_price() * _quantity
+
+
 func _build_item_details() -> String:
 	return str(ITEM_DETAIL_FORMATTER.call("build_plain_text", _item_resource, _quantity))
 
 
 func _make_custom_tooltip(_for_text: String) -> Object:
-	return ITEM_DETAIL_FORMATTER.call("create_tooltip_control", _item_resource, _quantity)
+	return ITEM_DETAIL_FORMATTER.call("create_tooltip_control", _item_resource, _quantity, _price_label if _price_label != "售价" else "出售价格", _displayed_price_override)
 
 
 func _is_enhancement_stone() -> bool:
@@ -220,10 +242,56 @@ func _is_weapon_resource() -> bool:
 func _refresh_enhancement_target_highlight() -> void:
 	# 卡片色调；浅绿色表示可点击或可投放的强化目标，取消选择后恢复白色不影响原主题。
 	# 修复目标补充；当前不可选武器会优先使用灰色滤镜，可选武器继续使用浅绿色。
-	if _weapon_target_selection_blocked or _item_selection_blocked:
-		self_modulate = UNAVAILABLE_TARGET_FILTER_COLOR
+	var selection_blocked: bool = _weapon_target_selection_blocked or _item_selection_blocked
+	if selection_blocked:
+		# modulate 会同时影响按钮和子级富文本，确保背包资源卡也完整呈现灰色滤镜。
+		modulate = UNAVAILABLE_TARGET_FILTER_COLOR
+		_stop_selection_hover_animation(true)
 	else:
-		self_modulate = Color(0.68, 1.0, 0.76, 1.0) if _enhancement_target_highlight or _item_selection_highlight else Color.WHITE
+		modulate = Color(0.68, 1.0, 0.76, 1.0) if _enhancement_target_highlight or _item_selection_highlight else Color.WHITE
+	_refresh_interaction_theme(selection_blocked)
+	mouse_default_cursor_shape = Control.CURSOR_ARROW if selection_blocked else (Control.CURSOR_POINTING_HAND if not _location.is_empty() and _item_index >= 0 else Control.CURSOR_ARROW)
+
+
+func _refresh_interaction_theme(selection_blocked: bool) -> void:
+	_apply_weapon_slot_visual_style()
+	if not selection_blocked:
+		return
+	# 不可选卡片的悬停与按下样式完全复用普通样式，鼠标经过时不再变白或提亮。
+	var normal_style: StyleBox = get_theme_stylebox("normal").duplicate()
+	add_theme_stylebox_override("hover", normal_style.duplicate())
+	add_theme_stylebox_override("pressed", normal_style.duplicate())
+
+
+func _on_mouse_entered() -> void:
+	if _weapon_target_selection_blocked or _item_selection_blocked:
+		return
+	if _enhancement_target_highlight or _item_selection_highlight:
+		_play_selection_hover_animation(SELECTABLE_TARGET_HOVER_SCALE)
+
+
+func _on_mouse_exited() -> void:
+	if _weapon_target_selection_blocked or _item_selection_blocked:
+		_stop_selection_hover_animation(true)
+		return
+	if _enhancement_target_highlight or _item_selection_highlight:
+		_play_selection_hover_animation(1.0)
+
+
+func _play_selection_hover_animation(target_scale: float) -> void:
+	if _selection_hover_tween != null and _selection_hover_tween.is_valid():
+		_selection_hover_tween.kill()
+	pivot_offset = size * 0.5
+	_selection_hover_tween = create_tween()
+	_selection_hover_tween.tween_property(self, "scale", Vector2.ONE * target_scale, SELECTABLE_TARGET_HOVER_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+
+func _stop_selection_hover_animation(reset_immediately: bool) -> void:
+	if _selection_hover_tween != null and _selection_hover_tween.is_valid():
+		_selection_hover_tween.kill()
+	_selection_hover_tween = null
+	if reset_immediately:
+		scale = Vector2.ONE
 
 
 func _ensure_stone_summary_label() -> void:
@@ -294,7 +362,7 @@ func _build_stone_card_bbcode(extraction_prefix: String) -> String:
 	if _weapon_slot_visual_style_enabled:
 		card_lines.append("[center][font_size=9]%s[/font_size][/center]" % (" ".join(colored_tokens) if not colored_tokens.is_empty() else "无词条"))
 	else:
-		card_lines.append("[center]%s  ·  售价 %d[/center]" % [(" ".join(colored_tokens) if not colored_tokens.is_empty() else "无词条"), _get_sell_price() * _quantity])
+		card_lines.append("[center]%s  ·  %s %d[/center]" % [(" ".join(colored_tokens) if not colored_tokens.is_empty() else "无词条"), _price_label, _get_displayed_price()])
 	return "\n".join(card_lines)
 
 
@@ -308,7 +376,7 @@ func _build_repair_kit_card_bbcode(extraction_prefix: String) -> String:
 	# 修复耐久；所有当前修复包使用整数数值，绿色明确表示该道具提供正向恢复效果。
 	var repair_amount: float = maxf(float(_item_resource.get("repair_amount")), 0.0)
 	var repair_text: String = "[color=%s]武器耐久+%.0f[/color]" % [STONE_BENEFICIAL_COLOR, repair_amount]
-	card_lines.append("[center][font_size=9]%s[/font_size][/center]" % repair_text if _weapon_slot_visual_style_enabled else "[center]%s  ·  售价 %d[/center]" % [repair_text, _get_sell_price() * _quantity])
+	card_lines.append("[center][font_size=9]%s[/font_size][/center]" % repair_text if _weapon_slot_visual_style_enabled else "[center]%s  ·  %s %d[/center]" % [repair_text, _price_label, _get_displayed_price()])
 	return "\n".join(card_lines)
 
 

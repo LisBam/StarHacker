@@ -987,14 +987,16 @@ func _get_nearby_weapon_drops() -> Array[Node2D]:
 
 
 func _update_loot_chest_interaction() -> void:
-	if not _can_pickup_nearby_drops() or not _is_pickup_action_held():
-		_set_active_loot_chest(null)
+	if not _can_pickup_nearby_drops():
+		_set_active_loot_chest(null, false)
 		return
 	# 拾取优先级；只要周围存在可拾取掉落物，长按 F 不会同时推进宝箱开启进度。
 	if not _get_nearby_weapon_drops().is_empty():
-		_set_active_loot_chest(null)
+		_set_active_loot_chest(null, false)
 		return
-	_set_active_loot_chest(_get_nearest_interactable_loot_chest())
+	# 最近宝箱；进入范围后立即显示提示，只有实际按住拾取键时才切换为进度条并推进开启。
+	var nearest_chest: Node2D = _get_nearest_interactable_loot_chest()
+	_set_active_loot_chest(nearest_chest, nearest_chest != null and _is_pickup_action_held())
 
 
 func _get_nearest_interactable_loot_chest() -> Node2D:
@@ -1019,16 +1021,26 @@ func _get_nearest_interactable_loot_chest() -> Node2D:
 	return nearest_chest
 
 
-func _set_active_loot_chest(chest_node: Node2D) -> void:
+func _set_active_loot_chest(chest_node: Node2D, opening: bool) -> void:
 	if _active_loot_chest == chest_node:
-		if _active_loot_chest != null and is_instance_valid(_active_loot_chest) and _active_loot_chest.has_method("set_open_interaction_active"):
-			_active_loot_chest.call("set_open_interaction_active", true, _player as Node2D)
+		_refresh_active_loot_chest_state(opening)
 		return
-	if _active_loot_chest != null and is_instance_valid(_active_loot_chest) and _active_loot_chest.has_method("set_open_interaction_active"):
-		_active_loot_chest.call("set_open_interaction_active", false, null)
+	if _active_loot_chest != null and is_instance_valid(_active_loot_chest):
+		if _active_loot_chest.has_method("set_open_interaction_active"):
+			_active_loot_chest.call("set_open_interaction_active", false, null)
+		if _active_loot_chest.has_method("set_interaction_prompt_visible"):
+			_active_loot_chest.call("set_interaction_prompt_visible", false)
 	_active_loot_chest = chest_node
-	if _active_loot_chest != null and _active_loot_chest.has_method("set_open_interaction_active"):
-		_active_loot_chest.call("set_open_interaction_active", true, _player as Node2D)
+	_refresh_active_loot_chest_state(opening)
+
+
+func _refresh_active_loot_chest_state(opening: bool) -> void:
+	if _active_loot_chest == null or not is_instance_valid(_active_loot_chest):
+		return
+	if _active_loot_chest.has_method("set_open_interaction_active"):
+		_active_loot_chest.call("set_open_interaction_active", opening, _player as Node2D if opening else null)
+	if _active_loot_chest.has_method("set_interaction_prompt_visible"):
+		_active_loot_chest.call("set_interaction_prompt_visible", not opening)
 
 
 func _is_pickup_action_held() -> bool:
@@ -1775,6 +1787,8 @@ func _close_supply_extraction_panel() -> void:
 	if _supply_extraction_overlay == null:
 		return
 	_supply_extraction_overlay.visible = false
+	if _supply_extraction_panel != null and _supply_extraction_panel.has_method("dismiss"):
+		_supply_extraction_panel.call("dismiss")
 	get_tree().paused = false
 	_refresh_combat_input_state()
 

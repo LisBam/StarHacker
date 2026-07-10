@@ -25,6 +25,10 @@ const DRAG_PREVIEW_MINIMUM_SIZE: Vector2 = Vector2(128.0, 50.0)
 const DRAG_PREVIEW_BACKGROUND_COLOR: Color = Color(0.06, 0.09, 0.12, 0.88)
 ## 拖拽预览边框颜色；默认使用明亮青色，突出当前正在移动的武器。
 const DRAG_PREVIEW_BORDER_COLOR: Color = Color(0.48, 0.90, 1.0, 0.96)
+## 绿色可选目标悬停缩放；默认 1.03，让可使用道具的武器具有明确鼠标反馈。
+const TARGET_HOVER_SCALE: float = 1.03
+## 绿色可选目标悬停时长；默认 0.12 秒，进入和离开时共用。
+const TARGET_HOVER_DURATION: float = 0.12
 
 ## 点击与拖拽判定阈值；默认 6 像素，鼠标移动达到该距离后只允许拖拽，不再触发点击操作菜单。
 @export_range(0.0, 64.0, 0.5) var click_drag_threshold_pixels: float = 6.0
@@ -102,6 +106,8 @@ func _ready() -> void:
 	_build_target_filter_overlay()
 	_refresh_text()
 	gui_input.connect(_on_gui_input)
+	mouse_entered.connect(_on_mouse_entered)
+	mouse_exited.connect(_on_mouse_exited)
 
 
 func set_slot_data(new_context: String, new_kind: String, new_index: int, new_weapon_data: Resource, new_is_selected: bool) -> void:
@@ -144,6 +150,8 @@ func set_weapon_target_selection_state(selection_active: bool, selectable: bool)
 	var has_weapon: bool = weapon_data != null and str(weapon_data.get("weapon_type")) in ["ranged", "melee"]
 	is_enhancement_target_highlight = selection_active and selectable and has_weapon
 	_weapon_target_selection_blocked = selection_active and not selectable and has_weapon
+	if _weapon_target_selection_blocked or not is_enhancement_target_highlight:
+		_restore_target_hover_visual()
 	_refresh_target_filter_overlay()
 	queue_redraw()
 
@@ -358,6 +366,33 @@ func _on_gui_input(event: InputEvent) -> void:
 		item_selected.emit(weapon_data, slot_context, slot_kind, slot_index)
 	else:
 		_restore_inventory_interaction_visual()
+
+
+func _on_mouse_entered() -> void:
+	if weapon_data == null or _weapon_target_selection_blocked or not is_enhancement_target_highlight:
+		return
+	_play_target_hover_animation(TARGET_HOVER_SCALE)
+
+
+func _on_mouse_exited() -> void:
+	if is_enhancement_target_highlight:
+		_play_target_hover_animation(1.0)
+	else:
+		_restore_target_hover_visual()
+
+
+func _play_target_hover_animation(target_scale: float) -> void:
+	_prepare_inventory_interaction_tween()
+	pivot_offset = size * 0.5
+	_interaction_tween.tween_property(self, "scale", Vector2.ONE * target_scale, TARGET_HOVER_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+
+func _restore_target_hover_visual() -> void:
+	if _interaction_tween != null and _interaction_tween.is_valid():
+		_interaction_tween.kill()
+	_interaction_tween = null
+	scale = Vector2.ONE
+	modulate = Color.WHITE
 
 
 func _create_drag_preview_control() -> Control:

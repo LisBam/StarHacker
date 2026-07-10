@@ -37,6 +37,7 @@ const DISPLAY_MODE_FULL: int = 1
 ## 撤离点标记颜色；默认亮绿色，只有 GameWorld 标记撤离点后才绘制。
 @export var extraction_marker_color: Color = Color(0.35, 1.0, 0.72, 1.0)
 ## 物资撤离点标记颜色；默认亮金色，开局生成后始终显示并与正式撤离点区分。
+## 探索显示补充：点位虽然开局生成，但只有所在探索格被发现后才会实际绘制。
 @export var supply_extraction_marker_color: Color = Color(1.0, 0.72, 0.22, 1.0)
 ## 玩家点半径；取值建议大于 0，默认 4 像素，修改会影响小地图上玩家标记大小。
 @export_range(1.0, 20.0, 0.5) var player_marker_radius: float = 4.0
@@ -105,8 +106,8 @@ func _process(delta: float) -> void:
 	_redraw_remaining = maxf(_redraw_remaining - maxf(delta, 0.0), 0.0)
 	# 地图结构是否变化；取值为 true/false，默认用于障碍或探索缓存变化后立即重绘。
 	var map_cache_changed: bool = _refresh_obstacle_cache_if_needed()
-	if display_mode == DISPLAY_MODE_FULL:
-		map_cache_changed = _refresh_explored_cache_if_needed() or map_cache_changed
+	# 两种地图模式都刷新探索缓存，物资撤离点只有被玩家发现后才允许显示。
+	map_cache_changed = _refresh_explored_cache_if_needed() or map_cache_changed
 
 	if map_cache_changed or _should_redraw_map():
 		_remember_redraw_state()
@@ -216,13 +217,25 @@ func _draw_supply_extraction_markers(world_view_rect: Rect2) -> void:
 			continue
 		# 物资撤离点世界坐标；只接收 GameWorld 返回的 Vector2 项。
 		var supply_position: Vector2 = raw_position
+		if not _is_world_position_discovered(supply_position):
+			continue
 		if not world_view_rect.has_point(supply_position):
 			continue
 		# 物资撤离点小地图坐标；完整地图显示全部点位，局部地图只显示范围内点位。
+		# 探索规则补充：进入坐标映射前已过滤未发现点位，因此“全部”仅指全部已发现点位。
 		var marker_position: Vector2 = _world_position_to_minimap_position(supply_position, world_view_rect)
 		# 方形标记半径；略小于正式撤离点圆形标记，颜色和形状共同区分用途。
 		var marker_radius: float = maxf(extraction_marker_radius - 1.0, 2.0)
 		draw_rect(Rect2(marker_position - Vector2.ONE * marker_radius, Vector2.ONE * marker_radius * 2.0), supply_extraction_marker_color, false, 2.0)
+
+
+func _is_world_position_discovered(world_position: Vector2) -> bool:
+	if _game_world != null and _game_world.has_method("is_world_position_explored"):
+		return bool(_game_world.call("is_world_position_explored", world_position))
+	# 兼容接口缺失的临时场景；使用本地探索格缓存判断，不默认泄露未知点位。
+	var cell_size: float = _get_exploration_cell_size()
+	var exploration_cell: Vector2i = Vector2i(floori(world_position.x / cell_size), floori(world_position.y / cell_size))
+	return _get_explored_cell_lookup().has(exploration_cell)
 
 
 func _draw_navigation_marker(world_view_rect: Rect2) -> void:

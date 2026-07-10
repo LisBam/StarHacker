@@ -65,10 +65,10 @@
 - `InputBindings`：全局输入绑定管理器，以 AutoLoad 单例存在，不声明同名 `class_name`，保存可配置动作、默认事件、玩家自定义事件和恢复默认逻辑，直接写入 Godot `InputMap`，允许多个动作共享同一个输入事件。
 - `KeyBindingPanel`：复用型按键绑定 UI，主菜单设置和暂停设置的按键绑定页面都会动态创建它，用于捕获下一次键盘或鼠标输入并调用 `InputBindings.rebind_action()`。
 - `CombatCamera`：玩家子节点上的战斗相机，关闭 Camera2D 位置平滑并使用物理帧回调跟随玩家，避免物理移动和渲染相机不同步造成移动抖动；屏幕震动只修改相机 `offset`，不会改变玩家或相机节点真实位置。
-- `CombatHud`：除原战斗 HUD、背包和暂停职责外，负责显示左上角全地图存活怪物数量、调用全局背包完成结算，并以背包同款武器/资源两级分类和双列列表展示本局首次获得物品；局内背包支持装备、修复和单件/整组/部分丢弃，部分丢弃复用数量弹窗；道具目标选择会给装备栏、背包武器和其他不可选物品统一添加灰色滤镜并阻止无效点击；F 键附近存在掉落物时优先拾取，否则持续按住可开启最近宝箱；物资撤离点准备完成后按闪避打开暂停式送回面板。
-- `MiniMapControl`：读取 GameWorld 的地图、探索、正式撤离点、开局物资撤离点和玩家导航标点；物资撤离点使用金色方框标记，M 键大地图允许左键设置或点中已有标点取消，局部小地图与完整地图都会绘制玩家到标点的绿色虚线。
+- `CombatHud`：除原战斗 HUD、背包和暂停职责外，负责显示左上角全地图存活怪物数量、调用全局背包完成结算，并以背包同款武器/资源两级分类和双列列表展示本局首次获得物品；局内背包支持装备、修复和单件/整组/部分丢弃，部分丢弃复用数量弹窗；道具目标选择会给装备栏、背包武器和背包资源中的不可选物品统一添加灰色滤镜并阻止无效点击；F 键附近存在掉落物时优先拾取，否则管理宝箱范围提示和长按进度；物资撤离点准备完成后按闪避打开暂停式送回面板。
+- `MiniMapControl`：读取 GameWorld 的地图、探索、正式撤离点、开局物资撤离点和玩家导航标点；物资撤离点只有在对应探索格被发现后才使用金色方框标记，M 键大地图允许左键设置或点中已有标点取消，局部小地图与完整地图都会绘制玩家到标点的绿色虚线。
 - `WarehousePanel`：主菜单局外仓库 UI，只调用 `GlobalInventory`。展开背包后，远程武器提供“装备1”“装备2”并明确替换对应远程槽，近战武器提供“装备”；仓库与背包之间拖动数量大于 1 的强化石或修复包时复用数量弹窗选择实际移动量，Shift+点击仍转移整组；仓库/背包分隔拖条使用全局鼠标跟踪和按下时缓存的稳定高度，默认仓库占 0.38，可调范围为 0.10 至 0.90，背包缩小时通过外层滚动容器继续访问全部内容。
-- `StorageItemControl`：仓库、背包、物资撤离和结算共用物品控件，强化石卡片只显示品质、堆叠数量和属性方向，不显示具体百分比；仓库内强化石和修复包都在效果行显示整组售价，局内背包强化石移除冗余“资源”首行；武器卡片底部显示等宽耐久条，损坏武器名称追加“（损坏）”；修复包可点击或拖到武器上恢复耐久，强化石不能作为战斗消耗品直接使用；通用选择状态可统一显示高亮或灰色滤镜并阻止无效点击、拖动；控件不直接修改物品所有权。
+- `StorageItemControl`：仓库、背包、物资撤离和结算共用物品控件，强化石卡片只显示品质、堆叠数量和属性方向，不显示具体百分比；仓库内强化石和修复包都在效果行显示整组售价，物资撤离模式改为显示整组实际撤离收费；武器卡片底部显示等宽耐久条，损坏武器名称追加“（损坏）”；通用选择状态会完整影响子级富文本，不可选时禁用悬停提亮，可选绿色目标提供缩放反馈；控件不直接修改物品所有权。
 - `StorageDropArea`：仓库与随身背包共用的两列网格拖放区域，只校验拖拽协议并把目标容器交给 `WarehousePanel`。
 - `InventoryQuery`：仓库、局内背包和锻造材料列表共用的只读查询组件，为条目附加真实来源下标并执行多层分类、关键词、强化属性正负方向多选筛选和获得时间/物品价值排序；多个筛选键按并集匹配，例如同时勾选“伤害+”“伤害-”会显示全部伤害词条强化石，旧版纯属性键继续匹配任意方向，不修改全局库存顺序。
 - `EquipmentStorageSlotControl`：局外装备槽拖拽控件，校验远程或近战武器类型，支持装备与仓库、背包以及远程装备槽之间的双向拖拽；使用修复包时，未满耐久装备显示绿色高亮，满耐久装备显示灰色滤镜并阻止无效选择。
@@ -85,7 +85,7 @@
 - `WeaponDrop`：通用地面物品掉落物，兼容武器、强化石和修复包并加入 `item_drops` 组，HUD 按距离扫描后生成附近掉落列表；拾取成功后会把同一个资源实例加入背包并释放掉落物节点。
 - `CombatBurstEffect`：代码绘制的短促战斗爆发特效，用于玩家和怪物受击、死亡反馈；默认挂到当前场景根节点，保证死亡节点释放后特效仍能播放完成。
 - `SessionState`：入口会话状态，保存当前模式和当前角色，供主菜单、GameWorld 和训练场角色切换复用。
-- `LootChest`：独立宝箱建筑，集中维护四档品质、生命、受击缩短后的有效开启时间、宝箱上方进度条和一次性掉落请求；静态本体阻挡移动与双方弹体，`DamageReceiverComponent` 子组件额外接收玩家近战命中。
+- `LootChest`：独立宝箱建筑，集中维护四档品质、生命、范围内“长按F开启”提示、受击缩短后的有效开启时间、宝箱上方进度条、开启方式和一次性掉落请求；静态本体阻挡移动与双方弹体，`DamageReceiverComponent` 子组件额外接收玩家近战命中。
 - `SupplyExtractionPanel`：战斗内暂停式物资送回面板，只通过 `GlobalInventory` 获取报价并原子转移背包或装备栏物品；金币不足或超过剩余价值的物品灰显不可选，堆叠部分送回复用 `SellQuantityDialog`。
 - `GameWorld`：战斗承载脚本，生成大型网格地图、整图敌人分布、正式模式敌人补充、导航标点、墙体建筑、10 至 20 个宝箱、2 至 5 个物资撤离点、正式撤离点和掉落物，并提供共享 A* 路径查询接口。
 
@@ -143,7 +143,7 @@
 
 永久仓库首次建立或从旧存档迁移时默认按获得时间从新到旧排列，之后会保存玩家手工调整的列表顺序。强化石保存品质、属性和方向；读取旧存档时，通用“强化石”按初级品质恢复，旧方向或百分比词条统一保留正负方向。
 
-地面掉落物使用同一套通用物品流转规则。玩家靠近地面武器或资源时，HUD 左侧按距离显示列表；按 F 拾取最近一件。靠近宝箱持续按住 F 会在宝箱上方显示开启进度，但只要周围存在可拾取掉落物就优先执行拾取并暂停宝箱进度。普通、中级、高级、极品宝箱基础开启时间分别为 1、2、3、5 秒；实际需求乘当前生命比例，因此受伤会线性缩短长按时间，生命归零立即爆出掉落。战斗背包点击物品可丢弃，堆叠资源提供全部或部分丢弃，部分丢弃复用数量弹窗；拆分出的地面资源会登记为本局已见实例，重新拾取不会被误计为新战利品。
+地面掉落物使用同一套通用物品流转规则。玩家靠近地面武器或资源时，HUD 左侧按距离显示列表；按 F 拾取最近一件。进入宝箱范围后显示“长按F开启”，按住后切换为进度条，但只要周围存在可拾取掉落物就优先执行拾取。普通、中级、高级、极品宝箱基础开启时间分别为 1、2、3、5 秒；实际需求乘当前生命比例。击破宝箱的物品先从箱体中心播放放射飞出动画，手动开启则在近距离直接形成紧凑掉落。战斗背包点击物品可丢弃，堆叠资源提供全部或部分丢弃，部分丢弃复用数量弹窗；拆分出的地面资源会登记为本局已见实例，重新拾取不会被误计为新战利品。
 
 ## 局外商店与锻造
 
@@ -222,7 +222,7 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 - `l_wall.tscn`：L 型墙体，用于制造转角掩体和局部阻挡。
 - `l_building.tscn`：L 型实心建筑块，用于制造更大的转角建筑轮廓。
 
-`GameWorld` 通过 `obstacle_scenes` 等参数控制环境生成，并缓存环境碰撞矩形供小地图和 A* 使用。宝箱同样写入第 5 物理层和障碍缓存，因此会阻挡玩家、怪物和双方弹体；开启或击毁后会移除自身障碍矩形、清空导航缓存并刷新小地图版本。每局随机生成 10 至 20 个宝箱，72% 候选优先位于建筑周边，封闭环形建筑和紧凑建筑在周边候选中使用 3 倍权重。
+`GameWorld` 通过 `obstacle_scenes` 等参数控制环境生成，并缓存环境碰撞矩形供小地图和 A* 使用。宝箱生成早于虚拟敌人人口和导航请求，同样写入第 5 物理层、`environment_obstacles` 分组和障碍缓存，因此敌人局部碰撞、视线射线、射击射线和共享 A* 都会考虑宝箱；开启或击毁后会移除自身障碍矩形、清空导航缓存并刷新小地图版本。每局随机生成 10 至 20 个宝箱，72% 候选优先位于建筑周边，封闭环形建筑和紧凑建筑在周边候选中使用 3 倍权重。
 
 `GameWorld` 会按 `exploration_cell_size` 和 `exploration_radius` 记录玩家探索过的地图格子。该数据只由地图 UI 读取，不影响怪物索敌和碰撞。探索记录不会每帧重算，而是按 `exploration_update_interval` 定期检查，并在玩家移动超过 `exploration_update_distance` 时提前刷新；只有新增探索格时才递增探索版本号，供大地图复用迷雾查询缓存。调整格子尺寸会影响迷雾精度和缓存数量；调整探索半径会影响玩家走过后大地图可见区域大小。`GameWorld.find_navigation_path()` 会按寻路格尺寸和代理半径缓存整张地图的 A* 网格，供怪物在目标被墙体或建筑阻挡时自动绕路；寻路网格禁用斜向移动，避免路径从墙角缝隙穿过。环境障碍在地图生成完成后保持静态，因此缓存网格可以被所有怪物复用；如果后续加入可破坏墙体或动态门，需要在障碍变化后清空导航缓存和小地图障碍版本。
 
@@ -236,7 +236,7 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 
 `GameWorld` 通过 `enhancement_stone_drop_chance = 0.10` 为每次实际击杀独立判定强化石；怪物自身 `weapon_drop_chance = 0.20` 独立判定武器。强化石品质为初级 40%、中级 30%、高级 20%、极品 10%。宝箱掉落类别权重为枪械 50%、强化石 30%、修复包 20%；普通、中级、高级、极品宝箱的单件高品质概率分别为 10%、30%、55%、75%，极品宝箱另保证至少 5 件高品质物品。
 
-`GameWorld` 会记录进入战斗后的存活时间。正式撤离仍在 120 秒生成、300 秒标记，范围内停留 5 秒后按闪避结束战斗。除此之外，开局立即按 45%、30%、17%、8% 概率生成 2、3、4、5 个物资撤离点；玩家在任一点连续停留 3 秒后按闪避打开 `SupplyExtractionPanel`，游戏暂停但不会结束战斗。`GlobalInventory` 在单局内累计已送回价值，所有点位共享 1000 金币上限；每次送回按物品当前价值的 20% 向上取整扣除金币，成功后物品立即离开背包或装备栏并进入永久仓库。
+`GameWorld` 会记录进入战斗后的存活时间。正式撤离仍在 120 秒生成、300 秒标记，范围内停留 5 秒后按闪避结束战斗。除此之外，开局立即按 45%、30%、17%、8% 概率生成 2、3、4、5 个物资撤离点，但地图只显示已经进入探索格记录的点位；玩家在任一点连续停留 3 秒后按闪避打开 `SupplyExtractionPanel`，游戏暂停但不会结束战斗。面板用“撤离收费”展示当前物品 20% 运费，关闭时会同步隐藏面板自身，避免后台继续吞掉 ESC。`GlobalInventory` 在单局内累计已送回价值，所有点位共享 1000 金币上限。
 
 训练场提供 `clear_monsters()`、`respawn_monsters()` 和 `add_training_survival_time()` 接口给 HUD 训练场设置调用。清怪会先按训练怪物组清理，再清理 `monster_parent_path` 指向的怪物容器；重新生成会按当前配置追加一批新怪物，不会清空场上已有怪物；增加时间默认使用 `training_time_addition_seconds = 60`。
 
@@ -267,7 +267,7 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 - 仓库与开发者面板：`panel_minimum_size`、`dialog_width`、`dialog_height`、`dialog_background_alpha`、`combat_panel_height`、`coin_step`、`enhancement_stone_grant_count`
 - 商店：`automatic_refresh_interval_seconds`、`weapon_stock_count`、`resource_stock_count`、`normal_price_multiplier_minimum`、`normal_price_multiplier_maximum`、`second_hand_firearm_chance`、`second_hand_durability_consumption_minimum`、`second_hand_durability_consumption_maximum`、`second_hand_enhancement_cumulative_chances`、`second_hand_stone_compatibility_attempts`、`manual_refresh_base_cost`、`manual_refresh_cost_growth`、`gray_market_price_multiplier_minimum`、`gray_market_price_multiplier_maximum`、`gray_market_failure_limit`、`weapon_resource_paths`
 - 锻造：`MAIN_WEAPON_VALUE_STEP`、`MAIN_WEAPON_MULTIPLIER_PER_STEP`、`BASE_COST_MULTIPLIER`、`SACRIFICE_WEAPON_DURABILITY_RATIO`、`COST_PER_RESTORED_DURABILITY`、`STONE_QUALITY_COSTS`、`STONE_UPGRADE_SUCCESS_RATE_PER_SACRIFICE`、`SACRIFICE_SLOT_COUNT`、`FORGE_ANIMATION_DURATION`、`FORGE_ANIMATION_ROTATIONS`、`panel_minimum_size`、`forge_slot_size`、`top_sacrifice_slot_upward_offset`
-- 宝箱：`loot_chest_spawn_count_min`、`loot_chest_spawn_count_max`、`loot_chest_near_building_chance`、`loot_chest_enclosed_building_weight`、`loot_chest_spawn_attempt_count`、`loot_chest_min_distance_from_player`、`loot_chest_clearance_radius`、`loot_chest_minimum_spacing`、`interaction_radius`、`minimum_hold_duration`、`LootChest.QUALITY_WEIGHTS`、`LootChest.QUALITY_CONFIGS`、`CHEST_HIGH_QUALITY_CHANCES`
+- 宝箱：`loot_chest_spawn_count_min`、`loot_chest_spawn_count_max`、`loot_chest_near_building_chance`、`loot_chest_enclosed_building_weight`、`loot_chest_spawn_attempt_count`、`loot_chest_min_distance_from_player`、`loot_chest_clearance_radius`、`loot_chest_minimum_spacing`、`loot_chest_manual_drop_radius_min`、`loot_chest_manual_drop_radius_max`、`loot_chest_broken_drop_radius_min`、`loot_chest_broken_drop_radius_max`、`loot_chest_launch_duration_min`、`loot_chest_launch_duration_max`、`loot_chest_launch_arc_height_min`、`loot_chest_launch_arc_height_max`、`interaction_radius`、`minimum_hold_duration`、`LootChest.QUALITY_WEIGHTS`、`LootChest.QUALITY_CONFIGS`、`CHEST_HIGH_QUALITY_CHANCES`
 - 物资撤离：`supply_extraction_count_weights`、`supply_extraction_hold_duration_seconds`、`supply_extraction_radius`、`supply_extraction_spawn_edge_margin`、`supply_extraction_min_distance_from_player`、`supply_extraction_spawn_attempt_count`、`COMBAT_SHIPPING_VALUE_LIMIT`、`COMBAT_SHIPPING_FEE_RATIO`
 - 角色选择：`game_scene_path`、`main_menu_scene_path`、`stat_bar_maximum`、`speed_bar_maximum`
 - 输入绑定：`SAVE_PATH`、`EVENT_TYPE_UNBOUND`、`_action_entries`

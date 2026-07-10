@@ -12,6 +12,10 @@ const GAME_MODE_TRAINING: String = "training"
 const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_panel.gd")
 ## 局外仓库面板脚本；默认在主菜单点击仓库按钮后动态创建并读取全局背包服务。
 const WAREHOUSE_PANEL_SCRIPT: Script = preload("res://scripts/ui/warehouse_panel.gd")
+## 局外商店面板脚本；默认在主菜单点击商店按钮后动态创建并读取全局商店服务。
+const SHOP_PANEL_SCRIPT: Script = preload("res://scripts/ui/shop_panel.gd")
+## 局外锻造面板脚本；默认在主菜单点击锻造按钮后动态创建并组合库存与锻造服务。
+const FORGE_PANEL_SCRIPT: Script = preload("res://scripts/ui/forge_panel.gd")
 ## 隐藏开发者菜单脚本；默认只在主菜单依次输入 LISBAM 后显示。
 const DEVELOPER_MENU_SCRIPT: Script = preload("res://scripts/ui/developer_menu.gd")
 ## 开发者模式解锁序列；默认由六个英文字母组成，输入错误会按首字母重新匹配。
@@ -29,6 +33,10 @@ const DEVELOPER_UNLOCK_SEQUENCE: String = "LISBAM"
 @onready var _quit_button: Button = %QuitButton
 ## 仓库按钮缓存；默认固定在主菜单左下角，点击后打开全局背包与装备调整界面。
 @onready var _warehouse_button: Button = %WarehouseButton
+## 商店按钮缓存；默认位于仓库按钮右侧，点击后打开普通商店与灰市界面。
+@onready var _shop_button: Button = %ShopButton
+## 锻造按钮缓存；默认位于商店按钮右侧，点击后打开主武器修复与强化界面。
+@onready var _forge_button: Button = %ForgeButton
 ## 设置面板缓存；默认绑定唯一名 SettingsPanel，控制主菜单设置界面的显示和隐藏。
 @onready var _settings_panel: Control = %SettingsPanel
 ## 设置内容容器缓存；默认通过场景路径绑定，用于动态挂载按键绑定面板。
@@ -62,6 +70,14 @@ var _settings_home_controls: Array[Control] = []
 var _warehouse_overlay: Control
 ## 仓库面板实例；默认由 WarehousePanel 脚本创建，关闭后复用而不重复构建服务数据。
 var _warehouse_panel: Control
+## 商店全屏遮罩；默认运行时创建并隐藏，打开时阻止主菜单其他按钮接收鼠标输入。
+var _shop_overlay: Control
+## 商店面板实例；默认由 ShopPanel 脚本创建，关闭后复用并保留当前查询条件。
+var _shop_panel: Control
+## 锻造全屏遮罩；默认运行时创建并隐藏，打开时阻止主菜单其他按钮接收鼠标输入。
+var _forge_overlay: Control
+## 锻造面板实例；默认由 ForgePanel 脚本创建，关闭后复用并保留未执行的槽位引用。
+var _forge_panel: Control
 ## 开发者菜单全屏遮罩；默认运行时创建并隐藏，解锁后阻止其他主菜单控件接收输入。
 var _developer_overlay: Control
 ## 开发者菜单实例；默认由 DeveloperMenu 脚本动态创建并在关闭后复用。
@@ -77,10 +93,14 @@ func _ready() -> void:
 	_settings_button.pressed.connect(_on_settings_button_pressed)
 	_quit_button.pressed.connect(_on_quit_button_pressed)
 	_warehouse_button.pressed.connect(_on_warehouse_button_pressed)
+	_shop_button.pressed.connect(_on_shop_button_pressed)
+	_forge_button.pressed.connect(_on_forge_button_pressed)
 	_master_volume_slider.value_changed.connect(_on_master_volume_slider_value_changed)
 	_settings_back_button.pressed.connect(_on_settings_back_button_pressed)
 	_build_key_binding_navigation()
 	_build_warehouse_overlay()
+	_build_shop_overlay()
+	_build_forge_overlay()
 	_build_developer_overlay()
 	_settings_panel.visible = false
 	_show_key_binding_page(false)
@@ -135,6 +155,20 @@ func _on_warehouse_button_pressed() -> void:
 	_warehouse_overlay.visible = true
 
 
+func _on_shop_button_pressed() -> void:
+	if _shop_overlay == null:
+		return
+	_settings_panel.visible = false
+	_shop_overlay.visible = true
+
+
+func _on_forge_button_pressed() -> void:
+	if _forge_overlay == null:
+		return
+	_settings_panel.visible = false
+	_forge_overlay.visible = true
+
+
 func _build_warehouse_overlay() -> void:
 	if _warehouse_overlay != null:
 		return
@@ -171,6 +205,82 @@ func _build_warehouse_overlay() -> void:
 	warehouse_overlay.add_child(warehouse_panel)
 	_warehouse_panel = warehouse_panel
 	warehouse_overlay.visible = false
+
+
+func _build_shop_overlay() -> void:
+	if _shop_overlay != null:
+		return
+
+	# 商店遮罩；覆盖整个主菜单并拦截输入，关闭时整体隐藏。
+	var shop_overlay: Control = Control.new()
+	shop_overlay.name = "ShopOverlay"
+	shop_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	shop_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(shop_overlay)
+	_shop_overlay = shop_overlay
+
+	# 商店背景遮罩；使用半透明黑色突出商品查询和购买区域。
+	var shop_dim: ColorRect = ColorRect.new()
+	shop_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	shop_dim.color = Color(0.0, 0.0, 0.0, 0.62)
+	shop_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	shop_overlay.add_child(shop_dim)
+
+	# 商店面板；居中显示并由独立组件维护商品刷新、筛选与购买确认。
+	var shop_panel: Control = SHOP_PANEL_SCRIPT.new() as Control
+	if shop_panel == null:
+		shop_overlay.visible = false
+		return
+	shop_panel.anchor_left = 0.5
+	shop_panel.anchor_top = 0.5
+	shop_panel.anchor_right = 0.5
+	shop_panel.anchor_bottom = 0.5
+	shop_panel.offset_left = -480.0
+	shop_panel.offset_top = -310.0
+	shop_panel.offset_right = 480.0
+	shop_panel.offset_bottom = 310.0
+	shop_panel.connect("closed", Callable(self, "_on_shop_closed"))
+	shop_overlay.add_child(shop_panel)
+	_shop_panel = shop_panel
+	shop_overlay.visible = false
+
+
+func _build_forge_overlay() -> void:
+	if _forge_overlay != null:
+		return
+
+	# 锻造遮罩；覆盖整个主菜单并拦截输入，锻造动画期间由面板自身阻止关闭。
+	var forge_overlay: Control = Control.new()
+	forge_overlay.name = "ForgeOverlay"
+	forge_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	forge_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(forge_overlay)
+	_forge_overlay = forge_overlay
+
+	# 锻造背景遮罩；使用半透明黑色突出环形材料槽和锻造预览。
+	var forge_dim: ColorRect = ColorRect.new()
+	forge_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	forge_dim.color = Color(0.0, 0.0, 0.0, 0.68)
+	forge_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	forge_overlay.add_child(forge_dim)
+
+	# 锻造面板；居中显示并由独立组件维护材料引用、动画与原子结算。
+	var forge_panel: Control = FORGE_PANEL_SCRIPT.new() as Control
+	if forge_panel == null:
+		forge_overlay.visible = false
+		return
+	forge_panel.anchor_left = 0.5
+	forge_panel.anchor_top = 0.5
+	forge_panel.anchor_right = 0.5
+	forge_panel.anchor_bottom = 0.5
+	forge_panel.offset_left = -480.0
+	forge_panel.offset_top = -325.0
+	forge_panel.offset_right = 480.0
+	forge_panel.offset_bottom = 325.0
+	forge_panel.connect("closed", Callable(self, "_on_forge_closed"))
+	forge_overlay.add_child(forge_panel)
+	_forge_panel = forge_panel
+	forge_overlay.visible = false
 
 
 func _build_developer_overlay() -> void:
@@ -211,6 +321,10 @@ func _open_developer_menu() -> void:
 	_settings_panel.visible = false
 	if _warehouse_overlay != null:
 		_warehouse_overlay.visible = false
+	if _shop_overlay != null:
+		_shop_overlay.visible = false
+	if _forge_overlay != null:
+		_forge_overlay.visible = false
 	_developer_overlay.visible = true
 
 
@@ -224,6 +338,18 @@ func _on_warehouse_closed() -> void:
 	if _warehouse_overlay != null:
 		_warehouse_overlay.visible = false
 	_warehouse_button.grab_focus()
+
+
+func _on_shop_closed() -> void:
+	if _shop_overlay != null:
+		_shop_overlay.visible = false
+	_shop_button.grab_focus()
+
+
+func _on_forge_closed() -> void:
+	if _forge_overlay != null:
+		_forge_overlay.visible = false
+	_forge_button.grab_focus()
 
 
 func _on_master_volume_slider_value_changed(value: float) -> void:

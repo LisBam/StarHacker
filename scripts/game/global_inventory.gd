@@ -8,6 +8,8 @@ signal equipment_changed
 signal run_state_changed
 signal warehouse_changed
 signal coins_changed
+## 战斗失败遗失记录信号；参数为本次实际遗失条目，商店灰市通过该只读快照维护最近五次失败物品。
+signal combat_failure_losses_recorded(lost_entries: Array)
 
 ## 全局背包存档路径；默认写入用户目录，保存物品标识、获得时间、排序优先级和装备槽。
 const SAVE_PATH: String = "user://global_inventory.json"
@@ -36,6 +38,8 @@ const DEFAULT_RANGED_WEAPON_IDS: Array[String] = ["quantum_pistol", "pulse_rifle
 const DEFAULT_MELEE_WEAPON_ID: String = "phase_blade"
 ## 默认局外金币数量；首次建立存档时为 0，金币只能通过出售永久仓库物品增加且不会进入战斗。
 const DEFAULT_STARTING_COINS: int = 0
+## 战斗失败默认保留比例；默认 0.5，使背包内每件武器和每颗资源长期平均各保留 50%。
+const DEFAULT_FAILURE_RETENTION_RATIO: float = 0.5
 ## 永久仓库位置标识；默认供局外拖拽接口识别安全存储来源和目标。
 const STORAGE_LOCATION_WAREHOUSE: String = "warehouse"
 ## 随身背包位置标识；默认供局外拖拽接口识别战斗携带来源和目标。
@@ -88,7 +92,7 @@ var _save_queued: bool = false
 @export_range(0.05, 10.0, 0.05) var durability_save_delay_seconds: float = 0.5
 ## 是否已有耐久存档等待执行；默认 false，用于把短时间内多次射击合并为一次磁盘写入。
 var _durability_save_queued: bool = false
-## 服务随机数生成器；默认启动时随机化，用于失败结算随机保留 20% 背包物品。
+## 服务随机数生成器；默认启动时随机化，用于失败结算随机保留 50% 背包物品。
 var _random: RandomNumberGenerator = RandomNumberGenerator.new()
 ## 局外金币余额；取值大于等于 0，默认 0，只在主菜单仓库出售永久物品时增加。
 var _coins: int = DEFAULT_STARTING_COINS
@@ -157,11 +161,11 @@ func complete_combat_run_success() -> Dictionary:
 	return _last_run_outcome.duplicate(true)
 
 
-func complete_combat_run_failure(reason: String = "战斗失败", retained_ratio: float = 0.2) -> Dictionary:
+func complete_combat_run_failure(reason: String = "战斗失败", retained_ratio: float = DEFAULT_FAILURE_RETENTION_RATIO) -> Dictionary:
 	if not _run_active:
 		return _last_run_outcome.duplicate(true)
 
-	# 标准化保留概率；每件武器或每颗堆叠资源独立判定，长期平均保留约 20%。
+	# 标准化保留概率；每件武器或每颗堆叠资源独立判定，默认长期平均保留约 50%。
 	var resolved_retained_ratio: float = clampf(retained_ratio, 0.0, 1.0)
 	# 结算后背包记录；武器整件保留或丢失，强化石堆叠按单颗随机后保留剩余数量。
 	var retained_records: Array[Dictionary] = []
@@ -204,6 +208,8 @@ func complete_combat_run_failure(reason: String = "战斗失败", retained_ratio
 		"gained_items": gained_items,
 		"lost_items": lost_items,
 	}
+	# 灰市遗失快照；在背包所有权完成结算后发送，监听方只能读取资源与数量，不会重新取得库存记录。
+	combat_failure_losses_recorded.emit(lost_entries.duplicate(true))
 	_queue_save_inventory()
 	inventory_changed.emit()
 	run_state_changed.emit()
@@ -262,6 +268,83 @@ func adjust_coins(amount: int) -> int:
 	_queue_save_inventory()
 	coins_changed.emit()
 	return _coins
+
+
+func purchase_resource_to_warehouse(item_resource: Resource, purchase_price: int, quantity: int = 1) -> bool:
+	if item_resource == null or purchase_price < 0 or quantity <= 0 or _coins < purchase_price:
+		return false
+	# 实际购买数量；武器固定为一件，可堆叠资源限制在单组上限以内，防止商店异常数据写入超大堆叠。
+	var resolved_quantity: int = 1 if _is_weapon_resource(item_resource) else clampi(quantity, 1, MAX_STACK_QUANTITY)
+	# 新增仓库记录；商店资源已经是独立实例，直接转交所有权并允许强化石按签名合并。
+	var purchased_record: Dictionary = _create_record(item_resource)
+	purchased_record["quantity"] = resolved_quantity
+	_coins -= purchase_price
+	_insert_record_with_stack_merge(_warehouse_records, purchased_record)
+	_queue_save_inventory()
+	warehouse_changed.emit()
+	coins_changed.emit()
+	return true
+
+
+func has_storage_resource_quantity(item_resource: Resource, source_location: String, requested_quantity: int = 1) -> bool:
+	if requested_quantity <= 0:
+		return false
+	return get_storage_resource_quantity(item_resource, source_location) >= requested_quantity
+
+
+func consume_storage_resource_quantity(item_resource: Resource, source_location: String, requested_quantity: int = 1) -> bool:
+	if item_resource == null or requested_quantity <= 0:
+		return false
+	# 消耗来源记录；只允许锻造等局外系统消费仓库或背包中的真实所有权记录。
+	var source_records: Array[Dictionary] = _get_storage_records(source_location)
+	# 消耗记录下标；通过资源实例身份定位，避免同名武器或同类强化石被误删。
+	var record_index: int = _find_storage_record_index(source_location, item_resource)
+	if record_index < 0 or record_index >= source_records.size():
+		return false
+	# 当前持有数量；武器固定为一，资源堆叠按记录数量读取。
+	var stored_quantity: int = maxi(int(source_records[record_index].get("quantity", 1)), 1)
+	if stored_quantity < requested_quantity:
+		return false
+	# 剩余数量；仍有余量时保留原资源实例，全部消耗时移除完整记录。
+	var remaining_quantity: int = stored_quantity - requested_quantity
+	if remaining_quantity > 0:
+		source_records[record_index]["quantity"] = remaining_quantity
+	else:
+		source_records.remove_at(record_index)
+	_queue_save_inventory()
+	_emit_storage_changed(source_location)
+	return true
+
+
+func serialize_item_snapshot(item_resource: Resource, quantity: int = 1) -> Dictionary:
+	if item_resource == null:
+		return {}
+	# 临时快照记录；不进入任何库存容器，仅复用稳定存档格式保存商店与灰市物品的运行时状态。
+	var snapshot_record: Dictionary = {
+		"record_id": "",
+		"resource": item_resource,
+		"quantity": clampi(quantity, 1, MAX_STACK_QUANTITY),
+		"acquired_at": 0.0,
+		"acquisition_sequence": 0,
+		"last_extraction_epoch": 0,
+	}
+	return _serialize_record(snapshot_record)
+
+
+func deserialize_item_snapshot(serialized_snapshot: Dictionary) -> Dictionary:
+	if serialized_snapshot.is_empty():
+		return {}
+	# 原获得序号；商店读取临时物品不应改变玩家库存的真实获得顺序，因此反序列化后立即恢复。
+	var original_acquisition_sequence: int = _acquisition_sequence
+	# 临时恢复记录；使用库存兼容加载器恢复武器强化、耐久或强化石品质与词条。
+	var restored_record: Dictionary = _deserialize_record(serialized_snapshot)
+	_acquisition_sequence = original_acquisition_sequence
+	if restored_record.is_empty():
+		return {}
+	return {
+		"resource": restored_record.get("resource") as Resource,
+		"quantity": clampi(int(restored_record.get("quantity", 1)), 1, MAX_STACK_QUANTITY),
+	}
 
 
 func clear_warehouse_items() -> int:

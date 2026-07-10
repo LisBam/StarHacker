@@ -24,6 +24,8 @@ const TARGET_AI_STATE_VISIBLE: int = 1
 const TARGET_AI_STATE_SEARCHING: int = 2
 ## AI 二级扩大搜查状态；默认表示玩家反复卡墙且临近脱战阈值，本怪物扩大自身搜查范围。
 const TARGET_AI_STATE_BLOCKADE: int = 3
+## 玩家物理层位掩码；固定为第 1 层，用于从怪物碰撞掩码中移除玩家并建立双向碰撞例外。
+const PLAYER_PHYSICS_LAYER_MASK: int = 1
 
 ## 最大血量；取值应大于 0，默认 60 用于训练场怪物强度，运行时修改会影响怪物承伤能力。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var max_health: float = 60.0
@@ -261,6 +263,8 @@ func apply_spawn_variation(size_multiplier: float, attribute_multiplier: float) 
 
 
 func _ready() -> void:
+	# 怪物实体碰撞只保留环境层；即使旧场景或运行时生成路径仍包含玩家层，也会在进入场景树时统一清除。
+	collision_mask &= ~PLAYER_PHYSICS_LAYER_MASK
 	current_health = clampf(current_health, 0.0, max_health)
 	_random.randomize()
 	_randomize_individual_behavior()
@@ -269,6 +273,11 @@ func _ready() -> void:
 	_cache_collision_shapes()
 	_ai_update_remaining = _random.randf_range(0.0, maxf(ai_update_interval, 0.016))
 	health_changed.emit(current_health, max_health)
+
+
+func _exit_tree() -> void:
+	# 怪物卸载或死亡释放前同步清除玩家侧例外，避免虚拟人口反复实例化后留下失效物理 RID。
+	_remove_target_collision_exception(_target)
 
 
 func _physics_process(delta: float) -> void:
@@ -337,7 +346,9 @@ func _cache_collision_shapes() -> void:
 
 
 func set_target(target_node: Node) -> void:
+	_remove_target_collision_exception(_target)
 	_target = target_node as Node2D
+	_add_target_collision_exception(_target)
 	if _movement_component != null:
 		_movement_component.call("set_spawn_position", global_position)
 	if _perception_component != null:
@@ -346,6 +357,20 @@ func set_target(target_node: Node) -> void:
 		_tactical_component.call("reset_intelligence")
 	_sync_perception_state()
 	_clear_navigation_path()
+
+
+func _add_target_collision_exception(target_node: Node) -> void:
+	if not (target_node is PhysicsBody2D):
+		return
+	add_collision_exception_with(target_node)
+	(target_node as PhysicsBody2D).add_collision_exception_with(self)
+
+
+func _remove_target_collision_exception(target_node: Node) -> void:
+	if not is_instance_valid(target_node) or not (target_node is PhysicsBody2D):
+		return
+	remove_collision_exception_with(target_node)
+	(target_node as PhysicsBody2D).remove_collision_exception_with(self)
 
 
 func refresh_ai_configuration() -> void:

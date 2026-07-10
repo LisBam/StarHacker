@@ -20,6 +20,26 @@ const SUBCATEGORY_ENHANCEMENT_STONES: String = "enhancement_stones"
 const SORT_ACQUIRED_TIME: String = "acquired_time"
 ## 物品价值排序；按单价乘堆叠数量从高到低排列，相同价值时回退获得时间。
 const SORT_ITEM_VALUE: String = "item_value"
+## 强化石方向筛选键分隔符；默认冒号用于把属性名和 +1/-1 方向组合为稳定元数据。
+const STONE_ATTRIBUTE_DIRECTION_SEPARATOR: String = ":"
+## 强化石方向筛选分组顺序；默认先展示全部“+”属性，再展示全部“-”属性。
+const STONE_FILTER_DIRECTIONS: Array[int] = [1, -1]
+
+
+static func build_stone_attribute_filter_key(stat_name: String, direction: int) -> String:
+	# 标准化方向；筛选元数据只保存 +1 或 -1，避免 UI 文本变化影响查询规则。
+	var normalized_direction: int = EnhancementRules.normalize_direction(direction)
+	return "%s%s%d" % [stat_name, STONE_ATTRIBUTE_DIRECTION_SEPARATOR, normalized_direction]
+
+
+static func get_stone_attribute_filter_label(stat_name: String, direction: int) -> String:
+	# 筛选显示文本；与强化石卡片一致使用“属性+”或“属性-”，便于玩家直接按方向定位。
+	return "%s%s" % [EnhancementRules.get_stat_label(stat_name), EnhancementRules.get_direction_symbol(direction)]
+
+
+static func get_stone_attribute_direction_group_label(direction: int) -> String:
+	# 分组标题；只负责说明数值方向，不把“+”或“-”错误等同于增益或减益。
+	return "“%s”属性" % EnhancementRules.get_direction_symbol(direction)
 
 
 static func filter_and_sort_entries(entries: Array, primary_category: String, subcategory: String, search_keyword: String, stone_attribute: String, sort_mode: String) -> Array[Dictionary]:
@@ -76,7 +96,19 @@ static func _matches_stone_attribute(entry: Dictionary, stone_attribute: String)
 		return false
 	# 归一化强化词典；旧百分比存档也能按属性键正确筛选。
 	var modifiers: Dictionary = EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary)
-	return modifiers.has(stone_attribute)
+	# 筛选键分段；新版键为“属性:方向”，旧版纯属性键继续匹配该属性的任意方向。
+	var filter_parts: PackedStringArray = stone_attribute.split(STONE_ATTRIBUTE_DIRECTION_SEPARATOR, false, 1)
+	# 筛选属性名；新版读取分隔符前内容，旧版直接使用完整键。
+	var filter_stat_name: String = filter_parts[0] if not filter_parts.is_empty() else stone_attribute
+	if not modifiers.has(filter_stat_name):
+		return false
+	if filter_parts.size() < 2:
+		return true
+	# 目标筛选方向；无效值按 +1 兜底，正常 UI 始终写入明确的 +1 或 -1。
+	var filter_direction: int = EnhancementRules.normalize_direction(int(filter_parts[1]))
+	# 强化石实际方向；归一化后与目标方向精确匹配。
+	var modifier_direction: int = EnhancementRules.normalize_direction(modifiers.get(filter_stat_name, 1))
+	return modifier_direction == filter_direction
 
 
 static func _build_search_text(entry: Dictionary) -> String:

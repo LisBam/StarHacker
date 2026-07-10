@@ -74,6 +74,8 @@ const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
 @export_range(24.0, 120.0, 1.0) var nearby_drop_collapsed_height: float = 42.0
 ## 战斗开发者菜单半尺寸；默认 280x280，修改会影响暂停遮罩中调试面板的可用空间，运行时通常不动态修改。
 @export var combat_developer_menu_half_size: Vector2 = Vector2(280.0, 280.0)
+## 远程冷却遮罩最短显示时长；默认 0.12 秒，更短或相等的高射速冷却不显示遮罩以避免持续闪烁。
+@export_range(0.0, 1.0, 0.01) var ranged_cooldown_overlay_minimum_duration: float = 0.12
 
 ## 玩家节点缓存；默认按 player_path 获取，允许为空但 HUD 不会显示有效状态，修改会影响所有组件绑定。
 var _player: Node
@@ -635,6 +637,10 @@ func _refresh_inventory_equipment_slots() -> void:
 func _refresh_cooldown_overlays() -> void:
 	# 远程冷却比例；取值为 0 到 1，默认从远程攻击组件读取，修改会影响远程槽白色 CD 遮罩。
 	var ranged_cooldown_ratio: float = _get_component_cooldown_ratio(_ranged_attack_component)
+	# 本次远程冷却总时长；高射速武器不显示快速闪烁的遮罩，但实际攻击冷却保持不变。
+	var ranged_cooldown_duration: float = _get_component_cooldown_duration(_ranged_attack_component)
+	if ranged_cooldown_duration <= ranged_cooldown_overlay_minimum_duration:
+		ranged_cooldown_ratio = 0.0
 	if ranged_cooldown_ratio <= 0.0:
 		_last_cooling_ranged_slot = -1
 
@@ -1224,9 +1230,13 @@ func _bind_inventory_filter_buttons() -> void:
 			_inventory_stone_attribute_option.custom_minimum_size = Vector2(112.0, 34.0)
 			_inventory_stone_attribute_option.add_item("全部属性")
 			_inventory_stone_attribute_option.set_item_metadata(0, "")
-			for stat_name in EnhancementRules.STAT_KEYS:
-				_inventory_stone_attribute_option.add_item(EnhancementRules.get_stat_label(stat_name))
-				_inventory_stone_attribute_option.set_item_metadata(_inventory_stone_attribute_option.item_count - 1, stat_name)
+			# 筛选方向顺序；先列出全部“+”词条，再列出全部“-”词条，保持与仓库筛选一致。
+			for direction in InventoryQuery.STONE_FILTER_DIRECTIONS:
+				_inventory_stone_attribute_option.add_separator(InventoryQuery.get_stone_attribute_direction_group_label(direction))
+				# 可筛选属性；每个属性分别建立精确方向选项，例如“伤害+”和“伤害-”。
+				for stat_name in EnhancementRules.STAT_KEYS:
+					_inventory_stone_attribute_option.add_item(InventoryQuery.get_stone_attribute_filter_label(stat_name, direction))
+					_inventory_stone_attribute_option.set_item_metadata(_inventory_stone_attribute_option.item_count - 1, InventoryQuery.build_stone_attribute_filter_key(stat_name, direction))
 			_inventory_stone_attribute_option.item_selected.connect(_on_inventory_stone_attribute_selected)
 			query_bar.add_child(_inventory_stone_attribute_option)
 
@@ -1839,6 +1849,13 @@ func _get_component_cooldown_ratio(component: Node) -> float:
 		return 0.0
 
 	return clampf(float(component.call("get_cooldown_ratio")), 0.0, 1.0)
+
+
+func _get_component_cooldown_duration(component: Node) -> float:
+	if component == null or not component.has_method("get_cooldown_duration"):
+		return 0.0
+
+	return maxf(float(component.call("get_cooldown_duration")), 0.0)
 
 
 func _get_current_character_display_name() -> String:
@@ -2495,7 +2512,7 @@ func _on_return_main_menu_button_pressed() -> void:
 	if _escape_confirmation_dialog == null:
 		return
 	# 逃跑警告；正式模式明确说明背包损失规则，训练模式说明不会进行战利品保留结算。
-	_escape_confirmation_dialog.dialog_text = "确认逃跑并返回主菜单吗？\n正式战斗中，背包物品仅约 20% 会被保留，约 80% 会丢失；已装备物品不参与损失。" if not _is_training_mode else "确认结束训练并返回主菜单吗？训练模式不会产生正式战斗物品损失。"
+	_escape_confirmation_dialog.dialog_text = "确认逃跑并返回主菜单吗？\n正式战斗中，背包物品约 50% 会被保留、约 50% 会丢失；已装备物品不参与损失。" if not _is_training_mode else "确认结束训练并返回主菜单吗？训练模式不会产生正式战斗物品损失。"
 	_escape_confirmation_dialog.popup_centered(Vector2i(520, 0))
 
 
@@ -2624,7 +2641,7 @@ func _show_failure_settlement(reason: String) -> void:
 		_set_death_overlay_visible(true)
 		return
 
-	# 全局背包服务；正式战斗失败时随机保留约 20% 背包物品并移除其余物品。
+	# 全局背包服务；正式战斗失败时随机保留约 50% 背包物品并移除其余物品。
 	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
 	if global_inventory == null or not global_inventory.has_method("is_combat_run_active") or not bool(global_inventory.call("is_combat_run_active")):
 		_run_outcome_resolved = true
@@ -2633,7 +2650,7 @@ func _show_failure_settlement(reason: String) -> void:
 
 	_run_outcome_resolved = true
 	# 失败结算；包含完整丢失与随机保留物品名称，直接用于结算界面。
-	var outcome: Dictionary = global_inventory.call("complete_combat_run_failure", reason, 0.2)
+	var outcome: Dictionary = global_inventory.call("complete_combat_run_failure", reason)
 	_present_run_outcome(outcome)
 
 
@@ -2659,7 +2676,7 @@ func _rebuild_settlement_list() -> void:
 	var result_type: String = str(_settlement_outcome.get("result", "failure"))
 	# 结算说明；明确列表统计口径，避免把自己丢弃后重新捡回的开局物品误认为战利品。
 	var summary_label: Label = Label.new()
-	summary_label.text = "已保留本次撤离携带的全部物品，物品仍在随身背包中，可返回仓库后手动存放。下方仅统计本局首次获得的战利品。" if result_type == "success" else "背包物品按规则随机保留约 20%，已装备物品不参与损失。下方仅展示本局首次获得与实际丢失的物品。"
+	summary_label.text = "已保留本次撤离携带的全部物品，物品仍在随身背包中，可返回仓库后手动存放。下方仅统计本局首次获得的战利品。" if result_type == "success" else "背包物品按规则随机保留约 50%、丢失约 50%，已装备物品不参与损失。下方仅展示本局首次获得与实际丢失的物品。"
 	summary_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	summary_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_death_settlement_list.add_child(summary_label)
@@ -2676,7 +2693,7 @@ func _rebuild_settlement_list() -> void:
 		"",
 		InventoryQuery.SORT_ACQUIRED_TIME
 	)
-	# 实际丢失条目；失败结算展示被移出背包的约 80% 物品，成功结算保持空数组。
+	# 实际丢失条目；失败结算展示被移出背包的约 50% 物品，成功结算保持空数组。
 	var lost_entries: Array = _settlement_outcome.get("lost_entries", [])
 	_build_settlement_section("本局获得", filtered_gained_entries, "当前分类没有获得物品", Color(0.35, 1.0, 0.72, 1.0))
 	if result_type != "success":

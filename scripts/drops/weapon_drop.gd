@@ -19,6 +19,10 @@ class_name WeaponDrop
 var _visual_base_position: Vector2 = Vector2.ZERO
 ## 当前存活时间；取值大于等于 0，默认 0，用于驱动悬浮动画。
 var _age: float = 0.0
+## 当前是否正在播放宝箱击破飞出动画；默认 false，动画期间不会进入可拾取分组。
+var _launching: bool = false
+## 当前飞出动画补间；默认 null，用于同时驱动世界位移和视觉抛物线高度。
+var _launch_tween: Tween
 
 ## 视觉根节点缓存；默认绑定直接子节点 Visual，允许为空以避免场景节点缺失时阻断掉落逻辑。
 @onready var _visual_root: Node2D = get_node_or_null("Visual") as Node2D
@@ -68,6 +72,30 @@ func get_pickup_radius() -> float:
 	return pickup_radius
 
 
+func play_launch_animation(target_position: Vector2, duration: float, arc_height: float) -> void:
+	if _launch_tween != null and _launch_tween.is_valid():
+		_launch_tween.kill()
+	_launching = true
+	remove_from_group("item_drops")
+	remove_from_group("weapon_drops")
+	# 有效动画参数；时长至少 0.05 秒，弧高使用正值确保物品先向上飞出再落地。
+	var resolved_duration: float = maxf(duration, 0.05)
+	# 有效抛物线高度；默认由 GameWorld 按击破掉落配置传入。
+	var resolved_arc_height: float = maxf(arc_height, 0.0)
+	_launch_tween = create_tween()
+	_launch_tween.set_parallel(true)
+	_launch_tween.tween_property(self, "global_position", target_position, resolved_duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if _visual_root != null:
+		# 视觉上升阶段；占总时长 42%，与水平位移共同形成明显飞出轨迹。
+		var rise_duration: float = resolved_duration * 0.42
+		# 视觉下降阶段；占剩余时长，落地后回到原始视觉位置。
+		var fall_duration: float = resolved_duration - rise_duration
+		var arc_tween: Tween = create_tween()
+		arc_tween.tween_property(_visual_root, "position", _visual_base_position + Vector2.UP * resolved_arc_height, rise_duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		arc_tween.tween_property(_visual_root, "position", _visual_base_position, fall_duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	_launch_tween.chain().tween_callback(_finish_launch_animation)
+
+
 func get_pickup_display_name() -> String:
 	# 当前掉落资源；优先读取通用字段并兼容旧武器场景配置。
 	var current_item_data: Resource = _get_item_data()
@@ -87,7 +115,7 @@ func get_pickup_display_name() -> String:
 func pickup_to_inventory(inventory_component: Node) -> bool:
 	# 当前掉落资源；拾取时把同一资源实例交给全局库存，以便本局收益统计排除重复拾取。
 	var current_item_data: Resource = _get_item_data()
-	if current_item_data == null or inventory_component == null or not inventory_component.has_method("add_item"):
+	if _launching or current_item_data == null or inventory_component == null or not inventory_component.has_method("add_item"):
 		return false
 
 	if not bool(inventory_component.call("add_item", current_item_data)):
@@ -120,3 +148,11 @@ func _refresh_visual() -> void:
 
 func _get_item_data() -> Resource:
 	return item_data if item_data != null else weapon_data
+
+
+func _finish_launch_animation() -> void:
+	_launching = false
+	add_to_group("item_drops")
+	add_to_group("weapon_drops")
+	if _visual_root != null:
+		_visual_root.position = _visual_base_position

@@ -22,6 +22,12 @@ var _is_main_slot: bool = false
 var _entry: Dictionary = {}
 ## 当前槽位物品是否不符合主物品锻造规则；默认 false，启用时显示红色滤镜但仍允许点击归还。
 var _is_invalid: bool = false
+## 槽位普通样式缓存；默认在 configure 创建，用于无效材料禁用悬停提亮。
+var _normal_style: StyleBoxFlat
+## 槽位悬停样式缓存；默认在 configure 创建，合法槽位继续使用轻微提亮反馈。
+var _hover_style: StyleBoxFlat
+## 槽位按下样式缓存；默认在 configure 创建，合法槽位继续使用按下反馈。
+var _pressed_style: StyleBoxFlat
 
 
 func configure(slot_index: int, is_main_slot: bool, slot_size: float = 84.0) -> void:
@@ -31,20 +37,18 @@ func configure(slot_index: int, is_main_slot: bool, slot_size: float = 84.0) -> 
 	var resolved_slot_size: float = maxf(slot_size, MINIMUM_SLOT_SIZE)
 	custom_minimum_size = Vector2.ONE * resolved_slot_size
 	# 槽位基础样式；六个槽位统一正方形深色底与白色边框，主槽与牺牲槽仅通过位置区分职责。
-	var normal_style: StyleBoxFlat = StyleBoxFlat.new()
-	normal_style.bg_color = Color(0.06, 0.075, 0.09, 0.94)
-	normal_style.border_color = Color.WHITE
-	normal_style.set_border_width_all(2)
-	normal_style.set_corner_radius_all(4)
+	_normal_style = StyleBoxFlat.new()
+	_normal_style.bg_color = Color(0.06, 0.075, 0.09, 0.94)
+	_normal_style.border_color = Color.WHITE
+	_normal_style.set_border_width_all(2)
+	_normal_style.set_corner_radius_all(4)
 	# 槽位悬停样式；保留白色边框并轻微提亮背景，便于确认可点击归还操作。
-	var hover_style: StyleBoxFlat = normal_style.duplicate() as StyleBoxFlat
-	hover_style.bg_color = Color(0.13, 0.17, 0.21, 0.98)
+	_hover_style = _normal_style.duplicate() as StyleBoxFlat
+	_hover_style.bg_color = Color(0.13, 0.17, 0.21, 0.98)
 	# 槽位按下样式；保持边框不变，避免锻造区视觉层级随点击发生跳变。
-	var pressed_style: StyleBoxFlat = normal_style.duplicate() as StyleBoxFlat
-	pressed_style.bg_color = Color(0.18, 0.22, 0.26, 1.0)
-	add_theme_stylebox_override("normal", normal_style)
-	add_theme_stylebox_override("hover", hover_style)
-	add_theme_stylebox_override("pressed", pressed_style)
+	_pressed_style = _normal_style.duplicate() as StyleBoxFlat
+	_pressed_style.bg_color = Color(0.18, 0.22, 0.26, 1.0)
+	_refresh_interaction_styles()
 	if not pressed.is_connected(_on_pressed):
 		pressed.connect(_on_pressed)
 	refresh({})
@@ -69,7 +73,17 @@ func refresh(entry: Dictionary) -> void:
 func set_invalid_state(is_invalid: bool) -> void:
 	# 无效状态只改变当前槽位视觉与提示，不禁用按钮，玩家仍可单击移除红色材料。
 	_is_invalid = is_invalid
+	_refresh_interaction_styles()
 	refresh(_entry)
+
+
+func _refresh_interaction_styles() -> void:
+	if _normal_style == null:
+		return
+	add_theme_stylebox_override("normal", _normal_style)
+	# 红色无效材料仍允许点击归还，但 hover 和 pressed 不再提亮为可锻造状态。
+	add_theme_stylebox_override("hover", _normal_style if _is_invalid else _hover_style)
+	add_theme_stylebox_override("pressed", _normal_style if _is_invalid else _pressed_style)
 
 
 func get_entry() -> Dictionary:

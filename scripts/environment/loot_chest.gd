@@ -4,7 +4,7 @@ class_name LootChest
 ## 宝箱是可受击、可长按开启的静态建筑实体。
 ## 宝箱只负责品质数值、生命、开启进度和释放请求，实际掉落物池由 GameWorld 统一生成。
 
-signal loot_released(chest_position: Vector2, quality_id: String, drop_count: int, minimum_high_quality_count: int)
+signal loot_released(chest_position: Vector2, quality_id: String, drop_count: int, minimum_high_quality_count: int, broken_open: bool)
 signal chest_removed(chest: Node)
 
 ## 普通宝箱品质标识；用于品质抽取、视觉和掉落权重查询。
@@ -57,6 +57,8 @@ var _random: RandomNumberGenerator = RandomNumberGenerator.new()
 @onready var _quality_label: Label = get_node_or_null("QualityLabel") as Label
 ## 宝箱开启进度条；默认绑定 OpenProgress，只有有效长按交互期间显示在宝箱上方。
 @onready var _open_progress: ProgressBar = get_node_or_null("OpenProgress") as ProgressBar
+## 宝箱交互提示；默认绑定 InteractionLabel，玩家进入范围且尚未长按时显示“长按F开启”。
+@onready var _interaction_label: Label = get_node_or_null("InteractionLabel") as Label
 
 
 func _ready() -> void:
@@ -81,7 +83,7 @@ func _process(delta: float) -> void:
 	_hold_elapsed = minf(_hold_elapsed + maxf(delta, 0.0), effective_hold_duration)
 	_refresh_progress_bar(effective_hold_duration)
 	if _hold_elapsed >= effective_hold_duration:
-		_release_loot()
+		_release_loot(false)
 
 
 func configure_quality(quality_id: String) -> void:
@@ -102,11 +104,11 @@ func apply_damage(damage: float, _source: Node) -> void:
 	_current_health = maxf(_current_health - damage, 0.0)
 	_refresh_quality_state()
 	if _current_health <= 0.0:
-		_release_loot()
+		_release_loot(true)
 		return
 	# 已积累进度可能在受伤缩短需求后立即达到新阈值，此时直接完成开启。
 	if _hold_elapsed >= get_effective_hold_duration():
-		_release_loot()
+		_release_loot(false)
 
 
 func set_open_interaction_active(active: bool, player: Node2D) -> void:
@@ -118,6 +120,13 @@ func set_open_interaction_active(active: bool, player: Node2D) -> void:
 		return
 	_interaction_active = true
 	_interaction_player = player
+	if _interaction_label != null:
+		_interaction_label.visible = false
+
+
+func set_interaction_prompt_visible(visible: bool) -> void:
+	if _interaction_label != null:
+		_interaction_label.visible = visible and not _opened and not _interaction_active
 
 
 func get_interaction_radius() -> float:
@@ -150,7 +159,7 @@ static func roll_quality(random_source: RandomNumberGenerator) -> String:
 	return QUALITY_SUPREME
 
 
-func _release_loot() -> void:
+func _release_loot(broken_open: bool) -> void:
 	if _opened:
 		return
 	_opened = true
@@ -161,7 +170,7 @@ func _release_loot() -> void:
 	var drop_count: int = _random.randi_range(int(quality_config.get("drop_min", 2)), int(quality_config.get("drop_max", 4)))
 	# 最低高品质掉落数量；不会超过本次实际总掉落数。
 	var minimum_high_quality_count: int = mini(int(quality_config.get("minimum_high_quality_count", 0)), drop_count)
-	loot_released.emit(global_position, _quality_id, drop_count, minimum_high_quality_count)
+	loot_released.emit(global_position, _quality_id, drop_count, minimum_high_quality_count, broken_open)
 	chest_removed.emit(self)
 	queue_free()
 
@@ -171,6 +180,8 @@ func _reset_hold_progress() -> void:
 	if _open_progress != null:
 		_open_progress.visible = false
 		_open_progress.value = 0.0
+	if _interaction_label != null:
+		_interaction_label.visible = false
 
 
 func _refresh_progress_bar(effective_hold_duration: float) -> void:

@@ -146,6 +146,22 @@ const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, 
 @export_range(16.0, 160.0, 1.0) var loot_chest_clearance_radius: float = 40.0
 ## 相邻宝箱最小中心距离；默认 112 像素，避免多个静态建筑堆叠成不可通行团块。
 @export_range(32.0, 640.0, 1.0) var loot_chest_minimum_spacing: float = 112.0
+## 手动开启宝箱掉落最小扩散半径；默认 34 像素，让物品保持聚集但不完全重叠。
+@export_range(0.0, 400.0, 1.0) var loot_chest_manual_drop_radius_min: float = 34.0
+## 手动开启宝箱掉落最大扩散半径；默认 72 像素，形成紧凑可拾取物资堆。
+@export_range(0.0, 600.0, 1.0) var loot_chest_manual_drop_radius_max: float = 72.0
+## 击破宝箱掉落最小飞散半径；默认 105 像素，避免爆出的物品堆在箱体中心。
+@export_range(0.0, 600.0, 1.0) var loot_chest_broken_drop_radius_min: float = 105.0
+## 击破宝箱掉落最大飞散半径；默认 190 像素，使不同掉落物形成明显放射分布。
+@export_range(0.0, 900.0, 1.0) var loot_chest_broken_drop_radius_max: float = 190.0
+## 击破宝箱飞出动画最短时长；默认 0.48 秒，每件物品会在范围内独立随机。
+@export_range(0.05, 2.0, 0.01) var loot_chest_launch_duration_min: float = 0.48
+## 击破宝箱飞出动画最长时长；默认 0.72 秒，距离较远时仍保持清晰可见。
+@export_range(0.05, 2.0, 0.01) var loot_chest_launch_duration_max: float = 0.72
+## 击破宝箱飞出动画最小弧高；默认 54 像素，控制掉落物视觉上抛高度。
+@export_range(0.0, 300.0, 1.0) var loot_chest_launch_arc_height_min: float = 54.0
+## 击破宝箱飞出动画最大弧高；默认 92 像素，为多件掉落提供轻微高度差。
+@export_range(0.0, 400.0, 1.0) var loot_chest_launch_arc_height_max: float = 92.0
 ## 玩家丢弃武器散落半径；取值建议大于玩家半径，默认 52 像素，修改会影响拖出背包时武器落点距离。
 @export_range(0.0, 400.0, 1.0) var dropped_weapon_scatter_radius: float = 52.0
 ## 地面掉落最小分离距离；默认 36 像素，多个物品同时生成时会尽量避开已有掉落物中心。
@@ -394,6 +410,11 @@ func get_explored_cells_version() -> int:
 
 func get_exploration_cell_size() -> float:
 	return maxf(exploration_cell_size, 1.0)
+
+
+func is_world_position_explored(world_position: Vector2) -> bool:
+	# 世界位置探索状态；地图标记通过同一迷雾格查询，未进入玩家探索范围的撤离点不会提前泄露。
+	return _explored_cells.has(_world_position_to_exploration_cell(world_position))
 
 
 func get_survival_time_seconds() -> float:
@@ -1535,7 +1556,7 @@ func _is_loot_chest_position_valid(candidate_position: Vector2) -> bool:
 	return true
 
 
-func _on_loot_chest_released(chest_position: Vector2, quality_id: String, drop_count: int, minimum_high_quality_count: int) -> void:
+func _on_loot_chest_released(chest_position: Vector2, quality_id: String, drop_count: int, minimum_high_quality_count: int, broken_open: bool) -> void:
 	# 宝箱掉落循环；极品前五件强制高品质，其余物品按当前宝箱品质对应概率独立判定。
 	for drop_index in range(maxi(drop_count, 0)):
 		# 是否为极品保底高品质物品；默认前五件为 true，其余按品质概率判定。
@@ -1543,7 +1564,34 @@ func _on_loot_chest_released(chest_position: Vector2, quality_id: String, drop_c
 		# 本次掉落资源；从枪械、强化石和修复包池中生成独立实例。
 		var item_resource: Resource = _create_random_loot_chest_item(quality_id, force_high_quality)
 		if item_resource != null:
-			spawn_item_drop(item_resource, _get_scattered_drop_position(chest_position))
+			# 掉落目标；手动开启使用紧凑扩散，击破使用更大的放射半径并播放飞出动画。
+			var drop_target: Vector2 = _get_loot_chest_drop_position(chest_position, drop_index, drop_count, broken_open)
+			if broken_open:
+				# 飞出时长；在配置范围内独立随机，避免所有物品完全同步落地。
+				var launch_duration: float = _random.randf_range(minf(loot_chest_launch_duration_min, loot_chest_launch_duration_max), maxf(loot_chest_launch_duration_min, loot_chest_launch_duration_max))
+				# 飞出弧高；在配置范围内独立随机，为多件物品提供自然高度差。
+				var launch_arc_height: float = _random.randf_range(minf(loot_chest_launch_arc_height_min, loot_chest_launch_arc_height_max), maxf(loot_chest_launch_arc_height_min, loot_chest_launch_arc_height_max))
+				spawn_item_drop(item_resource, drop_target, chest_position, launch_duration, launch_arc_height)
+			else:
+				spawn_item_drop(item_resource, drop_target)
+
+
+func _get_loot_chest_drop_position(center_position: Vector2, drop_index: int, drop_count: int, broken_open: bool) -> Vector2:
+	# 扩散半径范围；击破使用 105 至 190 像素，手动开启使用 34 至 72 像素默认范围。
+	var minimum_radius: float = loot_chest_broken_drop_radius_min if broken_open else loot_chest_manual_drop_radius_min
+	# 最大扩散半径；与最小值排序后抽取，允许检查器反向配置仍保持有效。
+	var maximum_radius: float = loot_chest_broken_drop_radius_max if broken_open else loot_chest_manual_drop_radius_max
+	# 均匀基础角度；按物品索引分配扇区，避免多件物品随机到同一方向。
+	var base_angle: float = TAU * float(drop_index) / float(maxi(drop_count, 1))
+	# 角度扰动；限制在半个扇区内，保留放射分布同时避免视觉过于机械。
+	var angle_jitter: float = _random.randf_range(-PI / float(maxi(drop_count, 2)), PI / float(maxi(drop_count, 2)))
+	# 实际扩散距离；在当前开启方式的闭区间内随机。
+	var scatter_distance: float = _random.randf_range(minf(minimum_radius, maximum_radius), maxf(minimum_radius, maximum_radius))
+	# 候选落点；先限制到地图内，再避开环境碰撞。
+	var candidate_position: Vector2 = _clamp_position_to_map(center_position + Vector2.RIGHT.rotated(base_angle + angle_jitter) * scatter_distance)
+	if not _is_position_blocked_by_environment(candidate_position, 18.0):
+		return candidate_position
+	return _get_scattered_drop_position(center_position)
 
 
 func _create_random_loot_chest_item(quality_id: String, force_high_quality: bool) -> Resource:
@@ -1890,7 +1938,7 @@ func _create_random_enhancement_stone() -> EnhancementStoneData:
 	)
 
 
-func spawn_item_drop(item_data: Resource, drop_position: Vector2) -> bool:
+func spawn_item_drop(item_data: Resource, drop_position: Vector2, launch_origin: Vector2 = Vector2.INF, launch_duration: float = 0.0, launch_arc_height: float = 0.0) -> bool:
 	if item_data == null or weapon_drop_scene == null:
 		return false
 
@@ -1902,11 +1950,17 @@ func spawn_item_drop(item_data: Resource, drop_position: Vector2) -> bool:
 	# 掉落父节点；优先使用 Drops 容器，缺失时回退 GameWorld。
 	var spawn_parent: Node = _drop_parent if _drop_parent != null else self
 	spawn_parent.add_child(drop_instance)
-	drop_instance.global_position = _clamp_position_to_map(drop_position)
+	# 最终落点；所有普通掉落和宝箱飞出动画共同限制在地图范围内。
+	var resolved_drop_position: Vector2 = _clamp_position_to_map(drop_position)
+	# 是否播放飞出动画；有效起点与正时长同时存在时，先生成在箱体中心再飞向最终落点。
+	var should_launch: bool = launch_origin != Vector2.INF and launch_duration > 0.0
+	drop_instance.global_position = _clamp_position_to_map(launch_origin) if should_launch else resolved_drop_position
 	if drop_instance.has_method("configure_item_drop"):
 		drop_instance.call("configure_item_drop", item_data)
 	else:
 		drop_instance.set("weapon_data", item_data)
+	if should_launch and drop_instance.has_method("play_launch_animation"):
+		drop_instance.call("play_launch_animation", resolved_drop_position, launch_duration, launch_arc_height)
 	return true
 
 

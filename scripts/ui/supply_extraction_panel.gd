@@ -68,6 +68,15 @@ func present() -> void:
 	visible = true
 
 
+func dismiss() -> void:
+	# 关闭面板自身可见状态，避免父遮罩隐藏后该控件继续在后台接收并吞掉后续 ESC 输入。
+	visible = false
+	if _action_menu != null:
+		_action_menu.hide()
+	if _quantity_dialog != null:
+		_quantity_dialog.hide()
+
+
 func _unhandled_key_input(event: InputEvent) -> void:
 	if visible and event.is_action_pressed("ui_cancel"):
 		closed.emit()
@@ -217,10 +226,14 @@ func _add_item_card(parent_grid: GridContainer, item_resource: Resource, source_
 		return
 	# 最少一件报价；卡片只有在至少能送回一个单位时可点击，整组超额仍可通过部分送回继续操作。
 	var minimum_quote: Dictionary = _global_inventory.call("get_combat_shipping_quote", item_resource, source_location, 1) as Dictionary
+	# 当前展示数量报价；卡片显示整件或整组物品实际需要支付的撤离收费，而不是局外售价。
+	var display_quote: Dictionary = _global_inventory.call("get_combat_shipping_quote", item_resource, source_location, quantity) as Dictionary
+	# 当前撤离收费；取值为物品当前有效价值的 20% 向上取整。
+	var extraction_fee: int = maxi(int(display_quote.get("fee", 0)), 0)
 	# 物品卡片；复用仓库详情和灰色滤镜，但关闭拖拽以限定为送回操作。
 	var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
 	item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	item_control.call("configure", item_resource, source_location, 0, false, "", quantity)
+	item_control.call("configure", item_resource, source_location, 0, false, "", quantity, "撤离收费", extraction_fee)
 	item_control.call("set_drag_enabled", false)
 	item_control.call("set_item_selection_state", true, bool(minimum_quote.get("selectable", false)), false)
 	item_control.connect("item_action_requested", Callable(self, "_on_item_action_requested").bind(source_location, quantity))

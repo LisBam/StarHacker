@@ -60,11 +60,11 @@ static func get_item_sell_price(item_resource: Resource) -> int:
 	return maxi(int(item_resource.get("sell_price")), 0)
 
 
-static func build_plain_text(item_resource: Resource, quantity: int = 1) -> String:
-	return _strip_bbcode(build_bbcode(item_resource, quantity))
+static func build_plain_text(item_resource: Resource, quantity: int = 1, price_label: String = "出售价格", total_price_override: int = -1) -> String:
+	return _strip_bbcode(build_bbcode(item_resource, quantity, price_label, total_price_override))
 
 
-static func build_bbcode(item_resource: Resource, quantity: int = 1) -> String:
+static func build_bbcode(item_resource: Resource, quantity: int = 1, price_label: String = "出售价格", total_price_override: int = -1) -> String:
 	if item_resource == null:
 		return "物品数据不可用"
 	# 详情文本行；首部统一显示名称、分类、数量与售价，后续按资源类型追加字段。
@@ -75,7 +75,11 @@ static func build_bbcode(item_resource: Resource, quantity: int = 1) -> String:
 		detail_lines.append("数量：%d / 99" % maxi(quantity, 1))
 	# 单件售价；资源堆叠额外展示整组价值，避免菜单价格与详情不一致。
 	var unit_sell_price: int = get_item_sell_price(item_resource)
-	detail_lines.append("出售价格：%d 金币%s" % [unit_sell_price * maxi(quantity, 1), "（单个 %d）" % unit_sell_price if quantity > 1 else ""])
+	# 详情价格；普通界面显示出售价格，物资撤离界面传入实际撤离收费覆盖值。
+	var displayed_total_price: int = total_price_override if total_price_override >= 0 else unit_sell_price * maxi(quantity, 1)
+	# 单价补充；仅普通出售价格且堆叠数量大于 1 时显示，撤离收费已经包含整组向上取整结果。
+	var unit_price_suffix: String = "（单个 %d）" % unit_sell_price if price_label == "出售价格" and quantity > 1 else ""
+	detail_lines.append("%s：%d 金币%s" % [price_label, displayed_total_price, unit_price_suffix])
 	# 物品说明；空说明不生成无意义空行。
 	var description: String = str(item_resource.get("description"))
 	if not description.is_empty():
@@ -90,7 +94,7 @@ static func build_bbcode(item_resource: Resource, quantity: int = 1) -> String:
 	return "\n".join(detail_lines)
 
 
-static func create_tooltip_control(item_resource: Resource, quantity: int = 1) -> Control:
+static func create_tooltip_control(item_resource: Resource, quantity: int = 1, price_label: String = "出售价格", total_price_override: int = -1) -> Control:
 	# 富文本详情；由 Godot 自定义 tooltip 承载，fit_content 保证内容按文本高度完整展开。
 	var detail_label: RichTextLabel = RichTextLabel.new()
 	detail_label.bbcode_enabled = true
@@ -98,7 +102,7 @@ static func create_tooltip_control(item_resource: Resource, quantity: int = 1) -
 	detail_label.scroll_active = false
 	detail_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	detail_label.custom_minimum_size = Vector2(330.0, 0.0)
-	detail_label.text = build_bbcode(item_resource, quantity)
+	detail_label.text = build_bbcode(item_resource, quantity, price_label, total_price_override)
 
 	# 详情边距；为系统 tooltip 提供稳定留白，避免文字紧贴边缘。
 	var margin: MarginContainer = MarginContainer.new()

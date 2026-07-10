@@ -106,6 +106,14 @@ func _update_target_behavior(_delta: float, target_distance: float) -> void:
 func _try_fire_projectile(direction: Vector2) -> void:
 	if projectile_scene == null or _shoot_cooldown_remaining > 0.0 or direction.is_zero_approx():
 		return
+	if not is_instance_valid(_target) or not _target_is_visible:
+		return
+	# 发射瞬间目标距离；再次读取实时位置，防止低频 AI 决策后玩家已经离开 shoot_range 仍然放空枪。
+	var current_target_distance: float = global_position.distance_to(_target.global_position)
+	if current_target_distance > maxf(shoot_range, 0.0):
+		return
+	if not _has_line_of_sight_to_target():
+		return
 
 	# 敌方弹体实例；取值为 Node2D 或 null，默认由 projectile_scene 实例化。
 	var projectile: Node2D = projectile_scene.instantiate() as Node2D

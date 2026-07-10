@@ -11,7 +11,7 @@ const TARGET_AI_STATE_IDLE: int = 0
 const TARGET_AI_STATE_VISIBLE: int = 1
 ## AI 丢失搜查状态；默认表示玩家被障碍遮挡，怪物只根据最后线索前往遮挡物背后和附近区域搜索。
 const TARGET_AI_STATE_SEARCHING: int = 2
-## AI 二级全域封锁状态；默认表示玩家已多次利用墙体脱离视野，小队扩大外围岔路和墙体近点封锁范围。
+## AI 二级扩大搜查状态；默认表示玩家已多次利用墙体脱离视野，本怪物扩大外围岔路和墙体近点搜查范围。
 const TARGET_AI_STATE_BLOCKADE: int = 3
 
 ## 视野范围；取值建议大于 0，默认 360 像素，玩家进入该范围后怪物开始索敌追击。
@@ -124,7 +124,7 @@ var _medium_hotspots: Array[Dictionary] = []
 var _long_term_region_center: Vector2 = Vector2.ZERO
 ## 是否存在长期交战片区；默认 false，首次看见玩家后创建且后续只记录当前片区。
 var _has_long_term_region: bool = false
-## 最后逃跑方向；取值为最后可见速度的单位向量，默认零向量，用于共享路线预判。
+## 最后逃跑方向；取值为最后可见速度的单位向量，默认零向量，用于本怪物路线预判。
 var _last_escape_direction: Vector2 = Vector2.ZERO
 ## 本地战术线索版本；取值单调递增，默认 0，每次确认消失线索时通知本怪物战术组件刷新。
 var _intelligence_revision: int = 0
@@ -136,7 +136,7 @@ var _is_medium_memory_recheck: bool = false
 var _medium_recheck_cooldown_remaining: float = 0.0
 ## 可见线索刷新剩余时间；取值大于等于 0，默认 0，进入可见状态后立即记录并按间隔刷新。
 var _visible_intelligence_broadcast_remaining: float = 0.0
-## 最近情报类型；取值为 visible_contact、occlusion_loss 或 target_lost，默认空字符串表示尚未形成共享报告。
+## 最近本地线索类型；取值为 visible_contact、occlusion_loss 或 target_lost，默认空字符串表示尚未形成本怪物报告。
 var _last_intelligence_type: String = ""
 
 
@@ -457,7 +457,7 @@ func _record_medium_hotspot(hotspot_position: Vector2) -> void:
 	for hotspot_index in range(_medium_hotspots.size()):
 		# 热点记录；包含 position 与 count，默认从数组复制后修改并写回。
 		var hotspot: Dictionary = _medium_hotspots[hotspot_index]
-		# 热点原始位置；取值异常时回退当前记录点，避免共享字典类型错误。
+		# 热点原始位置；取值异常时回退当前记录点，避免本地记忆字典类型错误。
 		var raw_hotspot_position: Variant = hotspot.get("position", hotspot_position)
 		if not (raw_hotspot_position is Vector2):
 			continue
@@ -714,93 +714,6 @@ func _reset_target_search() -> void:
 	_target_search_remaining = 0.0
 	_has_reached_lost_search_anchor = false
 	_target_search_wait_remaining = 0.0
-
-
-func receive_shared_intelligence(report: Dictionary) -> void:
-	# 怪物情报共享已删除；兼容入口不再接收任何外部怪物报告。
-	return
-
-	if report.is_empty() or not is_instance_valid(_actor):
-		return
-
-	# 共享目标编号；取值为发送者锁定目标实例编号，默认只接收与本组件当前目标一致的战术情报。
-	var shared_target_id: int = int(report.get("target_instance_id", 0))
-	if is_instance_valid(_target) and shared_target_id != 0 and shared_target_id != _target.get_instance_id():
-		return
-
-	# 共享情报类型；visible_contact 表示队友当前发现玩家，occlusion_loss 表示玩家刚进入实心墙体后方，target_lost 表示玩家快速离开有效视野但仍需前往最后线索追踪。
-	var shared_intelligence_type: String = str(report.get("intelligence_type", "occlusion_loss"))
-
-	# 共享消失位置原始值；取值应为 Vector2，缺失或异常时不改变本地记忆。
-	var raw_disappearance_position: Variant = report.get("disappearance_position")
-	if raw_disappearance_position is Vector2:
-		_last_known_target_position = raw_disappearance_position
-		_has_last_known_target_position = true
-
-	# 共享遮挡位置原始值；取值应为 Vector2，记录队友射线命中的实心墙体坐标。
-	var raw_occlusion_position: Variant = report.get("occlusion_position")
-	if shared_intelligence_type == "occlusion_loss" and raw_occlusion_position is Vector2:
-		_last_occlusion_position = raw_occlusion_position
-		_has_last_occlusion_position = true
-
-	# 共享估算速度原始值；取值应为 Vector2，只来自玩家最后可见阶段而非墙后实时位置。
-	var raw_estimated_velocity: Variant = report.get("estimated_velocity")
-	if raw_estimated_velocity is Vector2:
-		_estimated_target_velocity = raw_estimated_velocity
-
-	# 共享逃跑方向原始值；取值应为 Vector2，用于全队一致预判岔路和房间出口。
-	var raw_escape_direction: Variant = report.get("escape_direction")
-	if raw_escape_direction is Vector2:
-		_last_escape_direction = raw_escape_direction
-
-	if shared_intelligence_type == "occlusion_loss":
-		_line_of_sight_loss_count = maxi(_line_of_sight_loss_count, int(report.get("loss_count", 0)))
-	_target_memory_remaining = maxf(_target_memory_remaining, target_memory_duration)
-	if shared_intelligence_type == "occlusion_loss":
-		_medium_memory_remaining = maxf(_medium_memory_remaining, medium_memory_duration)
-	if _has_last_known_target_position:
-		_update_long_term_region(_last_known_target_position)
-		if shared_intelligence_type == "occlusion_loss":
-			_record_medium_hotspot(_last_occlusion_position if _has_last_occlusion_position else _last_known_target_position)
-
-	# 共享中期热点数组；取值为发送者已记录的墙角与逃生通道，默认只合并合法 Vector2 位置。
-	var raw_shared_hotspots: Variant = report.get("medium_hotspots", [])
-	if shared_intelligence_type == "occlusion_loss" and raw_shared_hotspots is Array:
-		# 共享热点遍历项；取值可能为 Dictionary 或其他 Variant，默认逐项校验。
-		for raw_shared_hotspot in raw_shared_hotspots:
-			if not (raw_shared_hotspot is Dictionary):
-				continue
-			# 共享热点字典；包含 position 与 count，默认先读取位置再按频次有限次合并。
-			var shared_hotspot: Dictionary = raw_shared_hotspot
-			# 共享热点位置原始值；取值应为 Vector2，异常项忽略。
-			var raw_shared_position: Variant = shared_hotspot.get("position")
-			if raw_shared_position is Vector2:
-				_record_medium_hotspot(raw_shared_position)
-
-	if _target_is_visible:
-		return
-
-	if shared_intelligence_type == "occlusion_loss" and _line_of_sight_loss_count >= occlusion_break_forget_count:
-		_enter_regular_alert_state()
-		return
-
-	# 接收情报前的 AI 状态；取值用于通知宿主清理旧导航路径并切换分区任务。
-	var previous_ai_state: int = _target_ai_state
-	# 二级封锁进入计数；取值为脱战阈值减提前量，最小为 1。
-	var blockade_start_count: int = maxi(occlusion_break_forget_count - blockade_loss_margin, 1)
-	_has_target = true
-	_target_is_visible = false
-	_target_ai_state = TARGET_AI_STATE_BLOCKADE if shared_intelligence_type == "occlusion_loss" and _line_of_sight_loss_count >= blockade_start_count else TARGET_AI_STATE_SEARCHING
-	# 共享搜查锚点原始值；取值应为 Vector2，缺失时按本地最后线索重新计算。
-	var raw_search_anchor: Variant = report.get("search_anchor")
-	_target_search_anchor_position = raw_search_anchor if raw_search_anchor is Vector2 else _get_lost_target_search_anchor()
-	_target_search_destination = _target_search_anchor_position
-	_has_target_search_destination = true
-	_has_reached_lost_search_anchor = false
-	_target_search_remaining = 0.0
-	_target_search_wait_remaining = 0.0
-	_is_medium_memory_recheck = false
-	_emit_state_change(previous_ai_state)
 
 
 func get_tactical_intelligence() -> Dictionary:

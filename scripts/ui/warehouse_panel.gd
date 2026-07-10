@@ -58,6 +58,21 @@ func _ready() -> void:
 	_rebuild_storage_content()
 
 
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not is_visible_in_tree() or not (event is InputEventKey):
+		return
+	# 仓库键盘事件；只处理首次按下，避免长按 E 导致背包区域连续展开和收起。
+	var key_event: InputEventKey = event as InputEventKey
+	if not key_event.pressed or key_event.echo:
+		return
+	if key_event.keycode == KEY_E or key_event.physical_keycode == KEY_E:
+		_on_mode_toggle_pressed()
+		get_viewport().set_input_as_handled()
+	elif key_event.keycode == KEY_ESCAPE or key_event.physical_keycode == KEY_ESCAPE:
+		closed.emit()
+		get_viewport().set_input_as_handled()
+
+
 func _build_storage_interface() -> void:
 	# 新版外层边距；默认让联合仓库界面在主菜单遮罩内保持稳定留白。
 	var margin: MarginContainer = MarginContainer.new()

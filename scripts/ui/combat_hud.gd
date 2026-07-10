@@ -9,6 +9,8 @@ class_name CombatHud
 const WEAPON_SLOT_CONTROL_SCRIPT: Script = preload("res://scripts/ui/weapon_slot_control.gd")
 ## 按键绑定面板脚本；默认用于暂停设置中动态创建可重绑定操作列表。
 const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_panel.gd")
+## 结算物品控件脚本；默认复用仓库的双列物品摘要与完整悬停详情，但结算列表不启用点击和拖拽。
+const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
 ## 背包全部分页标识；默认显示所有背包武器，修改会影响筛选按钮与背包网格过滤。
 const INVENTORY_FILTER_ALL: String = "all"
 ## 背包远程分页标识；默认匹配武器资源 weapon_type 的 ranged 值，修改会影响远程筛选页。
@@ -224,8 +226,8 @@ var _pause_settings_home_controls: Array[Control] = []
 @onready var _death_return_main_menu_button: Button = %DeathReturnMainMenuButton
 ## 结算标题缓存；默认绑定 DeathTitle，成功撤离、死亡和主动退出会显示不同标题。
 @onready var _death_title_label: Label = %DeathTitle
-## 结算内容缓存；默认绑定 DeathMessage，展示本局获得、保留和丢失物品完整列表。
-@onready var _death_message_label: Label = %DeathMessage
+## 结算物品列表缓存；默认绑定 DeathSettlementList，以仓库式双列列表展示本局获得和实际丢失物品。
+@onready var _death_settlement_list: VBoxContainer = %DeathSettlementList
 
 
 func _ready() -> void:
@@ -1962,7 +1964,7 @@ func _show_success_settlement() -> void:
 	# 全局背包服务；正式撤离时保存全部物品、标记上次撤离优先级并返回本局新增物品列表。
 	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
 	# 成功结算；缺少全局服务时使用空收益兜底，仍展示撤离成功界面。
-	var outcome: Dictionary = {"result": "success", "title": "撤离成功", "gained_items": [], "lost_items": [], "retained_items": []}
+	var outcome: Dictionary = {"result": "success", "title": "撤离成功", "gained_entries": [], "lost_entries": [], "gained_items": [], "lost_items": []}
 	if global_inventory != null and global_inventory.has_method("complete_combat_run_success"):
 		outcome = global_inventory.call("complete_combat_run_success")
 	_present_run_outcome(outcome)
@@ -1977,7 +1979,7 @@ func _show_failure_settlement(reason: String) -> void:
 	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
 	if global_inventory == null or not global_inventory.has_method("is_combat_run_active") or not bool(global_inventory.call("is_combat_run_active")):
 		_run_outcome_resolved = true
-		_present_run_outcome({"result": "failure", "title": reason, "gained_items": [], "lost_items": [], "retained_items": []})
+		_present_run_outcome({"result": "failure", "title": reason, "gained_entries": [], "lost_entries": [], "gained_items": [], "lost_items": []})
 		return
 
 	_run_outcome_resolved = true
@@ -1990,7 +1992,7 @@ func _present_run_outcome(outcome: Dictionary) -> void:
 	# 结算结果类型；success 表示撤离成功，其他值统一按失败展示。
 	var result_type: String = str(outcome.get("result", "failure"))
 	_death_title_label.text = str(outcome.get("title", "战斗结算"))
-	_death_message_label.text = _build_run_outcome_text(outcome)
+	_rebuild_settlement_list(outcome)
 	_death_return_main_menu_button.text = "确定"
 	if result_type == "success":
 		_death_title_label.add_theme_color_override("font_color", Color(0.35, 1.0, 0.72, 1.0))
@@ -1999,32 +2001,66 @@ func _present_run_outcome(outcome: Dictionary) -> void:
 	_set_death_overlay_visible(true)
 
 
-func _build_run_outcome_text(outcome: Dictionary) -> String:
-	# 结算文本段落；按获得、随机保留和丢失顺序组织，确保玩家能明确知道物品去向。
-	var sections: PackedStringArray = PackedStringArray()
-	# 本局获得物品；取值为名称数组，成功撤离时完整展示。
-	var gained_items: Array = outcome.get("gained_items", [])
-	# 随机保留物品；取值为失败结算中幸存的约 20% 背包物品。
-	var retained_items: Array = outcome.get("retained_items", [])
-	# 丢失物品；取值为失败结算中移除的约 80% 背包物品。
-	var lost_items: Array = outcome.get("lost_items", [])
+func _rebuild_settlement_list(outcome: Dictionary) -> void:
+	_clear_container(_death_settlement_list)
+	# 结算结果类型；success 使用撤离说明，失败只说明损失规则，不展示随机保留物品列表。
+	var result_type: String = str(outcome.get("result", "failure"))
+	# 结算说明；明确列表统计口径，避免把自己丢弃后重新捡回的开局物品误认为战利品。
+	var summary_label: Label = Label.new()
+	summary_label.text = "已保留本次撤离携带的全部物品。下方仅统计本局首次获得的战利品。" if result_type == "success" else "背包物品按规则随机保留约 20%，已装备物品不参与损失。下方仅展示本局首次获得与实际丢失的物品。"
+	summary_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	summary_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_death_settlement_list.add_child(summary_label)
 
-	if str(outcome.get("result", "failure")) == "success":
-		sections.append("本次撤离已保留背包与装备中的全部物品。")
-		sections.append("\n本局获得（%d）：\n%s" % [gained_items.size(), _format_item_name_list(gained_items, "本局没有获得新物品")])
-	else:
-		sections.append("背包物品随机保留约 20%，其余物品已经丢失；已装备物品不参与背包损失。")
-		sections.append("\n保留物品（%d）：\n%s" % [retained_items.size(), _format_item_name_list(retained_items, "没有保留背包物品")])
-		sections.append("\n丢失物品（%d）：\n%s" % [lost_items.size(), _format_item_name_list(lost_items, "没有丢失背包物品")])
-	return "\n".join(sections)
+	# 本局获得条目；优先读取包含 Resource 的结构化列表，鼠标悬停时可显示完整物品属性。
+	var gained_entries: Array = outcome.get("gained_entries", [])
+	# 实际丢失条目；失败结算展示被移出背包的约 80% 物品，成功结算保持空数组。
+	var lost_entries: Array = outcome.get("lost_entries", [])
+	_build_settlement_section("本局获得", gained_entries, "本局没有获得新物品", Color(0.35, 1.0, 0.72, 1.0))
+	if result_type != "success":
+		_build_settlement_section("丢失物品", lost_entries, "本次没有丢失背包物品", Color(1.0, 0.46, 0.52, 1.0))
 
 
-func _format_item_name_list(items: Array, empty_text: String) -> String:
-	if items.is_empty():
-		return empty_text
-	# 名称文本数组；元素为带序号的单行物品名，便于大量物品在滚动结算框中逐项核对。
-	var item_lines: PackedStringArray = PackedStringArray()
-	# 物品名称索引；取值为数组有效下标，用于生成从 1 开始的显示序号。
-	for item_index in range(items.size()):
-		item_lines.append("%d. %s" % [item_index + 1, str(items[item_index])])
-	return "\n".join(item_lines)
+func _build_settlement_section(section_name: String, entries: Array, empty_text: String, accent_color: Color) -> void:
+	# 分区标题；显示分类名称和数量，颜色区分战利品与丢失物品。
+	var section_title: Label = Label.new()
+	section_title.text = "%s（%d）" % [section_name, entries.size()]
+	section_title.add_theme_font_size_override("font_size", 18)
+	section_title.add_theme_color_override("font_color", accent_color)
+	_death_settlement_list.add_child(section_title)
+	if entries.is_empty():
+		# 空列表提示；用于明确本次结算没有对应类型物品，而不是 UI 加载失败。
+		var empty_label: Label = Label.new()
+		empty_label.text = empty_text
+		empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		empty_label.custom_minimum_size = Vector2(0.0, 42.0)
+		_death_settlement_list.add_child(empty_label)
+		return
+
+	# 仓库式双列网格；每行显示两个物品，结算条目只读且支持鼠标悬停详情。
+	var item_grid: GridContainer = GridContainer.new()
+	item_grid.columns = 2
+	item_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	item_grid.add_theme_constant_override("h_separation", 8)
+	item_grid.add_theme_constant_override("v_separation", 6)
+	_death_settlement_list.add_child(item_grid)
+	# 结算条目遍历项；每项应包含 resource 与 display_name，异常数据会回退为普通文本。
+	for raw_entry in entries:
+		if not (raw_entry is Dictionary):
+			continue
+		# 结构化结算条目；携带运行时 Resource 以复用仓库详情生成逻辑。
+		var entry: Dictionary = raw_entry
+		# 结算物品资源；有效时创建只读 StorageItemControl，缺失时显示名称兜底。
+		var item_resource: Resource = entry.get("resource") as Resource
+		if item_resource != null:
+			var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
+			item_control.custom_minimum_size = Vector2(0.0, 48.0)
+			item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			item_control.call("configure", item_resource, "", -1, false)
+			item_grid.add_child(item_control)
+		else:
+			var fallback_label: Label = Label.new()
+			fallback_label.text = str(entry.get("display_name", "未知物品"))
+			fallback_label.custom_minimum_size = Vector2(0.0, 48.0)
+			fallback_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			item_grid.add_child(fallback_label)

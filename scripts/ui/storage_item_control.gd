@@ -28,7 +28,8 @@ func configure(item_resource: Resource, location: String, item_index: int, quick
 	text = "%s%s · %s · 售价 %d" % [extraction_prefix, _get_item_display_name(), _get_weapon_type_label(), _get_sell_price()]
 	tooltip_text = _build_item_details()
 	disabled = _item_resource == null
-	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if _quick_action_enabled else Control.CURSOR_DRAG
+	# 鼠标指针形态；快捷点击使用手型，可拖拽容器使用拖拽形态，结算只读条目使用普通箭头。
+	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if _quick_action_enabled else (Control.CURSOR_DRAG if not _location.is_empty() and _item_index >= 0 else Control.CURSOR_ARROW)
 	if not pressed.is_connected(_on_pressed):
 		pressed.connect(_on_pressed)
 

@@ -7,6 +7,7 @@ class_name EquipmentStorageSlotControl
 signal item_drop_requested(drag_data: Dictionary, target_location: String, target_index: int)
 signal item_selected(item_resource: Resource)
 signal enhancement_drop_requested(stone_resource: Resource, source_location: String, weapon_resource: Resource)
+signal repair_kit_drop_requested(repair_kit_resource: Resource, source_location: String, weapon_resource: Resource)
 
 ## 拖拽数据类型标识；必须与 StorageItemControl 和 StorageDropArea 保持一致。
 const DRAG_DATA_TYPE: String = "global_storage_item"
@@ -87,6 +88,8 @@ func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
 	# 拖拽物品资源；取值为 WeaponData 或兼容 Resource，类型字段决定能否投放。
 	var dragged_resource: Resource = drag_data.get("resource") as Resource
 	if dragged_resource != null and str(dragged_resource.get("item_kind")) == "enhancement_stone":
+		return false
+	if dragged_resource != null and str(dragged_resource.get("item_kind")) == "repair_kit":
 		return _item_resource != null and not str(drag_data.get("source_location", "")).is_empty()
 	return dragged_resource != null and str(dragged_resource.get("weapon_type")) == _accepted_weapon_type
 
@@ -96,10 +99,10 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 		return
 	# 拖拽字典；复制后发给仓库面板，装备槽目标不使用列表下标所以固定为 -1。
 	var drag_data: Dictionary = (data as Dictionary).duplicate()
-	# 拖拽资源；强化石命中已装备武器时直接请求强化，不进入装备交换逻辑。
+	# 拖拽资源；修复包命中已装备武器时直接请求修复，不进入装备交换逻辑。
 	var dragged_resource: Resource = drag_data.get("resource") as Resource
-	if dragged_resource != null and str(dragged_resource.get("item_kind")) == "enhancement_stone":
-		enhancement_drop_requested.emit(dragged_resource, str(drag_data.get("source_location", "")), _item_resource)
+	if dragged_resource != null and str(dragged_resource.get("item_kind")) == "repair_kit":
+		repair_kit_drop_requested.emit(dragged_resource, str(drag_data.get("source_location", "")), _item_resource)
 		return
 	item_drop_requested.emit(drag_data, _location, -1)
 

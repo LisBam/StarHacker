@@ -15,6 +15,8 @@ const CHANNEL_GRAY: String = "gray"
 
 ## 商店面板最小尺寸；默认与仓库主面板一致适配 1280×720 窗口。
 @export var panel_minimum_size: Vector2 = Vector2(960.0, 620.0)
+## 底部状态提示淡出时长；默认 3 秒，商店刷新和购买结果会在该时间内线性淡出后清空。
+@export_range(0.5, 10.0, 0.1) var status_fade_duration_seconds: float = 3.0
 
 ## 商店服务缓存；负责库存、刷新倒计时、灰市批次和购买结算。
 var _shop_service: Node
@@ -64,6 +66,8 @@ var _pending_stock_id: String = ""
 var _pending_failure_group_id: String = ""
 ## 倒计时刷新累计时间；默认 0，达到一秒后更新文本并检查自动刷新。
 var _countdown_update_accumulator: float = 0.0
+## 当前状态提示已显示时长；默认 -1 表示没有待淡出的提示，非负值用于计算透明度。
+var _status_fade_elapsed_seconds: float = -1.0
 
 
 func _ready() -> void:
@@ -78,6 +82,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	_update_status_fade(delta)
 	_countdown_update_accumulator += delta
 	if _countdown_update_accumulator < 1.0:
 		return
@@ -215,6 +220,10 @@ func _connect_services() -> void:
 		_shop_service.connect("refresh_state_changed", Callable(self, "_refresh_header"))
 	if _global_inventory != null:
 		_global_inventory.connect("coins_changed", Callable(self, "_refresh_header"))
+	# 开发者调试设置；价格倍率显示切换后重建卡片，避免等待商店刷新才更新文本。
+	var debug_settings: Node = get_tree().root.get_node_or_null("DebugSettings")
+	if debug_settings != null and debug_settings.has_signal("debug_information_visibility_changed"):
+		debug_settings.connect("debug_information_visibility_changed", Callable(self, "_on_debug_information_visibility_changed"))
 
 
 func _create_category_button(target_bar: HBoxContainer, button_text: String, category_name: String, is_primary: bool) -> void:
@@ -240,6 +249,7 @@ func _rebuild_subcategory_buttons() -> void:
 		_create_category_button(_subcategory_bar, "远程", InventoryQuery.SUBCATEGORY_RANGED, false)
 	else:
 		_create_category_button(_subcategory_bar, "强化石", InventoryQuery.SUBCATEGORY_ENHANCEMENT_STONES, false)
+		_create_category_button(_subcategory_bar, "道具", InventoryQuery.SUBCATEGORY_ITEMS, false)
 	_refresh_category_buttons()
 
 
@@ -260,7 +270,7 @@ func _refresh_category_buttons() -> void:
 func _rebuild_content() -> void:
 	_clear_container(_item_grid)
 	if _shop_service == null:
-		_status_label.text = "商店服务不可用"
+		_show_status("商店服务不可用")
 		return
 	# 当前通道条目；普通商店会先检查十分钟自动刷新，灰市按最近失败批次平铺。
 	var source_entries: Array = _shop_service.call("get_shop_entries") if _current_channel == CHANNEL_NORMAL else _shop_service.call("get_gray_market_entries")
@@ -278,9 +288,10 @@ func _rebuild_content() -> void:
 			# 商品卡片；来源下标只用于查询稳定排序，购买使用 stock_id 和灰市批次编号。
 			var item_control: Button = SHOP_ITEM_CONTROL_SCRIPT.new() as Button
 			item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			# 先加入场景树；商品配置需要读取全局调试设置，挂载后才能安全访问 get_tree()。
+			_item_grid.add_child(item_control)
 			item_control.call("configure", entry, _current_channel == CHANNEL_GRAY)
 			item_control.connect("purchase_requested", Callable(self, "_on_purchase_requested"))
-			_item_grid.add_child(item_control)
 	_refresh_category_buttons()
 	_refresh_header()
 
@@ -308,6 +319,8 @@ func _refresh_header() -> void:
 func _on_channel_pressed(channel_name: String) -> void:
 	_current_channel = channel_name
 	_status_label.text = ""
+	_status_label.modulate = Color.WHITE
+	_status_fade_elapsed_seconds = -1.0
 	_rebuild_content()
 
 
@@ -339,7 +352,7 @@ func _on_manual_refresh_pressed() -> void:
 		return
 	# 刷新结果；服务先检查金币再扣款和重建库存，失败不会增加连续刷新次数。
 	var refresh_result: Dictionary = _shop_service.call("request_manual_refresh") as Dictionary
-	_status_label.text = str(refresh_result.get("message", "刷新失败"))
+	_show_status(str(refresh_result.get("message", "刷新失败")))
 	_rebuild_content()
 
 
@@ -356,7 +369,7 @@ func _on_purchase_requested(stock_id: String, failure_group_id: String) -> void:
 		_purchase_dialog.dialog_text = "确认花费 %d 金币购买“%s”吗？\n购买后物品将直接存入永久仓库。" % [int((raw_entry as Dictionary).get("price", 0)), str(item_resource.get("display_name")) if item_resource != null else "未知物品"]
 		_purchase_dialog.popup_centered(Vector2i(500, 0))
 		return
-	_status_label.text = "该商品已售出或已经刷新"
+	_show_status("该商品已售出或已经刷新")
 
 
 func _on_purchase_confirmed() -> void:
@@ -368,7 +381,7 @@ func _on_purchase_confirmed() -> void:
 		purchase_result = _shop_service.call("purchase_shop_entry", _pending_stock_id) as Dictionary
 	else:
 		purchase_result = _shop_service.call("purchase_gray_market_entry", _pending_stock_id, _pending_failure_group_id) as Dictionary
-	_status_label.text = str(purchase_result.get("message", "购买失败"))
+	_show_status(str(purchase_result.get("message", "购买失败")))
 	_pending_stock_id = ""
 	_pending_failure_group_id = ""
 	_rebuild_content()
@@ -376,12 +389,39 @@ func _on_purchase_confirmed() -> void:
 
 func _on_shop_stock_changed() -> void:
 	if _current_channel == CHANNEL_NORMAL:
+		_show_status("商店已刷新")
 		_rebuild_content()
 
 
 func _on_gray_market_changed() -> void:
 	if _current_channel == CHANNEL_GRAY:
 		_rebuild_content()
+
+
+func _on_debug_information_visibility_changed(_visible: bool) -> void:
+	_rebuild_content()
+
+
+func _show_status(message: String) -> void:
+	_status_label.text = message
+	_status_label.modulate = Color.WHITE
+	_status_fade_elapsed_seconds = 0.0 if not message.is_empty() else -1.0
+
+
+func _update_status_fade(delta: float) -> void:
+	if _status_fade_elapsed_seconds < 0.0 or _status_label == null:
+		return
+	# 有效淡出时长；至少 0.1 秒，避免检查器异常值导致除零。
+	var resolved_duration: float = maxf(status_fade_duration_seconds, 0.1)
+	_status_fade_elapsed_seconds += maxf(delta, 0.0)
+	if _status_fade_elapsed_seconds >= resolved_duration:
+		_status_label.text = ""
+		_status_label.modulate = Color.WHITE
+		_status_fade_elapsed_seconds = -1.0
+		return
+	# 提示剩余透明度；从 1 线性衰减至 0，文本内容保持可读直到时间结束。
+	var remaining_alpha: float = clampf(1.0 - _status_fade_elapsed_seconds / resolved_duration, 0.0, 1.0)
+	_status_label.modulate = Color(1.0, 1.0, 1.0, remaining_alpha)
 
 
 func _on_close_pressed() -> void:

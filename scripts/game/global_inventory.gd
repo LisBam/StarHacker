@@ -13,8 +13,8 @@ signal combat_failure_losses_recorded(lost_entries: Array)
 
 ## 全局背包存档路径；默认写入用户目录，保存物品标识、获得时间、排序优先级和装备槽。
 const SAVE_PATH: String = "user://global_inventory.json"
-## 当前库存存档版本；默认 6，版本 6 起同时保存当前耐久和保存时最大耐久。
-const SAVE_VERSION: int = 6
+## 当前库存存档版本；默认 7，版本 7 起支持可堆叠修复包的独立数据恢复。
+const SAVE_VERSION: int = 7
 ## 旧版耐久上限；固定 100.0，用于把版本 5 的当前耐久按比例迁移到新版上限。
 const LEGACY_DURABILITY_MAX: float = 100.0
 ## 默认远程槽数量；当前项目使用双远程武器，修改需要同步玩家输入可直接选择的槽位数量。
@@ -28,6 +28,12 @@ const WEAPON_RESOURCE_PATHS: Dictionary = {
 	"rail_cannon": "res://data/weapons/rail_cannon.tres",
 	"phase_blade": "res://data/weapons/phase_blade.tres",
 	"quantum_dagger": "res://data/weapons/quantum_dagger.tres",
+}
+## 修复包资源路径表；键为稳定 item_id，值为项目内模板路径，用于存档恢复和未来扩展。
+const REPAIR_KIT_RESOURCE_PATHS: Dictionary = {
+	"repair_kit_basic": "res://data/items/repair_kit_basic.tres",
+	"repair_kit_medium": "res://data/items/repair_kit_medium.tres",
+	"repair_kit_advanced": "res://data/items/repair_kit_advanced.tres",
 }
 ## 默认背包武器标识；首次建立存档时放入未装备武器，顺序会按获得时间默认排序。
 ## 永久仓库初始化补充：常量名称为旧存档兼容保留，当前首次存档会把这些未装备武器放入永久仓库。
@@ -596,6 +602,47 @@ func use_enhancement_stone_with_result(stone_resource: Resource, source_location
 	return enhancement_result
 
 
+func use_repair_kit_with_result(repair_kit_resource: Resource, source_location: String, weapon_resource: Resource) -> Dictionary:
+	# 默认失败结果；调用方可直接读取成功状态、修复前后耐久和实际恢复量。
+	var failed_result: Dictionary = {"success": false, "weapon": weapon_resource, "repair_kit": repair_kit_resource, "durability_before": 0.0, "durability_after": 0.0, "durability_restored": 0.0}
+	if not _is_repair_kit(repair_kit_resource) or not _is_weapon_resource(weapon_resource) or not _is_storage_location(source_location):
+		return failed_result
+	# 修复包记录下标；必须仍在原仓库或背包中，避免 UI 的过期引用消耗错误物品。
+	var repair_kit_record_index: int = _find_storage_record_index(source_location, repair_kit_resource)
+	# 修复包来源记录；非法来源会返回空数组，因此必须先同时校验下标与武器所有权。
+	var source_records: Array[Dictionary] = _get_storage_records(source_location)
+	if repair_kit_record_index < 0 or repair_kit_record_index >= source_records.size() or not _is_owned_weapon_resource(weapon_resource):
+		return failed_result
+	# 当前耐久；限制到非负数，用于计算可修复缺口。
+	var durability_before: float = maxf(float(weapon_resource.get("current_durability")), 0.0)
+	# 最大耐久；至少为 1，避免异常旧武器出现无效修复计算。
+	var maximum_durability: float = maxf(float(weapon_resource.get("max_durability")), 1.0)
+	# 修复包标称恢复量；取值至少为 0，实际恢复量仍会受武器耐久缺口限制。
+	var configured_repair_amount: float = maxf(float(repair_kit_resource.get("repair_amount")), 0.0)
+	# 实际恢复量；满耐久武器不会消耗修复包。
+	var durability_restored: float = minf(configured_repair_amount, maxf(maximum_durability - durability_before, 0.0))
+	if durability_restored <= 0.0:
+		return failed_result
+	# 修复后耐久；写入前限制在武器自身最大耐久以内。
+	var durability_after: float = minf(durability_before + durability_restored, maximum_durability)
+	if weapon_resource.has_method("set_current_durability"):
+		weapon_resource.call("set_current_durability", durability_after)
+	else:
+		weapon_resource.set("current_durability", durability_after)
+	# 修复包记录；成功修复后才扣除一件，失败不会改变库存或武器。
+	var repair_kit_record: Dictionary = source_records[repair_kit_record_index]
+	# 修复包剩余数量；大于零时保留原堆叠，归零时移除完整记录。
+	var remaining_quantity: int = maxi(int(repair_kit_record.get("quantity", 1)) - 1, 0)
+	if remaining_quantity > 0:
+		repair_kit_record["quantity"] = remaining_quantity
+	else:
+		source_records.remove_at(repair_kit_record_index)
+	_queue_save_inventory()
+	_emit_storage_changed(source_location)
+	notify_weapon_runtime_state_changed(weapon_resource)
+	return {"success": true, "weapon": weapon_resource, "repair_kit": repair_kit_resource, "durability_before": durability_before, "durability_after": durability_after, "durability_restored": durability_restored}
+
+
 func transfer_storage_to_equipment(item_resource: Resource, source_location: String, target_location: String) -> bool:
 	# 来源记录索引；取值为对应仓库或背包中的有效下标，其他位置不能通过该接口装备。
 	var source_index: int = _find_storage_record_index(source_location, item_resource)
@@ -725,7 +772,7 @@ func add_backpack_resource(item_resource: Resource, target_index: int = -1) -> b
 		record = _create_record(item_resource)
 		_track_combat_acquisition(item_resource)
 
-	if _is_enhancement_stone(item_resource):
+	if _is_stackable_resource(item_resource):
 		_insert_record_with_stack_merge(_backpack_records, record, target_index)
 	elif target_index < 0:
 		_backpack_records.append(record)
@@ -1059,6 +1106,14 @@ func _is_enhancement_stone(item_resource: Resource) -> bool:
 	return item_resource != null and str(item_resource.get("item_kind")) == "enhancement_stone"
 
 
+func _is_repair_kit(item_resource: Resource) -> bool:
+	return item_resource != null and str(item_resource.get("item_kind")) == "repair_kit"
+
+
+func _is_stackable_resource(item_resource: Resource) -> bool:
+	return _is_enhancement_stone(item_resource) or _is_repair_kit(item_resource)
+
+
 func _is_owned_weapon_resource(item_resource: Resource) -> bool:
 	if not _is_weapon_resource(item_resource):
 		return false
@@ -1078,7 +1133,7 @@ func _get_resource_sell_price(item_resource: Resource) -> int:
 
 
 func _get_stack_signature(item_resource: Resource) -> String:
-	if not _is_enhancement_stone(item_resource):
+	if not _is_stackable_resource(item_resource):
 		return ""
 	if item_resource.has_method("get_stack_signature"):
 		return str(item_resource.call("get_stack_signature"))
@@ -1088,9 +1143,9 @@ func _get_stack_signature(item_resource: Resource) -> String:
 func _insert_record_with_stack_merge(target_records: Array[Dictionary], record: Dictionary, target_index: int = -1) -> void:
 	if record.is_empty():
 		return
-	# 待插入资源；武器保持单实例记录，只有强化石参与堆叠合并。
+	# 待插入资源；武器保持单实例记录，强化石和修复包按同类签名参与堆叠合并。
 	var item_resource: Resource = record.get("resource") as Resource
-	if not _is_enhancement_stone(item_resource):
+	if not _is_stackable_resource(item_resource):
 		# 武器插入下标；负数追加，指定下标用于拖拽排序和装备替换回滚。
 		var weapon_insert_index: int = target_records.size() if target_index < 0 else clampi(target_index, 0, target_records.size())
 		target_records.insert(weapon_insert_index, record)
@@ -1098,12 +1153,12 @@ func _insert_record_with_stack_merge(target_records: Array[Dictionary], record: 
 
 	# 剩余待放数量；合法记录限制在 1 到 99，跨容器移动时会优先填充相同词条堆叠。
 	var remaining_quantity: int = clampi(int(record.get("quantity", 1)), 1, MAX_STACK_QUANTITY)
-	# 待插入签名；只有词条键和值完全一致的强化石才允许合并。
+	# 待插入签名；强化石按品质词条方向、修复包按 item_id 合并。
 	var stack_signature: String = _get_stack_signature(item_resource)
 	for existing_record in target_records:
-		# 已有资源；非强化石或签名不一致时跳过。
+		# 已有资源；非可堆叠资源或签名不一致时跳过。
 		var existing_resource: Resource = existing_record.get("resource") as Resource
-		if not _is_enhancement_stone(existing_resource) or _get_stack_signature(existing_resource) != stack_signature:
+		if not _is_stackable_resource(existing_resource) or _get_stack_signature(existing_resource) != stack_signature:
 			continue
 		# 已有数量；达到 99 时继续寻找下一组相同强化石。
 		var existing_quantity: int = clampi(int(existing_record.get("quantity", 1)), 1, MAX_STACK_QUANTITY)
@@ -1529,6 +1584,14 @@ func _serialize_record(record: Dictionary) -> Dictionary:
 		serialized_record["icon_text"] = str(item_resource.get("icon_text"))
 		serialized_record["sell_price"] = int(item_resource.get("sell_price"))
 		serialized_record["modifiers"] = EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary)
+	elif _is_repair_kit(item_resource):
+		# 修复包字段；保存稳定标识与显示配置，允许未来运行时生成的道具安全恢复。
+		serialized_record["item_id"] = str(item_resource.get("item_id"))
+		serialized_record["display_name"] = str(item_resource.get("display_name"))
+		serialized_record["description"] = str(item_resource.get("description"))
+		serialized_record["icon_text"] = str(item_resource.get("icon_text"))
+		serialized_record["sell_price"] = int(item_resource.get("sell_price"))
+		serialized_record["repair_amount"] = maxf(float(item_resource.get("repair_amount")), 0.0)
 	elif item_resource.has_method("get_enhancement_ratio"):
 		serialized_record["enhancement_modifiers"] = (item_resource.get("enhancement_modifiers") as Dictionary).duplicate(true)
 		serialized_record["current_durability"] = maxf(float(item_resource.get("current_durability")), 0.0)
@@ -1557,13 +1620,25 @@ func _deserialize_record(serialized_record: Dictionary) -> Dictionary:
 		enhancement_stone.sell_price = maxi(int(serialized_record.get("sell_price", 0)), 0)
 		enhancement_stone.modifiers = EnhancementRules.normalize_modifiers(serialized_record.get("modifiers", {}) as Dictionary)
 		item_resource = enhancement_stone
+	elif item_kind == "repair_kit":
+		# 修复包资源；优先从项目模板深拷贝恢复，字段异常时仍可按存档内容构建独立道具。
+		var repair_kit: RepairKitData = _load_repair_kit_resource(str(serialized_record.get("item_id", "")), resource_path) as RepairKitData
+		if repair_kit == null:
+			repair_kit = RepairKitData.new()
+		repair_kit.item_id = str(serialized_record.get("item_id", repair_kit.item_id))
+		repair_kit.display_name = str(serialized_record.get("display_name", repair_kit.display_name))
+		repair_kit.description = str(serialized_record.get("description", repair_kit.description))
+		repair_kit.icon_text = str(serialized_record.get("icon_text", repair_kit.icon_text))
+		repair_kit.sell_price = maxi(int(serialized_record.get("sell_price", repair_kit.sell_price)), 0)
+		repair_kit.repair_amount = maxf(float(serialized_record.get("repair_amount", repair_kit.repair_amount)), 1.0)
+		item_resource = repair_kit
 	else:
 		item_resource = _load_weapon_resource(weapon_id, resource_path)
 	if item_resource == null:
 		return {}
-	if item_kind != "enhancement_stone" and serialized_record.get("enhancement_modifiers") is Dictionary:
+	if _is_weapon_resource(item_resource) and serialized_record.get("enhancement_modifiers") is Dictionary:
 		item_resource.set("enhancement_modifiers", (serialized_record.get("enhancement_modifiers") as Dictionary).duplicate(true))
-	if item_kind != "enhancement_stone":
+	if _is_weapon_resource(item_resource):
 		# 恢复耐久；旧存档缺少字段时按模板最大耐久恢复满值，避免升级后全部旧武器意外损坏。
 		# 模板最大耐久；当前所有武器默认 1000.0，后续单独修改上限时仍作为本次加载的最终上限。
 		var template_max_durability: float = maxf(float(item_resource.get("max_durability")), 1.0)
@@ -1602,9 +1677,27 @@ func _load_weapon_resource(weapon_id: String, preferred_path: String = "") -> Re
 	return duplicated_resource if duplicated_resource != null else weapon_template
 
 
+func _load_repair_kit_resource(item_id: String, preferred_path: String = "") -> Resource:
+	# 实际资源路径；优先读取存档路径，缺失时按稳定修复包标识回退项目默认表。
+	var resolved_path: String = preferred_path
+	if resolved_path.is_empty():
+		resolved_path = str(REPAIR_KIT_RESOURCE_PATHS.get(item_id, ""))
+	if resolved_path.is_empty() or not ResourceLoader.exists(resolved_path):
+		return null
+	# 修复包模板；读取成功后深拷贝，确保拾取或购买的同类道具不会共享运行时资源状态。
+	var repair_kit_template: Resource = load(resolved_path) as Resource
+	if repair_kit_template == null:
+		return null
+	# 独立修复包资源；复制失败时回退模板，仍保持存档可读取。
+	var duplicated_resource: Resource = repair_kit_template.duplicate(true) as Resource
+	return duplicated_resource if duplicated_resource != null else repair_kit_template
+
+
 func _resolve_resource_path(item_resource: Resource) -> String:
 	if item_resource == null:
 		return ""
 	if not item_resource.resource_path.is_empty():
 		return item_resource.resource_path
+	if _is_repair_kit(item_resource):
+		return str(REPAIR_KIT_RESOURCE_PATHS.get(str(item_resource.get("item_id")), ""))
 	return str(WEAPON_RESOURCE_PATHS.get(str(item_resource.get("weapon_id")), ""))

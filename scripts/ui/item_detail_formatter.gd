@@ -28,6 +28,10 @@ static func is_enhancement_stone(item_resource: Resource) -> bool:
 	return item_resource != null and str(item_resource.get("item_kind")) == "enhancement_stone"
 
 
+static func is_repair_kit(item_resource: Resource) -> bool:
+	return item_resource != null and str(item_resource.get("item_kind")) == "repair_kit"
+
+
 static func get_item_display_name(item_resource: Resource) -> String:
 	if item_resource == null:
 		return "未知物品"
@@ -41,6 +45,8 @@ static func get_item_display_name(item_resource: Resource) -> String:
 static func get_item_type_label(item_resource: Resource) -> String:
 	if is_enhancement_stone(item_resource):
 		return "资源 · 强化石"
+	if is_repair_kit(item_resource):
+		return "道具 · 修复包"
 	# 武器类型；ranged 与 melee 分别映射到仓库武器子分类。
 	var weapon_type: String = str(item_resource.get("weapon_type")) if item_resource != null else ""
 	return "武器 · 远程" if weapon_type == "ranged" else ("武器 · 近战" if weapon_type == "melee" else "未知")
@@ -77,6 +83,8 @@ static func build_bbcode(item_resource: Resource, quantity: int = 1) -> String:
 
 	if is_enhancement_stone(item_resource):
 		_append_stone_lines(detail_lines, item_resource)
+	elif is_repair_kit(item_resource):
+		_append_repair_kit_lines(detail_lines, item_resource)
 	elif is_weapon(item_resource):
 		_append_weapon_lines(detail_lines, item_resource)
 	return "\n".join(detail_lines)
@@ -120,6 +128,14 @@ static func _append_stone_lines(detail_lines: Array[String], item_resource: Reso
 	var modifiers: Dictionary = EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary)
 	_append_stone_lines_by_benefit(detail_lines, modifiers, true)
 	_append_stone_lines_by_benefit(detail_lines, modifiers, false)
+
+
+static func _append_repair_kit_lines(detail_lines: Array[String], item_resource: Resource) -> void:
+	# 修复量；取值至少为 0，显示为整数以匹配所有当前修复包的固定耐久数值。
+	var repair_amount: float = maxf(float(item_resource.get("repair_amount")), 0.0)
+	detail_lines.append("[b]使用效果[/b]")
+	detail_lines.append("仅可对武器使用")
+	detail_lines.append("恢复耐久：%.0f" % repair_amount)
 
 
 static func _append_stone_lines_by_benefit(detail_lines: Array[String], modifiers: Dictionary, beneficial: bool) -> void:

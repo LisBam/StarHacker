@@ -32,14 +32,25 @@ func configure(entry: Dictionary, is_gray_market: bool) -> void:
 	var item_name: String = str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", _item_resource)) if _item_resource != null else "无效商品"
 	# 商品类型；武器显示近战或远程，强化石显示资源类型。
 	var item_type: String = str(ITEM_DETAIL_FORMATTER.call("get_item_type_label", _item_resource)) if _item_resource != null else "未知"
-	# 二手说明；仅普通商店二手枪械显示耐久与历史强化石数量，灰市保留遗失物原状态但不标为二手。
-	var second_hand_text: String = ""
-	if bool(entry.get("second_hand", false)):
-		second_hand_text = " · 二手枪械 · 曾使用 %d 颗强化石" % maxi(int(entry.get("used_stone_count", 0)), 0)
-	text = "%s%s · %s%s\n购买价 %d 金币（原价 × %.2f）" % [item_name, " x%d" % _quantity if _quantity > 1 else "", item_type, second_hand_text, purchase_price, price_multiplier]
+	# 是否为武器；用于决定卡片是否展示当前耐久值。
+	var is_weapon: bool = _item_resource != null and str(_item_resource.get("weapon_type")) in ["ranged", "melee"]
+	# 是否为二手商品；普通商店二手枪械仅在枪械名称前增加简短标识，不显示历史强化细节。
+	var _is_second_hand: bool = bool(entry.get("second_hand", false))
+	if _is_second_hand:
+		item_name = "【二手】%s" % item_name
+	# 价格显示文本；默认仅显示最终金币，开发者开启调试信息后才公开原价倍率。
+	var price_text: String = _build_price_text(purchase_price, price_multiplier)
+	if is_weapon:
+		# 当前耐久；商店武器保留二手磨损与历史强化后的真实状态，因此必须直接展示给玩家。
+		var current_durability: float = maxf(float(_item_resource.get("current_durability")), 0.0)
+		# 最大耐久；至少为 1，避免旧资源字段异常时产生无效展示。
+		var maximum_durability: float = maxf(float(_item_resource.get("max_durability")), 1.0)
+		text = "%s · %s\n耐久 %.0f / %.0f\n%s" % [item_name, item_type, current_durability, maximum_durability, price_text]
+	else:
+		text = "%s%s · %s\n%s" % [item_name, " x%d" % _quantity if _quantity > 1 else "", item_type, price_text]
 	tooltip_text = ITEM_DETAIL_FORMATTER.call("build_plain_text", _item_resource, _quantity) if _item_resource != null else ""
 	disabled = _item_resource == null or _stock_id.is_empty()
-	custom_minimum_size = Vector2(0.0, 66.0)
+	custom_minimum_size = Vector2(0.0, 84.0 if is_weapon else 66.0)
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if not disabled else Control.CURSOR_ARROW
 	if not pressed.is_connected(_on_pressed):
 		pressed.connect(_on_pressed)
@@ -53,3 +64,11 @@ func _on_pressed() -> void:
 
 func _make_custom_tooltip(_for_text: String) -> Object:
 	return ITEM_DETAIL_FORMATTER.call("create_tooltip_control", _item_resource, _quantity)
+
+
+func _build_price_text(purchase_price: int, price_multiplier: float) -> String:
+	# 调试设置服务；缺失时按正式显示兜底，避免商店控件与开发者菜单产生硬依赖。
+	var debug_settings: Node = get_tree().root.get_node_or_null("DebugSettings")
+	# 是否显示调试倍率；默认 false，仅在开发者菜单明确开启后显示原价计算过程。
+	var show_debug_information: bool = debug_settings != null and debug_settings.has_method("is_debug_information_visible") and bool(debug_settings.call("is_debug_information_visible"))
+	return "%d金币（原价×%.2f）" % [purchase_price, price_multiplier] if show_debug_information else "%d金币" % purchase_price

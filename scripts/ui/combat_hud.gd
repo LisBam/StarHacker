@@ -559,10 +559,10 @@ func _rebuild_inventory_slots() -> void:
 		var source_index: int = int((raw_entry as Dictionary).get("source_index", visible_index))
 
 		visible_item_count += 1
-		if str(item_data.get("item_kind")) == "enhancement_stone":
-			# 强化石数量；取值 1 到 99，显示在资源方格并随点击菜单消费。
+		if str(item_data.get("weapon_type")) not in ["ranged", "melee"]:
+			# 资源数量；取值 1 到 99，强化石与修复包都使用资源方格显示。
 			var quantity: int = clampi(int((raw_entry as Dictionary).get("quantity", 1)), 1, 99)
-			# 强化石资源格；复用仓库控件的方形布局和带颜色悬停详情，不参与武器装备拖拽。
+			# 资源方格；复用仓库控件的方形布局，修复包可点击或拖动到武器，强化石仅保留锻造材料属性。
 			var resource_slot: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
 			resource_slot.call("configure", item_data, "backpack", source_index, false, "", quantity)
 			resource_slot.call("set_weapon_slot_visual_style", true)
@@ -664,6 +664,7 @@ func _create_weapon_slot_control(minimum_size: Vector2) -> Control:
 	slot_control.connect("drag_released_outside", Callable(self, "_on_weapon_slot_drag_released_outside"))
 	slot_control.connect("item_selected", Callable(self, "_on_combat_weapon_selected"))
 	slot_control.connect("enhancement_drop_received", Callable(self, "_on_combat_enhancement_drop_received"))
+	slot_control.connect("repair_kit_drop_received", Callable(self, "_on_combat_repair_kit_drop_received"))
 	return slot_control
 
 
@@ -2190,7 +2191,7 @@ func _on_inventory_stone_attribute_selected(item_index: int) -> void:
 
 
 func _on_combat_resource_action_requested(item_resource: Resource) -> void:
-	if item_resource == null or str(item_resource.get("item_kind")) != "enhancement_stone":
+	if item_resource == null or str(item_resource.get("item_kind")) != "repair_kit":
 		return
 	_combat_action_stone_resource = item_resource
 	_combat_action_weapon_resource = null
@@ -2237,7 +2238,7 @@ func _on_combat_weapon_selected(weapon_resource: Resource, selected_context: Str
 	if weapon_resource == null or not _inventory_panel.visible:
 		return
 	if _pending_combat_stone_resource != null:
-		_apply_combat_enhancement(_pending_combat_stone_resource, weapon_resource)
+		_apply_combat_repair(_pending_combat_stone_resource, weapon_resource)
 		return
 	if selected_context == "equipment" and selected_kind == "ranged" and _equipment_component != null and _equipment_component.has_method("equip_ranged_slot"):
 		_equipment_component.call("equip_ranged_slot", selected_index)
@@ -2259,6 +2260,30 @@ func _on_combat_enhancement_drop_received(stone_resource: Resource, source_locat
 	if source_location != "backpack" or stone_resource == null or weapon_resource == null:
 		return
 	_apply_combat_enhancement(stone_resource, weapon_resource)
+
+
+func _on_combat_repair_kit_drop_received(repair_kit_resource: Resource, source_location: String, weapon_resource: Resource) -> void:
+	if source_location != "backpack" or repair_kit_resource == null or weapon_resource == null:
+		return
+	_apply_combat_repair(repair_kit_resource, weapon_resource)
+
+
+func _apply_combat_repair(repair_kit_resource: Resource, weapon_resource: Resource) -> void:
+	# 全局库存服务；修复包消费与耐久写入必须由统一所有权服务完成，避免 HUD 直接篡改资源。
+	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+	if global_inventory == null or not global_inventory.has_method("use_repair_kit_with_result"):
+		return
+	# 修复结果；点击选择和拖动投放共用同一原子消费流程，满耐久武器不会消耗道具。
+	var repair_result: Dictionary = global_inventory.call("use_repair_kit_with_result", repair_kit_resource, "backpack", weapon_resource) as Dictionary
+	if not bool(repair_result.get("success", false)):
+		return
+	# 是否需要恢复页面；使用菜单进入武器选择页后恢复到原资源分页，拖动修复保持当前页面。
+	var should_restore_stone_view: bool = _pending_combat_stone_resource != null and _combat_stone_return_view_pending
+	_pending_combat_stone_resource = null
+	if should_restore_stone_view:
+		_restore_combat_stone_return_view()
+	_refresh_equipment()
+	_rebuild_inventory_slots()
 
 
 func _apply_combat_enhancement(stone_resource: Resource, weapon_resource: Resource) -> void:

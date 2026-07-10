@@ -31,6 +31,8 @@ const ITEM_ACTION_EQUIP: int = 4
 const ITEM_ACTION_EQUIP_RANGED_1: int = 5
 ## 操作菜单装备到远程槽 2 的编号；固定为 6，只对展开背包内的远程武器显示。
 const ITEM_ACTION_EQUIP_RANGED_2: int = 6
+## 操作菜单使用修复包编号；固定为 7，只对 repair_kit 道具显示并进入武器选择状态。
+const ITEM_ACTION_USE_REPAIR_KIT: int = 7
 ## 仓库区域最小占比；默认 0.10，保证拖条向上时仓库仍保留基础浏览空间。
 const STORAGE_SPLIT_MIN_RATIO: float = 0.10
 ## 仓库区域最大占比；默认 0.90，允许玩家把随身背包缩小到仅保留必要操作入口。
@@ -122,6 +124,10 @@ var _stone_return_search_text: String = ""
 var _stone_return_attribute_filter: String = ""
 ## 是否存在待恢复的强化石页面；默认 false，点击“使用”跳转武器页后设为 true，取消或成功强化后清除。
 var _stone_return_view_pending: bool = false
+## 待使用修复包资源；非空时下一次点击任意持有武器会消耗一件修复包并恢复耐久。
+var _pending_repair_kit_resource: Resource
+## 待使用修复包来源；取值 warehouse 或 backpack，修复成功后从对应堆叠扣除一件。
+var _pending_repair_kit_location: String = ""
 
 
 func _ready() -> void:
@@ -397,11 +403,12 @@ func _build_storage_entry_row(entry: Dictionary, location: String, entry_index: 
 	var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
 	item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	item_control.call("configure", item_resource, location, entry_index, _backpack_expanded, extraction_prefix, quantity)
-	item_control.call("set_enhancement_target_highlight", _pending_stone_resource != null and str(item_resource.get("weapon_type")) in ["ranged", "melee"])
+	item_control.call("set_enhancement_target_highlight", (_pending_stone_resource != null or _pending_repair_kit_resource != null) and str(item_resource.get("weapon_type")) in ["ranged", "melee"])
 	item_control.connect("quick_action_requested", Callable(self, "_on_quick_action_requested").bind(location))
 	item_control.connect("item_action_requested", Callable(self, "_on_item_action_requested").bind(location))
 	item_control.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
 	item_control.connect("enhancement_drop_requested", Callable(self, "_on_enhancement_drop_requested"))
+	item_control.connect("repair_kit_drop_requested", Callable(self, "_on_repair_kit_drop_requested"))
 	target_container.add_child(item_control)
 
 
@@ -432,8 +439,10 @@ func _create_storage_equipment_slot(slot_label: String, location: String, weapon
 	slot_control.call("configure", slot_label, location, weapon_type, item_resource, detail_tooltip)
 	slot_control.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
 	slot_control.connect("item_selected", Callable(self, "_on_enhancement_weapon_selected"))
+	slot_control.connect("item_selected", Callable(self, "_on_repair_kit_weapon_selected"))
 	slot_control.connect("enhancement_drop_requested", Callable(self, "_on_enhancement_drop_requested"))
-	slot_control.call("set_enhancement_target_highlight", _pending_stone_resource != null and item_resource != null)
+	slot_control.connect("repair_kit_drop_requested", Callable(self, "_on_repair_kit_drop_requested"))
+	slot_control.call("set_enhancement_target_highlight", (_pending_stone_resource != null or _pending_repair_kit_resource != null) and item_resource != null)
 	slot_control.custom_minimum_size = Vector2(0.0, 46.0)
 	return slot_control
 
@@ -474,6 +483,7 @@ func _rebuild_storage_subcategory_buttons() -> void:
 		_create_storage_category_button(_storage_subcategory_bar, "远程", InventoryQuery.SUBCATEGORY_RANGED, false)
 	else:
 		_create_storage_category_button(_storage_subcategory_bar, "强化石", InventoryQuery.SUBCATEGORY_ENHANCEMENT_STONES, false)
+		_create_storage_category_button(_storage_subcategory_bar, "道具", InventoryQuery.SUBCATEGORY_ITEMS, false)
 	_refresh_storage_category_buttons()
 
 
@@ -524,6 +534,8 @@ func _on_stone_attribute_selected(item_index: int) -> void:
 
 
 func _get_storage_summary_text(warehouse_entries: Array, backpack_entries: Array) -> String:
+	if _pending_repair_kit_resource != null:
+		return "正在使用 %s：请选择仓库、背包或装备栏中的一把武器" % str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", _pending_repair_kit_resource))
 	if _pending_stone_resource != null:
 		return "正在使用 %s：请选择仓库、背包或装备栏中的一把兼容武器" % str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", _pending_stone_resource))
 	return "永久仓库 %d 组 · 随身背包 %d 组 · 普通点击打开操作，Shift+点击快速转移%s" % [warehouse_entries.size(), backpack_entries.size(), "，拖拽可调整或装备" if _backpack_expanded else ""]
@@ -541,7 +553,7 @@ func _apply_storage_display_mode() -> void:
 	_warehouse_scroll.size_flags_stretch_ratio = warehouse_split_ratio if _backpack_expanded else 1.0
 	_backpack_scroll.size_flags_stretch_ratio = 1.0 - warehouse_split_ratio
 	if _cancel_stone_use_button != null:
-		_cancel_stone_use_button.visible = _pending_stone_resource != null
+		_cancel_stone_use_button.visible = _pending_stone_resource != null or _pending_repair_kit_resource != null
 
 
 func _on_mode_toggle_pressed() -> void:
@@ -562,6 +574,9 @@ func _on_quick_action_requested(item_resource: Resource, source_location: String
 func _on_item_action_requested(item_resource: Resource, source_location: String) -> void:
 	if item_resource == null or _global_inventory == null:
 		return
+	if _pending_repair_kit_resource != null and str(item_resource.get("weapon_type")) in ["melee", "ranged"]:
+		_on_repair_kit_weapon_selected(item_resource)
+		return
 	if _pending_stone_resource != null and str(item_resource.get("weapon_type")) in ["melee", "ranged"]:
 		_on_enhancement_weapon_selected(item_resource)
 		return
@@ -580,8 +595,8 @@ func _on_item_action_requested(item_resource: Resource, source_location: String)
 	else:
 		_item_action_menu.add_item("出售（+%d）" % total_sell_price, ITEM_ACTION_SELL)
 	_item_action_menu.set_item_disabled(_item_action_menu.get_item_index(ITEM_ACTION_SELL), total_sell_price <= 0)
-	if str(item_resource.get("item_kind")) == "enhancement_stone":
-		_item_action_menu.add_item("使用", ITEM_ACTION_USE)
+	if str(item_resource.get("item_kind")) == "repair_kit":
+		_item_action_menu.add_item("使用", ITEM_ACTION_USE_REPAIR_KIT)
 	elif source_location == "backpack" and str(item_resource.get("weapon_type")) in ["ranged", "melee"]:
 		if str(item_resource.get("weapon_type")) == "ranged":
 			_item_action_menu.add_item("装备1", ITEM_ACTION_EQUIP_RANGED_1)
@@ -610,6 +625,20 @@ func _on_item_action_menu_id_pressed(action_id: int) -> void:
 		_capture_stone_return_view()
 		_backpack_expanded = true
 		# 强化目标选择页；自动切回全部武器并清空查询条件，确保仓库、背包和装备栏目标立即可见。
+		_storage_primary_category = InventoryQuery.PRIMARY_WEAPONS
+		_storage_subcategory = InventoryQuery.SUBCATEGORY_ALL
+		_stone_attribute_filter = ""
+		_stone_attribute_option.select(0)
+		_storage_search_edit.clear()
+		_rebuild_storage_subcategory_buttons()
+		_refresh_storage_category_buttons()
+		_apply_storage_display_mode()
+		_rebuild_storage_content()
+	elif action_id == ITEM_ACTION_USE_REPAIR_KIT and str(_action_item_resource.get("item_kind")) == "repair_kit":
+		_pending_repair_kit_resource = _action_item_resource
+		_pending_repair_kit_location = _action_item_location
+		_backpack_expanded = true
+		# 修复目标选择页；武器可位于永久仓库、随身背包或局外装备栏，因此显示完整武器浏览视图。
 		_storage_primary_category = InventoryQuery.PRIMARY_WEAPONS
 		_storage_subcategory = InventoryQuery.SUBCATEGORY_ALL
 		_stone_attribute_filter = ""
@@ -650,12 +679,37 @@ func _on_enhancement_drop_requested(stone_resource: Resource, source_location: S
 	var enhancement_result: Dictionary = _global_inventory.call("use_enhancement_stone_with_result", stone_resource, source_location, weapon_resource) as Dictionary
 	if bool(enhancement_result.get("success", false)):
 		_present_enhancement_result(enhancement_result)
+		_rebuild_storage_content()
+
+
+func _on_repair_kit_weapon_selected(weapon_resource: Resource) -> void:
+	if _pending_repair_kit_resource == null or weapon_resource == null or _global_inventory == null:
+		return
+	# 修复结果；满耐久武器不会消耗道具，成功后清理选择状态并反馈实际恢复耐久。
+	var repair_result: Dictionary = _global_inventory.call("use_repair_kit_with_result", _pending_repair_kit_resource, _pending_repair_kit_location, weapon_resource) as Dictionary
+	if bool(repair_result.get("success", false)):
+		_pending_repair_kit_resource = null
+		_pending_repair_kit_location = ""
+		_storage_summary_label.text = "修复完成，恢复 %.0f 点耐久" % float(repair_result.get("durability_restored", 0.0))
+	_apply_storage_display_mode()
 	_rebuild_storage_content()
+
+
+func _on_repair_kit_drop_requested(repair_kit_resource: Resource, source_location: String, weapon_resource: Resource) -> void:
+	if _global_inventory == null or repair_kit_resource == null or weapon_resource == null:
+		return
+	# 拖动修复结果；成功后直接刷新库存和武器耐久，失败时不会消费修复包。
+	var repair_result: Dictionary = _global_inventory.call("use_repair_kit_with_result", repair_kit_resource, source_location, weapon_resource) as Dictionary
+	if bool(repair_result.get("success", false)):
+		_storage_summary_label.text = "修复完成，恢复 %.0f 点耐久" % float(repair_result.get("durability_restored", 0.0))
+		_rebuild_storage_content()
 
 
 func _on_cancel_stone_use_pressed() -> void:
 	_pending_stone_resource = null
 	_pending_stone_location = ""
+	_pending_repair_kit_resource = null
+	_pending_repair_kit_location = ""
 	if _stone_return_view_pending:
 		_restore_stone_return_view()
 	_apply_storage_display_mode()

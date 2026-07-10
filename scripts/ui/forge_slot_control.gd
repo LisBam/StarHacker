@@ -23,7 +23,22 @@ var _entry: Dictionary = {}
 func configure(slot_index: int, is_main_slot: bool) -> void:
 	_slot_index = slot_index
 	_is_main_slot = is_main_slot
-	custom_minimum_size = Vector2(138.0, 72.0) if is_main_slot else Vector2(124.0, 64.0)
+	custom_minimum_size = Vector2(104.0, 104.0)
+	# 槽位基础样式；六个槽位统一正方形深色底与白色边框，主槽与牺牲槽仅通过位置区分职责。
+	var normal_style: StyleBoxFlat = StyleBoxFlat.new()
+	normal_style.bg_color = Color(0.06, 0.075, 0.09, 0.94)
+	normal_style.border_color = Color.WHITE
+	normal_style.set_border_width_all(2)
+	normal_style.set_corner_radius_all(4)
+	# 槽位悬停样式；保留白色边框并轻微提亮背景，便于确认可点击归还操作。
+	var hover_style: StyleBoxFlat = normal_style.duplicate() as StyleBoxFlat
+	hover_style.bg_color = Color(0.13, 0.17, 0.21, 0.98)
+	# 槽位按下样式；保持边框不变，避免锻造区视觉层级随点击发生跳变。
+	var pressed_style: StyleBoxFlat = normal_style.duplicate() as StyleBoxFlat
+	pressed_style.bg_color = Color(0.18, 0.22, 0.26, 1.0)
+	add_theme_stylebox_override("normal", normal_style)
+	add_theme_stylebox_override("hover", hover_style)
+	add_theme_stylebox_override("pressed", pressed_style)
 	if not pressed.is_connected(_on_pressed):
 		pressed.connect(_on_pressed)
 	refresh({})
@@ -31,16 +46,15 @@ func configure(slot_index: int, is_main_slot: bool) -> void:
 
 func refresh(entry: Dictionary) -> void:
 	_entry = entry.duplicate()
-	# 当前物品；空槽显示用途提示，有物品时显示名称与来源并允许单击快速归还。
+	# 当前物品；空槽不显示文字，有物品时只显示名称并允许单击快速归还。
 	var item_resource: Resource = _entry.get("resource") as Resource
 	if item_resource == null:
-		text = "主锻造武器\n拖入或单击放入" if _is_main_slot else "牺牲品\n武器 / 强化石"
+		text = ""
 		tooltip_text = ""
 		self_modulate = Color.WHITE
 	else:
-		# 来源名称；仓库和背包使用清晰中文，方便确认单击会回到哪里。
-		var source_name: String = "仓库" if str(_entry.get("source_location", "")) == "warehouse" else "背包"
-		text = "%s\n来源：%s" % [str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", item_resource)), source_name]
+		# 物品名称；槽位保持简洁，仅展示已放入材料的名称，完整来源和属性仍可通过悬停查看。
+		text = str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", item_resource))
 		tooltip_text = ITEM_DETAIL_FORMATTER.call("build_plain_text", item_resource, 1)
 		self_modulate = Color(0.78, 0.95, 1.0, 1.0) if _is_main_slot else Color(1.0, 0.88, 0.66, 1.0)
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND

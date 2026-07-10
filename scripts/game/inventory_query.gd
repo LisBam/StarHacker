@@ -16,6 +16,8 @@ const SUBCATEGORY_MELEE: String = "melee"
 const SUBCATEGORY_RANGED: String = "ranged"
 ## 强化石资源子分类；只匹配 item_kind 为 enhancement_stone。
 const SUBCATEGORY_ENHANCEMENT_STONES: String = "enhancement_stones"
+## 道具资源子分类；当前匹配 item_kind 为 repair_kit，后续可扩展为更多主动道具。
+const SUBCATEGORY_ITEMS: String = "items"
 ## 获得时间排序；默认按 acquired_at 与 acquisition_sequence 从新到旧排列。
 const SORT_ACQUIRED_TIME: String = "acquired_time"
 ## 物品价值排序；按单价乘堆叠数量从高到低排列，相同价值时回退获得时间。
@@ -83,7 +85,7 @@ static func _matches_category(entry: Dictionary, primary_category: String, subca
 	if primary_category == PRIMARY_RESOURCES:
 		if item_kind == "weapon" or weapon_type in [SUBCATEGORY_MELEE, SUBCATEGORY_RANGED]:
 			return false
-		return subcategory == SUBCATEGORY_ALL or (subcategory == SUBCATEGORY_ENHANCEMENT_STONES and item_kind == "enhancement_stone")
+		return subcategory == SUBCATEGORY_ALL or (subcategory == SUBCATEGORY_ENHANCEMENT_STONES and item_kind == "enhancement_stone") or (subcategory == SUBCATEGORY_ITEMS and item_kind == "repair_kit")
 	return false
 
 
@@ -129,7 +131,7 @@ static func _build_search_text(entry: Dictionary) -> String:
 	elif weapon_type == SUBCATEGORY_RANGED:
 		search_parts.append("武器 远程")
 	else:
-		search_parts.append("资源 强化石" if str(item_resource.get("item_kind")) == "enhancement_stone" else "资源")
+		search_parts.append("资源 强化石" if str(item_resource.get("item_kind")) == "enhancement_stone" else ("资源 道具 修复包" if str(item_resource.get("item_kind")) == "repair_kit" else "资源"))
 	if str(item_resource.get("item_kind")) == "enhancement_stone":
 		# 强化词典；将“伤害+”“冷却+”等可见词条加入搜索内容。
 		var modifiers: Dictionary = EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary)

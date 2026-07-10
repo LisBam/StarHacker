@@ -24,6 +24,14 @@
 - 激活怪物的物理移动仍逐帧执行；感知、射线、绕障和寻路决策按 `ai_update_interval` 默认 0.1 秒运行。每只怪物在出生时随机错开首次更新时间，避免同帧峰值。
 - 已缓存的 A* 网格由所有激活怪物复用。路径重算继续受随机间隔和目标移动阈值限制。
 
+## 死亡掉落
+
+- 真实怪物死亡后由 `GameWorld._on_monster_died()` 统一处理掉落和虚拟人口注销，怪物脚本不直接依赖库存或强化系统。
+- 武器继续读取怪物自身 `weapon_drop_chance`，默认 3%，并从 `weapon_drop_table` 随机复制独立武器实例。
+- 强化石使用世界级 `enhancement_stone_drop_chance`，默认 0.05，即每次击杀独立有 5% 概率掉落一颗。
+- 强化石可随机生成一到多个正负百分比词条。词条数量、负词条概率、比例范围和基础售价均由 `GameWorld` 导出参数控制，掉落后通过通用 `item_drops` 拾取协议进入随身背包。
+- 虚拟记录本身不会在远处自动死亡或生成地面掉落；只有玩家附近已经实例化且实际被击杀的怪物才执行死亡掉落，避免远距离模拟产生无法拾取的资源节点。
+
 ## 实心墙体专属视野
 
 - 视线默认只查询物理层 5，即 `vision_line_of_sight_collision_mask = 16`。
@@ -89,6 +97,7 @@
 ## 参数分组
 
 - 加载与错峰：`active_radius`、`sleep_hysteresis`、`update_interval`、`monsters_per_update`、`materializations_per_update`、`max_materialized_monsters`、`ai_update_interval`。
+- 死亡掉落：`weapon_drop_chance`、`enhancement_stone_drop_chance`、`enhancement_stone_min_modifier_count`、`enhancement_stone_max_modifier_count`、`enhancement_stone_negative_modifier_chance`、`enhancement_stone_min_modifier_ratio`、`enhancement_stone_max_modifier_ratio`、`enhancement_stone_base_sell_price`。
 - 实心墙体视野：`vision_range`、`lose_target_range_multiplier`、`vision_requires_line_of_sight`、`vision_line_of_sight_collision_mask`、`vision_loss_grace_duration`、`solid_wall_group`、`line_of_sight_skip_limit`。
 - 短期线索：`target_memory_duration`、`target_prediction_time`、`target_prediction_max_distance`、`search_arrive_distance`、`lost_search_occlusion_offset`。
 - 中长期记忆：`medium_memory_duration`、`medium_hotspot_merge_distance`、`medium_hotspot_max_count`、`medium_recheck_trigger_radius`、`medium_recheck_duration`、`medium_recheck_cooldown`、`long_term_region_radius`、`long_term_alert_patrol_speed_multiplier`。

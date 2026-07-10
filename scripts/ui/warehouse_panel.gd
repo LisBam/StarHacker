@@ -11,6 +11,20 @@ const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_it
 const STORAGE_DROP_AREA_SCRIPT: Script = preload("res://scripts/ui/storage_drop_area.gd")
 ## 局外装备拖拽槽脚本；默认负责远近战类型校验以及装备栏双向拖拽数据生成。
 const EQUIPMENT_STORAGE_SLOT_SCRIPT: Script = preload("res://scripts/ui/equipment_storage_slot_control.gd")
+## 物品详情格式化器；用于识别武器、强化石和动态售价，避免仓库面板重复拼接属性文本。
+const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
+## 仓库筛选全部武器标识；默认进入仓库时显示近战与远程武器。
+const STORAGE_FILTER_WEAPONS: String = "weapons"
+## 仓库筛选近战武器标识；只匹配 weapon_type 为 melee 的物品。
+const STORAGE_FILTER_MELEE: String = "melee"
+## 仓库筛选远程武器标识；只匹配 weapon_type 为 ranged 的物品。
+const STORAGE_FILTER_RANGED: String = "ranged"
+## 仓库筛选强化石标识；只匹配 item_kind 为 enhancement_stone 的资源。
+const STORAGE_FILTER_STONES: String = "enhancement_stones"
+## 操作菜单出售项编号；固定为 1，选择后出售当前仓库或背包整条记录。
+const ITEM_ACTION_SELL: int = 1
+## 操作菜单使用项编号；固定为 2，只对强化石显示并进入武器选择状态。
+const ITEM_ACTION_USE: int = 2
 
 ## 面板最小尺寸；默认 960x620，适配当前 1280x720 主菜单并保留边缘空间。
 @export var panel_minimum_size: Vector2 = Vector2(960.0, 620.0)
@@ -39,6 +53,20 @@ var _mode_toggle_button: Button
 var _coins_label: Label
 ## 新版仓库摘要标签；默认显示永久仓库与随身背包数量，并明确安全和死亡损失边界。
 var _storage_summary_label: Label
+## 当前仓库与背包共用筛选标识；默认 weapons，修改会同步刷新上下两个容器。
+var _storage_filter: String = STORAGE_FILTER_WEAPONS
+## 筛选按钮表；键为筛选标识，值为运行时创建按钮，用于刷新互斥选中状态。
+var _storage_filter_buttons: Dictionary = {}
+## 物品操作菜单；普通点击武器或强化石时显示出售与可选使用操作。
+var _item_action_menu: PopupMenu
+## 当前操作物品资源；菜单关闭前保持资源实例引用，用于精确出售或启动强化选择。
+var _action_item_resource: Resource
+## 当前操作物品位置；取值 warehouse 或 backpack，用于出售和消费强化石。
+var _action_item_location: String = ""
+## 待使用强化石资源；非空时下一次普通点击任意兼容武器会尝试强化该武器。
+var _pending_stone_resource: Resource
+## 待使用强化石来源；取值 warehouse 或 backpack，强化成功后从对应堆叠扣除一颗。
+var _pending_stone_location: String = ""
 
 
 func _ready() -> void:
@@ -110,6 +138,17 @@ func _build_storage_interface() -> void:
 	_storage_summary_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(_storage_summary_label)
 
+	# 分类筛选栏；武器与资源为主分类，近战、远程和强化石提供明确子分类入口。
+	var filter_bar: HBoxContainer = HBoxContainer.new()
+	filter_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+	filter_bar.add_theme_constant_override("separation", 6)
+	content.add_child(filter_bar)
+	_create_storage_filter_button(filter_bar, "武器", STORAGE_FILTER_WEAPONS)
+	_create_storage_filter_button(filter_bar, "近战", STORAGE_FILTER_MELEE)
+	_create_storage_filter_button(filter_bar, "远程", STORAGE_FILTER_RANGED)
+	_create_storage_filter_button(filter_bar, "资源", STORAGE_FILTER_STONES)
+	_create_storage_filter_button(filter_bar, "强化石", STORAGE_FILTER_STONES)
+
 	# 永久仓库标题；始终位于界面上方并说明安全存储属性。
 	var warehouse_title: Label = Label.new()
 	warehouse_title.text = "永久仓库 · 未放入背包的物品不会因死亡或退出丢失"
@@ -180,7 +219,12 @@ func _build_storage_interface() -> void:
 	close_button.text = "返回主菜单"
 	close_button.pressed.connect(_on_close_pressed)
 	content.add_child(close_button)
+
+	_item_action_menu = PopupMenu.new()
+	_item_action_menu.id_pressed.connect(_on_item_action_menu_id_pressed)
+	add_child(_item_action_menu)
 	_apply_storage_display_mode()
+	_refresh_storage_filter_buttons()
 
 
 func _rebuild_storage_content() -> void:
@@ -197,7 +241,7 @@ func _rebuild_storage_content() -> void:
 	# 随身背包条目；顺序只影响当前携带布局，进入战斗后由 HUD 读取同一数组。
 	var backpack_entries: Array = _global_inventory.call("get_backpack_entries")
 	_coins_label.text = "金币：%d" % int(_global_inventory.call("get_coins"))
-	_storage_summary_label.text = "永久仓库 %d 件 · 随身背包 %d 件 · %s" % [warehouse_entries.size(), backpack_entries.size(), "点击仓库物品可装入背包，点击背包物品可存入仓库" if _backpack_expanded else "当前可出售永久仓库物品"]
+	_storage_summary_label.text = _get_storage_summary_text(warehouse_entries, backpack_entries)
 	_build_storage_entries(warehouse_entries, "warehouse", _warehouse_item_list)
 	if _backpack_expanded:
 		_build_storage_entries(backpack_entries, "backpack", _carried_item_list)
@@ -207,10 +251,15 @@ func _rebuild_storage_content() -> void:
 func _build_storage_entries(entries: Array, location: String, target_container: Container) -> void:
 	if target_container == null:
 		return
-	if entries.is_empty():
+	# 当前分类匹配数量；用于在容器有其他分类物品但当前页为空时仍显示明确空状态。
+	var matching_entry_count: int = 0
+	for raw_entry in entries:
+		if raw_entry is Dictionary and _does_entry_match_storage_filter(raw_entry as Dictionary):
+			matching_entry_count += 1
+	if matching_entry_count <= 0:
 		# 空容器提示；根据所在区域明确物品安全属性和快捷转移方向。
 		var empty_state_label: Label = Label.new()
-		empty_state_label.text = "永久仓库为空" if location == "warehouse" else "随身背包为空，可点击或拖入上方仓库物品"
+		empty_state_label.text = "当前分类没有永久仓库物品" if location == "warehouse" else "当前分类没有随身背包物品，可用 Shift+点击或拖入上方仓库物品"
 		empty_state_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		empty_state_label.custom_minimum_size = Vector2(0.0, 52.0)
 		target_container.add_child(empty_state_label)
@@ -220,7 +269,7 @@ func _build_storage_entries(entries: Array, location: String, target_container: 
 	for entry_index in range(entries.size()):
 		# 展示条目原始值；取值应为 Dictionary，异常数据不会生成可操作控件。
 		var raw_entry: Variant = entries[entry_index]
-		if raw_entry is Dictionary:
+		if raw_entry is Dictionary and _does_entry_match_storage_filter(raw_entry as Dictionary):
 			_build_storage_entry_row(raw_entry as Dictionary, location, entry_index, entries.size(), target_container)
 
 
@@ -230,29 +279,18 @@ func _build_storage_entry_row(entry: Dictionary, location: String, entry_index: 
 	if item_resource == null:
 		return
 
-	# 物品操作行；横向组合可拖拽详情按钮、装备或出售操作以及顺序调整按钮。
-	var row: HBoxContainer = HBoxContainer.new()
-	row.custom_minimum_size = Vector2(0.0, 44.0)
-	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_theme_constant_override("separation", 5)
-	target_container.add_child(row)
-	# 上次撤离前缀；只有自动转入永久仓库且属于最近一次成功撤离的物品显示。
+	# 物品数量；武器固定为 1，强化石按 1 到 99 显示在方形资源格中。
+	var quantity: int = clampi(int(entry.get("quantity", 1)), 1, 99)
+	# 上次撤离前缀；最近一次成功撤离携带的物品手动转入永久仓库后继续显示该标记。
 	var extraction_prefix: String = "[上次撤离] " if bool(entry.get("is_last_extraction", false)) else ""
 	# 物品控件；展开模式允许点击跨容器转移，纯仓库模式只提供浏览、拖拽和出售。
 	var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
 	item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	item_control.call("configure", item_resource, location, entry_index, _backpack_expanded, extraction_prefix)
+	item_control.call("configure", item_resource, location, entry_index, _backpack_expanded, extraction_prefix, quantity)
 	item_control.connect("quick_action_requested", Callable(self, "_on_quick_action_requested").bind(location))
+	item_control.connect("item_action_requested", Callable(self, "_on_item_action_requested").bind(location))
 	item_control.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
-	row.add_child(item_control)
-
-	if location == "warehouse" and not _backpack_expanded:
-		# 出售按钮；纯仓库模式显示固定售价，点击后永久移除物品并增加局外金币。
-		var sell_button: Button = Button.new()
-		sell_button.text = "出售 +%d" % maxi(int(item_resource.get("sell_price")), 0)
-		sell_button.disabled = int(item_resource.get("sell_price")) <= 0
-		sell_button.pressed.connect(Callable(self, "_on_sell_pressed").bind(item_resource))
-		row.add_child(sell_button)
+	target_container.add_child(item_control)
 
 
 func _build_loadout_entries() -> void:
@@ -281,6 +319,7 @@ func _create_storage_equipment_slot(slot_label: String, location: String, weapon
 	var detail_tooltip: String = _get_item_detail_tooltip(item_resource)
 	slot_control.call("configure", slot_label, location, weapon_type, item_resource, detail_tooltip)
 	slot_control.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
+	slot_control.connect("item_selected", Callable(self, "_on_enhancement_weapon_selected"))
 	slot_control.custom_minimum_size = Vector2(0.0, 54.0)
 	return slot_control
 
@@ -295,6 +334,55 @@ func _get_item_detail_tooltip(item_resource: Resource) -> String:
 	var detail_tooltip: String = detail_control.tooltip_text
 	detail_control.free()
 	return detail_tooltip
+
+
+func _create_storage_filter_button(filter_bar: HBoxContainer, button_text: String, filter_name: String) -> void:
+	# 分类按钮；同一筛选标识可由“资源”和“强化石”两个层级标签触发，按钮状态保持同步。
+	var filter_button: Button = Button.new()
+	filter_button.text = button_text
+	filter_button.toggle_mode = true
+	filter_button.custom_minimum_size = Vector2(92.0, 34.0)
+	filter_button.pressed.connect(Callable(self, "_on_storage_filter_pressed").bind(filter_name))
+	filter_bar.add_child(filter_button)
+	# 同标识按钮数组；资源主分类和强化石子分类都应同时显示为选中。
+	var filter_button_list: Array = _storage_filter_buttons.get(filter_name, [])
+	filter_button_list.append(filter_button)
+	_storage_filter_buttons[filter_name] = filter_button_list
+
+
+func _on_storage_filter_pressed(filter_name: String) -> void:
+	_storage_filter = filter_name
+	_refresh_storage_filter_buttons()
+	_rebuild_storage_content()
+
+
+func _refresh_storage_filter_buttons() -> void:
+	for filter_name in _storage_filter_buttons.keys():
+		# 同分类按钮列表；资源主分类和强化石子分类共享选中状态。
+		var filter_button_list: Array = _storage_filter_buttons.get(filter_name, [])
+		for raw_button in filter_button_list:
+			if raw_button is Button:
+				(raw_button as Button).set_pressed_no_signal(str(filter_name) == _storage_filter)
+
+
+func _does_entry_match_storage_filter(entry: Dictionary) -> bool:
+	# 条目资源；异常空资源不参与任何分类。
+	var item_resource: Resource = entry.get("resource") as Resource
+	if item_resource == null:
+		return false
+	if _storage_filter == STORAGE_FILTER_STONES:
+		return str(item_resource.get("item_kind")) == "enhancement_stone"
+	# 武器类型；weapons 显示全部武器，melee/ranged 只显示对应子分类。
+	var weapon_type: String = str(item_resource.get("weapon_type"))
+	if _storage_filter == STORAGE_FILTER_WEAPONS:
+		return weapon_type in ["melee", "ranged"]
+	return weapon_type == _storage_filter
+
+
+func _get_storage_summary_text(warehouse_entries: Array, backpack_entries: Array) -> String:
+	if _pending_stone_resource != null:
+		return "正在使用 %s：请选择仓库、背包或装备栏中的一把兼容武器" % str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", _pending_stone_resource))
+	return "永久仓库 %d 组 · 随身背包 %d 组 · 普通点击打开操作，Shift+点击快速转移%s" % [warehouse_entries.size(), backpack_entries.size(), "，拖拽可调整或装备" if _backpack_expanded else ""]
 
 
 func _apply_storage_display_mode() -> void:
@@ -317,6 +405,48 @@ func _on_quick_action_requested(item_resource: Resource, source_location: String
 		_global_inventory.call("transfer_warehouse_to_backpack", item_resource)
 	elif source_location == "backpack":
 		_global_inventory.call("transfer_backpack_to_warehouse", item_resource)
+
+
+func _on_item_action_requested(item_resource: Resource, source_location: String) -> void:
+	if item_resource == null or _global_inventory == null:
+		return
+	if _pending_stone_resource != null and str(item_resource.get("weapon_type")) in ["melee", "ranged"]:
+		_on_enhancement_weapon_selected(item_resource)
+		return
+
+	_action_item_resource = item_resource
+	_action_item_location = source_location
+	_item_action_menu.clear()
+	# 出售总价；强化石按整组数量计算，强化武器按动态售价计算。
+	var total_sell_price: int = int(_global_inventory.call("get_storage_resource_sell_price", item_resource, source_location))
+	_item_action_menu.add_item("出售（+%d）" % total_sell_price, ITEM_ACTION_SELL)
+	_item_action_menu.set_item_disabled(_item_action_menu.get_item_index(ITEM_ACTION_SELL), total_sell_price <= 0)
+	if str(item_resource.get("item_kind")) == "enhancement_stone":
+		_item_action_menu.add_item("使用", ITEM_ACTION_USE)
+	_item_action_menu.position = Vector2i(get_viewport().get_mouse_position())
+	_item_action_menu.popup()
+
+
+func _on_item_action_menu_id_pressed(action_id: int) -> void:
+	if _global_inventory == null or _action_item_resource == null:
+		return
+	if action_id == ITEM_ACTION_SELL:
+		_global_inventory.call("sell_storage_resource", _action_item_resource, _action_item_location)
+	elif action_id == ITEM_ACTION_USE and str(_action_item_resource.get("item_kind")) == "enhancement_stone":
+		_pending_stone_resource = _action_item_resource
+		_pending_stone_location = _action_item_location
+		_rebuild_storage_content()
+	_action_item_resource = null
+	_action_item_location = ""
+
+
+func _on_enhancement_weapon_selected(weapon_resource: Resource) -> void:
+	if _pending_stone_resource == null or weapon_resource == null or _global_inventory == null:
+		return
+	if bool(_global_inventory.call("use_enhancement_stone", _pending_stone_resource, _pending_stone_location, weapon_resource)):
+		_pending_stone_resource = null
+		_pending_stone_location = ""
+	_rebuild_storage_content()
 
 
 func _on_item_drop_requested(drag_data: Dictionary, target_location: String, target_index: int) -> void:
@@ -371,4 +501,6 @@ func _clear_container(container: Node) -> void:
 
 
 func _on_close_pressed() -> void:
+	_pending_stone_resource = null
+	_pending_stone_location = ""
 	closed.emit()

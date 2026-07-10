@@ -102,6 +102,30 @@ func get_items() -> Array[Resource]:
 	return _items.duplicate()
 
 
+func get_item_entries() -> Array[Dictionary]:
+	if _global_inventory != null and _global_inventory.has_method("get_backpack_entries"):
+		# 全局背包条目；包含资源、堆叠数量和记录元数据，UI 只读取副本不直接修改所有权。
+		var global_entries: Array = _global_inventory.call("get_backpack_entries")
+		# 合法条目结果；过滤异常值后返回字典副本，避免调用方写入全局记录。
+		var resolved_entries: Array[Dictionary] = []
+		for raw_entry in global_entries:
+			if raw_entry is Dictionary:
+				resolved_entries.append((raw_entry as Dictionary).duplicate())
+		return resolved_entries
+
+	# 本地回退条目；自动加载缺失时每个资源按数量 1 暴露给背包 UI。
+	var fallback_entries: Array[Dictionary] = []
+	for item_data in _items:
+		fallback_entries.append({"resource": item_data, "quantity": 1})
+	return fallback_entries
+
+
+func use_enhancement_stone(stone_resource: Resource, weapon_resource: Resource) -> bool:
+	if _global_inventory == null or not _global_inventory.has_method("use_enhancement_stone"):
+		return false
+	return bool(_global_inventory.call("use_enhancement_stone", stone_resource, "backpack", weapon_resource))
+
+
 func get_item_count() -> int:
 	if _global_inventory != null and _global_inventory.has_method("get_backpack_count"):
 		return int(_global_inventory.call("get_backpack_count"))

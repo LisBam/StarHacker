@@ -102,6 +102,20 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export var weapon_drop_scene: PackedScene
 ## 武器掉落随机池；元素为 WeaponData 资源，怪物死亡掉落时会从中随机复制一把作为独立掉落物。
 @export var weapon_drop_table: Array[Resource] = []
+## 强化石死亡掉落概率；默认 0.05 表示每只被击杀怪物独立有 5% 概率生成一颗随机强化石。
+@export_range(0.0, 1.0, 0.001) var enhancement_stone_drop_chance: float = 0.05
+## 单颗强化石最少词条数量；默认 1，运行时随机数量会限制在最少与最多词条之间。
+@export_range(1, 9, 1) var enhancement_stone_min_modifier_count: int = 1
+## 单颗强化石最多词条数量；默认 3，允许一颗强化石同时包含多种正负属性。
+@export_range(1, 9, 1) var enhancement_stone_max_modifier_count: int = 3
+## 强化石生成负数词条的概率；默认 0.28，负词条仍会与其他正词条共同保存在同一颗石头上。
+@export_range(0.0, 1.0, 0.01) var enhancement_stone_negative_modifier_chance: float = 0.28
+## 强化石单条最小绝对百分比；默认 0.04 表示至少改变基础属性 4%。
+@export_range(0.001, 1.0, 0.001) var enhancement_stone_min_modifier_ratio: float = 0.04
+## 强化石单条最大绝对百分比；默认 0.16 表示最多改变基础属性 16%。
+@export_range(0.001, 2.0, 0.001) var enhancement_stone_max_modifier_ratio: float = 0.16
+## 强化石基础出售价格；默认 30 金币，随机多词条会按词条数量增加单颗价值。
+@export_range(0, 999999, 1) var enhancement_stone_base_sell_price: int = 30
 ## 玩家丢弃武器散落半径；取值建议大于玩家半径，默认 52 像素，修改会影响拖出背包时武器落点距离。
 @export_range(0.0, 400.0, 1.0) var dropped_weapon_scatter_radius: float = 52.0
 ## 撤离点生成时间；取值为进入战斗后的秒数，默认 120 表示存活 2 分钟后生成撤离点。
@@ -1304,6 +1318,7 @@ func _on_monster_died(monster_node: Node) -> void:
 		return
 
 	_try_spawn_monster_weapon_drop(monster_node as Node2D)
+	_try_spawn_enhancement_stone_drop(monster_node as Node2D)
 	if _monster_simulation_manager != null and _monster_simulation_manager.has_method("unregister_monster"):
 		_monster_simulation_manager.call("unregister_monster", monster_node)
 
@@ -1351,6 +1366,92 @@ func _get_random_weapon_drop_data() -> Resource:
 	# 独立武器资源；取值为模板深拷贝，默认避免多个掉落物共享同一个资源实例。
 	var dropped_weapon: Resource = weapon_template.duplicate(true) as Resource
 	return dropped_weapon if dropped_weapon != null else weapon_template
+
+
+func _try_spawn_enhancement_stone_drop(monster_node: Node2D) -> void:
+	if monster_node == null or weapon_drop_scene == null:
+		return
+	if enhancement_stone_drop_chance <= 0.0 or _random.randf() > clampf(enhancement_stone_drop_chance, 0.0, 1.0):
+		return
+
+	# 随机强化石；每次击杀独立创建资源实例，拾取后可按词条签名与库存已有堆叠合并。
+	var enhancement_stone: EnhancementStoneData = _create_random_enhancement_stone()
+	if enhancement_stone != null:
+		spawn_item_drop(enhancement_stone, monster_node.global_position)
+
+
+func _create_random_enhancement_stone() -> EnhancementStoneData:
+	# 全部可生成属性；包含通用、远程和近战字段，使用时由 WeaponData 只应用与目标武器兼容的词条。
+	var available_stats: Array[String] = [
+		"damage",
+		"cooldown",
+		"energy_cost",
+		"projectile_speed",
+		"bullet_range",
+		"spread_degrees",
+		"recoil_force",
+		"front_recoil_force",
+		"impact_force",
+		"melee_active_duration",
+	]
+	# 最小词条数；限制在属性池范围内，防止检查器异常配置导致重复词条或越界。
+	var minimum_modifier_count: int = clampi(enhancement_stone_min_modifier_count, 1, available_stats.size())
+	# 最大词条数；至少等于最小词条数并限制在属性池范围内。
+	var maximum_modifier_count: int = clampi(enhancement_stone_max_modifier_count, minimum_modifier_count, available_stats.size())
+	# 实际词条数；在配置范围内等概率随机。
+	var modifier_count: int = _random.randi_range(minimum_modifier_count, maximum_modifier_count)
+	# 随机属性顺序；先洗牌再截取，保证一颗石头不会出现重复属性。
+	var shuffled_stats: Array[String] = available_stats.duplicate()
+	for stat_index in range(shuffled_stats.size() - 1, 0, -1):
+		# 交换下标；Fisher-Yates 洗牌保证每种属性组合概率一致。
+		var swap_index: int = _random.randi_range(0, stat_index)
+		# 临时属性；用于交换两个数组元素。
+		var temporary_stat: String = shuffled_stats[stat_index]
+		shuffled_stats[stat_index] = shuffled_stats[swap_index]
+		shuffled_stats[swap_index] = temporary_stat
+
+	# 绝对比例边界；自动纠正最大值小于最小值的检查器配置。
+	var minimum_ratio: float = maxf(enhancement_stone_min_modifier_ratio, 0.001)
+	# 最大绝对比例；至少等于最小值，保证 randf_range 参数合法。
+	var maximum_ratio: float = maxf(enhancement_stone_max_modifier_ratio, minimum_ratio)
+	# 随机词条字典；每项为统一属性名与带正负号的小数百分比。
+	var generated_modifiers: Dictionary = {}
+	for stat_index in range(modifier_count):
+		# 属性名称；来自已洗牌属性池前 modifier_count 项。
+		var stat_name: String = shuffled_stats[stat_index]
+		# 属性绝对比例；在检查器配置范围内随机。
+		var modifier_ratio: float = _random.randf_range(minimum_ratio, maximum_ratio)
+		if _random.randf() < clampf(enhancement_stone_negative_modifier_chance, 0.0, 1.0):
+			modifier_ratio = -modifier_ratio
+		# 量化比例；固定到 1% 步进显著提高相同强化石可堆叠概率，并保持详情可读。
+		generated_modifiers[stat_name] = snappedf(modifier_ratio, 0.01)
+
+	# 强化石资源；显示名称按词条数量区分，售价随词条数量提高。
+	var enhancement_stone: EnhancementStoneData = EnhancementStoneData.new()
+	enhancement_stone.display_name = "%s强化石" % ("复合" if modifier_count > 1 else "属性")
+	enhancement_stone.sell_price = maxi(enhancement_stone_base_sell_price * modifier_count, 0)
+	enhancement_stone.modifiers = generated_modifiers
+	return enhancement_stone
+
+
+func spawn_item_drop(item_data: Resource, drop_position: Vector2) -> bool:
+	if item_data == null or weapon_drop_scene == null:
+		return false
+
+	# 通用掉落实例；复用现有掉落场景的碰撞、浮动和拾取接口，资源类型由脚本自行显示。
+	var drop_instance: Node2D = weapon_drop_scene.instantiate() as Node2D
+	if drop_instance == null:
+		return false
+
+	# 掉落父节点；优先使用 Drops 容器，缺失时回退 GameWorld。
+	var spawn_parent: Node = _drop_parent if _drop_parent != null else self
+	spawn_parent.add_child(drop_instance)
+	drop_instance.global_position = _clamp_position_to_map(drop_position)
+	if drop_instance.has_method("configure_item_drop"):
+		drop_instance.call("configure_item_drop", item_data)
+	else:
+		drop_instance.set("weapon_data", item_data)
+	return true
 
 
 func _get_scattered_drop_position(center_position: Vector2) -> Vector2:

@@ -155,6 +155,8 @@ func get_knockback_direction() -> Vector2:
 func _get_weapon_float(weapon_data: Resource, property_name: StringName, fallback_value: float) -> float:
 	if weapon_data == null:
 		return fallback_value
+	if weapon_data.has_method("get_effective_stat"):
+		return float(weapon_data.call("get_effective_stat", str(property_name)))
 
 	# 武器资源字段值；取值可能为数字或 null，默认通过 Resource.get 读取，修改会影响近战参数覆盖结果。
 	var property_value: Variant = weapon_data.get(property_name)

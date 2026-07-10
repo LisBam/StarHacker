@@ -5,9 +5,12 @@ class_name EquipmentStorageSlotControl
 ## 控件只验证武器类型并发出结构化请求，所有权交换由 GlobalInventory 原子接口完成。
 
 signal item_drop_requested(drag_data: Dictionary, target_location: String, target_index: int)
+signal item_selected(item_resource: Resource)
 
 ## 拖拽数据类型标识；必须与 StorageItemControl 和 StorageDropArea 保持一致。
 const DRAG_DATA_TYPE: String = "global_storage_item"
+## 统一物品详情格式化器；装备槽悬停时显示武器基础值、强化差值和动态售价。
+const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
 
 ## 当前装备资源；默认 null 表示空槽，空槽可以接收兼容武器但不能作为拖拽来源。
 var _item_resource: Resource
@@ -28,6 +31,13 @@ func configure(slot_label: String, location: String, accepted_weapon_type: Strin
 	tooltip_text = detail_tooltip if not detail_tooltip.is_empty() else ("拖入%s武器" % ("远程" if _accepted_weapon_type == "ranged" else "近战"))
 	disabled = false
 	mouse_default_cursor_shape = Control.CURSOR_DRAG if _item_resource != null else Control.CURSOR_POINTING_HAND
+	if not pressed.is_connected(_on_pressed):
+		pressed.connect(_on_pressed)
+
+
+func _on_pressed() -> void:
+	if _item_resource != null:
+		item_selected.emit(_item_resource)
 
 
 func _get_drag_data(_at_position: Vector2) -> Variant:
@@ -72,3 +82,7 @@ func _get_item_display_name() -> String:
 	# 装备显示名称；优先读取 display_name，未配置时回退稳定 weapon_id。
 	var display_name: String = str(_item_resource.get("display_name"))
 	return str(_item_resource.get("weapon_id")) if display_name.is_empty() else display_name
+
+
+func _make_custom_tooltip(_for_text: String) -> Object:
+	return ITEM_DETAIL_FORMATTER.call("create_tooltip_control", _item_resource, 1)

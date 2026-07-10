@@ -40,6 +40,8 @@ const STORAGE_LOCATION_BACKPACK: String = "backpack"
 const EQUIPMENT_LOCATION_MELEE: String = "melee"
 ## 远程装备位置前缀；默认与槽位下标组合为 ranged_0、ranged_1 等稳定目标标识。
 const EQUIPMENT_LOCATION_RANGED_PREFIX: String = "ranged_"
+## 可堆叠资源单组上限；默认 99，所有仓库、背包、转移、读档和拾取逻辑共同遵守该限制。
+const MAX_STACK_QUANTITY: int = 99
 
 ## 永久仓库记录数组；每项包含唯一记录编号、武器资源、获得时间与撤离优先级，战斗失败不会修改该数组。
 var _warehouse_records: Array[Dictionary] = []
@@ -117,12 +119,7 @@ func complete_combat_run_success() -> Dictionary:
 	# 成功撤离携带记录；包含背包与装备，全部写入本次撤离编号以支持以后卸下时仍优先排序。
 	for record in _get_all_owned_records():
 		record["last_extraction_epoch"] = _last_extraction_epoch
-	# 成功撤离背包记录；撤离后自动转入永久仓库，避免玩家下一局未整理时再次承担死亡损失。
-	var extracted_backpack_records: Array[Dictionary] = _backpack_records.duplicate()
-	_backpack_records.clear()
-	# 原有永久仓库记录；追加到撤离物品之后，保证最近一次撤离携带物品整体位于仓库前方且不打乱玩家手工顺序。
-	extracted_backpack_records.append_array(_warehouse_records)
-	_warehouse_records = extracted_backpack_records
+	# 成功撤离只保留随身背包现状，不自动转入永久仓库；玩家需要在局外仓库手动整理安全物品。
 	_run_active = false
 	_run_seen_resource_instance_ids.clear()
 	_run_gained_resources.clear()
@@ -135,7 +132,6 @@ func complete_combat_run_success() -> Dictionary:
 		"lost_items": [],
 	}
 	_queue_save_inventory()
-	warehouse_changed.emit()
 	inventory_changed.emit()
 	equipment_changed.emit()
 	run_state_changed.emit()
@@ -146,24 +142,9 @@ func complete_combat_run_failure(reason: String = "战斗失败", retained_ratio
 	if not _run_active:
 		return _last_run_outcome.duplicate(true)
 
-	# 背包总数；取值为结算前背包记录数量，装备槽不参与本次 80% 掉落规则。
-	var backpack_count: int = _backpack_records.size()
-	# 实际保留数量；默认按 20% 四舍五入，限制在 0 到背包总数。
-	var retained_count: int = clampi(roundi(float(backpack_count) * clampf(retained_ratio, 0.0, 1.0)), 0, backpack_count)
-	# 随机索引数组；元素为背包下标，通过洗牌选择本次保留记录。
-	var shuffled_indices: Array[int] = []
-	# 背包索引；取值为 0 到物品数量减一，用于构建随机选择池。
-	for record_index in range(backpack_count):
-		shuffled_indices.append(record_index)
-	_shuffle_integer_array(shuffled_indices)
-
-	# 保留下标查询表；键为背包下标，值为 true，用于保持原有排序构建结算后背包。
-	var retained_index_lookup: Dictionary = {}
-	# 保留选择索引；取值为 0 到 retained_count 减一，读取洗牌后的随机下标。
-	for retained_selection_index in range(retained_count):
-		retained_index_lookup[shuffled_indices[retained_selection_index]] = true
-
-	# 结算后背包记录；只保留随机选中的约 20% 物品，并维持原仓库相对顺序。
+	# 标准化保留概率；每件武器或每颗堆叠资源独立判定，长期平均保留约 20%。
+	var resolved_retained_ratio: float = clampf(retained_ratio, 0.0, 1.0)
+	# 结算后背包记录；武器整件保留或丢失，强化石堆叠按单颗随机后保留剩余数量。
 	var retained_records: Array[Dictionary] = []
 	# 本局获得物品条目；失败结算同样展示本局真正首次拾取的战利品，不因最终是否保留而改变获得事实。
 	var gained_entries: Array[Dictionary] = _build_run_gained_entries()
@@ -173,15 +154,23 @@ func complete_combat_run_failure(reason: String = "战斗失败", retained_ratio
 	var lost_entries: Array[Dictionary] = []
 	# 丢失物品名称；元素为显示名，用于死亡或主动退出结算界面。
 	var lost_items: Array[String] = []
-	# 结算背包索引；取值为原背包有效下标，用于区分保留和丢失记录。
-	for record_index in range(_backpack_records.size()):
-		# 当前结算记录；取值为包含资源和元数据的物品记录。
-		var record: Dictionary = _backpack_records[record_index]
-		if retained_index_lookup.has(record_index):
+	# 当前结算记录；逐组处理数量，保证 99 个强化石不会被当成一件物品整体保留或整体丢失。
+	for record in _backpack_records:
+		# 原始数量；武器默认 1，堆叠资源限制在 1 到 99。
+		var original_quantity: int = clampi(int(record.get("quantity", 1)), 1, MAX_STACK_QUANTITY)
+		# 实际保留数量；每个单位独立随机判定，武器数量固定为 1。
+		var retained_quantity: int = 0
+		for _unit_index in range(original_quantity):
+			if _random.randf() < resolved_retained_ratio:
+				retained_quantity += 1
+		# 丢失数量；用于结算列表在一个条目上显示 xN。
+		var lost_quantity: int = original_quantity - retained_quantity
+		if retained_quantity > 0:
+			record["quantity"] = retained_quantity
 			retained_records.append(record)
-		else:
-			lost_entries.append(_build_outcome_entry(record.get("resource") as Resource))
-			lost_items.append(_get_record_display_name(record))
+		if lost_quantity > 0:
+			lost_entries.append(_build_outcome_entry(record.get("resource") as Resource, lost_quantity))
+			lost_items.append("%s x%d" % [_get_record_display_name(record), lost_quantity] if lost_quantity > 1 else _get_record_display_name(record))
 
 	_backpack_records = retained_records
 	_detached_records.clear()
@@ -228,7 +217,9 @@ func get_warehouse_entries() -> Array[Dictionary]:
 		if item_resource == null:
 			continue
 		result.append({
+			"record_id": str(record.get("record_id", "")),
 			"resource": item_resource,
+			"quantity": int(record.get("quantity", 1)),
 			"acquired_at": float(record.get("acquired_at", 0.0)),
 			"is_last_extraction": _last_extraction_epoch > 0 and int(record.get("last_extraction_epoch", 0)) == _last_extraction_epoch,
 		})
@@ -281,9 +272,7 @@ func transfer_warehouse_to_backpack(item_resource: Resource, target_index: int =
 	# 待转移记录；保持原记录编号和获得时间，避免跨容器移动被误判为新拾取物品。
 	var moving_record: Dictionary = _warehouse_records[warehouse_index]
 	_warehouse_records.remove_at(warehouse_index)
-	# 背包插入位置；负数表示追加到末尾，拖拽到具体条目时限制在合法边界内。
-	var insert_index: int = _backpack_records.size() if target_index < 0 else clampi(target_index, 0, _backpack_records.size())
-	_backpack_records.insert(insert_index, moving_record)
+	_insert_record_with_stack_merge(_backpack_records, moving_record, target_index)
 	_queue_save_inventory()
 	warehouse_changed.emit()
 	inventory_changed.emit()
@@ -299,12 +288,7 @@ func transfer_backpack_to_warehouse(item_resource: Resource, target_index: int =
 	# 待转移记录；直接移动所有权记录，确保死亡结算只处理转移后仍留在背包的物品。
 	var moving_record: Dictionary = _backpack_records[backpack_index]
 	_backpack_records.remove_at(backpack_index)
-	if target_index < 0:
-		_warehouse_records.append(moving_record)
-	else:
-		# 仓库插入位置；取值限制在 0 到现有仓库数量，供拖拽精确调整展示顺序。
-		var insert_index: int = clampi(target_index, 0, _warehouse_records.size())
-		_warehouse_records.insert(insert_index, moving_record)
+	_insert_record_with_stack_merge(_warehouse_records, moving_record, target_index)
 	_queue_save_inventory()
 	warehouse_changed.emit()
 	inventory_changed.emit()
@@ -329,23 +313,69 @@ func move_warehouse_item(source_index: int, target_index: int) -> bool:
 
 
 func sell_warehouse_resource(item_resource: Resource) -> bool:
-	# 待出售仓库索引；只有永久仓库内物品可以出售，背包和装备物品不会被误售。
-	var warehouse_index: int = _find_warehouse_record_index(item_resource)
-	if warehouse_index < 0:
+	return sell_storage_resource(item_resource, STORAGE_LOCATION_WAREHOUSE)
+
+
+func sell_storage_resource(item_resource: Resource, source_location: String) -> bool:
+	# 出售来源记录数组；局外仓库界面允许出售永久仓库或已展开的随身背包物品。
+	var source_records: Array[Dictionary] = _get_storage_records(source_location)
+	# 待出售索引；使用资源实例身份精确定位重复武器或强化石堆叠。
+	var record_index: int = _find_storage_record_index(source_location, item_resource)
+	if record_index < 0 or record_index >= source_records.size():
+		return false
+	# 待出售记录；强化石出售整组，武器数量固定为 1。
+	var stored_record: Dictionary = source_records[record_index]
+	# 单件售价；武器使用强化后动态售价，强化石使用资源基础售价。
+	var unit_sell_price: int = _get_resource_sell_price(item_resource)
+	# 出售总价；堆叠资源乘以当前数量。
+	var total_sell_price: int = unit_sell_price * maxi(int(stored_record.get("quantity", 1)), 1)
+	if total_sell_price <= 0:
 		return false
 
-	# 待出售资源；取值用于读取数据资源上的固定售价，缺失或零售价物品不可出售。
-	var stored_resource: Resource = _warehouse_records[warehouse_index].get("resource") as Resource
-	# 物品售价；取值大于 0，负值会被限制为 0，防止异常数据扣除玩家金币。
-	var sell_price: int = maxi(int(stored_resource.get("sell_price")) if stored_resource != null else 0, 0)
-	if sell_price <= 0:
-		return false
-
-	_warehouse_records.remove_at(warehouse_index)
-	_coins += sell_price
+	source_records.remove_at(record_index)
+	_coins += total_sell_price
 	_queue_save_inventory()
-	warehouse_changed.emit()
+	_emit_storage_changed(source_location)
 	coins_changed.emit()
+	return true
+
+
+func get_storage_resource_sell_price(item_resource: Resource, source_location: String) -> int:
+	# 来源记录；不存在时返回 0，防止 UI 对已经移动的旧引用显示可出售价格。
+	var record_index: int = _find_storage_record_index(source_location, item_resource)
+	var source_records: Array[Dictionary] = _get_storage_records(source_location)
+	if record_index < 0 or record_index >= source_records.size():
+		return 0
+	return _get_resource_sell_price(item_resource) * maxi(int(source_records[record_index].get("quantity", 1)), 1)
+
+
+func use_enhancement_stone(stone_resource: Resource, source_location: String, weapon_resource: Resource) -> bool:
+	if not _is_enhancement_stone(stone_resource) or not _is_weapon_resource(weapon_resource):
+		return false
+	# 强化石来源索引；仅允许消费仓库或背包内仍由玩家持有的资源。
+	var stone_record_index: int = _find_storage_record_index(source_location, stone_resource)
+	# 强化石来源记录数组；非法位置返回空数组并拒绝消费。
+	var source_records: Array[Dictionary] = _get_storage_records(source_location)
+	if stone_record_index < 0 or stone_record_index >= source_records.size() or not _is_owned_weapon_resource(weapon_resource):
+		return false
+	# 强化词条；从石头资源读取，WeaponData 负责过滤与目标武器不兼容的属性。
+	var modifiers: Dictionary = stone_resource.get("modifiers") as Dictionary
+	if modifiers.is_empty() or not weapon_resource.has_method("apply_enhancement"):
+		return false
+	if not bool(weapon_resource.call("apply_enhancement", modifiers)):
+		return false
+
+	# 强化石记录；成功应用后才扣除一颗，失败不会消耗材料。
+	var stone_record: Dictionary = source_records[stone_record_index]
+	# 剩余数量；大于 0 时保留原堆叠，等于 0 时移除整条记录。
+	var remaining_quantity: int = maxi(int(stone_record.get("quantity", 1)) - 1, 0)
+	if remaining_quantity > 0:
+		stone_record["quantity"] = remaining_quantity
+	else:
+		source_records.remove_at(stone_record_index)
+	_queue_save_inventory()
+	_emit_storage_changed(source_location)
+	equipment_changed.emit()
 	return true
 
 
@@ -447,7 +477,9 @@ func get_backpack_entries() -> Array[Dictionary]:
 		if item_resource == null:
 			continue
 		result.append({
+			"record_id": str(record.get("record_id", "")),
 			"resource": item_resource,
+			"quantity": int(record.get("quantity", 1)),
 			"acquired_at": float(record.get("acquired_at", 0.0)),
 			"is_last_extraction": _last_extraction_epoch > 0 and int(record.get("last_extraction_epoch", 0)) == _last_extraction_epoch,
 		})
@@ -463,7 +495,9 @@ func has_backpack_resource(item_resource: Resource) -> bool:
 
 
 func add_backpack_resource(item_resource: Resource, target_index: int = -1) -> bool:
-	if item_resource == null or has_backpack_resource(item_resource) or _is_resource_equipped(item_resource):
+	if item_resource == null or _is_resource_equipped(item_resource):
+		return false
+	if has_backpack_resource(item_resource):
 		return false
 
 	# 待加入记录；优先复用 HUD 分步操作留下的临时记录，新拾取物品才创建新的获得时间。
@@ -474,7 +508,9 @@ func add_backpack_resource(item_resource: Resource, target_index: int = -1) -> b
 		record = _create_record(item_resource)
 		_track_combat_acquisition(item_resource)
 
-	if target_index < 0:
+	if _is_enhancement_stone(item_resource):
+		_insert_record_with_stack_merge(_backpack_records, record, target_index)
+	elif target_index < 0:
 		_backpack_records.append(record)
 		_sort_backpack_default()
 	else:
@@ -738,6 +774,7 @@ func _create_record(item_resource: Resource, acquired_at: float = -1.0, record_i
 		"acquired_at": resolved_acquired_at,
 		"acquisition_sequence": _acquisition_sequence,
 		"last_extraction_epoch": 0,
+		"quantity": 1,
 	}
 
 
@@ -789,6 +826,86 @@ func _is_storage_location(location: String) -> bool:
 	return location == STORAGE_LOCATION_WAREHOUSE or location == STORAGE_LOCATION_BACKPACK
 
 
+func _get_storage_records(location: String) -> Array[Dictionary]:
+	if location == STORAGE_LOCATION_WAREHOUSE:
+		return _warehouse_records
+	if location == STORAGE_LOCATION_BACKPACK:
+		return _backpack_records
+	return []
+
+
+func _is_weapon_resource(item_resource: Resource) -> bool:
+	return item_resource != null and not _is_enhancement_stone(item_resource) and str(item_resource.get("weapon_type")) in ["ranged", "melee"]
+
+
+func _is_enhancement_stone(item_resource: Resource) -> bool:
+	return item_resource != null and str(item_resource.get("item_kind")) == "enhancement_stone"
+
+
+func _is_owned_weapon_resource(item_resource: Resource) -> bool:
+	if not _is_weapon_resource(item_resource):
+		return false
+	if _find_backpack_record_index(item_resource) >= 0 or _find_warehouse_record_index(item_resource) >= 0:
+		return true
+	if _is_resource_equipped(item_resource):
+		return true
+	return _detached_records.has(item_resource.get_instance_id())
+
+
+func _get_resource_sell_price(item_resource: Resource) -> int:
+	if item_resource == null:
+		return 0
+	if item_resource.has_method("get_effective_sell_price"):
+		return maxi(int(item_resource.call("get_effective_sell_price")), 0)
+	return maxi(int(item_resource.get("sell_price")), 0)
+
+
+func _get_stack_signature(item_resource: Resource) -> String:
+	if not _is_enhancement_stone(item_resource):
+		return ""
+	if item_resource.has_method("get_stack_signature"):
+		return str(item_resource.call("get_stack_signature"))
+	return str(item_resource.get("modifiers"))
+
+
+func _insert_record_with_stack_merge(target_records: Array[Dictionary], record: Dictionary, target_index: int = -1) -> void:
+	if record.is_empty():
+		return
+	# 待插入资源；武器保持单实例记录，只有强化石参与堆叠合并。
+	var item_resource: Resource = record.get("resource") as Resource
+	if not _is_enhancement_stone(item_resource):
+		# 武器插入下标；负数追加，指定下标用于拖拽排序和装备替换回滚。
+		var weapon_insert_index: int = target_records.size() if target_index < 0 else clampi(target_index, 0, target_records.size())
+		target_records.insert(weapon_insert_index, record)
+		return
+
+	# 剩余待放数量；合法记录限制在 1 到 99，跨容器移动时会优先填充相同词条堆叠。
+	var remaining_quantity: int = clampi(int(record.get("quantity", 1)), 1, MAX_STACK_QUANTITY)
+	# 待插入签名；只有词条键和值完全一致的强化石才允许合并。
+	var stack_signature: String = _get_stack_signature(item_resource)
+	for existing_record in target_records:
+		# 已有资源；非强化石或签名不一致时跳过。
+		var existing_resource: Resource = existing_record.get("resource") as Resource
+		if not _is_enhancement_stone(existing_resource) or _get_stack_signature(existing_resource) != stack_signature:
+			continue
+		# 已有数量；达到 99 时继续寻找下一组相同强化石。
+		var existing_quantity: int = clampi(int(existing_record.get("quantity", 1)), 1, MAX_STACK_QUANTITY)
+		if existing_quantity >= MAX_STACK_QUANTITY:
+			continue
+		# 可合并数量；不超过当前堆叠空余和待插入剩余数量。
+		var merged_quantity: int = mini(MAX_STACK_QUANTITY - existing_quantity, remaining_quantity)
+		existing_record["quantity"] = existing_quantity + merged_quantity
+		remaining_quantity -= merged_quantity
+		if remaining_quantity <= 0:
+			return
+
+	# 溢出记录；原记录资源继续代表新堆叠，数量不会超过 99。
+	record["quantity"] = mini(remaining_quantity, MAX_STACK_QUANTITY)
+	# 资源插入下标；负数追加，拖拽到具体位置时保持目标附近布局。
+	var resource_insert_index: int = target_records.size() if target_index < 0 else clampi(target_index, 0, target_records.size())
+	target_records.insert(resource_insert_index, record)
+
+
 func _find_storage_record_index(location: String, item_resource: Resource) -> int:
 	if location == STORAGE_LOCATION_WAREHOUSE:
 		return _find_warehouse_record_index(item_resource)
@@ -815,14 +932,10 @@ func _insert_storage_record(location: String, record: Dictionary, target_index: 
 	if record.is_empty():
 		return false
 	if location == STORAGE_LOCATION_WAREHOUSE:
-		# 永久仓库插入下标；负数追加到末尾，指定值限制在当前合法边界内。
-		var warehouse_index: int = _warehouse_records.size() if target_index < 0 else clampi(target_index, 0, _warehouse_records.size())
-		_warehouse_records.insert(warehouse_index, record)
+		_insert_record_with_stack_merge(_warehouse_records, record, target_index)
 		return true
 	if location == STORAGE_LOCATION_BACKPACK:
-		# 随身背包插入下标；负数追加到末尾，指定值限制在当前合法边界内。
-		var backpack_index: int = _backpack_records.size() if target_index < 0 else clampi(target_index, 0, _backpack_records.size())
-		_backpack_records.insert(backpack_index, record)
+		_insert_record_with_stack_merge(_backpack_records, record, target_index)
 		return true
 	return false
 
@@ -1017,14 +1130,14 @@ func _build_run_gained_entries() -> Array[Dictionary]:
 	return gained_entries
 
 
-func _build_outcome_entry(item_resource: Resource) -> Dictionary:
+func _build_outcome_entry(item_resource: Resource, quantity: int = 1) -> Dictionary:
 	if item_resource == null:
-		return {"resource": null, "display_name": "未知物品"}
+		return {"resource": null, "display_name": "未知物品", "quantity": maxi(quantity, 1)}
 	# 物品显示名称；优先使用 display_name，空值时回退稳定 weapon_id，供兼容文本与列表标题共同使用。
 	var display_name: String = str(item_resource.get("display_name"))
 	if display_name.is_empty():
 		display_name = str(item_resource.get("weapon_id"))
-	return {"resource": item_resource, "display_name": display_name}
+	return {"resource": item_resource, "display_name": display_name, "quantity": maxi(quantity, 1)}
 
 
 func _get_outcome_entry_names(entries: Array[Dictionary]) -> Array[String]:
@@ -1032,7 +1145,10 @@ func _get_outcome_entry_names(entries: Array[Dictionary]) -> Array[String]:
 	var item_names: Array[String] = []
 	# 结算条目遍历项；每项都使用 display_name 字段，缺失时回退未知物品。
 	for entry in entries:
-		item_names.append(str(entry.get("display_name", "未知物品")))
+		# 结算数量；强化石等堆叠资源在名称后追加 xN，武器保持原有名称。
+		var quantity: int = maxi(int(entry.get("quantity", 1)), 1)
+		var display_name: String = str(entry.get("display_name", "未知物品"))
+		item_names.append("%s x%d" % [display_name, quantity] if quantity > 1 else display_name)
 	return item_names
 
 
@@ -1079,7 +1195,7 @@ func _save_inventory() -> void:
 
 	# 存档根字典；保存版本、排序计数、永久仓库、随身背包、装备和局外金币状态。
 	var save_data: Dictionary = {
-		"version": 2,
+		"version": 3,
 		"acquisition_sequence": _acquisition_sequence,
 		"last_extraction_epoch": _last_extraction_epoch,
 		"current_ranged_slot": _current_ranged_slot,
@@ -1176,29 +1292,57 @@ func _serialize_record(record: Dictionary) -> Dictionary:
 	var item_resource: Resource = record.get("resource") as Resource
 	if item_resource == null:
 		return {}
-	return {
+	# 通用序列化记录；版本 3 保存物品类型、堆叠数量和运行时强化词条。
+	var serialized_record: Dictionary = {
 		"record_id": str(record.get("record_id", "")),
+		"item_kind": str(item_resource.get("item_kind")),
 		"weapon_id": str(item_resource.get("weapon_id")),
 		"resource_path": _resolve_resource_path(item_resource),
+		"quantity": clampi(int(record.get("quantity", 1)), 1, MAX_STACK_QUANTITY),
 		"acquired_at": float(record.get("acquired_at", 0.0)),
 		"acquisition_sequence": int(record.get("acquisition_sequence", 0)),
 		"last_extraction_epoch": int(record.get("last_extraction_epoch", 0)),
 	}
+	if _is_enhancement_stone(item_resource):
+		serialized_record["display_name"] = str(item_resource.get("display_name"))
+		serialized_record["description"] = str(item_resource.get("description"))
+		serialized_record["icon_text"] = str(item_resource.get("icon_text"))
+		serialized_record["sell_price"] = int(item_resource.get("sell_price"))
+		serialized_record["modifiers"] = (item_resource.get("modifiers") as Dictionary).duplicate(true)
+	elif item_resource.has_method("get_enhancement_ratio"):
+		serialized_record["enhancement_modifiers"] = (item_resource.get("enhancement_modifiers") as Dictionary).duplicate(true)
+	return serialized_record
 
 
 func _deserialize_record(serialized_record: Dictionary) -> Dictionary:
+	# 物品类型；旧版存档缺失时按武器处理，保证版本 1/2 存档可继续读取。
+	var item_kind: String = str(serialized_record.get("item_kind", "weapon"))
 	# 武器标识；取值为稳定 weapon_id，资源路径失效时用于默认表兜底加载。
 	var weapon_id: String = str(serialized_record.get("weapon_id", ""))
 	# 资源路径；取值为项目内 tres 路径，默认优先使用以支持以后新增武器。
 	var resource_path: String = str(serialized_record.get("resource_path", ""))
 	# 恢复资源；取值为模板深拷贝，保证同类多件物品仍是独立实例。
-	var item_resource: Resource = _load_weapon_resource(weapon_id, resource_path)
+	var item_resource: Resource
+	if item_kind == "enhancement_stone":
+		# 强化石资源；由存档字段直接重建，避免依赖项目内固定 tres 模板。
+		var enhancement_stone: EnhancementStoneData = EnhancementStoneData.new()
+		enhancement_stone.display_name = str(serialized_record.get("display_name", "强化石"))
+		enhancement_stone.description = str(serialized_record.get("description", enhancement_stone.description))
+		enhancement_stone.icon_text = str(serialized_record.get("icon_text", enhancement_stone.icon_text))
+		enhancement_stone.sell_price = maxi(int(serialized_record.get("sell_price", 0)), 0)
+		enhancement_stone.modifiers = (serialized_record.get("modifiers", {}) as Dictionary).duplicate(true)
+		item_resource = enhancement_stone
+	else:
+		item_resource = _load_weapon_resource(weapon_id, resource_path)
 	if item_resource == null:
 		return {}
+	if item_kind != "enhancement_stone" and serialized_record.get("enhancement_modifiers") is Dictionary:
+		item_resource.set("enhancement_modifiers", (serialized_record.get("enhancement_modifiers") as Dictionary).duplicate(true))
 	# 恢复记录；保留编号和获得时间，序号缺失时使用当前递增值。
 	var record: Dictionary = _create_record(item_resource, float(serialized_record.get("acquired_at", 0.0)), str(serialized_record.get("record_id", "")))
 	record["acquisition_sequence"] = int(serialized_record.get("acquisition_sequence", record.get("acquisition_sequence", 0)))
 	record["last_extraction_epoch"] = int(serialized_record.get("last_extraction_epoch", 0))
+	record["quantity"] = clampi(int(serialized_record.get("quantity", 1)), 1, MAX_STACK_QUANTITY)
 	_acquisition_sequence = maxi(_acquisition_sequence, int(record["acquisition_sequence"]))
 	return record
 

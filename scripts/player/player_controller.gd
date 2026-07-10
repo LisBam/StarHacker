@@ -254,6 +254,8 @@ func _spend_energy(amount: float) -> bool:
 func _get_weapon_energy_cost(weapon_data: Resource) -> float:
 	if weapon_data == null:
 		return 0.0
+	if weapon_data.has_method("get_effective_stat"):
+		return maxf(float(weapon_data.call("get_effective_stat", "energy_cost")), 0.0)
 
 	return maxf(float(weapon_data.get("energy_cost")), 0.0)
 
@@ -292,6 +294,8 @@ func _apply_weapon_front_recoil(weapon_data: Resource, attack_direction: Vector2
 func _get_weapon_recoil_force(weapon_data: Resource) -> float:
 	if weapon_data == null:
 		return 0.0
+	if weapon_data.has_method("get_effective_stat"):
+		return maxf(float(weapon_data.call("get_effective_stat", "recoil_force")), 0.0)
 
 	return maxf(float(weapon_data.get("recoil_force")), 0.0)
 
@@ -299,6 +303,8 @@ func _get_weapon_recoil_force(weapon_data: Resource) -> float:
 func _get_weapon_front_recoil_force(weapon_data: Resource) -> float:
 	if weapon_data == null:
 		return 0.0
+	if weapon_data.has_method("get_effective_stat"):
+		return maxf(float(weapon_data.call("get_effective_stat", "front_recoil_force")), 0.0)
 
 	return maxf(float(weapon_data.get("front_recoil_force")), 0.0)
 

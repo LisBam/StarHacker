@@ -5,10 +5,13 @@ class_name StorageItemControl
 ## 控件不直接修改全局物品所有权，所有操作通过信号交给仓库面板调用 GlobalInventory 接口。
 
 signal quick_action_requested(item_resource: Resource)
+signal item_action_requested(item_resource: Resource)
 signal item_drop_requested(drag_data: Dictionary, target_location: String, target_index: int)
 
 ## 拖拽数据类型标识；默认用于拒绝来自其他 UI 系统的不兼容拖拽数据。
 const DRAG_DATA_TYPE: String = "global_storage_item"
+## 统一物品详情格式化器；默认生成基础值、强化值、资源词条和动态售价信息。
+const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
 
 ## 当前显示的物品资源；默认 null 表示尚未配置，配置后用于摘要、详情和拖拽身份校验。
 var _item_resource: Resource
@@ -18,18 +21,23 @@ var _location: String = ""
 var _item_index: int = -1
 ## 是否允许左键快捷操作；默认 false，纯仓库模式只浏览和出售，展开背包后才启用容器互转。
 var _quick_action_enabled: bool = false
+## 当前堆叠数量；武器固定为 1，强化石取值 1 到 99，修改会影响卡片数量角标和整组售价。
+var _quantity: int = 1
 
 
-func configure(item_resource: Resource, location: String, item_index: int, quick_action_enabled: bool, extraction_prefix: String = "") -> void:
+func configure(item_resource: Resource, location: String, item_index: int, quick_action_enabled: bool, extraction_prefix: String = "", quantity: int = 1) -> void:
 	_item_resource = item_resource
 	_location = location
 	_item_index = item_index
 	_quick_action_enabled = quick_action_enabled
-	text = "%s%s · %s · 售价 %d" % [extraction_prefix, _get_item_display_name(), _get_weapon_type_label(), _get_sell_price()]
-	tooltip_text = _build_item_details()
+	_quantity = clampi(quantity, 1, 99)
+	# 物品摘要；资源使用方形卡片并显示堆叠数，武器保持两列宽卡片显示分类和动态售价。
+	text = "%s%s\n%s\nx%d · 售价 %d" % [extraction_prefix, _get_item_display_name(), _get_weapon_type_label(), _quantity, _get_sell_price() * _quantity] if _is_enhancement_stone() else "%s%s · %s · 售价 %d" % [extraction_prefix, _get_item_display_name(), _get_weapon_type_label(), _get_sell_price()]
+	tooltip_text = ITEM_DETAIL_FORMATTER.call("build_plain_text", _item_resource, _quantity)
 	disabled = _item_resource == null
-	# 鼠标指针形态；快捷点击使用手型，可拖拽容器使用拖拽形态，结算只读条目使用普通箭头。
-	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if _quick_action_enabled else (Control.CURSOR_DRAG if not _location.is_empty() and _item_index >= 0 else Control.CURSOR_ARROW)
+	custom_minimum_size = Vector2(132.0, 112.0) if _is_enhancement_stone() else Vector2(0.0, 48.0)
+	# 鼠标指针形态；可操作容器使用手型，结算只读条目使用普通箭头。
+	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if not _location.is_empty() and _item_index >= 0 else Control.CURSOR_ARROW
 	if not pressed.is_connected(_on_pressed):
 		pressed.connect(_on_pressed)
 
@@ -48,6 +56,7 @@ func _get_drag_data(_at_position: Vector2) -> Variant:
 		"resource": _item_resource,
 		"source_location": _location,
 		"source_index": _item_index,
+		"quantity": _quantity,
 	}
 
 
@@ -68,8 +77,13 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 
 
 func _on_pressed() -> void:
-	if _quick_action_enabled and _item_resource != null:
+	if _item_resource == null:
+		return
+	# Shift 快速转移；只有展开背包模式启用，普通点击始终交给上层打开出售或使用菜单。
+	if _quick_action_enabled and Input.is_key_pressed(KEY_SHIFT):
 		quick_action_requested.emit(_item_resource)
+	elif not _location.is_empty() and _item_index >= 0:
+		item_action_requested.emit(_item_resource)
 
 
 func _get_item_display_name() -> String:
@@ -83,37 +97,20 @@ func _get_item_display_name() -> String:
 func _get_weapon_type_label() -> String:
 	if _item_resource == null:
 		return "未知"
-	return "远程" if str(_item_resource.get("weapon_type")) == "ranged" else "近战"
+	return str(ITEM_DETAIL_FORMATTER.call("get_item_type_label", _item_resource))
 
 
 func _get_sell_price() -> int:
-	return maxi(int(_item_resource.get("sell_price")) if _item_resource != null else 0, 0)
+	return int(ITEM_DETAIL_FORMATTER.call("get_item_sell_price", _item_resource))
 
 
 func _build_item_details() -> String:
-	if _item_resource == null:
-		return "物品数据不可用"
+	return str(ITEM_DETAIL_FORMATTER.call("build_plain_text", _item_resource, _quantity))
 
-	# 详情文本行；按物品类型组合通用字段和远近程专属战斗属性，供鼠标悬停直接阅读。
-	var detail_lines: Array[String] = []
-	detail_lines.append(_get_item_display_name())
-	detail_lines.append("类型：%s" % _get_weapon_type_label())
-	detail_lines.append("出售价格：%d 金币" % _get_sell_price())
-	# 武器说明；空字符串时显示统一兜底说明，避免悬停详情出现无意义空行。
-	var description: String = str(_item_resource.get("description"))
-	detail_lines.append("说明：%s" % ("暂无说明" if description.is_empty() else description))
-	detail_lines.append("能量消耗：%.1f" % float(_item_resource.get("energy_cost")))
-	if str(_item_resource.get("weapon_type")) == "ranged":
-		detail_lines.append("远程伤害：%.1f" % float(_item_resource.get("ranged_damage")))
-		detail_lines.append("射击冷却：%.2f 秒" % float(_item_resource.get("ranged_cooldown")))
-		detail_lines.append("弹体射程：%.1f" % float(_item_resource.get("bullet_range")))
-		detail_lines.append("弹体速度：%.1f" % float(_item_resource.get("projectile_speed")))
-		detail_lines.append("扩散：%.1f°" % maxf(float(_item_resource.get("spread_degrees")), 0.0))
-	else:
-		detail_lines.append("近战伤害：%.1f" % float(_item_resource.get("melee_damage")))
-		detail_lines.append("近战冷却：%.2f 秒" % float(_item_resource.get("melee_cooldown")))
-		detail_lines.append("判定时长：%.2f 秒" % float(_item_resource.get("melee_active_duration")))
-	detail_lines.append("后坐力：%.1f" % float(_item_resource.get("recoil_force")))
-	detail_lines.append("前坐力：%.1f" % float(_item_resource.get("front_recoil_force")))
-	detail_lines.append("冲击力：%.1f" % float(_item_resource.get("impact_force")))
-	return "\n".join(detail_lines)
+
+func _make_custom_tooltip(_for_text: String) -> Object:
+	return ITEM_DETAIL_FORMATTER.call("create_tooltip_control", _item_resource, _quantity)
+
+
+func _is_enhancement_stone() -> bool:
+	return _item_resource != null and str(_item_resource.get("item_kind")) == "enhancement_stone"

@@ -10,6 +10,7 @@ weapon_type = "melee"
 description = "低消耗快速近战测试武器。"
 icon_text = "D"
 sell_price = 70
+durability_cost_per_use = 0.75
 energy_cost = 7.0
 front_recoil_force = 140.0
 impact_force = 160.0

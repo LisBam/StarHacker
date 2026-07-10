@@ -44,6 +44,8 @@ var _detail_label: Label
 var _active_drag_data: Dictionary = {}
 ## 武器耐久条缓存；默认在 ready 创建，宽度跟随槽位并在武器耐久变化时单独刷新。
 var _durability_bar: Control
+## 武器耐久条覆盖宿主；默认由 PanelContainer 拉伸为完整槽位，耐久条在宿主内部仅贴底占用 5 像素。
+var _durability_overlay: Control
 
 
 func _ready() -> void:
@@ -228,8 +230,11 @@ func _build_content() -> void:
 
 
 func _build_durability_bar() -> void:
+	_durability_overlay = Control.new()
+	_durability_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_durability_overlay)
 	_durability_bar = WEAPON_DURABILITY_BAR_SCRIPT.new() as Control
-	add_child(_durability_bar)
+	_durability_overlay.add_child(_durability_bar)
 	_durability_bar.call("configure", weapon_data)
 
 

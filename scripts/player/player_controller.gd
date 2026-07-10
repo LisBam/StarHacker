@@ -64,6 +64,8 @@ var _dodge_time_remaining: float = 0.0
 var _knockback_velocity: Vector2 = Vector2.ZERO
 ## 当前受伤间隔剩余时间；取值大于等于 0，默认 0 表示可以受伤，修改会影响连续受伤过滤。
 var _damage_interval_remaining: float = 0.0
+## 是否由战斗开发者工具禁用耐久消耗；默认 false，开启后正式战斗成功攻击也不会扣除武器耐久。
+var _durability_consumption_disabled_by_debug: bool = false
 
 ## 输入组件实例缓存；默认在 ready 阶段按路径获取，保持动态类型以降低脚本类名缓存依赖，修改会影响移动与攻击输入读取。
 @onready var _input_component = get_node(input_component_path)
@@ -206,8 +208,16 @@ func _can_use_weapon(weapon_data: Resource) -> bool:
 	return bool(weapon_data.call("can_be_used")) if weapon_data.has_method("can_be_used") else true
 
 
+func set_weapon_durability_consumption_disabled(enabled: bool) -> void:
+	_durability_consumption_disabled_by_debug = enabled
+
+
+func is_weapon_durability_consumption_disabled_by_debug() -> bool:
+	return _durability_consumption_disabled_by_debug
+
+
 func _consume_weapon_durability(weapon_data: Resource) -> void:
-	if weapon_data == null or not weapon_data.has_method("consume_durability"):
+	if _should_skip_weapon_durability_consumption() or weapon_data == null or not weapon_data.has_method("consume_durability"):
 		return
 	# 是否实际消耗耐久；耐久消耗为 0 或武器已损坏时不触发持久化和 UI 刷新。
 	var durability_changed: bool = bool(weapon_data.call("consume_durability"))
@@ -216,6 +226,14 @@ func _consume_weapon_durability(weapon_data: Resource) -> void:
 	if _equipment_component.has_method("notify_weapon_runtime_state_changed"):
 		_equipment_component.call("notify_weapon_runtime_state_changed", weapon_data)
 	weapon_durability_changed.emit(weapon_data)
+
+
+func _should_skip_weapon_durability_consumption() -> bool:
+	if _durability_consumption_disabled_by_debug:
+		return true
+	# 会话状态；训练场固定不消耗武器耐久，缺少 AutoLoad 时按正式战斗处理以保持独立场景测试可预测。
+	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
+	return session_state != null and session_state.has_method("is_training_mode") and bool(session_state.call("is_training_mode"))
 
 
 func _handle_dodge_request(movement_direction: Vector2) -> void:

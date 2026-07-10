@@ -10,6 +10,7 @@ display_name = "离子冲锋枪"
 description = "高射速测试武器，适合观察能量消耗和远程冷却表现。"
 icon_text = "S"
 sell_price = 110
+durability_cost_per_use = 0.5
 energy_cost = 4.0
 projectile_scene = ExtResource("2_projectile")
 projectile_speed = 1040.0

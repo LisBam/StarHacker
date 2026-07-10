@@ -7,10 +7,13 @@ class_name DeveloperMenu
 signal closed
 signal infinite_health_toggled(enabled: bool)
 signal infinite_energy_toggled(enabled: bool)
+signal weapon_durability_consumption_toggled(disabled: bool)
 signal training_settings_requested
 
 ## 菜单最小尺寸；默认 520x470，适合在主菜单中央显示武器、强化石和金币调试操作。
 @export var panel_minimum_size: Vector2 = Vector2(520.0, 540.0)
+## 战斗调试上下文面板高度；默认 520 像素，用于容纳无限属性、免耐久和训练设置入口，运行时通常不动态修改。
+@export_range(360.0, 720.0, 1.0) var combat_panel_height: float = 520.0
 ## 单次金币调整数量；默认 1000，对应增加和减少按钮的固定测试步长。
 @export_range(1, 9999999, 1) var coin_step: int = 1000
 ## 单次随机强化石发放数量；默认 10，修改会同步按钮文案和实际永久仓库发放数量。
@@ -42,6 +45,8 @@ var _combat_controls_container: VBoxContainer
 var _infinite_health_check_button: CheckButton
 ## 无限能量开关；默认关闭，战斗模式中切换后向 CombatHud 发送状态。
 var _infinite_energy_check_button: CheckButton
+## 不消耗武器耐久开关；默认关闭，战斗模式中切换后请求 PlayerController 跳过耐久扣除。
+var _disable_weapon_durability_check_button: CheckButton
 ## 训练场设置按钮；默认只在战斗模式显示，请求 CombatHud 打开现有训练工具面板。
 var _training_settings_button: Button
 ## 当前是否为战斗开发者上下文；默认 false 表示主菜单局外资源模式。
@@ -50,6 +55,8 @@ var _combat_context_enabled: bool = false
 var _configured_infinite_health: bool = false
 ## 待同步无限能量状态；默认 false，允许在控件 ready 前先配置战斗状态。
 var _configured_infinite_energy: bool = false
+## 待同步不消耗武器耐久状态；默认 false，允许在控件 ready 前先配置战斗调试状态。
+var _configured_weapon_durability_disabled: bool = false
 ## 清空仓库确认框；默认运行时创建，防止开发者调试时误触不可逆的永久仓库清理。
 var _clear_warehouse_confirmation: ConfirmationDialog
 
@@ -66,20 +73,24 @@ func _ready() -> void:
 	_refresh_context_visibility()
 
 
-func configure_combat_context(infinite_health_enabled: bool, infinite_energy_enabled: bool) -> void:
+func configure_combat_context(infinite_health_enabled: bool, infinite_energy_enabled: bool, weapon_durability_disabled: bool = false) -> void:
 	_combat_context_enabled = true
 	_configured_infinite_health = infinite_health_enabled
 	_configured_infinite_energy = infinite_energy_enabled
+	_configured_weapon_durability_disabled = weapon_durability_disabled
 	_refresh_context_visibility()
 
 
-func sync_combat_states(infinite_health_enabled: bool, infinite_energy_enabled: bool) -> void:
+func sync_combat_states(infinite_health_enabled: bool, infinite_energy_enabled: bool, weapon_durability_disabled: bool = false) -> void:
 	_configured_infinite_health = infinite_health_enabled
 	_configured_infinite_energy = infinite_energy_enabled
+	_configured_weapon_durability_disabled = weapon_durability_disabled
 	if _infinite_health_check_button != null:
 		_infinite_health_check_button.set_pressed_no_signal(_configured_infinite_health)
 	if _infinite_energy_check_button != null:
 		_infinite_energy_check_button.set_pressed_no_signal(_configured_infinite_energy)
+	if _disable_weapon_durability_check_button != null:
+		_disable_weapon_durability_check_button.set_pressed_no_signal(_configured_weapon_durability_disabled)
 
 
 func _build_interface() -> void:
@@ -168,6 +179,11 @@ func _build_interface() -> void:
 	_infinite_energy_check_button.custom_minimum_size = Vector2(0.0, 40.0)
 	_infinite_energy_check_button.toggled.connect(_on_infinite_energy_toggled)
 	_combat_controls_container.add_child(_infinite_energy_check_button)
+	_disable_weapon_durability_check_button = CheckButton.new()
+	_disable_weapon_durability_check_button.text = "不消耗武器耐久"
+	_disable_weapon_durability_check_button.custom_minimum_size = Vector2(0.0, 40.0)
+	_disable_weapon_durability_check_button.toggled.connect(_on_weapon_durability_consumption_toggled)
+	_combat_controls_container.add_child(_disable_weapon_durability_check_button)
 	_training_settings_button = Button.new()
 	_training_settings_button.text = "打开训练场设置"
 	_training_settings_button.custom_minimum_size = Vector2(0.0, 44.0)
@@ -203,7 +219,7 @@ func _refresh_availability() -> void:
 
 
 func _refresh_context_visibility() -> void:
-	custom_minimum_size = Vector2(panel_minimum_size.x, 470.0 if _combat_context_enabled else panel_minimum_size.y)
+	custom_minimum_size = Vector2(panel_minimum_size.x, combat_panel_height if _combat_context_enabled else panel_minimum_size.y)
 	if _hint_label != null:
 		_hint_label.text = "战斗暂停时输入 LISBAM 开启" if _combat_context_enabled else "隐藏调试功能 · 输入序列 LISBAM 开启"
 	# 局外经济控件遍历项；战斗模式隐藏，避免把永久仓库和金币操作混入当前战斗工具。
@@ -214,7 +230,7 @@ func _refresh_context_visibility() -> void:
 		_combat_controls_container.visible = _combat_context_enabled
 	if _status_label != null:
 		_status_label.text = "可切换无限属性或打开训练工具" if _combat_context_enabled else "请选择开发者操作"
-	sync_combat_states(_configured_infinite_health, _configured_infinite_energy)
+	sync_combat_states(_configured_infinite_health, _configured_infinite_energy, _configured_weapon_durability_disabled)
 
 
 func _refresh_coins() -> void:
@@ -281,6 +297,12 @@ func _on_infinite_energy_toggled(enabled: bool) -> void:
 	_configured_infinite_energy = enabled
 	infinite_energy_toggled.emit(enabled)
 	_status_label.text = "无限能量已%s" % ("开启" if enabled else "关闭")
+
+
+func _on_weapon_durability_consumption_toggled(disabled: bool) -> void:
+	_configured_weapon_durability_disabled = disabled
+	weapon_durability_consumption_toggled.emit(disabled)
+	_status_label.text = "武器耐久消耗已%s" % ("关闭" if disabled else "恢复")
 
 
 func _on_training_settings_pressed() -> void:

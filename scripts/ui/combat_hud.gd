@@ -1718,6 +1718,8 @@ func _on_ranged_weapon_fired(_projectile: Node2D) -> void:
 
 func _on_player_died() -> void:
 	_is_player_dead = true
+	if _is_training_mode:
+		return
 	_show_failure_settlement("角色死亡")
 
 
@@ -1860,6 +1862,9 @@ func _on_test_settings_button_pressed() -> void:
 
 
 func _on_return_main_menu_button_pressed() -> void:
+	if _is_training_mode:
+		_return_to_main_menu()
+		return
 	_show_failure_settlement("主动退出战斗")
 
 
@@ -1986,7 +1991,7 @@ func _present_run_outcome(outcome: Dictionary) -> void:
 	var result_type: String = str(outcome.get("result", "failure"))
 	_death_title_label.text = str(outcome.get("title", "战斗结算"))
 	_death_message_label.text = _build_run_outcome_text(outcome)
-	_death_return_main_menu_button.text = "返回主菜单"
+	_death_return_main_menu_button.text = "确定"
 	if result_type == "success":
 		_death_title_label.add_theme_color_override("font_color", Color(0.35, 1.0, 0.72, 1.0))
 	else:

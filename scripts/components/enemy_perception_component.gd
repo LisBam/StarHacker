@@ -69,7 +69,7 @@ var blockade_loss_margin: int = 1
 var solid_wall_group: StringName = &"environment_obstacles"
 ## 视线透明碰撞跳过上限；默认 12，射线遇到非墙体地图元素时会排除后继续检测后方实心墙。
 var line_of_sight_skip_limit: int = 12
-## 可见目标情报广播间隔；默认 0.45 秒，持续看见玩家时定期刷新周围小队的最后可见坐标。
+## 可见线索刷新间隔；默认 0.45 秒，持续看见玩家时定期刷新本怪物内部最后可见坐标。
 var visible_intelligence_broadcast_interval: float = 0.45
 
 ## 感知宿主；取值为 CharacterBody2D 或 null，默认由敌人聚合脚本注入，用于射线起点和当前位置查询。
@@ -126,15 +126,15 @@ var _long_term_region_center: Vector2 = Vector2.ZERO
 var _has_long_term_region: bool = false
 ## 最后逃跑方向；取值为最后可见速度的单位向量，默认零向量，用于共享路线预判。
 var _last_escape_direction: Vector2 = Vector2.ZERO
-## 战术情报版本；取值单调递增，默认 0，每次确认墙体消失线索时通知战术组件广播。
+## 本地战术线索版本；取值单调递增，默认 0，每次确认消失线索时通知本怪物战术组件刷新。
 var _intelligence_revision: int = 0
-## 最近一次战术情报时间戳；取值为 Time.get_ticks_msec()，默认 0 表示尚未形成可广播的消失情报。
+## 最近一次本地线索时间戳；取值为 Time.get_ticks_msec()，默认 0 表示尚未形成可用消失线索。
 var _last_intelligence_timestamp_msec: int = 0
 ## 当前是否正在执行中期热点复查；默认 false，用于区分主动丢失搜查和巡逻途经后的短时驻足。
 var _is_medium_memory_recheck: bool = false
 ## 中期热点复查冷却剩余时间；取值大于等于 0，默认 0，避免离开复查后立刻重复触发。
 var _medium_recheck_cooldown_remaining: float = 0.0
-## 可见情报广播剩余时间；取值大于等于 0，默认 0，进入可见状态后立即广播并按间隔刷新。
+## 可见线索刷新剩余时间；取值大于等于 0，默认 0，进入可见状态后立即记录并按间隔刷新。
 var _visible_intelligence_broadcast_remaining: float = 0.0
 ## 最近情报类型；取值为 visible_contact、occlusion_loss 或 target_lost，默认空字符串表示尚未形成共享报告。
 var _last_intelligence_type: String = ""
@@ -717,6 +717,9 @@ func _reset_target_search() -> void:
 
 
 func receive_shared_intelligence(report: Dictionary) -> void:
+	# 怪物情报共享已删除；兼容入口不再接收任何外部怪物报告。
+	return
+
 	if report.is_empty() or not is_instance_valid(_actor):
 		return
 

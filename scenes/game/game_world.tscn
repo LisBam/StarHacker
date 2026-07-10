@@ -1,4 +1,4 @@
-[gd_scene load_steps=23 format=3]
+[gd_scene load_steps=24 format=3]
 
 [ext_resource type="Script" path="res://scripts/game/game_world.gd" id="1_game_world"]
 [ext_resource type="PackedScene" path="res://scenes/characters/player.tscn" id="2_player"]
@@ -22,6 +22,7 @@
 [ext_resource type="Resource" path="res://data/weapons/rail_cannon.tres" id="20_rail_cannon"]
 [ext_resource type="Resource" path="res://data/weapons/phase_blade.tres" id="21_phase_blade"]
 [ext_resource type="Resource" path="res://data/weapons/quantum_dagger.tres" id="22_quantum_dagger"]
+[ext_resource type="Script" path="res://scripts/components/monster_simulation_manager.gd" id="23_monster_simulation_manager"]
 
 [node name="GameWorld" type="Node2D"]
 script = ExtResource("1_game_world")
@@ -33,6 +34,9 @@ weapon_drop_table = Array[Resource]([ExtResource("16_quantum_pistol"), ExtResour
 
 [node name="Player" parent="." instance=ExtResource("2_player")]
 position = Vector2(0, 0)
+
+[node name="MonsterSimulationManager" type="Node" parent="."]
+script = ExtResource("23_monster_simulation_manager")
 
 [node name="Environment" type="Node2D" parent="."]
 
@@ -746,4 +750,4 @@ size_flags_vertical = 3
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 44)
 layout_mode = 2
-text = "返回主菜单"
+text = "确定"

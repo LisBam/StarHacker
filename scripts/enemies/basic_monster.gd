@@ -14,7 +14,7 @@ const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat
 const ENEMY_PERCEPTION_COMPONENT_SCRIPT: Script = preload("res://scripts/components/enemy_perception_component.gd")
 ## 敌人移动组件脚本；默认用于兼容旧场景缺少组件节点时动态补齐，不依赖全局类名解析顺序。
 const ENEMY_MOVEMENT_COMPONENT_SCRIPT: Script = preload("res://scripts/components/enemy_movement_component.gd")
-## 敌人战术组件脚本；默认用于兼容旧场景缺少组件节点时动态补齐，负责区域情报共享与小队分工。
+## 敌人战术组件脚本；默认用于兼容旧场景缺少组件节点时动态补齐，只处理本怪物独立搜查与伏击点。
 const ENEMY_TACTICAL_COMPONENT_SCRIPT: Script = preload("res://scripts/components/enemy_tactical_component.gd")
 ## AI 空闲状态；默认表示怪物没有玩家记忆，会回到出生点附近巡逻或待机警戒。
 const TARGET_AI_STATE_IDLE: int = 0
@@ -113,7 +113,7 @@ const TARGET_AI_STATE_BLOCKADE: int = 3
 @export var solid_wall_group: StringName = &"environment_obstacles"
 ## 非墙体碰撞跳过上限；默认 12，视线射线会跳过其他地图元素并继续检测后方实心墙。
 @export_range(1, 64, 1) var line_of_sight_skip_limit: int = 12
-## 可见目标情报广播间隔；默认 0.45 秒，一个敌人持续看见玩家时会定期刷新周围小队坐标并级联传播。
+## 可见线索刷新间隔；默认 0.45 秒，持续看见玩家时只刷新本怪物内部最后可见坐标，不会通知其他怪物。
 @export_range(0.05, 5.0, 0.05) var visible_intelligence_broadcast_interval: float = 0.45
 ## 同区域小队识别半径；默认 1200 像素，只与范围内且锁定同一玩家的存活 AI 共享情报和分工。
 @export_range(1.0, 5000.0, 1.0) var squad_region_radius: float = 1200.0
@@ -203,6 +203,12 @@ const TARGET_AI_STATE_BLOCKADE: int = 3
 @export var movement_component_path: NodePath = NodePath("EnemyMovementComponent")
 ## 战术组件节点路径；默认指向同级子节点 EnemyTacticalComponent，运行时无需动态修改。
 @export var tactical_component_path: NodePath = NodePath("EnemyTacticalComponent")
+## AI 决策更新间隔；默认 0.1 秒让感知、射线、绕障和寻路以 10Hz 错峰运行，物理移动仍逐帧保持平滑。
+@export_range(0.016, 0.5, 0.001) var ai_update_interval: float = 0.1
+## 休眠时是否隐藏怪物视觉；默认 true，远距离未加载区域不绘制怪物以减少渲染提交。
+@export var hide_when_simulation_inactive: bool = true
+## 休眠时是否关闭怪物碰撞；默认 true，远距离节点不进入物理宽相检测，靠近玩家前会由加载管理器恢复。
+@export var disable_collision_when_simulation_inactive: bool = true
 ## 怪物受击特效颜色；默认橙红色，修改会影响怪物被命中时的爆发反馈。
 @export var hit_effect_color: Color = Color(1.0, 0.45, 0.28, 0.95)
 ## 怪物死亡特效颜色；默认亮橙色，修改会影响怪物死亡时的爆发反馈。
@@ -228,12 +234,20 @@ var _random: RandomNumberGenerator = RandomNumberGenerator.new()
 var _perception_component: Node
 ## 移动组件实例；取值为 Node 或 null，默认从 movement_component_path 获取，负责寻路、巡逻、绕障和击退。
 var _movement_component: Node
-## 战术组件实例；取值为 Node 或 null，默认从 tactical_component_path 获取，负责情报共享、分工和合围点。
+## 战术组件实例；取值为 Node 或 null，默认从 tactical_component_path 获取，负责本怪物独立搜查和伏击点。
 var _tactical_component: Node
 ## 出生尺寸倍率；取值通常为 0.7 到 1.3，默认 1，供调试和其他系统读取本敌人的体型波动。
 var _spawn_size_multiplier: float = 1.0
 ## 出生属性倍率；取值通常为 0.7 到 1.3，默认 1，统一作用于生命、伤害、移速、射程和攻击节奏。
 var _spawn_attribute_multiplier: float = 1.0
+## AI 决策剩余时间；默认 0 表示首次物理帧立即决策，ready 后会随机错峰避免所有怪物同帧射线和寻路。
+var _ai_update_remaining: float = 0.0
+## AI 决策累计时间；默认 0，低频更新时累加真实经过时间供记忆、冷却和巡逻计时使用。
+var _ai_accumulated_delta: float = 0.0
+## 当前模拟是否激活；默认 true，远距离休眠后关闭物理处理，重新进入加载范围时恢复。
+var _simulation_active: bool = true
+## 怪物碰撞形状缓存；默认由 ready 收集所有后代 CollisionShape2D，休眠切换时统一启用或禁用。
+var _collision_shapes: Array[CollisionShape2D] = []
 
 
 func apply_spawn_variation(size_multiplier: float, attribute_multiplier: float) -> void:
@@ -259,11 +273,25 @@ func _ready() -> void:
 	_randomize_individual_behavior()
 	_resolve_ai_components()
 	refresh_ai_configuration()
+	_cache_collision_shapes()
+	_ai_update_remaining = _random.randf_range(0.0, maxf(ai_update_interval, 0.016))
 	health_changed.emit(current_health, max_health)
 
 
 func _physics_process(delta: float) -> void:
 	_attack_cooldown_remaining = maxf(_attack_cooldown_remaining - delta, 0.0)
+	_ai_accumulated_delta += delta
+	_ai_update_remaining = maxf(_ai_update_remaining - delta, 0.0)
+	if _ai_update_remaining <= 0.0:
+		# 本次 AI 时间步长；取值为两次决策之间累计的真实时间，保证低频更新不会缩短记忆与等待计时。
+		var ai_delta: float = maxf(_ai_accumulated_delta, delta)
+		_ai_accumulated_delta = 0.0
+		_ai_update_remaining = maxf(ai_update_interval, 0.016)
+		_update_ai_decision(ai_delta)
+	_move_with_external_velocity(delta)
+
+
+func _update_ai_decision(delta: float) -> void:
 	if _movement_component != null:
 		_movement_component.call("update", delta)
 	if _perception_component != null:
@@ -274,13 +302,45 @@ func _physics_process(delta: float) -> void:
 
 	if not _has_target:
 		_update_wander(delta)
-		_move_with_external_velocity(delta)
 		return
 
 	# 目标距离；取值为当前怪物到玩家的距离，默认每帧计算，修改会影响索敌、追击和攻击判定。
 	var target_distance: float = global_position.distance_to(_target.global_position) if is_instance_valid(_target) else INF
 	_update_target_behavior(delta, target_distance)
-	_move_with_external_velocity(delta)
+
+
+func set_simulation_active(active: bool) -> void:
+	if _simulation_active == active:
+		return
+	_simulation_active = active
+	set_physics_process(active)
+	if hide_when_simulation_inactive:
+		visible = active
+	if disable_collision_when_simulation_inactive:
+		# 碰撞形状遍历项；取值为 ready 缓存的有效形状，使用 deferred 避免物理查询期间直接改状态。
+		for collision_shape in _collision_shapes:
+			if is_instance_valid(collision_shape):
+				collision_shape.set_deferred("disabled", not active)
+	if active:
+		_ai_update_remaining = 0.0
+		_ai_accumulated_delta = 0.0
+	else:
+		velocity = Vector2.ZERO
+		_clear_navigation_path()
+
+
+func is_simulation_active() -> bool:
+	return _simulation_active
+
+
+func _cache_collision_shapes() -> void:
+	_collision_shapes.clear()
+	# 后代节点列表；取值为怪物全部子孙节点，默认只缓存 CollisionShape2D 供休眠时切换。
+	var descendant_nodes: Array[Node] = find_children("*", "CollisionShape2D", true, false)
+	# 后代节点遍历项；取值可能为其他 Node 类型，经过类型校验后加入强类型缓存。
+	for descendant_node in descendant_nodes:
+		if descendant_node is CollisionShape2D:
+			_collision_shapes.append(descendant_node as CollisionShape2D)
 
 
 func set_target(target_node: Node) -> void:
@@ -685,14 +745,9 @@ func get_target_search_destination() -> Vector2:
 	return raw_destination if raw_destination is Vector2 else global_position
 
 
-func receive_squad_intelligence(report: Dictionary) -> void:
-	# 战术组件接收结果；默认缺少战术组件时直接允许感知同步，重复消息会在战术层去重并阻止反复重置搜查点。
-	var intelligence_accepted: bool = true
-	if _tactical_component != null:
-		intelligence_accepted = bool(_tactical_component.call("receive_shared_intelligence", report))
-	if intelligence_accepted and _perception_component != null:
-		_perception_component.call("receive_shared_intelligence", report)
-	_sync_perception_state()
+func receive_squad_intelligence(_report: Dictionary) -> void:
+	# 小队情报共享已删除；兼容入口不会再改变本怪物索敌状态。
+	return
 
 
 func get_tactical_target_instance_id() -> int:

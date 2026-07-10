@@ -32,6 +32,14 @@ const DEFAULT_RANGED_WEAPON_IDS: Array[String] = ["quantum_pistol", "pulse_rifle
 const DEFAULT_MELEE_WEAPON_ID: String = "phase_blade"
 ## 默认局外金币数量；首次建立存档时为 0，金币只能通过出售永久仓库物品增加且不会进入战斗。
 const DEFAULT_STARTING_COINS: int = 0
+## 永久仓库位置标识；默认供局外拖拽接口识别安全存储来源和目标。
+const STORAGE_LOCATION_WAREHOUSE: String = "warehouse"
+## 随身背包位置标识；默认供局外拖拽接口识别战斗携带来源和目标。
+const STORAGE_LOCATION_BACKPACK: String = "backpack"
+## 近战装备位置标识；默认对应唯一近战槽，拖拽时只接收 melee 武器。
+const EQUIPMENT_LOCATION_MELEE: String = "melee"
+## 远程装备位置前缀；默认与槽位下标组合为 ranged_0、ranged_1 等稳定目标标识。
+const EQUIPMENT_LOCATION_RANGED_PREFIX: String = "ranged_"
 
 ## 永久仓库记录数组；每项包含唯一记录编号、武器资源、获得时间与撤离优先级，战斗失败不会修改该数组。
 var _warehouse_records: Array[Dictionary] = []
@@ -224,6 +232,35 @@ func get_coins() -> int:
 	return _coins
 
 
+func adjust_coins(amount: int) -> int:
+	# 调整后金币；取值至少为 0，开发者减少金币时不会形成负数余额。
+	var adjusted_coins: int = maxi(_coins + amount, 0)
+	if adjusted_coins == _coins:
+		return _coins
+	_coins = adjusted_coins
+	_queue_save_inventory()
+	coins_changed.emit()
+	return _coins
+
+
+func grant_all_known_weapons_to_warehouse() -> int:
+	# 实际发放数量；默认从 0 累加，只统计成功加载并写入永久仓库的武器资源。
+	var granted_count: int = 0
+	# 已知武器标识；取值来自稳定资源路径表，每次调用都会为每种武器创建独立实例。
+	for weapon_id in WEAPON_RESOURCE_PATHS.keys():
+		# 开发者发放资源；取值为模板深拷贝，加载失败的条目不会影响其他武器发放。
+		var item_resource: Resource = _load_weapon_resource(str(weapon_id))
+		if item_resource == null:
+			continue
+		_warehouse_records.append(_create_record(item_resource))
+		granted_count += 1
+	if granted_count <= 0:
+		return 0
+	_queue_save_inventory()
+	warehouse_changed.emit()
+	return granted_count
+
+
 func transfer_warehouse_to_backpack(item_resource: Resource, target_index: int = -1) -> bool:
 	# 永久仓库来源索引；取值为有效下标时才允许把安全物品转为下一局随身物品。
 	var warehouse_index: int = _find_warehouse_record_index(item_resource)
@@ -299,6 +336,82 @@ func sell_warehouse_resource(item_resource: Resource) -> bool:
 	warehouse_changed.emit()
 	coins_changed.emit()
 	return true
+
+
+func transfer_storage_to_equipment(item_resource: Resource, source_location: String, target_location: String) -> bool:
+	# 来源记录索引；取值为对应仓库或背包中的有效下标，其他位置不能通过该接口装备。
+	var source_index: int = _find_storage_record_index(source_location, item_resource)
+	if source_index < 0 or not _does_resource_match_equipment_location(item_resource, target_location):
+		return false
+
+	# 待装备记录；从来源容器原子取出，目标槽旧装备会回到相同来源位置形成直观交换。
+	var moving_record: Dictionary = _take_storage_record_at(source_location, source_index)
+	if moving_record.is_empty():
+		return false
+	# 被替换装备记录；空字典表示目标槽原本为空，非空时插回拖拽来源容器。
+	var replaced_record: Dictionary = _take_equipment_record(target_location)
+	if not _set_equipment_record(target_location, moving_record):
+		_insert_storage_record(source_location, moving_record, source_index)
+		if not replaced_record.is_empty():
+			_set_equipment_record(target_location, replaced_record)
+		return false
+	if not replaced_record.is_empty():
+		_insert_storage_record(source_location, replaced_record, source_index)
+	_refresh_current_ranged_slot_after_equipment_change()
+	_queue_save_inventory()
+	_emit_storage_changed(source_location)
+	equipment_changed.emit()
+	return true
+
+
+func transfer_equipment_to_storage(source_location: String, target_location: String, target_index: int = -1) -> bool:
+	if not _is_storage_location(target_location):
+		return false
+	# 待卸下装备记录；取值来自远程或近战槽，空槽不能创建存储记录。
+	var moving_record: Dictionary = _take_equipment_record(source_location)
+	if moving_record.is_empty():
+		return false
+	if not _insert_storage_record(target_location, moving_record, target_index):
+		_set_equipment_record(source_location, moving_record)
+		return false
+	_refresh_current_ranged_slot_after_equipment_change()
+	_queue_save_inventory()
+	_emit_storage_changed(target_location)
+	equipment_changed.emit()
+	return true
+
+
+func swap_equipment_locations(source_location: String, target_location: String) -> bool:
+	if source_location == target_location:
+		return true
+	# 来源装备资源；取值用于验证目标槽类型，空槽不能主动发起拖拽交换。
+	var source_resource: Resource = get_equipment_location_resource(source_location)
+	if source_resource == null or not _does_resource_match_equipment_location(source_resource, target_location):
+		return false
+	# 目标装备资源；非空时也必须兼容来源槽，防止远近战武器交换到错误类型槽位。
+	var target_resource: Resource = get_equipment_location_resource(target_location)
+	if target_resource != null and not _does_resource_match_equipment_location(target_resource, source_location):
+		return false
+	# 来源装备记录；先取出两个槽位，再交叉写回，保持资源记录编号和获得时间不变。
+	var source_record: Dictionary = _take_equipment_record(source_location)
+	# 目标装备记录；允许为空，交叉写回后来源槽会相应变为空槽。
+	var target_record: Dictionary = _take_equipment_record(target_location)
+	if not source_record.is_empty():
+		_set_equipment_record(target_location, source_record)
+	if not target_record.is_empty():
+		_set_equipment_record(source_location, target_record)
+	_refresh_current_ranged_slot_after_equipment_change()
+	_queue_save_inventory()
+	equipment_changed.emit()
+	return true
+
+
+func get_equipment_location_resource(location: String) -> Resource:
+	if location == EQUIPMENT_LOCATION_MELEE:
+		return get_melee_equipment_resource()
+	# 远程槽索引；取值为解析后的合法下标，-1 表示目标不是远程装备位置。
+	var ranged_slot_index: int = _get_ranged_slot_index_from_location(location)
+	return get_ranged_equipment_resource(ranged_slot_index) if ranged_slot_index >= 0 else null
 
 
 func get_backpack_resources() -> Array[Resource]:
@@ -658,6 +771,118 @@ func _find_warehouse_record_index(item_resource: Resource) -> int:
 		if _warehouse_records[record_index].get("resource") == item_resource:
 			return record_index
 	return -1
+
+
+func _is_storage_location(location: String) -> bool:
+	return location == STORAGE_LOCATION_WAREHOUSE or location == STORAGE_LOCATION_BACKPACK
+
+
+func _find_storage_record_index(location: String, item_resource: Resource) -> int:
+	if location == STORAGE_LOCATION_WAREHOUSE:
+		return _find_warehouse_record_index(item_resource)
+	if location == STORAGE_LOCATION_BACKPACK:
+		return _find_backpack_record_index(item_resource)
+	return -1
+
+
+func _take_storage_record_at(location: String, record_index: int) -> Dictionary:
+	if location == STORAGE_LOCATION_WAREHOUSE and record_index >= 0 and record_index < _warehouse_records.size():
+		# 永久仓库来源记录；移除后由装备槽或其他存储容器立即接管所有权。
+		var warehouse_record: Dictionary = _warehouse_records[record_index]
+		_warehouse_records.remove_at(record_index)
+		return warehouse_record
+	if location == STORAGE_LOCATION_BACKPACK and record_index >= 0 and record_index < _backpack_records.size():
+		# 随身背包来源记录；移除后由装备槽或其他存储容器立即接管所有权。
+		var backpack_record: Dictionary = _backpack_records[record_index]
+		_backpack_records.remove_at(record_index)
+		return backpack_record
+	return {}
+
+
+func _insert_storage_record(location: String, record: Dictionary, target_index: int = -1) -> bool:
+	if record.is_empty():
+		return false
+	if location == STORAGE_LOCATION_WAREHOUSE:
+		# 永久仓库插入下标；负数追加到末尾，指定值限制在当前合法边界内。
+		var warehouse_index: int = _warehouse_records.size() if target_index < 0 else clampi(target_index, 0, _warehouse_records.size())
+		_warehouse_records.insert(warehouse_index, record)
+		return true
+	if location == STORAGE_LOCATION_BACKPACK:
+		# 随身背包插入下标；负数追加到末尾，指定值限制在当前合法边界内。
+		var backpack_index: int = _backpack_records.size() if target_index < 0 else clampi(target_index, 0, _backpack_records.size())
+		_backpack_records.insert(backpack_index, record)
+		return true
+	return false
+
+
+func _emit_storage_changed(location: String) -> void:
+	if location == STORAGE_LOCATION_WAREHOUSE:
+		warehouse_changed.emit()
+	elif location == STORAGE_LOCATION_BACKPACK:
+		inventory_changed.emit()
+
+
+func _get_ranged_slot_index_from_location(location: String) -> int:
+	if not location.begins_with(EQUIPMENT_LOCATION_RANGED_PREFIX):
+		return -1
+	# 远程槽下标文本；取值为位置前缀后的数字部分，非整数内容会解析为 0 因此还需反向校验。
+	var slot_text: String = location.trim_prefix(EQUIPMENT_LOCATION_RANGED_PREFIX)
+	if not slot_text.is_valid_int():
+		return -1
+	# 远程槽下标；取值必须落在当前装备槽数组范围内。
+	var slot_index: int = int(slot_text)
+	return slot_index if slot_index >= 0 and slot_index < _ranged_equipment_records.size() else -1
+
+
+func _does_resource_match_equipment_location(item_resource: Resource, location: String) -> bool:
+	if location == EQUIPMENT_LOCATION_MELEE:
+		return _is_weapon_type(item_resource, "melee")
+	return _get_ranged_slot_index_from_location(location) >= 0 and _is_weapon_type(item_resource, "ranged")
+
+
+func _take_equipment_record(location: String) -> Dictionary:
+	if location == EQUIPMENT_LOCATION_MELEE:
+		if _melee_equipment_record.is_empty():
+			return {}
+		# 近战来源记录；取出后立即清空唯一近战槽，等待原子操作写入新位置。
+		var melee_record: Dictionary = _melee_equipment_record
+		_melee_equipment_record = {}
+		return melee_record
+	# 远程槽下标；取值为合法槽位或 -1，异常位置不会修改装备数组。
+	var ranged_slot_index: int = _get_ranged_slot_index_from_location(location)
+	if ranged_slot_index < 0:
+		return {}
+	# 远程原始记录；取值为 Dictionary 或 null，空槽返回空字典。
+	var raw_record: Variant = _ranged_equipment_records[ranged_slot_index]
+	if not (raw_record is Dictionary) or (raw_record as Dictionary).is_empty():
+		return {}
+	# 远程来源记录；取出后清空原槽，等待交换或转移操作写入新位置。
+	var ranged_record: Dictionary = raw_record as Dictionary
+	_ranged_equipment_records[ranged_slot_index] = null
+	return ranged_record
+
+
+func _set_equipment_record(location: String, record: Dictionary) -> bool:
+	if record.is_empty():
+		return false
+	# 装备记录资源；取值必须与目标装备槽类型一致，防止错误拖拽污染装备存档。
+	var item_resource: Resource = record.get("resource") as Resource
+	if not _does_resource_match_equipment_location(item_resource, location):
+		return false
+	if location == EQUIPMENT_LOCATION_MELEE:
+		_melee_equipment_record = record
+		return true
+	# 远程目标下标；已通过类型匹配校验，仍使用解析结果避免位置字符串与数组下标耦合。
+	var ranged_slot_index: int = _get_ranged_slot_index_from_location(location)
+	if ranged_slot_index < 0:
+		return false
+	_ranged_equipment_records[ranged_slot_index] = record
+	return true
+
+
+func _refresh_current_ranged_slot_after_equipment_change() -> void:
+	if get_ranged_equipment_resource(_current_ranged_slot) == null:
+		_current_ranged_slot = _find_first_equipped_ranged_slot()
 
 
 func _take_owned_record(item_resource: Resource) -> Dictionary:

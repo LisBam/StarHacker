@@ -2,13 +2,15 @@
 
 本文档记录《崩坏：量子骇袭》的入口流程、玩家控制框架和可扩展点，用于后续长期维护。
 
+玩法规则与当前默认数值的权威快照统一维护在 `docs/游戏机制与玩法内容.md`；本文档重点记录代码架构、组件职责和扩展约定。
+
 ## 场景入口
 
 - `res://scenes/ui/main_menu.tscn` 是项目主场景，由 `project.godot` 的 `run/main_scene` 指向。
 - 主菜单脚本 `res://scripts/ui/main_menu.gd` 通过 `character_select_scene_path` 加载独立角色选择场景，默认第一行按钮文案为“骇入”。主菜单同时保留“训练场”按钮，两者都会先写入当前模式，再进入 `res://scenes/ui/character_select.tscn`。
 - `res://scenes/ui/character_select.tscn` 是进入战斗前的角色选择场景。玩家在左侧选择“星”“穹”“银狼”，右侧会显示角色名称、定位、说明、固定生命上限、固定能量上限、固定速度和技能占位信息，点击确认后进入 `res://scenes/game/game_world.tscn`。
 - 主菜单提供“设置”入口，设置首页包含全局 Master 主音量和“按键绑定”入口；左下角固定提供“仓库”按钮，打开后可在纯永久仓库模式与仓库/背包联合模式间切换，出售安全物品并通过拖拽管理仓库、背包和装备槽。
-- 主菜单依次输入 `LISBAM` 会显示局外开发者菜单，提供“一键获取所有武器”“一键增加 1000 金币”“一键减少 1000 金币”。战斗内打开 ESC 暂停菜单后同样可输入 `LISBAM`，此时显示战斗开发者菜单，可切换无限血量、无限能量并在正式模式打开训练场设置。
+- 主菜单依次输入 `LISBAM` 会显示局外开发者菜单，提供“一键获取所有武器”“随机获得 10 颗强化石”“一键增加 1000 金币”“一键减少 1000 金币”。战斗内打开 ESC 暂停菜单后同样可输入 `LISBAM`，此时显示战斗开发者菜单，可切换无限血量、无限能量并在正式模式打开训练场设置。
 - `res://scripts/game/session_state.gd` 通过 `project.godot` 自动加载为 `SessionState`，负责保存本次进入的模式和角色，避免把入口参数写进场景路径。
 - `res://scripts/game/global_inventory.gd` 通过 `project.godot` 自动加载为 `GlobalInventory`，分别保存随身背包、永久仓库、装备槽、局外金币、获得时间、上次撤离优先级和战斗结算，并写入 `user://global_inventory.json`。
 - `res://scenes/game/game_world.tscn` 是当前战斗承载场景，负责放置玩家、怪物、网格地图、随机墙体建筑和掉落物。它的脚本会在进入场景后生成大型网格地图，再随机摆放一批环境障碍和怪物。
@@ -55,21 +57,23 @@
 - `PlayerProjectile`：按方向移动，按寿命或最大距离自动销毁，通过射线提前检测怪物和环境墙体，命中可调用目标的 `apply_damage(damage, source)`。
 - `EnemyProjectile`：远程怪物发射的敌方弹体，会命中玩家或被环境阻挡，也能被玩家近战命中框消除。弹体内部有一次性命中锁，扫线检测和 `body_entered` 即使同帧触发，也只会结算一次伤害和击退。
 - `CombatStatsComponent`：维护玩家生命、能量、能量恢复和死亡状态，武器成功使用后由玩家控制器调用 `spend_energy()` 扣除能量，生命降到 0 时只派发一次 `died` 信号。
-- `InventoryComponent`：作为玩家节点上的背包能力代理，默认把增删、移动、堆叠条目查询和强化石使用转发给 `GlobalInventory`；自动加载缺失时才回退场景内本地数组。
+- `InventoryComponent`：作为玩家节点上的背包能力代理，默认把增删、移动、堆叠条目查询和强化石使用转发给 `GlobalInventory`；强化可返回提升/削弱属性、百分比、基础值和实际变化值；自动加载缺失时才回退场景内本地数组。
 - `EquipmentComponent`：作为玩家节点上的装备能力代理，默认把远程槽、当前槽和近战槽操作转发给 `GlobalInventory`，不直接执行攻击。
-- `WeaponSlotControl`：显示单个武器槽或背包武器槽，负责拖拽数据、投放校验、白色冷却遮罩绘制、强化目标选择和带颜色的武器悬浮提示；冷却比例未变化时不会重复重绘，不直接修改装备数据。
+- `WeaponSlotControl`：显示单个武器槽或背包武器槽，负责拖拽数据、投放校验、白色冷却遮罩绘制、高亮强化目标、接收强化石投放和传递带上下文的点击事件；冷却比例未变化时不会重复重绘，不直接修改装备数据。
 - `InventoryDropArea`：接收拖到背包空白区域的武器拖拽数据，并转发给 HUD 按背包末尾投放处理。
 - `InputBindings`：全局输入绑定管理器，以 AutoLoad 单例存在，不声明同名 `class_name`，保存可配置动作、默认事件、玩家自定义事件和恢复默认逻辑，直接写入 Godot `InputMap`，允许多个动作共享同一个输入事件。
 - `KeyBindingPanel`：复用型按键绑定 UI，主菜单设置和暂停设置的按键绑定页面都会动态创建它，用于捕获下一次键盘或鼠标输入并调用 `InputBindings.rebind_action()`。
 - `CombatCamera`：玩家子节点上的战斗相机，关闭 Camera2D 位置平滑并使用物理帧回调跟随玩家，避免物理移动和渲染相机不同步造成移动抖动；屏幕震动只修改相机 `offset`，不会改变玩家或相机节点真实位置。
-- `CombatHud`：除原战斗 HUD、背包和暂停职责外，负责显示左上角全地图存活怪物数量、调用全局背包完成结算，并以铺满可用滚动区域的仓库式双列列表展示本局首次获得与实际丢失物品；暂停时还负责识别 LISBAM 并打开战斗开发者菜单。
+- `CombatHud`：除原战斗 HUD、背包和暂停职责外，负责显示左上角全地图存活怪物数量、调用全局背包完成结算，并以铺满可用滚动区域的仓库式双列列表展示本局首次获得与实际丢失物品；局内背包支持点击远程装备槽切枪、点击背包武器直接替换当前远程/近战槽、强化目标高亮、取消使用、拖动强化和结果弹窗；暂停时还负责识别 LISBAM 并打开战斗开发者菜单。
 - `MiniMapControl`：读取 GameWorld 的地图、探索、撤离点和玩家导航标点；M 键大地图允许左键设置或点中已有标点取消，局部小地图与完整地图都会绘制玩家到标点的绿色虚线。
-- `WarehousePanel`：主菜单局外仓库 UI，只调用 `GlobalInventory`。界面按“武器 / 近战 / 远程”和“资源 / 强化石”分类；普通点击打开出售或使用菜单，Shift+点击才在仓库与背包间快速转移。展开背包后，上方保留仓库，下方左侧显示装备栏、右侧显示随身背包；使用强化石时可选择仓库、背包或装备栏中的兼容武器。仓库打开时按 E 展开或收起背包，按 ESC 关闭仓库。
-- `StorageItemControl`：仓库、背包和结算共用物品控件，武器使用宽卡片、强化石使用正方形资源格；统一生成堆叠数量、动态售价、基础/强化数值富文本悬停详情、Shift 快速转移和跨容器拖拽数据，不直接修改物品所有权。
+- `WarehousePanel`：主菜单局外仓库 UI，只调用 `GlobalInventory`。一级分类为武器/资源；武器二级分类为全部/近战/远程，资源二级分类为全部/强化石。界面支持关键词搜索、指定强化属性筛选、获得时间或物品价值排序；点击使用强化石后自动展开背包、高亮所有武器并显示“取消使用”，也可把强化石直接拖到武器上；Shift+点击才在仓库与背包间快速转移。
+- `StorageItemControl`：仓库、背包和结算共用物品控件，武器与强化石统一使用宽卡片布局；强化石卡片显示品质、堆叠数量、实际百分比和利弊颜色，并可作为拖动强化源；控件不直接修改物品所有权。
 - `StorageDropArea`：仓库与随身背包共用的两列网格拖放区域，只校验拖拽协议并把目标容器交给 `WarehousePanel`。
-- `EquipmentStorageSlotControl`：局外装备槽拖拽控件，校验远程或近战武器类型，支持装备与仓库、背包以及远程装备槽之间的双向拖拽。
+- `InventoryQuery`：仓库与局内背包共用的只读查询组件，为条目附加真实来源下标并执行多层分类、关键词、强化属性筛选和获得时间/物品价值排序，不修改全局库存顺序。
+- `EquipmentStorageSlotControl`：局外装备槽拖拽控件，校验远程或近战武器类型，支持装备与仓库、背包以及远程装备槽之间的双向拖拽，并可高亮为强化目标或接收强化石投放。
+- `EnhancementResultDialog`：仓库与局内背包共用的强化结果弹窗，先列提升、后列削弱，每条显示百分比、基础值、本次变化值和强化后数值。
 - `DeveloperMenu`：可复用隐藏开发者调试面板；主菜单上下文通过 `GlobalInventory` 发放武器和调整金币，战斗上下文隐藏经济操作并通过信号切换无限属性、打开训练场设置。
-- `GlobalInventory`：全局物品所有权服务，使用唯一记录区分武器与强化石堆叠，分别维护永久仓库、随身背包、装备、局外金币、临时拖拽记录、本局快照和存档。相同词条签名的强化石最多 99 个一组；正式战斗失败时每把背包武器、每颗背包强化石独立按约 20% 概率保留，永久仓库和局外金币不进入战斗；成功撤离后物品继续留在随身背包，必须由玩家手动转入永久仓库。
+- `GlobalInventory`：全局物品所有权服务，使用唯一记录区分武器与强化石堆叠，分别维护永久仓库、随身背包、装备、局外金币、临时拖拽记录、本局快照和存档。强化使用原子事务在成功后扣除一颗材料，并返回完整数值明细；只有品质、属性和百分比全部相同的强化石才会堆叠，单组上限 99。
 - `MonsterSimulationManager`：维护整图轻量虚拟敌人人口，分批实例化玩家加载半径内的真实敌人，并在远离后保存位置和生命比例再释放节点；远处人口不执行任何 AI、物理、碰撞或绘制。
 - `BasicMonster`：基础怪物聚合入口，维护血量、攻击、韧性、个体数值随机和组件配置，通过子组件组合索敌与移动能力，并保留近战、击退和继承扩展接口。
 - `EnemyPerceptionComponent`：维护视野射线、目标记忆、视野丢失缓冲、遮挡次数、最后线索预测、障碍背后锚点、范围搜查和彻底脱战，不执行移动或攻击。
@@ -94,11 +98,11 @@
 
 ### 武器强化与强化石
 
-`WeaponData` 将原有导出字段作为永久基础值，强化结果单独保存在 `enhancement_modifiers` 百分比词典中。战斗组件不再直接把基础字段当作最终值，而是统一调用 `get_effective_stat()` 读取 `基础值 × (1 + 累计强化比例)`。内部继续保留 `ranged_damage`、`melee_damage`、`ranged_cooldown` 和 `melee_cooldown` 以兼容现有 `.tres`，所有 UI 统一显示为“伤害”和“冷却”。
+`WeaponData` 将原有导出字段作为永久基础值，强化结果单独保存在 `enhancement_modifiers` 累计比例词典中。战斗组件不再直接把基础字段当作最终值，而是统一调用 `get_effective_stat()` 读取 `基础值 × (1 + 累计强化比例)`。内部继续保留 `ranged_damage`、`melee_damage`、`ranged_cooldown` 和 `melee_cooldown` 以兼容现有 `.tres`，所有 UI 统一显示为“伤害”和“冷却”。
 
-强化石由 `res://scripts/data/enhancement_stone_data.gd` 定义，`item_kind` 固定为 `enhancement_stone`，`modifiers` 保存一到多个正负百分比词条。当前随机池包含伤害、冷却、能量消耗、弹体速度、弹体射程、扩散、后坐力、前坐力、冲击力和近战判定时长；目标武器只应用与自身类型兼容的词条。词条和值完全一致时 `get_stack_signature()` 返回相同签名，仓库和背包会自动合并，单组上限为 99。
+强化石由 `res://scripts/data/enhancement_stone_data.gd` 定义，`item_kind` 固定为 `enhancement_stone`，`quality_id` 区分 low、medium、high、supreme，`modifiers` 保存属性的实际百分比。掉落品质权重为 40% 低级、30% 中级、20% 高级、10% 极品；低级增强 10%–20% 且 80% 带 10%–20% 削弱，中级增强 20%–40%、10% 额外增强、40% 带 5%–20% 削弱，高级增强 30%–50%、20% 额外增强、10% 带 5%–10% 削弱，极品增强 40%–60%、30% 额外增强且永不附带削弱。每颗石头必定至少一条增强，词条不重复；只有品质、属性和百分比全部一致时才堆叠。旧 +1/-1 存档自动迁移为 ±10%。
 
-武器悬停详情使用“总值（基础值±强化值）”格式，例如“伤害：1200（1000+200）”。总值高于基础值及正强化差值使用绿色，低于基础值及负强化差值使用红色。强化不覆盖基础值，可以继续累计或由后续负词条抵消。武器售价通过 `get_effective_sell_price()` 随累计强化比例动态变化；正数强化提高售价，负数强化降低售价，并保留最低 10% 基础售价的保护下限。
+武器悬停详情只在属性确实发生强化变化时使用“总值（基础值±强化值）”格式；未变化属性只显示最终值，不显示“（100+0）”。强化石详情显示实际百分比，增强词条全部排在削弱词条之前，并按玩法效果以绿色表示增强、红色表示削弱。强化成功后的共用弹窗会展示百分比、武器基础值、本次变化值和强化后数值。
 
 当前通用玩家预制体默认装备两把远程武器和一把近战武器：
 
@@ -122,13 +126,13 @@
 
 背包通过 E 键打开或关闭。背包打开时，`CombatHud` 会通过 `PlayerInputComponent.set_combat_input_enabled(false)` 禁用射击、近战和切换武器，避免拖拽装备时误触战斗输入；WASD 移动不受影响。
 
-局内背包界面采用左右分栏：左侧是当前装备，右侧是随身物品。右侧可切换武器、近战、远程和“资源 · 强化石”分类；强化石使用正方形资源格显示堆叠数量，普通点击后选择“使用”，再点击背包或装备栏中的兼容武器完成强化。数据不再属于当前 Player 场景，而是通过 `InventoryComponent` 与 `EquipmentComponent` 代理到 `GlobalInventory`；随身背包会带入战斗并参与失败损失，永久仓库不会在局内背包中出现，也不会因玩家死亡或主动退出而丢失。
+局内背包界面采用左右分栏：左侧是当前装备，右侧是随身物品。点击左侧已装备远程武器会立即切换当前手持槽；点击右侧背包武器会显示“装备”，远程武器替换当前手持槽，近战武器替换近战槽。强化石与武器统一使用宽卡片；点击“使用”后所有武器高亮并显示“取消使用”，也可直接把强化石拖到背包或装备栏武器上。
 
 装备和背包使用单实例流转规则：一把武器资源同一时间只能存在于一个位置。右侧背包武器拖到左侧装备槽后，会从背包列表移除；如果目标装备槽已有武器，旧武器会回到原背包位置。左侧装备拖回右侧背包的空白区域或任意背包物品上都会卸下并插入背包；背包武器之间拖拽会移动原物品顺序，不会复制资源；远程装备槽之间拖拽会移动或交换同一个武器引用。
 
-局外仓库与随身背包是两个独立容器。仓库和背包都使用每行两个物品的网格布局，不显示上下调整按钮；武器使用宽卡片，资源使用正方形格子。普通点击武器会显示“出售（+金币）”，普通点击强化石会显示“出售（+金币）”和“使用”；按住 Shift 再点击才会在仓库与背包间快速转移，拖拽仍可排序、跨容器移动或进入装备栏。强化石出售时按整组数量计算金币，金币不会带入战斗。展开背包后，上方为永久仓库，下方为装备栏和随身背包。右上角按钮明确显示“展开背包 E”或“收起背包 E”；按 E 可切换，按 ESC 直接关闭仓库。
+局外仓库与随身背包是两个独立容器。仓库和背包都使用每行两个物品的网格布局，武器与强化石统一使用宽卡片。普通点击强化石会显示出售和使用；选择使用后自动展开背包、高亮仓库/背包/装备栏的所有武器并显示“取消使用”。强化石也可直接拖到任意已有武器卡片或装备槽完成强化。
 
-永久仓库首次建立或从旧存档迁移时默认按获得时间从新到旧排列，之后会保存玩家手工调整的列表顺序。成功撤离只给当前携带记录写入撤离编号，不会自动改变容器；背包物品继续承担下一局风险，直到玩家手动转入永久仓库。存档版本 3 分别保存 `warehouse`、`backpack`、装备槽、`coins`、物品类型、堆叠数量、强化石词条和武器累计强化；读取没有 `warehouse` 字段的旧存档时，会把旧版混合背包物品安全迁移到永久仓库。
+永久仓库首次建立或从旧存档迁移时默认按获得时间从新到旧排列，之后会保存玩家手工调整的列表顺序。存档版本 4 新增强化石品质和实际百分比；读取旧存档时，通用“强化石”按低级品质恢复，旧 +1/-1 词条按 ±10% 迁移。
 
 地面掉落物使用同一套通用物品流转规则。玩家靠近地面武器或强化石时，HUD 左侧会显示附近掉落物面板，按钮列表按距离从近到远显示物品名称。按 F 会拾取最近的一件，即使列表被关闭也可使用。按 G 收起列表后，面板高度会缩小到 `nearby_drop_collapsed_height`，只保留标题以及紧贴标题的背景板，不再保留完整展开列表的空背景；再次按 G 后恢复 `nearby_drop_expanded_height`。
 
@@ -209,7 +213,7 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 
 所有 `WeaponData` 都包含 `spread_degrees` 扩散属性。扩散值表示弹体相对瞄准方向的最大随机角度：0 表示完全精准，数值越高偏移范围越大。当前远程武器分别配置不同扩散，近战武器显式保持 0；仓库、背包和结算悬停详情都会显示该属性。
 
-`GameWorld` 通过 `drop_parent_path`、`weapon_drop_scene`、`weapon_drop_table` 和 `dropped_weapon_scatter_radius` 控制通用地面物品生成。怪物死亡掉落武器时会从掉落表复制模板；每次怪物死亡还会按 `enhancement_stone_drop_chance` 独立判定强化石，默认概率 0.05。强化石词条数量、负词条概率、单条绝对比例和基础售价分别由 `enhancement_stone_min_modifier_count`、`enhancement_stone_max_modifier_count`、`enhancement_stone_negative_modifier_chance`、`enhancement_stone_min_modifier_ratio`、`enhancement_stone_max_modifier_ratio` 与 `enhancement_stone_base_sell_price` 控制。背包拖出武器会直接使用背包里的同一个武器资源；落点会尽量避开环境障碍并限制在地图范围内。
+`GameWorld` 通过 `enhancement_stone_drop_chance = 0.05` 为每次实际击杀独立判定强化石。掉落品质为低级 40%、中级 30%、高级 20%、极品 10%；每颗必定至少一条增强，各品质的额外增强、削弱概率和幅度由 `EnhancementRules.QUALITY_CONFIGS` 统一维护。地面拾取名称显示品质和增强属性预览，不显示削弱属性。
 
 `GameWorld` 会记录进入战斗后的存活时间，玩家死亡后不再增加。默认存活 120 秒时生成撤离点，300 秒时标记到地图。玩家在撤离范围内连续停留 `extraction_hold_duration_seconds` 默认 5 秒后按闪避确认撤离。成功撤离会调用 `GlobalInventory.complete_combat_run_success()`：保留装备和随身背包原位置，标记本次撤离携带记录，并显示本局首次从战场获得的物品；返回主菜单后需要玩家手动把安全物品转入永久仓库。统计使用 Resource 实例身份去重，开局自带物品自己扔出后重新捡回不会算作新收益；玩家确认结算后才返回主菜单。
 
@@ -231,7 +235,7 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 - 怪物：`max_health`、`current_health`、`weapon_drop_chance`、`attack_damage`、`toughness`、`attack_impact_force`、`move_speed`、`move_speed_random_multiplier_min`、`move_speed_random_multiplier_max`、`vision_range`、`attack_range`、`attack_cooldown`、`attack_cooldown_random_multiplier_min`、`attack_cooldown_random_multiplier_max`、`lose_target_range_multiplier`、`vision_requires_line_of_sight`、`vision_line_of_sight_collision_mask`、`vision_loss_grace_duration`、`target_memory_duration`、`target_prediction_time`、`target_prediction_max_distance`、`occlusion_break_forget_count`、`medium_memory_duration`、`long_term_region_radius`、`solid_wall_group`、`ai_update_interval`、`hide_when_simulation_inactive`、`disable_collision_when_simulation_inactive`、`tactical_search_near_radius`、`tactical_search_middle_radius`、`tactical_search_far_radius`、`search_points_before_ambush`、`patrol_route_path`、`patrol_route_loop`、`wander_radius`、`wander_speed_multiplier`、`pathfinding_enabled`、`pathfinding_cell_size`、`pathfinding_agent_radius`、`path_recalculation_min_interval`、`path_recalculation_max_interval`、`stuck_detection_time`、`knockback_decay`、`perception_component_path`、`movement_component_path`、`tactical_component_path`、`hit_effect_color`、`death_effect_color`
 - 远程怪物：`projectile_scene`、`shoot_range`、`keep_distance`、`ranged_projectile_speed`、`ranged_projectile_damage`、`ranged_projectile_range`、`ranged_projectile_impact_force`、`ranged_projectile_spread_degrees`、`shoot_cooldown`、`shoot_cooldown_random_multiplier_min`、`shoot_cooldown_random_multiplier_max`、`muzzle_offset`、`line_of_sight_collision_mask`、`projectile_parent_path`
 - 战斗地图：`grid_size`、`grid_extent`、`map_seed`、`base_floor_color`、`grid_color`、`axis_color`、`exploration_cell_size`、`exploration_radius`、`exploration_update_interval`、`exploration_update_distance`、`boundary_wall_thickness`、`boundary_wall_color`、`extraction_spawn_time_seconds`、`extraction_map_marker_time_seconds`、`extraction_hold_duration_seconds`、`extraction_radius`、`extraction_spawn_edge_margin`、`extraction_spawn_min_distance_from_player`、`extraction_spawn_attempt_count`、`extraction_fill_color`、`extraction_ring_color`
-- 强化石掉落：`enhancement_stone_drop_chance`、`enhancement_stone_min_modifier_count`、`enhancement_stone_max_modifier_count`、`enhancement_stone_negative_modifier_chance`、`enhancement_stone_min_modifier_ratio`、`enhancement_stone_max_modifier_ratio`、`enhancement_stone_base_sell_price`
+- 强化石掉落：`enhancement_stone_drop_chance`、`enhancement_stone_base_sell_price`、`EnhancementRules.QUALITY_WEIGHTS`、`EnhancementRules.QUALITY_CONFIGS`；`enhancement_stone_min_modifier_count`、`enhancement_stone_max_modifier_count`、`enhancement_stone_negative_modifier_chance` 仅保留旧扩展调用兼容，品质规则不再读取它们。
 - 敌人生成与加载：`monster_scene`、`monster_scenes`、`monster_spawn_count`、`monster_spawn_min_distance`、`monster_spawn_max_distance`、`monster_spawn_across_full_map`、`monster_spawn_edge_margin`、`monster_minimum_alive_count`、`monster_population_first_milestone_seconds`、`monster_population_five_minute_count`、`monster_population_second_milestone_seconds`、`monster_population_ten_minute_count`、`monster_replenish_interval`、`monster_replenish_batch_size`、`monster_spawn_variation_ratio`、`monster_parent_path`、`monster_simulation_manager_path`、`active_radius`、`sleep_hysteresis`、`update_interval`、`monsters_per_update`、`materializations_per_update`、`max_materialized_monsters`
 - 掉落物：`drop_parent_path`、`weapon_drop_scene`、`weapon_drop_table`、`dropped_weapon_scatter_radius`、`weapon_data`、`pickup_radius`、`bob_amplitude`、`bob_speed`
 - 环境生成：`environment_parent_path`、`obstacle_scenes`、`obstacle_spawn_count`、`obstacle_spawn_min_distance_from_player`、`obstacle_spawn_edge_margin`、`obstacle_spawn_min_spacing`、`obstacle_spawn_attempts_per_item`、`obstacle_scale_min`、`obstacle_scale_max`
@@ -239,7 +243,7 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 - 武器数据：`weapon_type`、`sell_price`、`energy_cost`、`projectile_speed`、`bullet_range`、`ranged_damage`、`ranged_cooldown`、`spread_degrees`、`recoil_force`、`front_recoil_force`、`impact_force`、`melee_damage`、`melee_cooldown`、`melee_active_duration`
 - 主菜单入口：`character_select_scene_path`、`WarehouseButton`、`DEVELOPER_UNLOCK_SEQUENCE`
 - 全局仓库：`SAVE_PATH`、`DEFAULT_RANGED_SLOT_COUNT`、`WEAPON_RESOURCE_PATHS`、`DEFAULT_BACKPACK_WEAPON_IDS`、`DEFAULT_RANGED_WEAPON_IDS`、`DEFAULT_MELEE_WEAPON_ID`、`DEFAULT_STARTING_COINS`
-- 仓库与开发者面板：`panel_minimum_size`、`coin_step`
+- 仓库与开发者面板：`panel_minimum_size`、`coin_step`、`enhancement_stone_grant_count`
 - 角色选择：`game_scene_path`、`main_menu_scene_path`、`stat_bar_maximum`、`speed_bar_maximum`
 - 输入绑定：`SAVE_PATH`、`EVENT_TYPE_UNBOUND`、`_action_entries`
 - HUD：`DROP_LIST_COMBAT_SUPPRESSION_DURATION`、`DEVELOPER_UNLOCK_SEQUENCE`、`ranged_slot_minimum_size`、`melee_slot_minimum_size`、`inventory_slot_minimum_size`、`toggle_inventory_action`、`toggle_large_map_action`、`pause_action`、`pickup_action`、`toggle_drop_list_action`、`extraction_action`、`nearby_drop_pickup_range`、`max_nearby_drop_buttons`、`nearby_drop_refresh_interval`、`nearby_drop_expanded_height`、`nearby_drop_collapsed_height`、`main_menu_scene_path`

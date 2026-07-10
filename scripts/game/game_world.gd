@@ -108,14 +108,11 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export_range(1, 9, 1) var enhancement_stone_min_modifier_count: int = 1
 ## 单颗强化石最多词条数量；默认 3，允许一颗强化石同时包含多种正负属性。
 @export_range(1, 9, 1) var enhancement_stone_max_modifier_count: int = 3
-## 强化石生成负数词条的概率；默认 0.28，负词条仍会与其他正词条共同保存在同一颗石头上。
+## 强化石生成削弱词条的概率；默认 0.28，削弱方向会按属性规则决定，例如冷却增加或伤害降低。
 @export_range(0.0, 1.0, 0.01) var enhancement_stone_negative_modifier_chance: float = 0.28
-## 强化石单条最小绝对百分比；默认 0.04 表示至少改变基础属性 4%。
-@export_range(0.001, 1.0, 0.001) var enhancement_stone_min_modifier_ratio: float = 0.04
-## 强化石单条最大绝对百分比；默认 0.16 表示最多改变基础属性 16%。
-@export_range(0.001, 2.0, 0.001) var enhancement_stone_max_modifier_ratio: float = 0.16
 ## 强化石基础出售价格；默认 30 金币，随机多词条会按词条数量增加单颗价值。
 @export_range(0, 999999, 1) var enhancement_stone_base_sell_price: int = 30
+## 品质规则兼容说明；词条数量与削弱概率现由 EnhancementRules.QUALITY_CONFIGS 统一决定，上述最小/最大词条和通用削弱概率只保留旧扩展调用兼容。
 ## 玩家丢弃武器散落半径；取值建议大于玩家半径，默认 52 像素，修改会影响拖出背包时武器落点距离。
 @export_range(0.0, 400.0, 1.0) var dropped_weapon_scatter_radius: float = 52.0
 ## 撤离点生成时间；取值为进入战斗后的秒数，默认 120 表示存活 2 分钟后生成撤离点。
@@ -1381,57 +1378,13 @@ func _try_spawn_enhancement_stone_drop(monster_node: Node2D) -> void:
 
 
 func _create_random_enhancement_stone() -> EnhancementStoneData:
-	# 全部可生成属性；包含通用、远程和近战字段，使用时由 WeaponData 只应用与目标武器兼容的词条。
-	var available_stats: Array[String] = [
-		"damage",
-		"cooldown",
-		"energy_cost",
-		"projectile_speed",
-		"bullet_range",
-		"spread_degrees",
-		"recoil_force",
-		"front_recoil_force",
-		"impact_force",
-		"melee_active_duration",
-	]
-	# 最小词条数；限制在属性池范围内，防止检查器异常配置导致重复词条或越界。
-	var minimum_modifier_count: int = clampi(enhancement_stone_min_modifier_count, 1, available_stats.size())
-	# 最大词条数；至少等于最小词条数并限制在属性池范围内。
-	var maximum_modifier_count: int = clampi(enhancement_stone_max_modifier_count, minimum_modifier_count, available_stats.size())
-	# 实际词条数；在配置范围内等概率随机。
-	var modifier_count: int = _random.randi_range(minimum_modifier_count, maximum_modifier_count)
-	# 随机属性顺序；先洗牌再截取，保证一颗石头不会出现重复属性。
-	var shuffled_stats: Array[String] = available_stats.duplicate()
-	for stat_index in range(shuffled_stats.size() - 1, 0, -1):
-		# 交换下标；Fisher-Yates 洗牌保证每种属性组合概率一致。
-		var swap_index: int = _random.randi_range(0, stat_index)
-		# 临时属性；用于交换两个数组元素。
-		var temporary_stat: String = shuffled_stats[stat_index]
-		shuffled_stats[stat_index] = shuffled_stats[swap_index]
-		shuffled_stats[swap_index] = temporary_stat
-
-	# 绝对比例边界；自动纠正最大值小于最小值的检查器配置。
-	var minimum_ratio: float = maxf(enhancement_stone_min_modifier_ratio, 0.001)
-	# 最大绝对比例；至少等于最小值，保证 randf_range 参数合法。
-	var maximum_ratio: float = maxf(enhancement_stone_max_modifier_ratio, minimum_ratio)
-	# 随机词条字典；每项为统一属性名与带正负号的小数百分比。
-	var generated_modifiers: Dictionary = {}
-	for stat_index in range(modifier_count):
-		# 属性名称；来自已洗牌属性池前 modifier_count 项。
-		var stat_name: String = shuffled_stats[stat_index]
-		# 属性绝对比例；在检查器配置范围内随机。
-		var modifier_ratio: float = _random.randf_range(minimum_ratio, maximum_ratio)
-		if _random.randf() < clampf(enhancement_stone_negative_modifier_chance, 0.0, 1.0):
-			modifier_ratio = -modifier_ratio
-		# 量化比例；固定到 1% 步进显著提高相同强化石可堆叠概率，并保持详情可读。
-		generated_modifiers[stat_name] = snappedf(modifier_ratio, 0.01)
-
-	# 强化石资源；显示名称按词条数量区分，售价随词条数量提高。
-	var enhancement_stone: EnhancementStoneData = EnhancementStoneData.new()
-	enhancement_stone.display_name = "%s强化石" % ("复合" if modifier_count > 1 else "属性")
-	enhancement_stone.sell_price = maxi(enhancement_stone_base_sell_price * modifier_count, 0)
-	enhancement_stone.modifiers = generated_modifiers
-	return enhancement_stone
+	return EnhancementStoneData.create_random(
+		_random,
+		enhancement_stone_min_modifier_count,
+		enhancement_stone_max_modifier_count,
+		enhancement_stone_negative_modifier_chance,
+		enhancement_stone_base_sell_price
+	)
 
 
 func spawn_item_drop(item_data: Resource, drop_position: Vector2) -> bool:

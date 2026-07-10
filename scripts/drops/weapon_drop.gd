@@ -73,6 +73,8 @@ func get_pickup_display_name() -> String:
 	var current_item_data: Resource = _get_item_data()
 	if current_item_data == null:
 		return "未知物品"
+	if str(current_item_data.get("item_kind")) == "enhancement_stone" and current_item_data.has_method("get_pickup_preview_name"):
+		return str(current_item_data.call("get_pickup_preview_name"))
 
 	# 物品显示名；取值来自资源 display_name 字段，默认用于附近掉落物列表和按钮文本。
 	var display_name: String = str(current_item_data.get("display_name"))

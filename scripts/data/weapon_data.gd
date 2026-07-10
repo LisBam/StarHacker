@@ -108,25 +108,69 @@ func can_apply_enhancement(modifiers: Dictionary) -> bool:
 
 func apply_enhancement(modifiers: Dictionary) -> bool:
 	# 是否实际应用词条；只有与当前武器兼容的字段会写入，避免远程专属属性污染近战武器。
+	var applied_any_modifier: bool = bool(apply_enhancement_with_result(modifiers).get("success", false))
+	return applied_any_modifier
+
+
+func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
+	# 强化结果；分开保存提升和削弱明细，UI 可直接展示百分比、基础值、变化值和强化后数值。
+	var result: Dictionary = {
+		"success": false,
+		"weapon": self,
+		"beneficial_changes": [],
+		"detrimental_changes": [],
+	}
+	# 是否实际应用词条；只有与当前武器兼容的字段会写入，避免远程专属属性污染近战武器。
 	var applied_any_modifier: bool = false
 	for raw_stat_name in modifiers.keys():
 		# 统一属性名；空值或当前武器不支持的字段直接跳过。
 		var stat_name: String = _resolve_canonical_stat_name(str(raw_stat_name))
 		if not _is_stat_supported(stat_name):
 			continue
-		# 新累计比例；强化允许正负相抵，不限制次数，基础属性始终保持不变。
-		var accumulated_ratio: float = float(enhancement_modifiers.get(stat_name, 0.0)) + float(modifiers.get(raw_stat_name, 0.0))
-		enhancement_modifiers[stat_name] = accumulated_ratio
+		# 词条方向；新版只读取 +1 或 -1，旧百分比也会按正负号归一化。
+		var modifier_direction: int = EnhancementRules.normalize_direction(modifiers.get(raw_stat_name, 1))
+		# 词条实际比例；品质化数据保留 5% 至 60% 幅度，旧 +1/-1 数据迁移为 10%。
+		var modifier_ratio: float = EnhancementRules.get_effect_ratio(modifiers.get(raw_stat_name, modifier_direction))
+		if is_zero_approx(modifier_ratio):
+			continue
+		# 基础数值；不包含任何历史强化，用于结果弹窗说明本次百分比的换算基准。
+		var base_value: float = get_base_stat(stat_name)
+		# 强化前数值；包含历史累计强化，用于计算本次实际变化量。
+		var before_value: float = get_effective_stat(stat_name)
+		# 新累计比例；每条词条按固定 10% 步长累计，强化允许正负相抵且基础属性始终保持不变。
+		var accumulated_ratio: float = float(enhancement_modifiers.get(stat_name, 0.0)) + modifier_ratio
+		enhancement_modifiers[stat_name] = snappedf(accumulated_ratio, 0.01)
+		# 强化后数值；已应用属性下限保护，可以直接交给弹窗和战斗组件使用。
+		var after_value: float = get_effective_stat(stat_name)
+		# 单条变化明细；保留属性名、百分比和基础/前后数值，避免 UI 重新计算造成误差。
+		var change_entry: Dictionary = {
+			"stat_name": stat_name,
+			"modifier_ratio": modifier_ratio,
+			"base_value": base_value,
+			"before_value": before_value,
+			"change_value": after_value - before_value,
+			"after_value": after_value,
+		}
+		if EnhancementRules.is_direction_beneficial(stat_name, modifier_ratio):
+			(result["beneficial_changes"] as Array).append(change_entry)
+		else:
+			(result["detrimental_changes"] as Array).append(change_entry)
 		applied_any_modifier = true
-	return applied_any_modifier
+	result["success"] = applied_any_modifier
+	return result
 
 
 func get_effective_sell_price() -> int:
-	# 售价调整比例；按所有当前武器可用词条的累计百分比相加，正强化升值、负强化贬值。
+	# 售价调整比例；按玩法利弊判断累计强化，增强提高售价、削弱降低售价。
 	var sell_price_ratio: float = 0.0
 	for raw_stat_name in enhancement_modifiers.keys():
 		if _is_stat_supported(str(raw_stat_name)):
-			sell_price_ratio += float(enhancement_modifiers.get(raw_stat_name, 0.0))
+			# 累计比例；正负号表示当前属性最终变化方向，绝对值表示累计强化幅度。
+			var accumulated_ratio: float = float(enhancement_modifiers.get(raw_stat_name, 0.0))
+			if not is_zero_approx(accumulated_ratio):
+				# 累计方向；用于判断该属性最终变化对武器是增强还是削弱。
+				var accumulated_direction: int = EnhancementRules.normalize_direction(accumulated_ratio)
+				sell_price_ratio += absf(accumulated_ratio) if EnhancementRules.is_direction_beneficial(str(raw_stat_name), accumulated_direction) else -absf(accumulated_ratio)
 	return maxi(roundi(float(sell_price) * maxf(1.0 + sell_price_ratio, MINIMUM_SELL_PRICE_MULTIPLIER)), 0)
 
 

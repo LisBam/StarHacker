@@ -42,6 +42,17 @@ const EQUIPMENT_LOCATION_MELEE: String = "melee"
 const EQUIPMENT_LOCATION_RANGED_PREFIX: String = "ranged_"
 ## 可堆叠资源单组上限；默认 99，所有仓库、背包、转移、读档和拾取逻辑共同遵守该限制。
 const MAX_STACK_QUANTITY: int = 99
+## 开发者单次发放强化石数量；默认 10，对应隐藏开发者菜单的固定调试功能。
+const DEVELOPER_STONE_GRANT_COUNT: int = 10
+## 开发者强化石最少词条数；默认 1，与战斗掉落默认配置保持一致。
+const DEVELOPER_STONE_MIN_MODIFIER_COUNT: int = 1
+## 开发者强化石最多词条数；默认 3，与战斗掉落默认配置保持一致。
+const DEVELOPER_STONE_MAX_MODIFIER_COUNT: int = 3
+## 开发者强化石削弱词条概率；默认 0.28，与战斗掉落默认配置保持一致。
+const DEVELOPER_STONE_DETRIMENTAL_CHANCE: float = 0.28
+## 开发者强化石单词条基础售价；默认 30 金币，与战斗掉落默认配置保持一致。
+const DEVELOPER_STONE_BASE_SELL_PRICE: int = 30
+## 开发者强化石兼容说明；词条数和削弱概率已由品质规则接管，上述三项随机常量仅用于保持旧调用签名稳定。
 
 ## 永久仓库记录数组；每项包含唯一记录编号、武器资源、获得时间与撤离优先级，战斗失败不会修改该数组。
 var _warehouse_records: Array[Dictionary] = []
@@ -263,6 +274,31 @@ func grant_all_known_weapons_to_warehouse() -> int:
 	return granted_count
 
 
+func grant_random_enhancement_stones_to_warehouse(stone_count: int = DEVELOPER_STONE_GRANT_COUNT) -> int:
+	# 实际发放数量；限制为非负数，每颗独立随机并按词条方向自动合并到永久仓库堆叠。
+	var granted_count: int = 0
+	# 请求数量；开发者菜单默认 10，外部调试调用可传入其他非负数量。
+	var resolved_stone_count: int = maxi(stone_count, 0)
+	for _stone_index in range(resolved_stone_count):
+		# 随机强化石；使用与战斗掉落相同的词条数量、削弱概率和售价规则。
+		var enhancement_stone: EnhancementStoneData = EnhancementStoneData.create_random(
+			_random,
+			DEVELOPER_STONE_MIN_MODIFIER_COUNT,
+			DEVELOPER_STONE_MAX_MODIFIER_COUNT,
+			DEVELOPER_STONE_DETRIMENTAL_CHANCE,
+			DEVELOPER_STONE_BASE_SELL_PRICE
+		)
+		if enhancement_stone == null:
+			continue
+		_insert_record_with_stack_merge(_warehouse_records, _create_record(enhancement_stone))
+		granted_count += 1
+	if granted_count <= 0:
+		return 0
+	_queue_save_inventory()
+	warehouse_changed.emit()
+	return granted_count
+
+
 func transfer_warehouse_to_backpack(item_resource: Resource, target_index: int = -1) -> bool:
 	# 永久仓库来源索引；取值为有效下标时才允许把安全物品转为下一局随身物品。
 	var warehouse_index: int = _find_warehouse_record_index(item_resource)
@@ -350,20 +386,40 @@ func get_storage_resource_sell_price(item_resource: Resource, source_location: S
 
 
 func use_enhancement_stone(stone_resource: Resource, source_location: String, weapon_resource: Resource) -> bool:
+	return bool(use_enhancement_stone_with_result(stone_resource, source_location, weapon_resource).get("success", false))
+
+
+func use_enhancement_stone_with_result(stone_resource: Resource, source_location: String, weapon_resource: Resource) -> Dictionary:
+	# 失败结果；任何校验失败都返回相同结构，调用方可以无需特判 null 即安全读取。
+	var failed_result: Dictionary = {
+		"success": false,
+		"weapon": weapon_resource,
+		"stone": stone_resource,
+		"beneficial_changes": [],
+		"detrimental_changes": [],
+	}
 	if not _is_enhancement_stone(stone_resource) or not _is_weapon_resource(weapon_resource):
-		return false
+		return failed_result
 	# 强化石来源索引；仅允许消费仓库或背包内仍由玩家持有的资源。
 	var stone_record_index: int = _find_storage_record_index(source_location, stone_resource)
 	# 强化石来源记录数组；非法位置返回空数组并拒绝消费。
 	var source_records: Array[Dictionary] = _get_storage_records(source_location)
 	if stone_record_index < 0 or stone_record_index >= source_records.size() or not _is_owned_weapon_resource(weapon_resource):
-		return false
+		return failed_result
 	# 强化词条；从石头资源读取，WeaponData 负责过滤与目标武器不兼容的属性。
-	var modifiers: Dictionary = stone_resource.get("modifiers") as Dictionary
+	var modifiers: Dictionary = stone_resource.call("get_normalized_modifiers") as Dictionary if stone_resource.has_method("get_normalized_modifiers") else EnhancementRules.normalize_modifiers(stone_resource.get("modifiers") as Dictionary)
 	if modifiers.is_empty() or not weapon_resource.has_method("apply_enhancement"):
-		return false
-	if not bool(weapon_resource.call("apply_enhancement", modifiers)):
-		return false
+		return failed_result
+	# 武器强化结果；新资源返回完整变化明细，旧扩展资源仍可通过 bool 接口完成强化。
+	var enhancement_result: Dictionary = failed_result.duplicate(true)
+	if weapon_resource.has_method("apply_enhancement_with_result"):
+		enhancement_result = weapon_resource.call("apply_enhancement_with_result", modifiers) as Dictionary
+	else:
+		enhancement_result["success"] = bool(weapon_resource.call("apply_enhancement", modifiers))
+	if not bool(enhancement_result.get("success", false)):
+		return failed_result
+	enhancement_result["weapon"] = weapon_resource
+	enhancement_result["stone"] = stone_resource
 
 	# 强化石记录；成功应用后才扣除一颗，失败不会消耗材料。
 	var stone_record: Dictionary = source_records[stone_record_index]
@@ -376,7 +432,7 @@ func use_enhancement_stone(stone_resource: Resource, source_location: String, we
 	_queue_save_inventory()
 	_emit_storage_changed(source_location)
 	equipment_changed.emit()
-	return true
+	return enhancement_result
 
 
 func transfer_storage_to_equipment(item_resource: Resource, source_location: String, target_location: String) -> bool:
@@ -1195,7 +1251,7 @@ func _save_inventory() -> void:
 
 	# 存档根字典；保存版本、排序计数、永久仓库、随身背包、装备和局外金币状态。
 	var save_data: Dictionary = {
-		"version": 3,
+		"version": 4,
 		"acquisition_sequence": _acquisition_sequence,
 		"last_extraction_epoch": _last_extraction_epoch,
 		"current_ranged_slot": _current_ranged_slot,
@@ -1304,11 +1360,13 @@ func _serialize_record(record: Dictionary) -> Dictionary:
 		"last_extraction_epoch": int(record.get("last_extraction_epoch", 0)),
 	}
 	if _is_enhancement_stone(item_resource):
+		# 强化石品质；版本 4 起与实际百分比一起保存，旧存档读取时回退为低级。
+		serialized_record["quality_id"] = str(item_resource.get("quality_id"))
 		serialized_record["display_name"] = str(item_resource.get("display_name"))
 		serialized_record["description"] = str(item_resource.get("description"))
 		serialized_record["icon_text"] = str(item_resource.get("icon_text"))
 		serialized_record["sell_price"] = int(item_resource.get("sell_price"))
-		serialized_record["modifiers"] = (item_resource.get("modifiers") as Dictionary).duplicate(true)
+		serialized_record["modifiers"] = EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary)
 	elif item_resource.has_method("get_enhancement_ratio"):
 		serialized_record["enhancement_modifiers"] = (item_resource.get("enhancement_modifiers") as Dictionary).duplicate(true)
 	return serialized_record
@@ -1326,11 +1384,14 @@ func _deserialize_record(serialized_record: Dictionary) -> Dictionary:
 	if item_kind == "enhancement_stone":
 		# 强化石资源；由存档字段直接重建，避免依赖项目内固定 tres 模板。
 		var enhancement_stone: EnhancementStoneData = EnhancementStoneData.new()
-		enhancement_stone.display_name = str(serialized_record.get("display_name", "强化石"))
+		enhancement_stone.quality_id = str(serialized_record.get("quality_id", EnhancementRules.QUALITY_LOW))
+		# 恢复显示名称；旧存档的通用“强化石”自动升级为对应品质名称。
+		var saved_display_name: String = str(serialized_record.get("display_name", ""))
+		enhancement_stone.display_name = EnhancementRules.get_quality_display_name(enhancement_stone.quality_id) if saved_display_name.is_empty() or saved_display_name == "强化石" else saved_display_name
 		enhancement_stone.description = str(serialized_record.get("description", enhancement_stone.description))
 		enhancement_stone.icon_text = str(serialized_record.get("icon_text", enhancement_stone.icon_text))
 		enhancement_stone.sell_price = maxi(int(serialized_record.get("sell_price", 0)), 0)
-		enhancement_stone.modifiers = (serialized_record.get("modifiers", {}) as Dictionary).duplicate(true)
+		enhancement_stone.modifiers = EnhancementRules.normalize_modifiers(serialized_record.get("modifiers", {}) as Dictionary)
 		item_resource = enhancement_stone
 	else:
 		item_resource = _load_weapon_resource(weapon_id, resource_path)

@@ -11,11 +11,11 @@ const DRAG_DATA_TYPE: String = "global_storage_item"
 
 ## 当前区域容器标识；取值为 warehouse 或 backpack，默认空字符串表示尚未配置。
 var _location: String = ""
-## 区域内部列表容器；默认在 ready 前由 configure 创建，供上层添加物品行和空提示。
-var _content_container: VBoxContainer
+## 区域内部网格容器；默认两列显示物品卡片，供上层添加物品和空状态控件。
+var _content_container: GridContainer
 
 
-func configure(location: String) -> void:
+func configure(location: String, column_count: int = 2) -> void:
 	_location = location
 	if _content_container != null:
 		return
@@ -29,15 +29,17 @@ func configure(location: String) -> void:
 	margin.mouse_filter = Control.MOUSE_FILTER_PASS
 	add_child(margin)
 
-	_content_container = VBoxContainer.new()
+	_content_container = GridContainer.new()
+	_content_container.columns = maxi(column_count, 1)
 	_content_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_content_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_content_container.add_theme_constant_override("separation", 6)
+	_content_container.add_theme_constant_override("h_separation", 8)
+	_content_container.add_theme_constant_override("v_separation", 8)
 	_content_container.mouse_filter = Control.MOUSE_FILTER_PASS
 	margin.add_child(_content_container)
 
 
-func get_content_container() -> VBoxContainer:
+func get_content_container() -> GridContainer:
 	return _content_container
 
 

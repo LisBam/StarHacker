@@ -1,9 +1,9 @@
 extends Node
 
-## 敌人战术组件负责同区域队友发现、情报广播、动态职能分配和二维合围点生成。
-## 组件不直接修改感知状态、攻击逻辑或物理速度，只向宿主提供当前战术目的地与驻守请求。
+## 敌人战术组件只读取本怪物的感知线索并生成二维搜查与伏击目标。
+## 组件不发现队友、不共享情报，也不直接修改感知状态、攻击逻辑或物理速度。
 
-## 敌人战术组名称；默认让所有挂载本组件的敌人通过 SceneTree 分组发现同区域队友。
+## 旧敌人战术组名称；当前不再把怪物加入该组，仅保留常量避免旧调试工具解析失败。
 const ENEMY_TACTICAL_GROUP: StringName = &"enemy_tactical_agents"
 ## 搜查单位职能；默认优先分配给近战单位，负责逐层排查墙角、死角和最后消失区域。
 const TACTICAL_ROLE_SEARCHER: int = 0
@@ -12,11 +12,11 @@ const TACTICAL_ROLE_HOLDER: int = 1
 ## 迂回单位职能；默认优先或仅由远程单位从墙体外侧绕行并封堵远端路线。
 const TACTICAL_ROLE_FLANKER: int = 2
 
-## 同区域小队识别半径；默认 1200 像素，只与该范围内且锁定同一目标的敌人共享情报和分工。
+## 旧同区域小队识别半径；当前不再读取，仅保留旧场景配置兼容。
 var squad_region_radius: float = 1200.0
-## 小队协调刷新间隔；默认 0.25 秒，在实时响应与多 AI 查询开销之间取得平衡。
+## 独立职能初始化检查间隔；默认 0.25 秒，首次确定单体搜查职能后后续检查会直接返回。
 var coordination_update_interval: float = 0.25
-## 多人小队职能轮换间隔；默认 18 秒，仅 4 人及以上时轮换同类单位顺序，兼顾完整搜查与动态换岗。
+## 旧多人职能轮换间隔；当前不再读取，仅保留旧场景配置兼容。
 var role_rotation_interval: float = 18.0
 ## 近层搜查半径；默认 88 像素，用于近战单位贴墙排查拐角和房间近角。
 var search_near_radius: float = 88.0
@@ -52,7 +52,7 @@ var tactical_destination_attempts: int = 8
 var obstacle_collision_mask: int = 16
 ## 实心墙体分组；默认 environment_obstacles，只有属于该组的碰撞体才作为墙角和遮挡物情报。
 var solid_wall_group: StringName = &"environment_obstacles"
-## 情报最大中继跳数；默认 6，每名收到新消息的敌人只向自己周围继续传递一次，避免无限广播循环。
+## 旧情报中继跳数；当前共享功能已删除，该值不参与运行逻辑。
 var intelligence_relay_max_hops: int = 6
 
 ## 战术宿主；取值为 CharacterBody2D 或 null，默认由敌人聚合脚本注入，用于位置和队友发现。
@@ -63,11 +63,11 @@ var _perception_component: Node
 var _movement_component: Node
 ## 组件使用的随机源；默认与宿主共享，用于错开搜查等待时间且保持每个敌人的独立节奏。
 var _random: RandomNumberGenerator
-## 当前共享情报；取值为包含消失点、遮挡点、逃跑方向和记忆热点的字典，默认空字典表示无可用战术依据。
+## 当前本地线索；取值为本怪物感知生成的消失点、遮挡点、逃跑方向和记忆热点字典。
 var _intelligence: Dictionary = {}
-## 当前是否拥有可用共享情报；默认 false，收到本地或队友情报后变为 true。
+## 当前是否拥有可用本地线索；默认 false，本怪物形成可见或消失报告后变为 true。
 var _has_intelligence: bool = false
-## 已处理的本地情报版本；默认 -1，版本递增时立即向同区域队友广播且不会回传队友情报形成循环。
+## 已处理的本地线索版本；默认 -1，版本递增时刷新本怪物独立战术路线。
 var _last_local_intelligence_revision: int = -1
 ## 小队协调刷新剩余时间；默认 0 表示初始化后立即计算一次在场人数和职能。
 var _coordination_update_remaining: float = 0.0
@@ -93,7 +93,7 @@ var _visited_search_point_count: int = 0
 var _ambush_mode: bool = false
 ## 当前卡位或伏击点是否已经到达；默认 false，到达后宿主停止主动移动但继续执行视野检测和攻击。
 var _hold_position_reached: bool = false
-## 已处理情报消息表；键为消息唯一标识，值为接收时间戳，用于级联传播时阻止消息在小队网络中循环。
+## 旧消息缓存表；当前不再写入，仅在重置接口中清空以兼容旧运行状态。
 var _processed_message_ids: Dictionary = {}
 
 
@@ -102,8 +102,6 @@ func initialize(actor: CharacterBody2D, perception_component: Node, movement_com
 	_perception_component = perception_component
 	_movement_component = movement_component
 	_random = random_source
-	if is_instance_valid(_actor):
-		_actor.add_to_group(ENEMY_TACTICAL_GROUP)
 
 
 func apply_configuration(settings: Dictionary) -> void:
@@ -142,7 +140,7 @@ func update(delta: float) -> void:
 	if not is_instance_valid(_actor):
 		return
 
-	_pull_and_broadcast_local_intelligence()
+	_pull_local_intelligence()
 	_coordination_update_remaining = maxf(_coordination_update_remaining - delta, 0.0)
 	if _coordination_update_remaining <= 0.0:
 		_refresh_squad_assignment()
@@ -182,39 +180,9 @@ func update(delta: float) -> void:
 	_hold_position_reached = false
 
 
-func receive_shared_intelligence(report: Dictionary) -> bool:
-	if report.is_empty():
-		return false
-
-	# 情报消息标识；默认由起点敌人、版本和时间组成，所有中继副本保持相同标识以便全网去重。
-	var message_id: String = str(report.get("message_id", _build_message_id(report)))
-	if _processed_message_ids.has(message_id):
-		return false
-
-	# 新情报时间戳；取值为发送者物理帧时刻，默认用于拒绝比当前情报更旧的队友报告。
-	var incoming_timestamp: int = int(report.get("timestamp_msec", 0))
-	# 当前情报时间戳；取值为已接收报告时刻，默认 0 表示尚未收到任何带时间的情报。
-	var current_timestamp: int = int(_intelligence.get("timestamp_msec", 0))
-	if _has_intelligence and incoming_timestamp < current_timestamp:
-		return false
-
-	_processed_message_ids[message_id] = Time.get_ticks_msec()
-	_prune_processed_messages()
-	_intelligence = report.duplicate(true)
-	_intelligence["message_id"] = message_id
-	_has_intelligence = true
-	_reset_tactical_route()
-	_coordination_update_remaining = 0.0
-
-	# 剩余中继跳数；取值大于 0 时把消息延迟转发给本单位周围敌人，形成跨区域链式发现。
-	var relay_hops_remaining: int = int(report.get("relay_hops_remaining", 0))
-	if relay_hops_remaining > 0:
-		# 中继报告；保持原始消息标识与情报内容，只减少一次剩余跳数。
-		var relay_report: Dictionary = report.duplicate(true)
-		relay_report["message_id"] = message_id
-		relay_report["relay_hops_remaining"] = relay_hops_remaining - 1
-		call_deferred("_broadcast_intelligence", relay_report)
-	return true
+func receive_shared_intelligence(_report: Dictionary) -> bool:
+	# 小队情报共享已删除；每只怪物只使用自身感知生成的最后线索。
+	return false
 
 
 func get_tactical_destination(fallback_destination: Vector2) -> Vector2:
@@ -244,7 +212,7 @@ func get_active_squad_size() -> int:
 	return _active_squad_size
 
 
-func _pull_and_broadcast_local_intelligence() -> void:
+func _pull_local_intelligence() -> void:
 	if _perception_component == null or not _perception_component.has_method("get_tactical_intelligence"):
 		return
 
@@ -258,227 +226,27 @@ func _pull_and_broadcast_local_intelligence() -> void:
 	if report.is_empty():
 		return
 
-	# 本地情报版本；取值单调递增，默认避免每个物理帧重复向全队广播同一份报告。
+	# 本地线索版本；取值单调递增，默认避免每个 AI 决策周期重复重建同一条搜查路线。
 	var report_revision: int = int(report.get("revision", -1))
 	if report_revision <= _last_local_intelligence_revision:
 		return
 
 	_last_local_intelligence_revision = report_revision
-	report["message_id"] = _build_message_id(report)
-	report["relay_hops_remaining"] = intelligence_relay_max_hops
-	_processed_message_ids[str(report["message_id"])] = Time.get_ticks_msec()
-	_prune_processed_messages()
 	_intelligence = report.duplicate(true)
 	_has_intelligence = true
 	_reset_tactical_route()
-	_broadcast_intelligence(report)
-
-
-func _broadcast_intelligence(report: Dictionary) -> void:
-	# 同区域战术单位；元素为拥有战术能力接口的敌人节点，默认包含自己并在发送时跳过。
-	var squad_agents: Array[Node2D] = _collect_squad_agents()
-	# 队友战术单位；取值为当前遍历的有效敌人，用于立即同步玩家消失与墙体情报。
-	for squad_agent in squad_agents:
-		if squad_agent == _actor or not squad_agent.has_method("receive_squad_intelligence"):
-			continue
-		squad_agent.call("receive_squad_intelligence", report)
 
 
 func _refresh_squad_assignment() -> void:
-	# 同区域战术单位；元素已按实例编号稳定排序，默认让所有敌人独立计算出一致的小队分工。
-	var squad_agents: Array[Node2D] = _collect_squad_agents()
-	_active_squad_size = maxi(squad_agents.size(), 1)
-	# 小队能力档案；每项包含实例编号、远近程属性与攻击射程，用于按数量和射程双重分工。
-	var profiles: Array[Dictionary] = []
-	# 小队成员节点；取值为同区域且锁定同一玩家的敌人，默认逐个转换为低耦合能力档案。
-	for squad_agent in squad_agents:
-		profiles.append(_build_agent_profile(squad_agent))
-
-	profiles.sort_custom(Callable(self, "_compare_profile_instance_id"))
-	if profiles.is_empty():
-		profiles.append(_build_agent_profile(_actor))
-
-	# 轮换周期；取值随全局运行时间递增，仅多人小队用于轮换同类候选顺序。
-	var rotation_epoch: int = 0
-	if profiles.size() >= 4:
-		rotation_epoch = floori(float(Time.get_ticks_msec()) * 0.001 / role_rotation_interval)
-
-	# 职能映射；键为敌人实例编号，值为 TACTICAL_ROLE_*，由全队一致的档案列表生成。
-	var role_by_instance_id: Dictionary = _assign_roles(profiles, rotation_epoch)
-	# 宿主实例编号；取值为 Object 唯一编号，用于查找本单位职能。
-	var actor_instance_id: int = _actor.get_instance_id()
-	# 新职能；默认回退搜查单位，确保单 AI 和异常档案仍执行贴墙排查而不远距离迂回。
-	var new_role: int = int(role_by_instance_id.get(actor_instance_id, TACTICAL_ROLE_SEARCHER))
-	# 新职能序号；取值为同职能稳定列表中的下标，用于把同类单位分散到不同路线。
-	var new_role_slot: int = _find_role_slot(profiles, role_by_instance_id, actor_instance_id, new_role)
-	# 新分工签名；人数、职能、序号或轮换周期变化都会生成不同字符串并触发重规划。
-	var new_signature: String = "%d:%d:%d:%d" % [profiles.size(), new_role, new_role_slot, rotation_epoch]
-	if new_signature == _assignment_signature:
+	# 独立战术签名；所有怪物固定按单体搜查单位运行，不扫描附近怪物或执行多人分工。
+	var independent_signature: String = "1:%d:0:0" % TACTICAL_ROLE_SEARCHER
+	if independent_signature == _assignment_signature:
 		return
-
-	_current_role = new_role
-	_role_slot_index = new_role_slot
-	_assignment_signature = new_signature
+	_active_squad_size = 1
+	_current_role = TACTICAL_ROLE_SEARCHER
+	_role_slot_index = 0
+	_assignment_signature = independent_signature
 	_reset_tactical_route()
-
-
-func _collect_squad_agents() -> Array[Node2D]:
-	# 筛选后的同区域单位；元素为 Node2D，默认至少在正常场景树中包含宿主自己。
-	var result: Array[Node2D] = []
-	if not is_instance_valid(_actor):
-		return result
-
-	# 宿主目标编号；取值为当前玩家实例编号，默认 0 表示未配置目标且只匹配同样未配置的单位。
-	var actor_target_id: int = _get_agent_target_instance_id(_actor)
-	# 场景树战术组成员；取值可能包含即将释放或不完整节点，默认逐项做能力和距离校验。
-	var grouped_agents: Array = _actor.get_tree().get_nodes_in_group(ENEMY_TACTICAL_GROUP)
-	# 战术组遍历项；取值为 Variant，默认只接收有效 Node2D。
-	for grouped_agent in grouped_agents:
-		if not (grouped_agent is Node2D):
-			continue
-
-		# 候选敌人节点；取值为战术组内 Node2D，用于检查区域和目标一致性。
-		var candidate_agent: Node2D = grouped_agent as Node2D
-		if not is_instance_valid(candidate_agent) or candidate_agent.is_queued_for_deletion():
-			continue
-		if _actor.global_position.distance_to(candidate_agent.global_position) > squad_region_radius:
-			continue
-		if _get_agent_target_instance_id(candidate_agent) != actor_target_id:
-			continue
-		result.append(candidate_agent)
-
-	return result
-
-
-func _build_agent_profile(agent: Node2D) -> Dictionary:
-	# 是否为远程单位；默认 false，只有宿主显式提供能力接口时才参与远程优先迂回和外围卡位。
-	var is_ranged: bool = bool(agent.call("is_ranged_tactical_unit")) if agent.has_method("is_ranged_tactical_unit") else false
-	# 有效攻击射程；默认 0，射程越大越优先承担远端迂回或出口外侧卡位。
-	var attack_range: float = float(agent.call("get_tactical_attack_range")) if agent.has_method("get_tactical_attack_range") else 0.0
-	return {
-		"instance_id": agent.get_instance_id(),
-		"is_ranged": is_ranged,
-		"attack_range": attack_range
-	}
-
-
-func _assign_roles(profiles: Array[Dictionary], rotation_epoch: int) -> Dictionary:
-	# 职能分配结果；键为实例编号，值为职能常量，默认在不同人数规则下逐项填充。
-	var result: Dictionary = {}
-	# 在场人数；取值为有效档案数量，默认至少 1。
-	var agent_count: int = profiles.size()
-	if agent_count <= 1:
-		result[int(profiles[0].get("instance_id", 0))] = TACTICAL_ROLE_SEARCHER
-		return result
-
-	if agent_count <= 3:
-		# 小队迂回成员编号；优先选择远程且射程最长者，没有远程时选择射程最长者保证仍有一人绕侧路。
-		var flanker_id: int = _select_best_flanker_id(profiles, true)
-		# 2~3 人档案项；取值为全部有效单位，默认除唯一迂回单位外都承担贴墙搜查。
-		for profile in profiles:
-			# 档案实例编号；取值为敌人唯一编号，用于写入一致的分工结果。
-			var profile_id: int = int(profile.get("instance_id", 0))
-			result[profile_id] = TACTICAL_ROLE_FLANKER if profile_id == flanker_id else TACTICAL_ROLE_SEARCHER
-		return result
-
-	# 远程档案；元素只包含远程敌人，4 人及以上时迂回职能不会分配给近战单位。
-	var ranged_profiles: Array[Dictionary] = []
-	# 多人小队档案项；取值为全部有效敌人，用于筛选远程迂回候选。
-	for profile in profiles:
-		if bool(profile.get("is_ranged", false)):
-			ranged_profiles.append(profile)
-
-	ranged_profiles.sort_custom(Callable(self, "_compare_profile_attack_range_descending"))
-	_rotate_profile_order(ranged_profiles, rotation_epoch)
-	# 期望迂回人数；默认约占全队四分之一，且只有存在远程单位时才实际分配。
-	var desired_flanker_count: int = maxi(1, floori(float(agent_count) * 0.25))
-	# 实际迂回人数；不会超过远程单位数量，保证 4 人以上的迂回单位全部为远程。
-	var flanker_count: int = mini(desired_flanker_count, ranged_profiles.size())
-	# 迂回成员编号集合；键为实例编号，值固定 true，用于后续快速排除。
-	var flanker_ids: Dictionary = {}
-	# 迂回候选索引；取值为 0 到实际迂回人数减一，优先选择射程更远且经过周期轮换的远程单位。
-	for flanker_index in range(flanker_count):
-		flanker_ids[int(ranged_profiles[flanker_index].get("instance_id", 0))] = true
-
-	# 非迂回档案；元素用于均衡分配搜查和卡位，默认近战优先排列到搜查侧。
-	var remaining_profiles: Array[Dictionary] = []
-	# 多人小队剩余筛选项；取值为全部档案，跳过已分配的远程迂回单位。
-	for profile in profiles:
-		# 剩余筛选实例编号；取值为敌人唯一编号，用于查询是否已经承担迂回。
-		var remaining_profile_id: int = int(profile.get("instance_id", 0))
-		if not flanker_ids.has(remaining_profile_id):
-			remaining_profiles.append(profile)
-
-	# 剩余近战档案；默认优先放入搜查序列，并只在近战内部轮换，保证近战优先规则不被周期打乱。
-	var melee_remaining_profiles: Array[Dictionary] = []
-	# 剩余远程档案；默认排在近战之后，主要承担外围卡位并在远程内部轮换。
-	var ranged_remaining_profiles: Array[Dictionary] = []
-	# 非迂回档案分类项；取值为剩余敌人能力档案，用于按远近程拆分轮换。
-	for remaining_profile in remaining_profiles:
-		if bool(remaining_profile.get("is_ranged", false)):
-			ranged_remaining_profiles.append(remaining_profile)
-		else:
-			melee_remaining_profiles.append(remaining_profile)
-
-	melee_remaining_profiles.sort_custom(Callable(self, "_compare_profile_instance_id"))
-	ranged_remaining_profiles.sort_custom(Callable(self, "_compare_profile_instance_id"))
-	_rotate_profile_order(melee_remaining_profiles, rotation_epoch)
-	_rotate_profile_order(ranged_remaining_profiles, rotation_epoch)
-	remaining_profiles.clear()
-	remaining_profiles.append_array(melee_remaining_profiles)
-	remaining_profiles.append_array(ranged_remaining_profiles)
-	# 搜查人数；默认占非迂回成员约一半，剩余成员远近搭配承担卡位。
-	var searcher_count: int = ceili(float(remaining_profiles.size()) * 0.5)
-	# 非迂回档案索引；取值为数组有效下标，前半分配搜查，后半分配卡位。
-	for remaining_index in range(remaining_profiles.size()):
-		# 非迂回实例编号；取值为当前档案唯一编号，用于写入分工映射。
-		var remaining_id: int = int(remaining_profiles[remaining_index].get("instance_id", 0))
-		result[remaining_id] = TACTICAL_ROLE_SEARCHER if remaining_index < searcher_count else TACTICAL_ROLE_HOLDER
-
-	# 迂回编号遍历项；取值为字典键，用于最后覆盖为远程迂回职能。
-	for flanker_id_variant in flanker_ids.keys():
-		result[int(flanker_id_variant)] = TACTICAL_ROLE_FLANKER
-	return result
-
-
-func _select_best_flanker_id(profiles: Array[Dictionary], allow_melee_fallback: bool) -> int:
-	# 最佳迂回编号；默认首个档案实例编号，保证异常能力数据下仍有确定结果。
-	var best_id: int = int(profiles[0].get("instance_id", 0))
-	# 最佳候选是否远程；默认取首项属性，远程优先级高于任何近战射程。
-	var best_is_ranged: bool = bool(profiles[0].get("is_ranged", false))
-	# 最佳攻击射程；默认取首项射程，同类型候选间优先选择射程更长者。
-	var best_attack_range: float = float(profiles[0].get("attack_range", 0.0))
-	# 迂回候选档案；取值为全部小队单位，用于按远程属性和射程比较。
-	for profile in profiles:
-		# 候选是否远程；默认 false，远程候选会直接替换当前近战最佳项。
-		var candidate_is_ranged: bool = bool(profile.get("is_ranged", false))
-		# 候选攻击射程；默认 0，同为远程或同为近战时射程更长者优先。
-		var candidate_attack_range: float = float(profile.get("attack_range", 0.0))
-		if candidate_is_ranged and not best_is_ranged:
-			best_id = int(profile.get("instance_id", 0))
-			best_is_ranged = true
-			best_attack_range = candidate_attack_range
-		elif candidate_is_ranged == best_is_ranged and candidate_attack_range > best_attack_range:
-			best_id = int(profile.get("instance_id", 0))
-			best_attack_range = candidate_attack_range
-
-	if not best_is_ranged and not allow_melee_fallback:
-		return 0
-	return best_id
-
-
-func _find_role_slot(profiles: Array[Dictionary], role_by_instance_id: Dictionary, actor_instance_id: int, role: int) -> int:
-	# 同职能序号；默认 0，每遇到同职能的更早档案递增，保证各单位分配不同扇区。
-	var role_slot: int = 0
-	# 档案项；取值按实例编号排序，默认提供所有敌人一致的职能内顺序。
-	for profile in profiles:
-		# 档案编号；取值为敌人唯一实例编号，用于查找职能并识别宿主。
-		var profile_id: int = int(profile.get("instance_id", 0))
-		if profile_id == actor_instance_id:
-			return role_slot
-		if int(role_by_instance_id.get(profile_id, TACTICAL_ROLE_SEARCHER)) == role:
-			role_slot += 1
-	return role_slot
 
 
 func _build_next_tactical_destination() -> void:
@@ -756,12 +524,6 @@ func _get_perception_state() -> int:
 	return int(_perception_component.call("get_ai_state"))
 
 
-func _get_agent_target_instance_id(agent: Node) -> int:
-	if agent != null and agent.has_method("get_tactical_target_instance_id"):
-		return int(agent.call("get_tactical_target_instance_id"))
-	return 0
-
-
 func _is_actor_ranged() -> bool:
 	return is_instance_valid(_actor) and _actor.has_method("is_ranged_tactical_unit") and bool(_actor.call("is_ranged_tactical_unit"))
 
@@ -776,36 +538,6 @@ func _get_next_tactical_wait() -> float:
 	return _random.randf_range(tactical_point_wait_min, tactical_point_wait_max) if _random != null else randf_range(tactical_point_wait_min, tactical_point_wait_max)
 
 
-func _build_message_id(report: Dictionary) -> String:
-	return "%d:%d:%d" % [
-		int(report.get("source_instance_id", 0)),
-		int(report.get("revision", 0)),
-		int(report.get("timestamp_msec", 0))
-	]
-
-
-func _prune_processed_messages() -> void:
-	# 消息缓存容量上限；默认 256 条，足以覆盖连续发现广播且防止长局战斗无限增长。
-	var message_capacity: int = 256
-	while _processed_message_ids.size() > message_capacity:
-		# 最旧消息标识；默认空字符串，遍历后用于删除时间戳最小的缓存项。
-		var oldest_message_id: String = ""
-		# 最旧消息时间；默认最大整数，遇到更早接收时间时更新。
-		var oldest_timestamp: int = 9223372036854775807
-		# 消息标识遍历项；取值为字典键，用于查找最早接收的情报。
-		for raw_message_id in _processed_message_ids.keys():
-			# 候选消息标识；取值转为 String，保证删除键与构建时一致。
-			var candidate_message_id: String = str(raw_message_id)
-			# 候选接收时间；取值来自缓存字典，默认 0 代表最优先清理。
-			var candidate_timestamp: int = int(_processed_message_ids[raw_message_id])
-			if candidate_timestamp < oldest_timestamp:
-				oldest_timestamp = candidate_timestamp
-				oldest_message_id = candidate_message_id
-		if oldest_message_id.is_empty():
-			return
-		_processed_message_ids.erase(oldest_message_id)
-
-
 func _reset_tactical_route() -> void:
 	_has_tactical_destination = false
 	_tactical_wait_remaining = 0.0
@@ -813,40 +545,3 @@ func _reset_tactical_route() -> void:
 	_visited_search_point_count = 0
 	_ambush_mode = false
 	_hold_position_reached = false
-
-
-func _rotate_profile_order(profiles: Array[Dictionary], rotation_epoch: int) -> void:
-	if profiles.size() <= 1:
-		return
-
-	# 轮换次数；取值为周期编号对数组长度取模，默认保持全队一致且避免无效整圈移动。
-	var rotation_count: int = posmod(rotation_epoch, profiles.size())
-	# 轮换索引；取值为 0 到轮换次数减一，每次把首项移动到末尾。
-	for _rotation_index in range(rotation_count):
-		# 首项档案；取值为数组第一个 Dictionary，用于周期轮换同类单位承担顺序。
-		var first_profile: Dictionary = profiles.pop_front()
-		profiles.append(first_profile)
-
-
-func _compare_profile_instance_id(first_profile: Dictionary, second_profile: Dictionary) -> bool:
-	return int(first_profile.get("instance_id", 0)) < int(second_profile.get("instance_id", 0))
-
-
-func _compare_profile_attack_range_descending(first_profile: Dictionary, second_profile: Dictionary) -> bool:
-	# 第一项射程；取值默认 0，用于远程迂回候选从长射程到短射程排序。
-	var first_range: float = float(first_profile.get("attack_range", 0.0))
-	# 第二项射程；取值默认 0，与第一项比较决定排序顺序。
-	var second_range: float = float(second_profile.get("attack_range", 0.0))
-	if not is_equal_approx(first_range, second_range):
-		return first_range > second_range
-	return int(first_profile.get("instance_id", 0)) < int(second_profile.get("instance_id", 0))
-
-
-func _compare_search_priority(first_profile: Dictionary, second_profile: Dictionary) -> bool:
-	# 第一项远程标记；false 的近战单位应排在前方优先承担贴墙搜查。
-	var first_is_ranged: bool = bool(first_profile.get("is_ranged", false))
-	# 第二项远程标记；用于与第一项比较近战优先级。
-	var second_is_ranged: bool = bool(second_profile.get("is_ranged", false))
-	if first_is_ranged != second_is_ranged:
-		return not first_is_ranged
-	return int(first_profile.get("instance_id", 0)) < int(second_profile.get("instance_id", 0))

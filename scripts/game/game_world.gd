@@ -65,9 +65,9 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export var monster_scene: PackedScene
 ## 随机怪物场景池；默认由场景填入近战和远程怪物，非空时会优先从池中随机选择生成对象。
 @export var monster_scenes: Array[PackedScene] = []
-## 怪物生成数量；取值建议 0 到 256，默认 96，运行时修改会直接影响开局整图敌人密度和性能开销。
-## 全地图布怪补充：正式战斗默认生成 96 名敌人，使大型地图各片区持续存在遭遇压力。
-@export_range(0, 256, 1) var monster_spawn_count: int = 96
+## 怪物生成数量；取值建议 0 到 256，默认 160，远距离怪物会休眠所以主要增加地图遭遇密度而非持续 AI 开销。
+## 全地图布怪补充：正式战斗默认生成 160 名敌人，使大型地图各片区持续存在遭遇压力。
+@export_range(0, 256, 1) var monster_spawn_count: int = 160
 ## 怪物生成最小距离；取值应大于等于 0，默认 280 像素，运行时修改会影响怪物是否离玩家过近。
 ## 全地图布怪补充：项目当前默认至少离玩家 900 像素，避免开局和补充刷新直接出现在屏幕附近。
 @export_range(0.0, 8000.0, 1.0) var monster_spawn_min_distance: float = 900.0
@@ -77,16 +77,18 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export var monster_spawn_across_full_map: bool = true
 ## 全地图敌人生成边界留白；默认 256 像素，防止敌人贴着边界墙或生成到地图外侧。
 @export_range(0.0, 4000.0, 1.0) var monster_spawn_edge_margin: float = 256.0
-## 正式战斗最低存活敌人数；默认 80，低于该值时会在玩家安全范围外分批补充敌人。
-@export_range(0, 256, 1) var monster_minimum_alive_count: int = 80
+## 正式战斗最低存活敌人数；默认 144，低于该值时会在玩家安全范围外分批补充敌人。
+@export_range(0, 256, 1) var monster_minimum_alive_count: int = 144
 ## 敌人补充检查间隔；默认 2 秒，避免每帧统计和生成大量节点。
 @export_range(0.1, 60.0, 0.1) var monster_replenish_interval: float = 2.0
-## 单次补充敌人数量；默认 8，实际生成数不会超过恢复到最低存活数量所需的缺口。
-@export_range(1, 32, 1) var monster_replenish_batch_size: int = 8
+## 单次补充敌人数量；默认 16，实际生成数不会超过恢复到最低存活数量所需的缺口。
+@export_range(1, 32, 1) var monster_replenish_batch_size: int = 16
 ## 敌人尺寸与属性随机波动比例；默认 0.3 表示每只敌人的大小和战斗属性分别在 70% 到 130% 范围内生成。
 @export_range(0.0, 0.9, 0.05) var monster_spawn_variation_ratio: float = 0.3
 ## 怪物父节点路径；默认指向 Enemies 容器，允许为空并回退到 GameWorld，修改会影响怪物节点层级。
 @export var monster_parent_path: NodePath = ^"Enemies"
+## 怪物加载管理器路径；默认指向 MonsterSimulationManager，负责远距离休眠和分批唤醒。
+@export var monster_simulation_manager_path: NodePath = ^"MonsterSimulationManager"
 ## 掉落物父节点路径；默认指向 Drops 容器，允许为空并回退到 GameWorld，修改会影响武器掉落物节点层级。
 @export var drop_parent_path: NodePath = ^"Drops"
 ## 武器掉落物场景；默认由 game_world.tscn 指向 WeaponDrop，必须实例化为 Node2D，修改会影响所有地面武器表现。
@@ -185,6 +187,8 @@ var _has_navigation_marker: bool = false
 @onready var _environment_parent: Node = get_node_or_null(environment_parent_path)
 ## 怪物父节点缓存；默认按 monster_parent_path 获取，允许为空并回退到当前 GameWorld。
 @onready var _monster_parent: Node = get_node_or_null(monster_parent_path)
+## 怪物加载管理器缓存；默认按 monster_simulation_manager_path 获取，缺失时怪物仍可运行但不会远距离休眠。
+@onready var _monster_simulation_manager: Node = get_node_or_null(monster_simulation_manager_path)
 ## 掉落物父节点缓存；默认按 drop_parent_path 获取，允许为空并回退到当前 GameWorld。
 @onready var _drop_parent: Node = get_node_or_null(drop_parent_path)
 
@@ -200,6 +204,8 @@ func _ready() -> void:
 	_spawn_boundary_walls()
 	_spawn_random_environment()
 	_environment_obstacle_version += 1
+	if _monster_simulation_manager != null and _monster_simulation_manager.has_method("initialize"):
+		_monster_simulation_manager.call("initialize", _player)
 	_spawn_monster_batch()
 	_monster_replenish_remaining = monster_replenish_interval
 	_update_explored_cells(true)
@@ -210,6 +216,8 @@ func _process(delta: float) -> void:
 	_update_extraction_state(delta)
 	_update_explored_cells_if_needed(delta)
 	_update_monster_replenishment(delta)
+	if _monster_simulation_manager != null and _monster_simulation_manager.has_method("update"):
+		_monster_simulation_manager.call("update", delta)
 
 
 func _draw() -> void:
@@ -1133,6 +1141,8 @@ func _spawn_monster_batch(requested_count: int = -1) -> void:
 			monster.connect("died", Callable(self, "_on_monster_died").bind(monster))
 		if monster.has_method("set_target"):
 			monster.call("set_target", _player)
+		if _monster_simulation_manager != null and _monster_simulation_manager.has_method("register_monster"):
+			_monster_simulation_manager.call("register_monster", monster)
 
 
 func _has_monster_scene_available() -> bool:
@@ -1227,6 +1237,8 @@ func _on_monster_died(monster_node: Node) -> void:
 		return
 
 	_try_spawn_monster_weapon_drop(monster_node as Node2D)
+	if _monster_simulation_manager != null and _monster_simulation_manager.has_method("unregister_monster"):
+		_monster_simulation_manager.call("unregister_monster", monster_node)
 
 
 func _try_spawn_monster_weapon_drop(monster_node: Node2D) -> void:
@@ -1295,6 +1307,8 @@ func _get_scattered_drop_position(center_position: Vector2) -> Vector2:
 func _free_monster_node(monster_node: Node) -> void:
 	if monster_node == null or not is_instance_valid(monster_node):
 		return
+	if _monster_simulation_manager != null and _monster_simulation_manager.has_method("unregister_monster"):
+		_monster_simulation_manager.call("unregister_monster", monster_node)
 
 	if monster_node.get_parent() != null:
 		monster_node.get_parent().remove_child(monster_node)

@@ -12,6 +12,10 @@ const GAME_MODE_TRAINING: String = "training"
 const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_panel.gd")
 ## 局外仓库面板脚本；默认在主菜单点击仓库按钮后动态创建并读取全局背包服务。
 const WAREHOUSE_PANEL_SCRIPT: Script = preload("res://scripts/ui/warehouse_panel.gd")
+## 隐藏开发者菜单脚本；默认只在主菜单依次输入 LISBAM 后显示。
+const DEVELOPER_MENU_SCRIPT: Script = preload("res://scripts/ui/developer_menu.gd")
+## 开发者模式解锁序列；默认由六个英文字母组成，输入错误会按首字母重新匹配。
+const DEVELOPER_UNLOCK_SEQUENCE: String = "LISBAM"
 ## 角色选择场景路径；默认进入独立角色选择场景，只允许填写 tscn 资源，运行时通常不动态修改，改错会导致入口无法继续。
 @export_file("*.tscn") var character_select_scene_path: String = "res://scenes/ui/character_select.tscn"
 
@@ -58,6 +62,12 @@ var _settings_home_controls: Array[Control] = []
 var _warehouse_overlay: Control
 ## 仓库面板实例；默认由 WarehousePanel 脚本创建，关闭后复用而不重复构建服务数据。
 var _warehouse_panel: Control
+## 开发者菜单全屏遮罩；默认运行时创建并隐藏，解锁后阻止其他主菜单控件接收输入。
+var _developer_overlay: Control
+## 开发者菜单实例；默认由 DeveloperMenu 脚本动态创建并在关闭后复用。
+var _developer_menu: Control
+## 开发者序列当前匹配下标；取值 0 到序列长度，默认 0 表示等待字母 L。
+var _developer_sequence_index: int = 0
 
 
 func _ready() -> void:
@@ -71,10 +81,33 @@ func _ready() -> void:
 	_settings_back_button.pressed.connect(_on_settings_back_button_pressed)
 	_build_key_binding_navigation()
 	_build_warehouse_overlay()
+	_build_developer_overlay()
 	_settings_panel.visible = false
 	_show_key_binding_page(false)
 	_sync_master_volume_slider()
 	_start_button.grab_focus()
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not (event is InputEventKey):
+		return
+	# 键盘事件；只处理首次按下且具有 Unicode 字符的字母键，长按重复不会推进序列。
+	var key_event: InputEventKey = event as InputEventKey
+	if not key_event.pressed or key_event.echo or key_event.unicode <= 0:
+		return
+	# 输入字符；统一转为大写后与隐藏序列逐位比较，键盘大小写状态不会影响解锁。
+	var input_character: String = String.chr(key_event.unicode).to_upper()
+	# 当前期望字符；取值为序列匹配下标对应单字符，用于推进或重置解锁进度。
+	var expected_character: String = DEVELOPER_UNLOCK_SEQUENCE.substr(_developer_sequence_index, 1)
+	if input_character == expected_character:
+		_developer_sequence_index += 1
+	else:
+		_developer_sequence_index = 1 if input_character == DEVELOPER_UNLOCK_SEQUENCE.substr(0, 1) else 0
+	if _developer_sequence_index < DEVELOPER_UNLOCK_SEQUENCE.length():
+		return
+	_developer_sequence_index = 0
+	_open_developer_menu()
+	get_viewport().set_input_as_handled()
 
 
 func _on_start_button_pressed() -> void:
@@ -138,6 +171,53 @@ func _build_warehouse_overlay() -> void:
 	warehouse_overlay.add_child(warehouse_panel)
 	_warehouse_panel = warehouse_panel
 	warehouse_overlay.visible = false
+
+
+func _build_developer_overlay() -> void:
+	if _developer_overlay != null:
+		return
+	# 开发者遮罩；覆盖完整主菜单并拦截鼠标输入，默认保持隐藏。
+	var developer_overlay: Control = Control.new()
+	developer_overlay.name = "DeveloperOverlay"
+	developer_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	developer_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(developer_overlay)
+	_developer_overlay = developer_overlay
+	# 开发者背景遮罩；使用深色半透明背景突出隐藏调试菜单。
+	var developer_dim: ColorRect = ColorRect.new()
+	developer_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	developer_dim.color = Color(0.0, 0.0, 0.0, 0.72)
+	developer_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	developer_overlay.add_child(developer_dim)
+	# 开发者菜单面板；居中显示资源与金币快捷操作。
+	var developer_menu: Control = DEVELOPER_MENU_SCRIPT.new() as Control
+	developer_menu.anchor_left = 0.5
+	developer_menu.anchor_top = 0.5
+	developer_menu.anchor_right = 0.5
+	developer_menu.anchor_bottom = 0.5
+	developer_menu.offset_left = -260.0
+	developer_menu.offset_top = -210.0
+	developer_menu.offset_right = 260.0
+	developer_menu.offset_bottom = 210.0
+	developer_menu.connect("closed", Callable(self, "_on_developer_menu_closed"))
+	developer_overlay.add_child(developer_menu)
+	_developer_menu = developer_menu
+	developer_overlay.visible = false
+
+
+func _open_developer_menu() -> void:
+	if _developer_overlay == null:
+		return
+	_settings_panel.visible = false
+	if _warehouse_overlay != null:
+		_warehouse_overlay.visible = false
+	_developer_overlay.visible = true
+
+
+func _on_developer_menu_closed() -> void:
+	if _developer_overlay != null:
+		_developer_overlay.visible = false
+	_start_button.grab_focus()
 
 
 func _on_warehouse_closed() -> void:

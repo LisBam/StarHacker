@@ -7,10 +7,13 @@ class_name WeaponSlotControl
 
 signal drop_received(drop_data: Dictionary, target_context: String, target_kind: String, target_index: int)
 signal drag_released_outside(drop_data: Dictionary)
-signal item_selected(item_resource: Resource)
+signal item_selected(item_resource: Resource, selected_context: String, selected_kind: String, selected_index: int)
+signal enhancement_drop_received(stone_resource: Resource, source_location: String, weapon_resource: Resource)
 
 ## 统一物品详情格式化器；用于在战斗装备栏与背包中显示带颜色的基础值和强化值。
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
+## 全局存储拖拽协议标识；与 StorageItemControl 一致，用于识别从背包拖入的强化石。
+const GLOBAL_STORAGE_DRAG_DATA_TYPE: String = "global_storage_item"
 
 ## 槽位所属上下文；取值为 equipment 或 inventory，默认 equipment，修改会影响拖拽来源和投放规则。
 var slot_context: String = "equipment"
@@ -26,6 +29,8 @@ var is_selected: bool = false
 var cooldown_ratio: float = 0.0
 ## 空槽显示文本；默认“空”，用于没有武器资源时的槽位提示，修改会影响空槽可读性。
 var empty_text: String = "空"
+## 当前槽位是否为强化目标；默认 false，选择强化武器期间会临时绘制绿色边框和背景。
+var is_enhancement_target_highlight: bool = false
 
 ## 标题标签缓存；默认由 _ready 创建，显示槽位编号或槽位名称，修改会影响标题刷新目标。
 var _title_label: Label
@@ -71,10 +76,17 @@ func set_cooldown_ratio(new_cooldown_ratio: float) -> void:
 	queue_redraw()
 
 
+func set_enhancement_target_highlight(enabled: bool) -> void:
+	is_enhancement_target_highlight = enabled and weapon_data != null
+	queue_redraw()
+
+
 func _draw() -> void:
 	# 槽位背景矩形；取值覆盖控件完整尺寸，默认用于绘制稳定底色，修改会影响武器槽视觉边界。
 	var background_rect: Rect2 = Rect2(Vector2.ZERO, size)
 	draw_rect(background_rect, Color(0.06, 0.075, 0.09, 0.92), true)
+	if is_enhancement_target_highlight:
+		draw_rect(background_rect, Color(0.16, 0.52, 0.24, 0.34), true)
 
 	if cooldown_ratio > 0.0:
 		# CD 覆盖高度；取值为控件高度乘冷却比例，默认从满槽随冷却减少，修改会影响白色遮罩退减速度表现。
@@ -84,7 +96,7 @@ func _draw() -> void:
 		draw_rect(cooldown_rect, Color(1.0, 1.0, 1.0, 0.42), true)
 
 	# 边框颜色；取值根据选中状态决定，默认选中槽更亮，修改会影响当前武器辨识度。
-	var border_color: Color = Color(0.55, 0.92, 1.0, 1.0) if is_selected else Color(0.22, 0.30, 0.36, 1.0)
+	var border_color: Color = Color(0.52, 1.0, 0.62, 1.0) if is_enhancement_target_highlight else (Color(0.55, 0.92, 1.0, 1.0) if is_selected else Color(0.22, 0.30, 0.36, 1.0))
 	draw_rect(background_rect, border_color, false, 2.0)
 
 
@@ -113,6 +125,10 @@ func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
 
 	# 拖拽字典；取值来自其他 WeaponSlotControl，默认包含来源和武器资源，修改会影响投放校验。
 	var drop_data: Dictionary = data as Dictionary
+	if str(drop_data.get("type", "")) == GLOBAL_STORAGE_DRAG_DATA_TYPE:
+		# 全局存储拖拽资源；局内只接受强化石投放到已有武器的槽位。
+		var storage_resource: Resource = drop_data.get("resource") as Resource
+		return storage_resource != null and str(storage_resource.get("item_kind")) == "enhancement_stone" and weapon_data != null and not str(drop_data.get("source_location", "")).is_empty()
 	if not drop_data.has("weapon_data") or not (drop_data["weapon_data"] is Resource):
 		return false
 
@@ -137,6 +153,11 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 
 	# 投放数据；取值来自拖拽源，默认传递给 HUD 处理，修改会影响装备和卸下目标解析。
 	var drop_data: Dictionary = data as Dictionary
+	if str(drop_data.get("type", "")) == GLOBAL_STORAGE_DRAG_DATA_TYPE:
+		# 强化石资源；已通过投放校验，只发送强化请求而不执行武器位置交换。
+		var stone_resource: Resource = drop_data.get("resource") as Resource
+		enhancement_drop_received.emit(stone_resource, str(drop_data.get("source_location", "")), weapon_data)
+		return
 	drop_received.emit(drop_data, slot_context, slot_kind, slot_index)
 
 
@@ -213,7 +234,7 @@ func _on_gui_input(event: InputEvent) -> void:
 	# 鼠标事件；左键按下时通知 HUD，只有处于强化选择状态时 HUD 才会消费该选择。
 	var mouse_event: InputEventMouseButton = event as InputEventMouseButton
 	if mouse_event.button_index == MOUSE_BUTTON_LEFT and mouse_event.pressed:
-		item_selected.emit(weapon_data)
+		item_selected.emit(weapon_data, slot_context, slot_kind, slot_index)
 
 
 func _get_slot_title() -> String:

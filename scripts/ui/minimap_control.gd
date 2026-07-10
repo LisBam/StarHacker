@@ -36,6 +36,8 @@ const DISPLAY_MODE_FULL: int = 1
 @export var player_color: Color = Color(0.34, 0.93, 1.0, 1.0)
 ## 撤离点标记颜色；默认亮绿色，只有 GameWorld 标记撤离点后才绘制。
 @export var extraction_marker_color: Color = Color(0.35, 1.0, 0.72, 1.0)
+## 物资撤离点标记颜色；默认亮金色，开局生成后始终显示并与正式撤离点区分。
+@export var supply_extraction_marker_color: Color = Color(1.0, 0.72, 0.22, 1.0)
 ## 玩家点半径；取值建议大于 0，默认 4 像素，修改会影响小地图上玩家标记大小。
 @export_range(1.0, 20.0, 0.5) var player_marker_radius: float = 4.0
 ## 撤离点标记半径；取值建议大于玩家点半径，默认 6 像素，修改会影响地图上撤离点识别度。
@@ -121,6 +123,7 @@ func _draw() -> void:
 	_draw_obstacles(world_view_rect)
 	_draw_fog(world_view_rect)
 	_draw_extraction_marker(world_view_rect)
+	_draw_supply_extraction_markers(world_view_rect)
 	_draw_navigation_marker(world_view_rect)
 	_draw_player_marker(world_view_rect)
 	draw_rect(minimap_rect, minimap_border_color, false, 2.0)
@@ -201,6 +204,25 @@ func _draw_extraction_marker(world_view_rect: Rect2) -> void:
 	draw_circle(marker_position, marker_radius, extraction_marker_color)
 	draw_line(marker_position + Vector2(-marker_radius * 1.7, 0.0), marker_position + Vector2(marker_radius * 1.7, 0.0), extraction_marker_color, 2.0)
 	draw_line(marker_position + Vector2(0.0, -marker_radius * 1.7), marker_position + Vector2(0.0, marker_radius * 1.7), extraction_marker_color, 2.0)
+
+
+func _draw_supply_extraction_markers(world_view_rect: Rect2) -> void:
+	if _game_world == null or not _game_world.has_method("get_supply_extraction_positions"):
+		return
+	# 物资撤离点列表；局部地图只绘制视野内点位，完整地图显示全部 2 至 5 个金色标记。
+	var raw_positions: Array = _game_world.call("get_supply_extraction_positions")
+	for raw_position in raw_positions:
+		if not (raw_position is Vector2):
+			continue
+		# 物资撤离点世界坐标；只接收 GameWorld 返回的 Vector2 项。
+		var supply_position: Vector2 = raw_position
+		if not world_view_rect.has_point(supply_position):
+			continue
+		# 物资撤离点小地图坐标；完整地图显示全部点位，局部地图只显示范围内点位。
+		var marker_position: Vector2 = _world_position_to_minimap_position(supply_position, world_view_rect)
+		# 方形标记半径；略小于正式撤离点圆形标记，颜色和形状共同区分用途。
+		var marker_radius: float = maxf(extraction_marker_radius - 1.0, 2.0)
+		draw_rect(Rect2(marker_position - Vector2.ONE * marker_radius, Vector2.ONE * marker_radius * 2.0), supply_extraction_marker_color, false, 2.0)
 
 
 func _draw_navigation_marker(world_view_rect: Rect2) -> void:

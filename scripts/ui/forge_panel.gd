@@ -27,6 +27,8 @@ const FORGE_ANIMATION_ROTATIONS: float = 1.5
 @export var panel_minimum_size: Vector2 = Vector2(960.0, 650.0)
 ## 主武器槽与牺牲槽边长；默认 84 像素，相比旧版 104 像素更紧凑，运行时无需动态修改。
 @export_range(64.0, 104.0, 1.0) var forge_slot_size: float = 84.0
+## 顶部中心牺牲槽额外上移距离；默认 16 像素，用于与主锻造槽保持清晰间隔，运行时无需动态修改。
+@export_range(0.0, 64.0, 1.0) var top_sacrifice_slot_upward_offset: float = 16.0
 
 ## 全局库存服务缓存；提供背包/仓库条目、金币、材料数量与强化应用。
 var _global_inventory: Node
@@ -38,8 +40,8 @@ var _current_source: String = SOURCE_BACKPACK
 var _primary_category: String = InventoryQuery.PRIMARY_WEAPONS
 ## 当前二级分类；默认全部，切换一级分类时重置。
 var _subcategory: String = InventoryQuery.SUBCATEGORY_ALL
-## 当前强化石属性筛选键；默认空字符串表示全部属性与方向。
-var _stone_attribute_filter: String = ""
+## 当前强化石属性筛选键集合；默认空数组表示全部属性与方向，多项条件按并集展示。
+var _stone_attribute_filter: Array[String] = []
 ## 当前排序模式；默认获得时间从新到旧，与背包仓库一致。
 var _sort_mode: String = InventoryQuery.SORT_ACQUIRED_TIME
 ## 主锻造条目；包含资源与原来源，空字典表示主槽未放入武器。
@@ -72,6 +74,8 @@ var _search_edit: LineEdit
 var _sort_option: OptionButton
 ## 强化属性筛选框；只在资源分类显示并按正负方向精确筛选。
 var _stone_attribute_option: OptionButton
+## 清空强化属性筛选按钮；默认只在资源分类显示，点击后一次移除全部勾选条件。
+var _stone_attribute_clear_button: Button
 ## 一级分类按钮表；用于同步当前武器或资源分类的选中状态。
 var _primary_buttons: Dictionary = {}
 ## 二级分类按钮表；根据一级分类动态重建。
@@ -229,15 +233,25 @@ func _build_interface() -> void:
 	query_bar.add_child(_sort_option)
 	_stone_attribute_option = OptionButton.new()
 	_stone_attribute_option.custom_minimum_size = Vector2(150.0, 34.0)
-	_stone_attribute_option.add_item("全部强化属性")
+	_stone_attribute_option.add_item("强化筛选（0）")
 	_stone_attribute_option.set_item_metadata(0, "")
 	for direction in InventoryQuery.STONE_FILTER_DIRECTIONS:
 		_stone_attribute_option.add_separator(InventoryQuery.get_stone_attribute_direction_group_label(direction))
 		for stat_name in EnhancementRules.STAT_KEYS:
 			_stone_attribute_option.add_item(InventoryQuery.get_stone_attribute_filter_label(stat_name, direction))
-			_stone_attribute_option.set_item_metadata(_stone_attribute_option.item_count - 1, InventoryQuery.build_stone_attribute_filter_key(stat_name, direction))
+			# 当前属性选项下标；用于写入筛选键并开启复选状态。
+			var attribute_item_index: int = _stone_attribute_option.item_count - 1
+			_stone_attribute_option.set_item_metadata(attribute_item_index, InventoryQuery.build_stone_attribute_filter_key(stat_name, direction))
+			_stone_attribute_option.get_popup().set_item_as_checkable(attribute_item_index, true)
+	# 多选弹窗；勾选单项后保持展开，便于连续组合“伤害+”“伤害-”等并集条件。
+	_stone_attribute_option.get_popup().hide_on_checkable_item_selection = false
 	_stone_attribute_option.item_selected.connect(_on_stone_attribute_selected)
 	query_bar.add_child(_stone_attribute_option)
+	_stone_attribute_clear_button = Button.new()
+	_stone_attribute_clear_button.text = "清空筛选"
+	_stone_attribute_clear_button.custom_minimum_size = Vector2(92.0, 34.0)
+	_stone_attribute_clear_button.pressed.connect(_on_clear_stone_attribute_filter_pressed)
+	query_bar.add_child(_stone_attribute_clear_button)
 	# 分类栏；保持背包仓库同款一级与二级结构。
 	var category_columns: VBoxContainer = VBoxContainer.new()
 	category_columns.add_theme_constant_override("separation", 3)
@@ -303,6 +317,10 @@ func _build_forge_slots() -> void:
 		sacrifice_slot.offset_top = -slot_half_size
 		sacrifice_slot.offset_right = slot_half_size
 		sacrifice_slot.offset_bottom = slot_half_size
+		if slot_index == 0:
+			# 顶部槽额外上移；保持环形结构不变，仅增加它与中央主槽之间的可读间隔。
+			sacrifice_slot.offset_top -= top_sacrifice_slot_upward_offset
+			sacrifice_slot.offset_bottom -= top_sacrifice_slot_upward_offset
 		sacrifice_slot.connect("item_requested", Callable(self, "_on_slot_item_requested"))
 		sacrifice_slot.connect("return_requested", Callable(self, "_on_slot_return_requested"))
 		_forge_board.add_child(sacrifice_slot)
@@ -326,8 +344,22 @@ func _refresh_all() -> void:
 
 func _refresh_slots() -> void:
 	_main_slot.call("refresh", _main_entry)
+	# 主槽有效性；极品强化石不能继续升阶，放入后会标红并阻止执行，但仍可单击归还。
+	var main_resource: Resource = _main_entry.get("resource") as Resource
+	_main_slot.call("set_invalid_state", main_resource != null and not _forge_service.can_use_as_main(main_resource))
+	# 当前预览；用于识别顺序计算后没有任何实际效果的牺牲材料。
+	var preview: Dictionary = _forge_service.build_preview(_main_entry, _get_active_sacrifice_entries())
+	# 无效材料列表；由服务按当前主物品和槽位顺序计算，UI 用于标红对应牺牲槽。
+	var invalid_entries: Array = preview.get("invalid_sacrifice_entries", []) as Array
 	for slot_index in range(_sacrifice_slots.size()):
 		_sacrifice_slots[slot_index].call("refresh", _sacrifice_entries[slot_index])
+		# 当前牺牲条目；无主物品、类型/品质不匹配或服务预览判定无效果时显示红色滤镜。
+		var sacrifice_entry: Dictionary = _sacrifice_entries[slot_index]
+		# 当前牺牲资源；空槽保持正常视觉。
+		var sacrifice_resource: Resource = sacrifice_entry.get("resource") as Resource
+		# 当前槽位是否无效；无效槽仍保留点击归还能力。
+		var sacrifice_invalid: bool = sacrifice_resource != null and (main_resource == null or not _forge_service.can_use_as_sacrifice(main_resource, sacrifice_resource) or sacrifice_entry in invalid_entries)
+		_sacrifice_slots[slot_index].call("set_invalid_state", sacrifice_invalid)
 
 
 func _refresh_preview() -> void:
@@ -340,6 +372,18 @@ func _refresh_preview() -> void:
 		_preview_label.text = str(preview.get("message", "请配置锻造物品"))
 		_forge_cost_label.text = "本次锻造消耗：--"
 		_forge_button.disabled = true
+		return
+	if str(preview.get("forge_mode", ForgeService.FORGE_MODE_WEAPON)) == ForgeService.FORGE_MODE_STONE_UPGRADE:
+		# 强化石升阶预览；只显示品质、材料数量和确定成功率，不收取金币。
+		var main_stone: Resource = preview.get("main_stone") as Resource
+		_preview_label.text = "主强化石：%s\n升阶结果：%s\n牺牲石：%d 颗\n当前成功率：%d%%" % [
+			str(main_stone.get("display_name")) if main_stone != null else "未知强化石",
+			EnhancementRules.get_quality_display_name(str(preview.get("next_quality_id", EnhancementRules.QUALITY_MEDIUM))),
+			int(preview.get("compatible_stone_count", 0)),
+			roundi(float(preview.get("success_rate", 0.0)) * 100.0),
+		]
+		_forge_cost_label.text = "本次升阶消耗：0 金币"
+		_forge_button.disabled = _forging_in_progress
 		return
 	# 主武器名称；预览有效时必定为武器资源。
 	var main_weapon: Resource = preview.get("weapon") as Resource
@@ -384,6 +428,11 @@ func _rebuild_inventory_items() -> void:
 		var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
 		item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		item_control.call("configure", item_resource, _current_source, int(entry.get("source_index", -1)), false, "", int(entry.get("quantity", 1)))
+		# 材料可选状态；主槽为空时只允许合法主物品，主槽已有物品时只允许符合其牺牲规则的候选材料。
+		var main_resource: Resource = _main_entry.get("resource") as Resource
+		# 当前卡片是否可选；不可选物品显示灰色滤镜并阻止点击与拖拽。
+		var item_selectable: bool = _forge_service.can_use_as_main(item_resource) if main_resource == null else _forge_service.can_use_as_sacrifice(main_resource, item_resource)
+		item_control.call("set_item_selection_state", true, item_selectable, false)
 		item_control.connect("item_action_requested", Callable(self, "_on_inventory_item_pressed").bind(_current_source))
 		_item_grid.add_child(item_control)
 
@@ -430,16 +479,19 @@ func _entry_matches(entry: Dictionary, item_resource: Resource, source_location:
 func _on_inventory_item_pressed(item_resource: Resource, source_location: String) -> void:
 	if _forging_in_progress or item_resource == null:
 		return
-	# 锻造材料类型；修复包等道具只能对武器使用，不允许进入主槽或牺牲槽。
-	var is_forge_material: bool = str(item_resource.get("weapon_type")) in ["ranged", "melee"] or str(item_resource.get("item_kind")) == "enhancement_stone"
-	if not is_forge_material:
-		_status_label.text = "该道具不能作为锻造材料"
-		return
 	# 快捷放入条目；来源必须保持为点击时所在背包或仓库，后续单击槽位即可回到原处。
 	var forge_entry: Dictionary = {"resource": item_resource, "source_location": source_location}
-	if str(item_resource.get("weapon_type")) in ["ranged", "melee"] and _main_entry.is_empty():
+	if _main_entry.is_empty() and _forge_service.can_use_as_main(item_resource):
 		_main_entry = forge_entry
-	elif not _place_in_first_empty_sacrifice(forge_entry):
+	elif not _main_entry.is_empty() and _forge_service.can_use_as_sacrifice(_main_entry.get("resource") as Resource, item_resource) and _place_in_first_empty_sacrifice(forge_entry):
+		pass
+	elif _main_entry.is_empty():
+		_status_label.text = "该物品不能放入主锻造槽"
+		return
+	elif not _forge_service.can_use_as_sacrifice(_main_entry.get("resource") as Resource, item_resource):
+		_status_label.text = "该物品不符合当前主物品的牺牲规则"
+		return
+	else:
 		_status_label.text = "五个牺牲槽均已放满"
 		return
 	_status_label.text = "已放入锻造槽；单击槽内物品可快速放回原来源"
@@ -463,10 +515,13 @@ func _on_slot_item_requested(slot_index: int, drag_data: Dictionary) -> void:
 	# 新槽位条目；只保存真实资源引用和原来源，不提前改变所有权。
 	var forge_entry: Dictionary = {"resource": item_resource, "source_location": source_location}
 	if slot_index < 0:
-		if not _main_entry.is_empty() or str(item_resource.get("weapon_type")) not in ["ranged", "melee"]:
+		if not _main_entry.is_empty() or not _forge_service.can_use_as_main(item_resource):
 			return
 		_main_entry = forge_entry
 	elif slot_index < _sacrifice_entries.size() and _sacrifice_entries[slot_index].is_empty():
+		if _main_entry.is_empty() or not _forge_service.can_use_as_sacrifice(_main_entry.get("resource") as Resource, item_resource):
+			_status_label.text = "该物品不符合当前主物品的牺牲规则"
+			return
 		_sacrifice_entries[slot_index] = forge_entry
 	_status_label.text = "已放入指定锻造槽"
 	_refresh_all()
@@ -516,6 +571,12 @@ func _on_forge_pressed() -> void:
 		_refresh_all()
 		return
 	_initialize_sacrifice_entries()
+	if str(forge_result.get("forge_mode", ForgeService.FORGE_MODE_WEAPON)) == ForgeService.FORGE_MODE_STONE_UPGRADE:
+		# 升阶失败保留原主石，成功后主槽引用新品质资源；两种结果都已正常消费全部牺牲石。
+		_main_entry = (forge_result.get("result_main_entry", _main_entry) as Dictionary).duplicate()
+		_status_label.text = str(forge_result.get("message", "强化石升阶已完成"))
+		_refresh_all()
+		return
 	_status_label.text = "锻造完成"
 	_refresh_all()
 	_result_dialog.call("present", forge_result)
@@ -631,6 +692,8 @@ func _refresh_source_and_category_buttons() -> void:
 	for category_name in _subcategory_buttons.keys():
 		(_subcategory_buttons[category_name] as Button).disabled = str(category_name) == _subcategory
 	_stone_attribute_option.visible = _primary_category == InventoryQuery.PRIMARY_RESOURCES
+	_stone_attribute_clear_button.visible = _primary_category == InventoryQuery.PRIMARY_RESOURCES
+	_stone_attribute_clear_button.disabled = _stone_attribute_filter.is_empty()
 
 
 func _on_source_pressed(source_location: String) -> void:
@@ -644,8 +707,7 @@ func _on_source_pressed(source_location: String) -> void:
 func _on_primary_category_pressed(category_name: String) -> void:
 	_primary_category = category_name
 	_subcategory = InventoryQuery.SUBCATEGORY_ALL
-	_stone_attribute_filter = ""
-	_stone_attribute_option.select(0)
+	_clear_stone_attribute_filter()
 	_rebuild_subcategory_buttons()
 	_rebuild_inventory_items()
 
@@ -668,8 +730,44 @@ func _on_sort_selected(item_index: int) -> void:
 
 
 func _on_stone_attribute_selected(item_index: int) -> void:
-	_stone_attribute_filter = str(_stone_attribute_option.get_item_metadata(item_index))
+	if item_index <= 0:
+		_stone_attribute_option.select(0)
+		return
+	# 筛选键；同一项再次选择会取消勾选，多项同时保留并由查询器按并集匹配。
+	var filter_key: String = str(_stone_attribute_option.get_item_metadata(item_index))
+	if filter_key.is_empty():
+		return
+	# 新勾选状态；已存在筛选再次点击时取消，其他条件继续保留。
+	var should_select: bool = filter_key not in _stone_attribute_filter
+	_stone_attribute_option.get_popup().set_item_checked(item_index, should_select)
+	if should_select:
+		_stone_attribute_filter.append(filter_key)
+	else:
+		_stone_attribute_filter.erase(filter_key)
+	_refresh_stone_attribute_filter_display()
 	_rebuild_inventory_items()
+
+
+func _on_clear_stone_attribute_filter_pressed() -> void:
+	_clear_stone_attribute_filter()
+	_rebuild_inventory_items()
+
+
+func _clear_stone_attribute_filter() -> void:
+	# 清空全部勾选；逐项恢复未选状态并把下拉框标题重置为 0 个条件。
+	_stone_attribute_filter.clear()
+	for item_index in range(1, _stone_attribute_option.item_count):
+		if not str(_stone_attribute_option.get_item_metadata(item_index)).is_empty():
+			_stone_attribute_option.get_popup().set_item_checked(item_index, false)
+	_refresh_stone_attribute_filter_display()
+
+
+func _refresh_stone_attribute_filter_display() -> void:
+	# 下拉框固定选中摘要项；具体已选条件通过弹出菜单勾选状态查看，避免单选标题覆盖多选结果。
+	_stone_attribute_option.set_item_text(0, "强化筛选（%d）" % _stone_attribute_filter.size())
+	_stone_attribute_option.select(0)
+	if _stone_attribute_clear_button != null:
+		_stone_attribute_clear_button.disabled = _stone_attribute_filter.is_empty()
 
 
 func _on_inventory_state_changed() -> void:

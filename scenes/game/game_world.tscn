@@ -1,4 +1,4 @@
-[gd_scene load_steps=27 format=3]
+[gd_scene load_steps=28 format=3]
 
 [ext_resource type="Script" path="res://scripts/game/game_world.gd" id="1_game_world"]
 [ext_resource type="PackedScene" path="res://scenes/characters/player.tscn" id="2_player"]
@@ -26,6 +26,7 @@
 [ext_resource type="Resource" path="res://data/items/repair_kit_basic.tres" id="24_repair_kit_basic"]
 [ext_resource type="Resource" path="res://data/items/repair_kit_medium.tres" id="25_repair_kit_medium"]
 [ext_resource type="Resource" path="res://data/items/repair_kit_advanced.tres" id="26_repair_kit_advanced"]
+[ext_resource type="PackedScene" path="res://scenes/environment/loot_chest.tscn" id="27_loot_chest"]
 
 [node name="GameWorld" type="Node2D"]
 script = ExtResource("1_game_world")
@@ -35,6 +36,7 @@ obstacle_scenes = Array[PackedScene]([ExtResource("6_wall_ring_building"), ExtRe
 weapon_drop_scene = ExtResource("15_weapon_drop")
 weapon_drop_table = Array[Resource]([ExtResource("16_quantum_pistol"), ExtResource("17_pulse_rifle"), ExtResource("18_ion_smg"), ExtResource("19_scatter_blaster"), ExtResource("20_rail_cannon"), ExtResource("21_phase_blade"), ExtResource("22_quantum_dagger")])
 repair_kit_drop_table = Array[Resource]([ExtResource("24_repair_kit_basic"), ExtResource("25_repair_kit_medium"), ExtResource("26_repair_kit_advanced")])
+loot_chest_scene = ExtResource("27_loot_chest")
 
 [node name="Player" parent="." instance=ExtResource("2_player")]
 position = Vector2(0, 0)

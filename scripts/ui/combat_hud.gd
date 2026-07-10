@@ -15,6 +15,10 @@ const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_it
 const DEVELOPER_MENU_SCRIPT: Script = preload("res://scripts/ui/developer_menu.gd")
 ## 强化结果弹窗脚本；用于局内使用或拖动强化石后展示完整属性变化。
 const ENHANCEMENT_RESULT_DIALOG_SCRIPT: Script = preload("res://scripts/ui/enhancement_result_dialog.gd")
+## 数量选择弹窗脚本；局内部分丢弃和物资送回仓库复用仓库已有滑条与数字输入 UI。
+const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
+## 物资撤离面板脚本；玩家在物资撤离点驻留 3 秒后按闪避打开，面板期间暂停游戏。
+const SUPPLY_EXTRACTION_PANEL_SCRIPT: Script = preload("res://scripts/ui/supply_extraction_panel.gd")
 ## 战斗开发者模式解锁序列；默认六个英文字母，输入错误时按首字母重新开始匹配。
 const DEVELOPER_UNLOCK_SEQUENCE: String = "LISBAM"
 ## 背包全部分页标识；默认显示所有背包武器，修改会影响筛选按钮与背包网格过滤。
@@ -31,6 +35,10 @@ const INVENTORY_FILTER_ITEMS: String = "items"
 const INVENTORY_ITEM_ACTION_USE: int = 1
 ## 局内武器操作菜单装备项编号；固定为 2，远程武器替换当前手持槽，近战武器替换近战槽。
 const INVENTORY_ITEM_ACTION_EQUIP: int = 2
+## 局内单件或整组丢弃操作编号；点击后直接把当前背包物品生成到玩家附近地面。
+const INVENTORY_ITEM_ACTION_DISCARD_ALL: int = 3
+## 局内部分丢弃操作编号；堆叠数量大于 1 时打开共用数量选择弹窗。
+const INVENTORY_ITEM_ACTION_DISCARD_PARTIAL: int = 4
 ## 星角色标识；默认与 SessionState 和 GameWorld 保持一致，修改会影响训练场切换角色目标。
 const CHARACTER_STELLE: String = "stelle"
 ## 穹角色标识；默认与 SessionState 和 GameWorld 保持一致，修改会影响训练场切换角色目标。
@@ -125,8 +133,10 @@ var _inventory_search_edit: LineEdit
 var _inventory_sort_option: OptionButton
 ## 背包强化属性筛选框；默认全部属性，只在资源主分类显示。
 var _inventory_stone_attribute_option: OptionButton
-## 背包当前强化属性筛选键；默认空字符串表示不过滤具体属性。
-var _inventory_stone_attribute_filter: String = ""
+## 背包清空强化属性筛选按钮；默认只在资源主分类显示，用于移除全部多选条件。
+var _inventory_stone_attribute_clear_button: Button
+## 背包当前强化属性筛选键集合；默认空数组表示不过滤具体属性，多项条件按并集展示。
+var _inventory_stone_attribute_filter: Array[String] = []
 ## 背包当前排序模式；默认 acquired_time，只改变显示顺序。
 var _inventory_sort_mode: String = InventoryQuery.SORT_ACQUIRED_TIME
 ## 局内资源操作菜单；点击强化石后显示“使用”选项，不在战斗内提供金币出售。
@@ -139,6 +149,12 @@ var _combat_action_stone_resource: Resource
 var _combat_action_weapon_resource: Resource
 ## 当前局内操作武器的背包原始下标；默认 -1，装备替换后用于把旧武器放回相同位置。
 var _combat_action_weapon_source_index: int = -1
+## 当前局内操作菜单物品的堆叠数量；默认 1，资源菜单用它决定显示单个、全部或部分丢弃。
+var _combat_action_item_quantity: int = 1
+## 当前局内部分丢弃等待确认的物品；默认 null，数量弹窗确认后按当前背包真实数量再次限制。
+var _pending_discard_resource: Resource
+## 局内数量选择弹窗；默认运行时创建一次，部分丢弃时切换为丢弃模式。
+var _combat_quantity_dialog: ConfirmationDialog
 ## 局内取消使用按钮；默认隐藏，进入强化目标选择后显示。
 var _inventory_cancel_stone_use_button: Button
 ## 局内强化结果弹窗；默认运行时创建一次并在每次成功强化时复用。
@@ -149,8 +165,8 @@ var _combat_stone_return_primary_category: String = InventoryQuery.PRIMARY_RESOU
 var _combat_stone_return_filter: String = INVENTORY_FILTER_STONES
 ## 强化选择前搜索文本；默认空字符串，成功强化后恢复原查询内容。
 var _combat_stone_return_search_text: String = ""
-## 强化选择前属性筛选；默认空字符串表示全部属性，成功强化后恢复原筛选。
-var _combat_stone_return_attribute_filter: String = ""
+## 强化选择前属性筛选集合；默认空数组表示全部属性，成功使用道具后恢复原多选组合。
+var _combat_stone_return_attribute_filter: Array[String] = []
 ## 是否存在待恢复的强化石页面；默认 false，只有点击“使用”触发页面跳转后才恢复，拖拽强化不会改变当前页面。
 var _combat_stone_return_view_pending: bool = false
 ## Master 音频总线索引；取值为 -1 或有效总线下标，默认 -1 表示尚未解析，修改会影响暂停设置音量应用目标。
@@ -177,6 +193,12 @@ var _nearby_drop_buttons: Array[Button] = []
 var _nearby_drop_refresh_remaining: float = 0.0
 ## 当前掉落物列表签名；元素为实例、名称和位置组成的字符串，默认用于判断列表内容是否需要重建。
 var _nearby_drop_signature: Array[String] = []
+## 当前正在长按开启的宝箱；默认 null，周围存在掉落物、松开 F、离开范围或打开其他面板时会立即取消并重置进度。
+var _active_loot_chest: Node2D
+## 物资撤离全屏遮罩；默认运行时创建并隐藏，打开时阻止其余 HUD 鼠标交互。
+var _supply_extraction_overlay: Control
+## 物资撤离面板实例；默认运行时创建一次并复用，显示背包、装备、金币和剩余送回价值。
+var _supply_extraction_panel: Control
 ## 最近一次显示的存活时间整秒数；默认 -1 表示尚未刷新，用于避免每帧重复写入相同计时文本。
 var _last_survival_time_whole_seconds: int = -1
 ## 最近一次显示的存活怪物数量；默认 -1 表示尚未刷新，虚拟人口变化时才更新左上角文本。
@@ -332,6 +354,7 @@ func _ready() -> void:
 	_build_escape_confirmation_dialog()
 	_build_combat_status_panel()
 	_build_nearby_drop_panel()
+	_build_supply_extraction_overlay()
 	_build_combat_developer_overlay()
 	_refresh_all()
 	_refresh_combat_status()
@@ -350,6 +373,7 @@ func _process(delta: float) -> void:
 	if _nearby_drop_refresh_remaining <= 0.0:
 		_nearby_drop_refresh_remaining = maxf(nearby_drop_refresh_interval, 0.01)
 		_refresh_nearby_drop_panel()
+	_update_loot_chest_interaction()
 
 	_refresh_combat_input_state()
 
@@ -359,6 +383,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if _is_key_binding_capture_active():
+		return
+
+	if _is_supply_extraction_open_event(event):
+		_mark_input_as_handled()
+		_open_supply_extraction_panel()
 		return
 
 	if _is_extraction_return_event(event):
@@ -570,6 +599,8 @@ func _rebuild_inventory_slots() -> void:
 			var resource_slot: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
 			resource_slot.call("configure", item_data, "backpack", source_index, false, "", quantity)
 			resource_slot.call("set_weapon_slot_visual_style", true)
+			# 道具目标选择期间资源不是合法武器目标，统一覆盖灰色滤镜并阻止点击或拖拽。
+			resource_slot.call("set_item_selection_state", _pending_combat_stone_resource != null, false, false)
 			resource_slot.custom_minimum_size = inventory_slot_minimum_size
 			resource_slot.connect("item_action_requested", Callable(self, "_on_combat_resource_action_requested"))
 			_inventory_weapon_grid.add_child(resource_slot)
@@ -790,6 +821,40 @@ func _build_nearby_drop_panel() -> void:
 	_apply_nearby_drop_panel_display_mode()
 
 
+func _build_supply_extraction_overlay() -> void:
+	# 全屏遮罩；暂停时仍处理 UI，深色背景明确当前正在进行安全物资转移。
+	var overlay: Control = Control.new()
+	overlay.name = "SupplyExtractionOverlay"
+	overlay.visible = false
+	overlay.process_mode = Node.PROCESS_MODE_ALWAYS
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_root_control.add_child(overlay)
+	_supply_extraction_overlay = overlay
+	# 遮罩暗层；覆盖全部 HUD 并吸收鼠标输入。
+	var dim: ColorRect = ColorRect.new()
+	dim.color = Color(0.0, 0.0, 0.0, 0.76)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.add_child(dim)
+	# 物资撤离面板；居中固定 920×620 并在暂停模式下继续响应。
+	var panel: Control = SUPPLY_EXTRACTION_PANEL_SCRIPT.new() as Control
+	panel.anchor_left = 0.5
+	panel.anchor_top = 0.5
+	panel.anchor_right = 0.5
+	panel.anchor_bottom = 0.5
+	panel.offset_left = -460.0
+	panel.offset_top = -310.0
+	panel.offset_right = 460.0
+	panel.offset_bottom = 310.0
+	panel.connect("closed", Callable(self, "_close_supply_extraction_panel"))
+	overlay.add_child(panel)
+	_supply_extraction_panel = panel
+	# 全局库存服务；送回报价、金币与所有权转移均由该单例处理。
+	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+	panel.call("configure", global_inventory)
+
+
 func _build_combat_developer_overlay() -> void:
 	if _root_control == null or _combat_developer_overlay != null:
 		return
@@ -921,6 +986,58 @@ func _get_nearby_weapon_drops() -> Array[Node2D]:
 	return sorted_drops
 
 
+func _update_loot_chest_interaction() -> void:
+	if not _can_pickup_nearby_drops() or not _is_pickup_action_held():
+		_set_active_loot_chest(null)
+		return
+	# 拾取优先级；只要周围存在可拾取掉落物，长按 F 不会同时推进宝箱开启进度。
+	if not _get_nearby_weapon_drops().is_empty():
+		_set_active_loot_chest(null)
+		return
+	_set_active_loot_chest(_get_nearest_interactable_loot_chest())
+
+
+func _get_nearest_interactable_loot_chest() -> Node2D:
+	if _player == null:
+		return null
+	# 最近宝箱；从 loot_chests 组读取，按宝箱自身交互半径和玩家距离共同筛选。
+	var nearest_chest: Node2D
+	# 最近宝箱距离；默认无穷大，遇到更近合法目标时持续缩小。
+	var nearest_distance: float = INF
+	for raw_chest in get_tree().get_nodes_in_group("loot_chests"):
+		if not (raw_chest is Node2D) or not is_instance_valid(raw_chest):
+			continue
+		# 当前宝箱节点；用于读取位置和自定义交互半径。
+		var chest_node: Node2D = raw_chest as Node2D
+		# 当前交互半径；优先读取宝箱配置，接口缺失时回退 HUD 拾取距离。
+		var interaction_distance: float = float(chest_node.call("get_interaction_radius")) if chest_node.has_method("get_interaction_radius") else nearby_drop_pickup_range
+		# 玩家到当前宝箱距离；用于范围校验和最近目标排序。
+		var chest_distance: float = chest_node.global_position.distance_to((_player as Node2D).global_position)
+		if chest_distance <= interaction_distance and chest_distance < nearest_distance:
+			nearest_distance = chest_distance
+			nearest_chest = chest_node
+	return nearest_chest
+
+
+func _set_active_loot_chest(chest_node: Node2D) -> void:
+	if _active_loot_chest == chest_node:
+		if _active_loot_chest != null and is_instance_valid(_active_loot_chest) and _active_loot_chest.has_method("set_open_interaction_active"):
+			_active_loot_chest.call("set_open_interaction_active", true, _player as Node2D)
+		return
+	if _active_loot_chest != null and is_instance_valid(_active_loot_chest) and _active_loot_chest.has_method("set_open_interaction_active"):
+		_active_loot_chest.call("set_open_interaction_active", false, null)
+	_active_loot_chest = chest_node
+	if _active_loot_chest != null and _active_loot_chest.has_method("set_open_interaction_active"):
+		_active_loot_chest.call("set_open_interaction_active", true, _player as Node2D)
+
+
+func _is_pickup_action_held() -> bool:
+	if InputMap.has_action(pickup_action) and Input.is_action_pressed(pickup_action):
+		return true
+	# 物理键兜底；只有动作缺失或未显式解绑时才继续识别默认 F 键。
+	return _should_use_physical_fallback(pickup_action) and Input.is_physical_key_pressed(KEY_F)
+
+
 func _find_nearest_drop_index(drop_nodes: Array[Node2D]) -> int:
 	# 最近索引；取值为 drop_nodes 的有效下标，默认 0 用于初始化比较。
 	var nearest_index: int = 0
@@ -1039,7 +1156,7 @@ func _set_large_map_visible(visible: bool) -> void:
 
 func _refresh_combat_input_state() -> void:
 	# 战斗输入启用状态；取值由背包、大地图、暂停菜单和掉落物 UI 共同决定，默认任意交互界面打开都会禁用战斗输入。
-	var combat_input_enabled: bool = not _inventory_panel.visible and not _large_map_overlay.visible and not _pause_overlay.visible and not _death_overlay.visible and not _is_player_dead and not _should_drop_ui_block_combat_input()
+	var combat_input_enabled: bool = not _inventory_panel.visible and not _large_map_overlay.visible and not _pause_overlay.visible and not _death_overlay.visible and (_supply_extraction_overlay == null or not _supply_extraction_overlay.visible) and not _is_player_dead and not _should_drop_ui_block_combat_input()
 	if _has_combat_input_enabled_state and _last_combat_input_enabled == combat_input_enabled:
 		return
 
@@ -1100,11 +1217,14 @@ func _refresh_extraction_status() -> void:
 	if _extraction_status_label == null:
 		return
 
-	if _game_world == null or not _game_world.has_method("has_extraction_point_spawned"):
+	if _game_world == null:
 		_set_extraction_status(false, "")
 		return
-
-	if not bool(_game_world.call("has_extraction_point_spawned")):
+	# 物资撤离点驻留提示优先显示；正式撤离点尚未生成时仍可查看 3 秒送回准备进度。
+	var inside_supply_extraction: bool = _game_world.has_method("is_player_inside_supply_extraction_area") and bool(_game_world.call("is_player_inside_supply_extraction_area"))
+	# 正式撤离点生成状态；没有物资撤离驻留时决定顶部提示是否继续显示。
+	var regular_extraction_spawned: bool = _game_world.has_method("has_extraction_point_spawned") and bool(_game_world.call("has_extraction_point_spawned"))
+	if not inside_supply_extraction and not regular_extraction_spawned:
 		_set_extraction_status(false, "")
 		return
 
@@ -1124,6 +1244,14 @@ func _set_extraction_status(visible: bool, status_text: String) -> void:
 
 
 func _get_extraction_status_text() -> String:
+	if _game_world != null and _game_world.has_method("is_player_inside_supply_extraction_area") and bool(_game_world.call("is_player_inside_supply_extraction_area")):
+		if _game_world.has_method("is_supply_extraction_ready") and bool(_game_world.call("is_supply_extraction_ready")):
+			return "物资撤离就绪  按闪避打开送回面板"
+		# 物资撤离驻留总时长；默认 3 秒，接口缺失时使用同一玩法兜底值。
+		var supply_duration: float = maxf(float(_game_world.call("get_supply_extraction_hold_duration_seconds")), 0.1) if _game_world.has_method("get_supply_extraction_hold_duration_seconds") else 3.0
+		# 当前驻留进度；限制在 0 到总时长，避免帧延迟显示超出分母。
+		var supply_elapsed: float = clampf(float(_game_world.call("get_supply_extraction_hold_elapsed_seconds")), 0.0, supply_duration) if _game_world.has_method("get_supply_extraction_hold_elapsed_seconds") else 0.0
+		return "物资撤离准备  %d / %d秒" % [ceili(supply_elapsed), ceili(supply_duration)]
 	if _is_extraction_ready_to_leave():
 		return "撤离就绪  按闪避返回"
 
@@ -1172,8 +1300,26 @@ func _is_extraction_return_event(event: InputEvent) -> bool:
 	return InputMap.has_action(extraction_action) and Input.is_action_just_pressed(extraction_action)
 
 
+func _is_supply_extraction_open_event(event: InputEvent) -> bool:
+	if not _can_process_extraction_input() or _game_world == null or not _game_world.has_method("is_supply_extraction_ready") or not bool(_game_world.call("is_supply_extraction_ready")):
+		return false
+	if event is InputEventKey:
+		# 物资撤离键盘事件；只响应非 echo 的按下事件，并兼容默认空格物理键兜底。
+		var key_event: InputEventKey = event as InputEventKey
+		if not key_event.pressed or key_event.echo:
+			return false
+		if _should_use_physical_fallback(extraction_action) and key_event.physical_keycode == KEY_SPACE:
+			return true
+	elif event is InputEventMouseButton:
+		if not (event as InputEventMouseButton).pressed:
+			return false
+	else:
+		return false
+	return InputMap.has_action(extraction_action) and Input.is_action_just_pressed(extraction_action)
+
+
 func _can_process_extraction_input() -> bool:
-	return not _is_player_dead and not _inventory_panel.visible and not _large_map_overlay.visible and not _pause_overlay.visible and not _death_overlay.visible
+	return not _is_player_dead and not _inventory_panel.visible and not _large_map_overlay.visible and not _pause_overlay.visible and not _death_overlay.visible and (_supply_extraction_overlay == null or not _supply_extraction_overlay.visible)
 
 
 func _is_extraction_ready_to_leave() -> bool:
@@ -1239,7 +1385,7 @@ func _bind_inventory_filter_buttons() -> void:
 			query_bar.add_child(_inventory_sort_option)
 			_inventory_stone_attribute_option = OptionButton.new()
 			_inventory_stone_attribute_option.custom_minimum_size = Vector2(112.0, 34.0)
-			_inventory_stone_attribute_option.add_item("全部属性")
+			_inventory_stone_attribute_option.add_item("强化筛选（0）")
 			_inventory_stone_attribute_option.set_item_metadata(0, "")
 			# 筛选方向顺序；先列出全部“+”词条，再列出全部“-”词条，保持与仓库筛选一致。
 			for direction in InventoryQuery.STONE_FILTER_DIRECTIONS:
@@ -1247,9 +1393,18 @@ func _bind_inventory_filter_buttons() -> void:
 				# 可筛选属性；每个属性分别建立精确方向选项，例如“伤害+”和“伤害-”。
 				for stat_name in EnhancementRules.STAT_KEYS:
 					_inventory_stone_attribute_option.add_item(InventoryQuery.get_stone_attribute_filter_label(stat_name, direction))
-					_inventory_stone_attribute_option.set_item_metadata(_inventory_stone_attribute_option.item_count - 1, InventoryQuery.build_stone_attribute_filter_key(stat_name, direction))
+					# 当前属性选项下标；用于绑定稳定筛选键并启用复选状态。
+					var attribute_item_index: int = _inventory_stone_attribute_option.item_count - 1
+					_inventory_stone_attribute_option.set_item_metadata(attribute_item_index, InventoryQuery.build_stone_attribute_filter_key(stat_name, direction))
+					_inventory_stone_attribute_option.get_popup().set_item_as_checkable(attribute_item_index, true)
+			_inventory_stone_attribute_option.get_popup().hide_on_checkable_item_selection = false
 			_inventory_stone_attribute_option.item_selected.connect(_on_inventory_stone_attribute_selected)
 			query_bar.add_child(_inventory_stone_attribute_option)
+			_inventory_stone_attribute_clear_button = Button.new()
+			_inventory_stone_attribute_clear_button.text = "清空筛选"
+			_inventory_stone_attribute_clear_button.custom_minimum_size = Vector2(82.0, 34.0)
+			_inventory_stone_attribute_clear_button.pressed.connect(_on_clear_inventory_stone_attribute_filter_pressed)
+			query_bar.add_child(_inventory_stone_attribute_clear_button)
 
 			# 一级分类栏；武器和资源独立于原二级分类栏，形成清晰的多层结构。
 			var primary_bar: HBoxContainer = HBoxContainer.new()
@@ -1293,6 +1448,9 @@ func _build_inventory_item_action_menu() -> void:
 	title_parent.move_child(_inventory_cancel_stone_use_button, _inventory_title_label.get_index() + 1)
 	_enhancement_result_dialog = ENHANCEMENT_RESULT_DIALOG_SCRIPT.new() as AcceptDialog
 	_root_control.add_child(_enhancement_result_dialog)
+	_combat_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as ConfirmationDialog
+	_combat_quantity_dialog.connect("quantity_confirmed", Callable(self, "_on_combat_quantity_confirmed"))
+	_root_control.add_child(_combat_quantity_dialog)
 
 
 func _bind_inventory_drop_area() -> void:
@@ -1462,6 +1620,9 @@ func _refresh_inventory_filter_buttons() -> void:
 		_inventory_filter_items_button.visible = not weapon_category_visible
 	if _inventory_stone_attribute_option != null:
 		_inventory_stone_attribute_option.visible = not weapon_category_visible
+	if _inventory_stone_attribute_clear_button != null:
+		_inventory_stone_attribute_clear_button.visible = not weapon_category_visible
+		_inventory_stone_attribute_clear_button.disabled = _inventory_stone_attribute_filter.is_empty()
 
 
 func _get_inventory_filter_label() -> String:
@@ -1581,6 +1742,9 @@ func _is_weapon_durability_consumption_disabled_by_debug() -> bool:
 
 
 func _close_top_interactive_panel() -> bool:
+	if _supply_extraction_overlay != null and _supply_extraction_overlay.visible:
+		_close_supply_extraction_panel()
+		return true
 	if _is_combat_developer_menu_visible():
 		_on_combat_developer_menu_closed()
 		return true
@@ -1594,6 +1758,25 @@ func _close_top_interactive_panel() -> bool:
 		return true
 
 	return false
+
+
+func _open_supply_extraction_panel() -> void:
+	if _supply_extraction_overlay == null or _supply_extraction_panel == null:
+		return
+	_set_inventory_visible(false)
+	_set_large_map_visible(false)
+	_supply_extraction_overlay.visible = true
+	_supply_extraction_panel.call("present")
+	get_tree().paused = true
+	_refresh_combat_input_state()
+
+
+func _close_supply_extraction_panel() -> void:
+	if _supply_extraction_overlay == null:
+		return
+	_supply_extraction_overlay.visible = false
+	get_tree().paused = false
+	_refresh_combat_input_state()
 
 
 func _toggle_drop_list_enabled() -> void:
@@ -2195,9 +2378,7 @@ func _on_inventory_filter_items_pressed() -> void:
 func _on_inventory_primary_category_pressed(category_name: String) -> void:
 	_inventory_primary_category = category_name
 	_inventory_filter = INVENTORY_FILTER_ALL
-	_inventory_stone_attribute_filter = ""
-	if _inventory_stone_attribute_option != null:
-		_inventory_stone_attribute_option.select(0)
+	_clear_inventory_stone_attribute_filter()
 	_refresh_inventory_filter_buttons()
 	if _inventory_panel.visible:
 		_rebuild_inventory_slots()
@@ -2217,19 +2398,63 @@ func _on_inventory_sort_selected(item_index: int) -> void:
 
 
 func _on_inventory_stone_attribute_selected(item_index: int) -> void:
-	_inventory_stone_attribute_filter = str(_inventory_stone_attribute_option.get_item_metadata(item_index))
+	if item_index <= 0:
+		_inventory_stone_attribute_option.select(0)
+		return
+	# 当前筛选键；为空的分隔项不会进入多选集合。
+	var filter_key: String = str(_inventory_stone_attribute_option.get_item_metadata(item_index))
+	if filter_key.is_empty():
+		return
+	# 新勾选状态；已存在条件再次点击时从并集筛选中移除。
+	var should_select: bool = filter_key not in _inventory_stone_attribute_filter
+	_inventory_stone_attribute_option.get_popup().set_item_checked(item_index, should_select)
+	if should_select:
+		_inventory_stone_attribute_filter.append(filter_key)
+	else:
+		_inventory_stone_attribute_filter.erase(filter_key)
+	_refresh_inventory_stone_attribute_filter_display()
 	if _inventory_panel.visible:
 		_rebuild_inventory_slots()
 
 
+func _on_clear_inventory_stone_attribute_filter_pressed() -> void:
+	_clear_inventory_stone_attribute_filter()
+	if _inventory_panel.visible:
+		_rebuild_inventory_slots()
+
+
+func _clear_inventory_stone_attribute_filter() -> void:
+	_inventory_stone_attribute_filter.clear()
+	if _inventory_stone_attribute_option == null:
+		return
+	for item_index in range(1, _inventory_stone_attribute_option.item_count):
+		if not str(_inventory_stone_attribute_option.get_item_metadata(item_index)).is_empty():
+			_inventory_stone_attribute_option.get_popup().set_item_checked(item_index, false)
+	_refresh_inventory_stone_attribute_filter_display()
+
+
+func _refresh_inventory_stone_attribute_filter_display() -> void:
+	if _inventory_stone_attribute_option == null:
+		return
+	_inventory_stone_attribute_option.set_item_text(0, "强化筛选（%d）" % _inventory_stone_attribute_filter.size())
+	_inventory_stone_attribute_option.select(0)
+	if _inventory_stone_attribute_clear_button != null:
+		_inventory_stone_attribute_clear_button.disabled = _inventory_stone_attribute_filter.is_empty()
+
+
 func _on_combat_resource_action_requested(item_resource: Resource) -> void:
-	if item_resource == null or str(item_resource.get("item_kind")) != "repair_kit":
+	if item_resource == null:
 		return
 	_combat_action_stone_resource = item_resource
 	_combat_action_weapon_resource = null
 	_combat_action_weapon_source_index = -1
+	# 全局库存服务；用于读取当前资源真实堆叠数量并决定丢弃菜单结构。
+	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+	_combat_action_item_quantity = int(global_inventory.call("get_storage_resource_quantity", item_resource, "backpack")) if global_inventory != null and global_inventory.has_method("get_storage_resource_quantity") else 1
 	_inventory_item_action_menu.clear()
-	_inventory_item_action_menu.add_item("使用", INVENTORY_ITEM_ACTION_USE)
+	if str(item_resource.get("item_kind")) == "repair_kit":
+		_inventory_item_action_menu.add_item("使用", INVENTORY_ITEM_ACTION_USE)
+	_add_inventory_discard_actions(_combat_action_item_quantity)
 	_inventory_item_action_menu.position = Vector2i(get_viewport().get_mouse_position())
 	_inventory_item_action_menu.popup()
 
@@ -2242,9 +2467,7 @@ func _on_inventory_item_action_menu_id_pressed(action_id: int) -> void:
 		# 强化目标选择页；自动显示全部背包武器并清空资源属性筛选和关键词。
 		_inventory_primary_category = InventoryQuery.PRIMARY_WEAPONS
 		_inventory_filter = INVENTORY_FILTER_ALL
-		_inventory_stone_attribute_filter = ""
-		if _inventory_stone_attribute_option != null:
-			_inventory_stone_attribute_option.select(0)
+		_clear_inventory_stone_attribute_filter()
 		if _inventory_search_edit != null:
 			_inventory_search_edit.clear()
 		_refresh_inventory_filter_buttons()
@@ -2264,6 +2487,16 @@ func _on_inventory_item_action_menu_id_pressed(action_id: int) -> void:
 		_rebuild_inventory_slots()
 		_combat_action_weapon_resource = null
 		_combat_action_weapon_source_index = -1
+	elif action_id == INVENTORY_ITEM_ACTION_DISCARD_ALL:
+		# 整组丢弃目标；武器优先使用武器引用，资源使用当前资源菜单引用。
+		var discard_resource: Resource = _combat_action_weapon_resource if _combat_action_weapon_resource != null else _combat_action_stone_resource
+		_discard_combat_inventory_item(discard_resource, _combat_action_item_quantity)
+	elif action_id == INVENTORY_ITEM_ACTION_DISCARD_PARTIAL:
+		# 部分丢弃目标；只对数量大于 1 的背包资源显示该操作。
+		var partial_resource: Resource = _combat_action_weapon_resource if _combat_action_weapon_resource != null else _combat_action_stone_resource
+		if partial_resource != null and _combat_quantity_dialog != null:
+			_pending_discard_resource = partial_resource
+			_combat_quantity_dialog.call("present_discard", str(partial_resource.get("display_name")), maxi(_combat_action_item_quantity, 1))
 
 
 func _on_combat_weapon_selected(weapon_resource: Resource, selected_context: String, selected_kind: String, selected_index: int) -> void:
@@ -2284,10 +2517,69 @@ func _on_combat_weapon_selected(weapon_resource: Resource, selected_context: Str
 	_combat_action_weapon_resource = weapon_resource
 	_combat_action_weapon_source_index = selected_index
 	_combat_action_stone_resource = null
+	_combat_action_item_quantity = 1
 	_inventory_item_action_menu.clear()
 	_inventory_item_action_menu.add_item("装备", INVENTORY_ITEM_ACTION_EQUIP)
+	_add_inventory_discard_actions(1)
 	_inventory_item_action_menu.position = Vector2i(get_viewport().get_mouse_position())
 	_inventory_item_action_menu.popup()
+
+
+func _add_inventory_discard_actions(item_quantity: int) -> void:
+	# 丢弃菜单；单件显示“丢弃”，堆叠资源显示“全部丢弃”和“部分丢弃”。
+	if item_quantity > 1:
+		_inventory_item_action_menu.add_item("全部丢弃", INVENTORY_ITEM_ACTION_DISCARD_ALL)
+		_inventory_item_action_menu.add_item("部分丢弃", INVENTORY_ITEM_ACTION_DISCARD_PARTIAL)
+	else:
+		_inventory_item_action_menu.add_item("丢弃", INVENTORY_ITEM_ACTION_DISCARD_ALL)
+
+
+func _on_combat_quantity_confirmed(quantity: int) -> void:
+	if _pending_discard_resource == null:
+		return
+	# 已确认丢弃资源；清空等待状态后执行，避免重复信号再次消费。
+	var discard_resource: Resource = _pending_discard_resource
+	_pending_discard_resource = null
+	_discard_combat_inventory_item(discard_resource, quantity)
+
+
+func _discard_combat_inventory_item(item_resource: Resource, requested_quantity: int) -> void:
+	if item_resource == null or _game_world == null:
+		return
+	if str(item_resource.get("weapon_type")) in ["ranged", "melee"]:
+		# 武器丢弃复用现有拖出背包流程，保留原资源实例、耐久、强化状态和生成失败回滚。
+		var drop_data: Dictionary = {"source_context": "inventory", "slot_kind": "inventory", "slot_index": _combat_action_weapon_source_index, "weapon_data": item_resource}
+		_drop_inventory_source_weapon_to_world(drop_data, item_resource)
+	else:
+		# 全局库存服务；资源堆叠必须在地面生成完成后从背包原子扣除。
+		var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+		if global_inventory == null or not global_inventory.has_method("get_storage_resource_quantity") or not _game_world.has_method("spawn_item_drop_near_player"):
+			return
+		# 实际丢弃数量；弹窗确认后再次按背包当前数量限制，避免数量变化造成负堆叠。
+		var stored_quantity: int = int(global_inventory.call("get_storage_resource_quantity", item_resource, "backpack"))
+		if stored_quantity <= 0:
+			return
+		# 实际丢弃数量；限制到当前真实堆叠，防止旧弹窗数量过期。
+		var discard_quantity: int = clampi(requested_quantity, 1, stored_quantity)
+		# 地面资源实例；每个单位使用独立副本，重新拾取时仍可按签名合并且不会共享同一实例身份。
+		var dropped_resources: Array[Resource] = []
+		for _discard_index in range(discard_quantity):
+			# 单个地面资源副本；每件拥有独立实例身份，拾取后仍按签名自动堆叠。
+			var dropped_resource: Resource = item_resource.duplicate(true) as Resource
+			if dropped_resource == null or not bool(_game_world.call("spawn_item_drop_near_player", dropped_resource)):
+				return
+			dropped_resources.append(dropped_resource)
+		if not bool(global_inventory.call("consume_storage_resource_quantity", item_resource, "backpack", discard_quantity)):
+			return
+		for dropped_resource in dropped_resources:
+			if global_inventory.has_method("register_combat_dropped_resource"):
+				global_inventory.call("register_combat_dropped_resource", dropped_resource)
+	_combat_action_stone_resource = null
+	_combat_action_weapon_resource = null
+	_combat_action_weapon_source_index = -1
+	_combat_action_item_quantity = 1
+	_rebuild_inventory_slots()
+	_refresh_nearby_drop_panel()
 
 
 func _on_combat_enhancement_drop_received(stone_resource: Resource, source_location: String, weapon_resource: Resource) -> void:
@@ -2355,25 +2647,23 @@ func _capture_combat_stone_return_view() -> void:
 	_combat_stone_return_primary_category = _inventory_primary_category
 	_combat_stone_return_filter = _inventory_filter
 	_combat_stone_return_search_text = _inventory_search_edit.text if _inventory_search_edit != null else ""
-	_combat_stone_return_attribute_filter = _inventory_stone_attribute_filter
+	_combat_stone_return_attribute_filter = _inventory_stone_attribute_filter.duplicate()
 
 
 func _restore_combat_stone_return_view() -> void:
 	_combat_stone_return_view_pending = false
 	_inventory_primary_category = _combat_stone_return_primary_category
 	_inventory_filter = _combat_stone_return_filter
-	_inventory_stone_attribute_filter = _combat_stone_return_attribute_filter
+	_inventory_stone_attribute_filter = _combat_stone_return_attribute_filter.duplicate()
 	if _inventory_search_edit != null:
 		_inventory_search_edit.text = _combat_stone_return_search_text
 	if _inventory_stone_attribute_option != null:
-		# 属性选项索引；默认 0 表示全部属性，匹配到原筛选键时恢复对应选项。
-		var attribute_option_index: int = 0
-		# 属性选项遍历索引；取值为下拉框合法下标，用于查找原筛选键。
-		for option_index in range(_inventory_stone_attribute_option.item_count):
-			if str(_inventory_stone_attribute_option.get_item_metadata(option_index)) == _combat_stone_return_attribute_filter:
-				attribute_option_index = option_index
-				break
-		_inventory_stone_attribute_option.select(attribute_option_index)
+		for option_index in range(1, _inventory_stone_attribute_option.item_count):
+			# 当前选项筛选键；根据返回页面保存的多选集合恢复勾选状态。
+			var filter_key: String = str(_inventory_stone_attribute_option.get_item_metadata(option_index))
+			if not filter_key.is_empty():
+				_inventory_stone_attribute_option.get_popup().set_item_checked(option_index, filter_key in _inventory_stone_attribute_filter)
+		_refresh_inventory_stone_attribute_filter_display()
 	_refresh_inventory_filter_buttons()
 
 
@@ -2662,6 +2952,8 @@ func _set_death_overlay_visible(visible: bool) -> void:
 	if visible:
 		_inventory_panel.visible = false
 		_large_map_overlay.visible = false
+		if _supply_extraction_overlay != null:
+			_supply_extraction_overlay.visible = false
 		_pause_overlay.visible = false
 		_pause_menu_panel.visible = false
 		_pause_settings_panel.visible = false

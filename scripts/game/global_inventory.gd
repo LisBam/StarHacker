@@ -46,6 +46,10 @@ const DEFAULT_MELEE_WEAPON_ID: String = "phase_blade"
 const DEFAULT_STARTING_COINS: int = 0
 ## 战斗失败默认保留比例；默认 0.5，使背包内每件武器和每颗资源长期平均各保留 50%。
 const DEFAULT_FAILURE_RETENTION_RATIO: float = 0.5
+## 单局物资送回价值上限；默认 1000 金币，背包与装备栏送回价值共同累计且不会因关闭面板重置。
+const COMBAT_SHIPPING_VALUE_LIMIT: int = 1000
+## 物资送回运费比例；默认按物品价值的 20% 向上取整扣除局外金币。
+const COMBAT_SHIPPING_FEE_RATIO: float = 0.20
 ## 永久仓库位置标识；默认供局外拖拽接口识别安全存储来源和目标。
 const STORAGE_LOCATION_WAREHOUSE: String = "warehouse"
 ## 随身背包位置标识；默认供局外拖拽接口识别战斗携带来源和目标。
@@ -92,6 +96,8 @@ var _run_seen_resource_instance_ids: Dictionary = {}
 var _run_gained_resources: Array[Resource] = []
 ## 最近一次战斗结算；包含 result、gained_entries、lost_entries 及兼容名称数组，默认空字典。
 var _last_run_outcome: Dictionary = {}
+## 当前正式战斗已经送回仓库的物品总价值；默认 0，每次开始新战斗时重置，最大不超过 1000。
+var _combat_shipped_value: int = 0
 ## 存档是否已排队；默认 false，同一帧多次拖拽操作只在帧末写盘一次。
 var _save_queued: bool = false
 ## 耐久变化合并存档间隔；默认 0.5 秒，高射速连续射击期间最多每半秒触发一次实际存档写入。
@@ -120,6 +126,7 @@ func _notification(what: int) -> void:
 
 func begin_combat_run() -> void:
 	_run_active = true
+	_combat_shipped_value = 0
 	_run_seen_resource_instance_ids.clear()
 	_run_gained_resources.clear()
 	# 开局物品记录；取值为背包和装备中的全部有效记录，用于建立战斗内已见资源身份集合。
@@ -265,6 +272,99 @@ func get_coins() -> int:
 	return _coins
 
 
+func get_combat_shipped_value() -> int:
+	# 已送回价值仅在当前战斗内累计，返回值限制在合法范围以兼容旧运行状态。
+	return clampi(_combat_shipped_value, 0, COMBAT_SHIPPING_VALUE_LIMIT)
+
+
+func get_combat_shipping_remaining_value() -> int:
+	# 剩余送回价值；所有物资撤离点共用同一单局额度，关闭或重新打开面板不会恢复。
+	return maxi(COMBAT_SHIPPING_VALUE_LIMIT - get_combat_shipped_value(), 0)
+
+
+func get_combat_shipping_quote(item_resource: Resource, source_location: String, requested_quantity: int = 1) -> Dictionary:
+	# 默认报价；调用方可统一读取 selectable、value、fee 和 message，不需要对空资源单独判空。
+	var quote: Dictionary = {"selectable": false, "value": 0, "fee": 0, "quantity": 0, "message": "物品不可送回"}
+	if not _run_active or item_resource == null or requested_quantity <= 0:
+		return quote
+	# 可送回数量；背包资源可按堆叠数量选择，装备槽只允许整件武器。
+	var available_quantity: int = get_storage_resource_quantity(item_resource, source_location) if _is_storage_location(source_location) else (1 if get_equipment_location_resource(source_location) == item_resource else 0)
+	if available_quantity <= 0:
+		quote["message"] = "物品已不在原位置"
+		return quote
+	# 实际报价数量；旧弹窗确认后数量变化时限制到当前仍持有的数量。
+	var shipping_quantity: int = clampi(requested_quantity, 1, available_quantity)
+	# 送回价值；按物品当前有效单价乘数量累计到单局 1000 金币上限。
+	var shipping_value: int = _get_resource_sell_price(item_resource) * shipping_quantity
+	# 运费；按总价值的 20% 向上取整，零价值物品运费保持 0。
+	var shipping_fee: int = ceili(float(shipping_value) * COMBAT_SHIPPING_FEE_RATIO) if shipping_value > 0 else 0
+	quote["value"] = shipping_value
+	quote["fee"] = shipping_fee
+	quote["quantity"] = shipping_quantity
+	if shipping_value > get_combat_shipping_remaining_value():
+		quote["message"] = "超过本局剩余送回价值"
+		return quote
+	if _coins < shipping_fee:
+		quote["message"] = "金币不足，无法支付运费"
+		return quote
+	quote["selectable"] = true
+	quote["message"] = "可以送回仓库"
+	return quote
+
+
+func ship_combat_resource_to_warehouse(item_resource: Resource, source_location: String, requested_quantity: int = 1) -> Dictionary:
+	# 执行前报价；同一接口完成数量、额度和金币复核，避免 UI 预览状态过期后产生负数或超额送回。
+	var quote: Dictionary = get_combat_shipping_quote(item_resource, source_location, requested_quantity)
+	if not bool(quote.get("selectable", false)):
+		return {"success": false, "message": str(quote.get("message", "无法送回仓库"))}
+	# 实际送回数量；已经由报价限制到当前所有权范围。
+	var shipping_quantity: int = int(quote.get("quantity", 1))
+	# 待移动记录；背包支持拆分堆叠，装备槽只会返回完整武器记录。
+	var moving_record: Dictionary = {}
+	if _is_storage_location(source_location):
+		# 来源记录下标；物品必须仍位于背包，仓库物品不允许重复送回仓库。
+		if source_location != STORAGE_LOCATION_BACKPACK:
+			return {"success": false, "message": "只有背包和装备栏物品可以送回"}
+		# 背包来源下标；通过资源实例定位，避免重复物品送回错误记录。
+		var source_index: int = _find_storage_record_index(source_location, item_resource)
+		if source_index < 0 or source_index >= _backpack_records.size():
+			return {"success": false, "message": "物品已不在背包中"}
+		# 来源记录；整组直接移动，部分堆叠复制独立资源并保留原记录元数据。
+		var source_record: Dictionary = _backpack_records[source_index]
+		# 当前背包数量；限制在合法堆叠范围，武器固定为 1。
+		var stored_quantity: int = clampi(int(source_record.get("quantity", 1)), 1, MAX_STACK_QUANTITY)
+		if shipping_quantity >= stored_quantity:
+			moving_record = source_record
+			_backpack_records.remove_at(source_index)
+		else:
+			# 部分送回资源副本；目标仓库必须持有独立实例，后续消费和存档不会影响背包余量。
+			var moving_resource: Resource = item_resource.duplicate(true) as Resource
+			if moving_resource == null:
+				return {"success": false, "message": "无法拆分该物品堆叠"}
+			moving_record = _create_record(moving_resource, float(source_record.get("acquired_at", -1.0)))
+			moving_record["last_extraction_epoch"] = int(source_record.get("last_extraction_epoch", 0))
+			moving_record["quantity"] = shipping_quantity
+			source_record["quantity"] = stored_quantity - shipping_quantity
+	else:
+		moving_record = _take_equipment_record(source_location)
+		if moving_record.is_empty():
+			return {"success": false, "message": "装备槽物品已发生变化"}
+	_insert_record_with_stack_merge(_warehouse_records, moving_record)
+	# 实际费用与额度；所有权移动成功后同步扣费和累计，随后只排队一次存档。
+	var shipping_fee: int = int(quote.get("fee", 0))
+	# 实际送回价值；累计到当前战斗的 1000 金币总上限。
+	var shipping_value: int = int(quote.get("value", 0))
+	_coins = maxi(_coins - shipping_fee, 0)
+	_combat_shipped_value = clampi(_combat_shipped_value + shipping_value, 0, COMBAT_SHIPPING_VALUE_LIMIT)
+	_refresh_current_ranged_slot_after_equipment_change()
+	_queue_save_inventory()
+	inventory_changed.emit()
+	equipment_changed.emit()
+	warehouse_changed.emit()
+	coins_changed.emit()
+	return {"success": true, "message": "物品已送回仓库", "value": shipping_value, "fee": shipping_fee, "quantity": shipping_quantity}
+
+
 func adjust_coins(amount: int) -> int:
 	# 调整后金币；取值至少为 0，开发者减少金币时不会形成负数余额。
 	var adjusted_coins: int = maxi(_coins + amount, 0)
@@ -289,6 +389,18 @@ func purchase_resource_to_warehouse(item_resource: Resource, purchase_price: int
 	_queue_save_inventory()
 	warehouse_changed.emit()
 	coins_changed.emit()
+	return true
+
+
+func add_storage_resource(item_resource: Resource, target_location: String, quantity: int = 1) -> bool:
+	if item_resource == null or not _is_storage_location(target_location) or quantity <= 0:
+		return false
+	# 新增记录；锻造升阶等局外系统通过统一接口取得所有权，资源堆叠继续遵守签名和单组 99 上限。
+	var added_record: Dictionary = _create_record(item_resource)
+	added_record["quantity"] = 1 if _is_weapon_resource(item_resource) else clampi(quantity, 1, MAX_STACK_QUANTITY)
+	_insert_record_with_stack_merge(_get_storage_records(target_location), added_record)
+	_queue_save_inventory()
+	_emit_storage_changed(target_location)
 	return true
 
 
@@ -843,6 +955,13 @@ func add_backpack_resource(item_resource: Resource, target_index: int = -1) -> b
 	_queue_save_inventory()
 	inventory_changed.emit()
 	return true
+
+
+func register_combat_dropped_resource(item_resource: Resource) -> void:
+	if not _run_active or item_resource == null:
+		return
+	# 丢弃资源身份；堆叠拆分后形成的新实例仍属于玩家原有物品，重新捡回时不计入本局首次战利品。
+	_run_seen_resource_instance_ids[item_resource.get_instance_id()] = true
 
 
 func remove_backpack_resource(item_resource: Resource) -> bool:
@@ -1672,7 +1791,7 @@ func _deserialize_record(serialized_record: Dictionary) -> Dictionary:
 		enhancement_stone.quality_id = str(serialized_record.get("quality_id", EnhancementRules.QUALITY_LOW))
 		# 恢复显示名称；旧存档的通用“强化石”自动升级为对应品质名称。
 		var saved_display_name: String = str(serialized_record.get("display_name", ""))
-		enhancement_stone.display_name = EnhancementRules.get_quality_display_name(enhancement_stone.quality_id) if saved_display_name.is_empty() or saved_display_name == "强化石" else saved_display_name
+		enhancement_stone.display_name = EnhancementRules.get_quality_display_name(enhancement_stone.quality_id) if saved_display_name.is_empty() or saved_display_name in ["强化石", "低级强化石"] else saved_display_name
 		enhancement_stone.description = str(serialized_record.get("description", enhancement_stone.description))
 		enhancement_stone.icon_text = str(serialized_record.get("icon_text", enhancement_stone.icon_text))
 		enhancement_stone.sell_price = maxi(int(serialized_record.get("sell_price", 0)), 0)

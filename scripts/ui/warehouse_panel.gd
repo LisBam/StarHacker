@@ -96,8 +96,10 @@ var _storage_search_edit: LineEdit
 var _storage_sort_option: OptionButton
 ## 强化属性筛选下拉框；默认全部属性，只在资源分类显示并按强化石词条键筛选。
 var _stone_attribute_option: OptionButton
-## 当前强化属性筛选键；默认空字符串表示不过滤具体属性。
-var _stone_attribute_filter: String = ""
+## 清空强化属性筛选按钮；默认只在资源分类显示，用于一次移除所有多选条件。
+var _stone_attribute_clear_button: Button
+## 当前强化属性筛选键集合；默认空数组表示不过滤具体属性，多项按并集匹配。
+var _stone_attribute_filter: Array[String] = []
 ## 当前展示排序；默认 acquired_time，可切换 item_value 且不修改真实库存顺序。
 var _storage_sort_mode: String = InventoryQuery.SORT_ACQUIRED_TIME
 ## 物品操作菜单；普通点击武器或强化石时显示出售与可选使用操作。
@@ -136,8 +138,8 @@ var _stone_return_primary_category: String = InventoryQuery.PRIMARY_RESOURCES
 var _stone_return_subcategory: String = InventoryQuery.SUBCATEGORY_ENHANCEMENT_STONES
 ## 强化选择前搜索文本；默认空字符串，成功强化后恢复玩家原查询。
 var _stone_return_search_text: String = ""
-## 强化选择前属性筛选；默认空字符串表示全部属性，成功强化后恢复原筛选。
-var _stone_return_attribute_filter: String = ""
+## 强化选择前属性筛选集合；默认空数组表示全部属性，成功强化后恢复原多选状态。
+var _stone_return_attribute_filter: Array[String] = []
 ## 是否存在待恢复的强化石页面；默认 false，点击“使用”跳转武器页后设为 true，取消或成功强化后清除。
 var _stone_return_view_pending: bool = false
 ## 待使用修复包资源；非空时下一次点击任意持有武器会消耗一件修复包并恢复耐久。
@@ -247,7 +249,7 @@ func _build_storage_interface() -> void:
 	query_bar.add_child(_storage_sort_option)
 	_stone_attribute_option = OptionButton.new()
 	_stone_attribute_option.custom_minimum_size = Vector2(142.0, 36.0)
-	_stone_attribute_option.add_item("全部强化属性")
+	_stone_attribute_option.add_item("强化筛选（0）")
 	_stone_attribute_option.set_item_metadata(0, "")
 	# 筛选方向顺序；先列出全部“+”词条，再列出全部“-”词条，方便按方向连续浏览。
 	for direction in InventoryQuery.STONE_FILTER_DIRECTIONS:
@@ -255,9 +257,18 @@ func _build_storage_interface() -> void:
 		# 可筛选属性；每个属性分别建立精确方向选项，例如“伤害+”和“伤害-”。
 		for stat_name in EnhancementRules.STAT_KEYS:
 			_stone_attribute_option.add_item(InventoryQuery.get_stone_attribute_filter_label(stat_name, direction))
-			_stone_attribute_option.set_item_metadata(_stone_attribute_option.item_count - 1, InventoryQuery.build_stone_attribute_filter_key(stat_name, direction))
+			# 当前属性选项下标；用于绑定筛选键并开启复选状态。
+			var attribute_item_index: int = _stone_attribute_option.item_count - 1
+			_stone_attribute_option.set_item_metadata(attribute_item_index, InventoryQuery.build_stone_attribute_filter_key(stat_name, direction))
+			_stone_attribute_option.get_popup().set_item_as_checkable(attribute_item_index, true)
+	_stone_attribute_option.get_popup().hide_on_checkable_item_selection = false
 	_stone_attribute_option.item_selected.connect(_on_stone_attribute_selected)
 	query_bar.add_child(_stone_attribute_option)
+	_stone_attribute_clear_button = Button.new()
+	_stone_attribute_clear_button.text = "清空筛选"
+	_stone_attribute_clear_button.custom_minimum_size = Vector2(92.0, 36.0)
+	_stone_attribute_clear_button.pressed.connect(_on_clear_stone_attribute_filter_pressed)
+	query_bar.add_child(_stone_attribute_clear_button)
 
 	# 一级分类栏；只显示武器和资源，二级分类由下一行根据主分类动态生成。
 	var primary_filter_bar: HBoxContainer = HBoxContainer.new()
@@ -522,8 +533,7 @@ func _rebuild_storage_subcategory_buttons() -> void:
 func _on_storage_primary_category_pressed(category_name: String) -> void:
 	_storage_primary_category = category_name
 	_storage_subcategory = InventoryQuery.SUBCATEGORY_ALL
-	_stone_attribute_filter = ""
-	_stone_attribute_option.select(0)
+	_clear_stone_attribute_filter()
 	_rebuild_storage_subcategory_buttons()
 	_refresh_storage_category_buttons()
 	_rebuild_storage_content()
@@ -547,6 +557,8 @@ func _refresh_storage_category_buttons() -> void:
 		if subcategory_button != null:
 			subcategory_button.set_pressed_no_signal(str(category_name) == _storage_subcategory)
 	_stone_attribute_option.visible = _storage_primary_category == InventoryQuery.PRIMARY_RESOURCES
+	_stone_attribute_clear_button.visible = _storage_primary_category == InventoryQuery.PRIMARY_RESOURCES
+	_stone_attribute_clear_button.disabled = _stone_attribute_filter.is_empty()
 
 
 func _on_storage_search_changed(_new_text: String) -> void:
@@ -561,8 +573,42 @@ func _on_storage_sort_selected(item_index: int) -> void:
 
 
 func _on_stone_attribute_selected(item_index: int) -> void:
-	_stone_attribute_filter = str(_stone_attribute_option.get_item_metadata(item_index))
+	if item_index <= 0:
+		_stone_attribute_option.select(0)
+		return
+	# 当前筛选键；分隔项和摘要项不会进入多选集合。
+	var filter_key: String = str(_stone_attribute_option.get_item_metadata(item_index))
+	if filter_key.is_empty():
+		return
+	# 新勾选状态；同一条件再次选择会从并集筛选中移除。
+	var should_select: bool = filter_key not in _stone_attribute_filter
+	_stone_attribute_option.get_popup().set_item_checked(item_index, should_select)
+	if should_select:
+		_stone_attribute_filter.append(filter_key)
+	else:
+		_stone_attribute_filter.erase(filter_key)
+	_refresh_stone_attribute_filter_display()
 	_rebuild_storage_content()
+
+
+func _on_clear_stone_attribute_filter_pressed() -> void:
+	_clear_stone_attribute_filter()
+	_rebuild_storage_content()
+
+
+func _clear_stone_attribute_filter() -> void:
+	_stone_attribute_filter.clear()
+	for item_index in range(1, _stone_attribute_option.item_count):
+		if not str(_stone_attribute_option.get_item_metadata(item_index)).is_empty():
+			_stone_attribute_option.get_popup().set_item_checked(item_index, false)
+	_refresh_stone_attribute_filter_display()
+
+
+func _refresh_stone_attribute_filter_display() -> void:
+	_stone_attribute_option.set_item_text(0, "强化筛选（%d）" % _stone_attribute_filter.size())
+	_stone_attribute_option.select(0)
+	if _stone_attribute_clear_button != null:
+		_stone_attribute_clear_button.disabled = _stone_attribute_filter.is_empty()
 
 
 func _get_storage_summary_text(warehouse_entries: Array, backpack_entries: Array) -> String:
@@ -661,8 +707,7 @@ func _on_item_action_menu_id_pressed(action_id: int) -> void:
 		# 强化目标选择页；自动切回全部武器并清空查询条件，确保仓库、背包和装备栏目标立即可见。
 		_storage_primary_category = InventoryQuery.PRIMARY_WEAPONS
 		_storage_subcategory = InventoryQuery.SUBCATEGORY_ALL
-		_stone_attribute_filter = ""
-		_stone_attribute_option.select(0)
+		_clear_stone_attribute_filter()
 		_storage_search_edit.clear()
 		_rebuild_storage_subcategory_buttons()
 		_refresh_storage_category_buttons()
@@ -675,8 +720,7 @@ func _on_item_action_menu_id_pressed(action_id: int) -> void:
 		# 修复目标选择页；武器可位于永久仓库、随身背包或局外装备栏，因此显示完整武器浏览视图。
 		_storage_primary_category = InventoryQuery.PRIMARY_WEAPONS
 		_storage_subcategory = InventoryQuery.SUBCATEGORY_ALL
-		_stone_attribute_filter = ""
-		_stone_attribute_option.select(0)
+		_clear_stone_attribute_filter()
 		_storage_search_edit.clear()
 		_rebuild_storage_subcategory_buttons()
 		_refresh_storage_category_buttons()
@@ -844,23 +888,22 @@ func _capture_stone_return_view() -> void:
 	_stone_return_primary_category = _storage_primary_category
 	_stone_return_subcategory = _storage_subcategory
 	_stone_return_search_text = _storage_search_edit.text
-	_stone_return_attribute_filter = _stone_attribute_filter
+	_stone_return_attribute_filter = _stone_attribute_filter.duplicate()
 
 
 func _restore_stone_return_view() -> void:
 	_stone_return_view_pending = false
 	_storage_primary_category = _stone_return_primary_category
 	_storage_subcategory = _stone_return_subcategory
-	_stone_attribute_filter = _stone_return_attribute_filter
+	_stone_attribute_filter = _stone_return_attribute_filter.duplicate()
 	_storage_search_edit.text = _stone_return_search_text
-	# 属性选项索引；默认 0 表示全部属性，匹配到原筛选键时恢复对应下拉项。
-	var attribute_option_index: int = 0
-	# 属性选项遍历索引；取值为下拉框合法下标，用于查找原筛选键。
-	for option_index in range(_stone_attribute_option.item_count):
-		if str(_stone_attribute_option.get_item_metadata(option_index)) == _stone_return_attribute_filter:
-			attribute_option_index = option_index
-			break
-	_stone_attribute_option.select(attribute_option_index)
+	# 恢复全部多选勾选；返回强化石页面后保持玩家原有并集筛选组合。
+	for option_index in range(1, _stone_attribute_option.item_count):
+		# 当前选项筛选键；用于判断它是否属于保存的返回视图集合。
+		var filter_key: String = str(_stone_attribute_option.get_item_metadata(option_index))
+		if not filter_key.is_empty():
+			_stone_attribute_option.get_popup().set_item_checked(option_index, filter_key in _stone_attribute_filter)
+	_refresh_stone_attribute_filter_display()
 	_rebuild_storage_subcategory_buttons()
 	_refresh_storage_category_buttons()
 

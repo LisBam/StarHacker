@@ -11,6 +11,10 @@ signal quantity_confirmed(quantity: int)
 const DISPLAY_MODE_SALE: String = "sale"
 ## 移动数量模式标识；跨仓库和背包拖拽堆叠时显示移动方向与实际数量。
 const DISPLAY_MODE_TRANSFER: String = "transfer"
+## 丢弃数量模式标识；战斗背包部分丢弃时显示本次丢弃数量，不计算金币。
+const DISPLAY_MODE_DISCARD: String = "discard"
+## 物资送回数量模式标识；显示本次价值、20% 运费和送回后的剩余额度。
+const DISPLAY_MODE_SHIPPING: String = "shipping"
 
 ## 弹窗默认宽度；默认 520 像素可容纳物品名称、数量滑条和数字输入框。
 ## 当前尺寸补充；默认值已调整为 400 像素以保持紧凑，仍可在检查器中按界面语言长度调整，运行时无需动态修改。
@@ -24,6 +28,12 @@ const DISPLAY_MODE_TRANSFER: String = "transfer"
 var _maximum_quantity: int = 1
 ## 当前单件售价；取值大于等于 0，默认 0 用于即时计算出售总价。
 var _unit_sell_price: int = 0
+## 当前单件物品价值；默认 0，仅物资送回模式用于计算价值、运费和额度。
+var _unit_item_value: int = 0
+## 当前可用送回价值；默认 0，仅物资送回模式用于提示选择数量是否会超过单局上限。
+var _shipping_remaining_value: int = 0
+## 当前送回运费比例；默认 0.20，与全局库存服务的正式结算规则保持一致。
+var _shipping_fee_ratio: float = 0.20
 ## 当前物品显示名称；默认“物品”，配置后用于标题说明本次出售目标。
 var _item_display_name: String = "物品"
 ## 当前展示模式；默认出售模式，移动模式下不计算金币并改为显示本次将移动的数量。
@@ -69,6 +79,31 @@ func present_transfer(item_display_name: String, maximum_quantity: int, source_d
 	title = "选择移动数量"
 	get_ok_button().text = "移动"
 	_description_label.text = "%s · %s → %s · 最多 %d 个" % [_item_display_name, source_display_name, target_display_name, _maximum_quantity]
+	_present_current_configuration()
+
+
+func present_discard(item_display_name: String, maximum_quantity: int) -> void:
+	_display_mode = DISPLAY_MODE_DISCARD
+	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
+	_maximum_quantity = maxi(maximum_quantity, 1)
+	_unit_sell_price = 0
+	title = "选择丢弃数量"
+	get_ok_button().text = "丢弃"
+	_description_label.text = "%s · 最多可丢弃 %d 个" % [_item_display_name, _maximum_quantity]
+	_present_current_configuration()
+
+
+func present_shipping(item_display_name: String, maximum_quantity: int, unit_item_value: int, shipping_remaining_value: int, shipping_fee_ratio: float = 0.20) -> void:
+	_display_mode = DISPLAY_MODE_SHIPPING
+	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
+	_maximum_quantity = maxi(maximum_quantity, 1)
+	_unit_sell_price = 0
+	_unit_item_value = maxi(unit_item_value, 0)
+	_shipping_remaining_value = maxi(shipping_remaining_value, 0)
+	_shipping_fee_ratio = clampf(shipping_fee_ratio, 0.0, 1.0)
+	title = "选择送回数量"
+	get_ok_button().text = "送回仓库"
+	_description_label.text = "%s · 最多可选择 %d 个" % [_item_display_name, _maximum_quantity]
 	_present_current_configuration()
 
 
@@ -156,9 +191,24 @@ func _on_spin_box_value_changed(value: float) -> void:
 func _refresh_total_price(quantity: int) -> void:
 	# 有效数量；滑条和数字框始终限制在当前堆叠范围，摘要只读取该标准化结果。
 	var resolved_quantity: int = clampi(quantity, 1, _maximum_quantity)
+	get_ok_button().disabled = false
 	if _display_mode == DISPLAY_MODE_TRANSFER:
 		_total_price_label.text = "将移动 %d 个" % resolved_quantity
 		return
+	if _display_mode == DISPLAY_MODE_DISCARD:
+		_total_price_label.text = "将丢弃 %d 个" % resolved_quantity
+		return
+	if _display_mode == DISPLAY_MODE_SHIPPING:
+		# 送回摘要；运费按总价值比例向上取整，剩余额度允许显示负数以明确当前数量不可执行。
+		var shipping_value: int = _unit_item_value * resolved_quantity
+		# 当前数量运费；总价值乘配置比例后向上取整，与全局库存最终扣费一致。
+		var shipping_fee: int = ceili(float(shipping_value) * _shipping_fee_ratio) if shipping_value > 0 else 0
+		# 送回后的剩余额度；小于 0 时确认按钮禁用并通过负数明确超额规模。
+		var remaining_after_shipping: int = _shipping_remaining_value - shipping_value
+		_total_price_label.text = "价值 %d · 运费 %d · 送回后剩余 %d" % [shipping_value, shipping_fee, remaining_after_shipping]
+		get_ok_button().disabled = shipping_value > _shipping_remaining_value
+		return
+	get_ok_button().disabled = false
 	# 出售总价；单价乘当前数量，用于确认前即时预览金币收益。
 	var total_sell_price: int = _unit_sell_price * resolved_quantity
 	_total_price_label.text = "可获得 %d 金币" % total_sell_price

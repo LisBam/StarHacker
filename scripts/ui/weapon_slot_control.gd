@@ -17,9 +17,38 @@ const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_form
 const GLOBAL_STORAGE_DRAG_DATA_TYPE: String = "global_storage_item"
 ## 武器耐久条组件；统一贴在槽位底部并只读取 WeaponData 耐久状态。
 const WEAPON_DURABILITY_BAR_SCRIPT: Script = preload("res://scripts/ui/weapon_durability_bar.gd")
+## 不可选目标覆盖颜色；默认使用半透明灰黑层，仍允许玩家辨认武器名称和耐久状态。
+const UNAVAILABLE_TARGET_OVERLAY_COLOR: Color = Color(0.16, 0.16, 0.16, 0.72)
+## 拖拽预览最小尺寸；默认 128×50，保证武器名称在鼠标旁保持清晰且不会遮挡过多背包内容。
+const DRAG_PREVIEW_MINIMUM_SIZE: Vector2 = Vector2(128.0, 50.0)
+## 拖拽预览背景颜色；默认使用高透明度深蓝黑，与战斗背包武器槽风格一致。
+const DRAG_PREVIEW_BACKGROUND_COLOR: Color = Color(0.06, 0.09, 0.12, 0.88)
+## 拖拽预览边框颜色；默认使用明亮青色，突出当前正在移动的武器。
+const DRAG_PREVIEW_BORDER_COLOR: Color = Color(0.48, 0.90, 1.0, 0.96)
 
 ## 点击与拖拽判定阈值；默认 6 像素，鼠标移动达到该距离后只允许拖拽，不再触发点击操作菜单。
 @export_range(0.0, 64.0, 0.5) var click_drag_threshold_pixels: float = 6.0
+@export_category("背包武器交互动效")
+## 点击按压缩放；默认 0.94，仅用于局内背包武器，数值越小按压反馈越明显，运行时无需动态修改。
+@export_range(0.80, 1.0, 0.01) var inventory_click_press_scale: float = 0.94
+## 点击回弹峰值；默认 1.04，仅用于普通点击释放，数值越大弹性表现越强，运行时无需动态修改。
+@export_range(1.0, 1.20, 0.01) var inventory_click_bounce_scale: float = 1.04
+## 点击按压动画时长；默认 0.07 秒，控制鼠标按下后的收缩速度，运行时无需动态修改。
+@export_range(0.01, 0.30, 0.01) var inventory_click_press_duration: float = 0.07
+## 点击释放动画时长；默认 0.14 秒，控制回弹恢复速度，运行时无需动态修改。
+@export_range(0.04, 0.50, 0.01) var inventory_click_release_duration: float = 0.14
+## 拖拽来源缩放；默认 0.96，拖动期间让原槽位轻微收缩以表达物品已被拿起，运行时无需动态修改。
+@export_range(0.80, 1.0, 0.01) var inventory_drag_source_scale: float = 0.96
+## 拖拽来源透明度；默认 0.58，拖动期间降低原槽位存在感，取值越低原位置越淡，运行时无需动态修改。
+@export_range(0.20, 1.0, 0.01) var inventory_drag_source_opacity: float = 0.58
+## 拖拽预览初始缩放；默认 0.92，预览出现后会回弹放大，运行时无需动态修改。
+@export_range(0.70, 1.0, 0.01) var inventory_drag_preview_start_scale: float = 0.92
+## 拖拽预览脉冲缩放；默认 1.04，拖动期间循环轻微呼吸，运行时无需动态修改。
+@export_range(1.0, 1.20, 0.01) var inventory_drag_preview_pulse_scale: float = 1.04
+## 拖拽预览单段脉冲时长；默认 0.32 秒，数值越小呼吸与摆动越快，运行时无需动态修改。
+@export_range(0.08, 1.0, 0.01) var inventory_drag_preview_pulse_duration: float = 0.32
+## 拖拽预览摆动弧度；默认 0.035 弧度，提供轻微左右动态且避免影响文字阅读，运行时无需动态修改。
+@export_range(0.0, 0.15, 0.005) var inventory_drag_preview_tilt_radians: float = 0.035
 
 ## 槽位所属上下文；取值为 equipment 或 inventory，默认 equipment，修改会影响拖拽来源和投放规则。
 var slot_context: String = "equipment"
@@ -37,6 +66,8 @@ var cooldown_ratio: float = 0.0
 var empty_text: String = "空"
 ## 当前槽位是否为强化目标；默认 false，选择强化武器期间会临时绘制绿色边框和背景。
 var is_enhancement_target_highlight: bool = false
+## 当前武器是否处于目标选择但不可选择状态；默认 false，满耐久武器在修复包选择期间会显示灰色覆盖层。
+var _weapon_target_selection_blocked: bool = false
 
 ## 标题标签缓存；默认由 _ready 创建，显示槽位编号或槽位名称，修改会影响标题刷新目标。
 var _title_label: Label
@@ -56,6 +87,10 @@ var _pending_left_click: bool = false
 var _left_press_position: Vector2 = Vector2.ZERO
 ## 当前按压是否已超过拖拽阈值；默认 false，超过后即使没有成功投放也不会弹出“装备”菜单。
 var _left_drag_exceeded_threshold: bool = false
+## 当前交互动效补间；默认 null，新点击或拖拽状态会终止旧补间，避免快速操作造成缩放叠加。
+var _interaction_tween: Tween
+## 不可选目标覆盖层；默认由 ready 创建并隐藏，仅在修复包选择期间覆盖满耐久武器。
+var _target_filter_overlay: ColorRect
 
 
 func _ready() -> void:
@@ -64,6 +99,7 @@ func _ready() -> void:
 		custom_minimum_size = Vector2(96.0, 76.0)
 	_build_content()
 	_build_durability_bar()
+	_build_target_filter_overlay()
 	_refresh_text()
 	gui_input.connect(_on_gui_input)
 
@@ -76,6 +112,7 @@ func set_slot_data(new_context: String, new_kind: String, new_index: int, new_we
 	is_selected = new_is_selected
 	if _durability_bar != null:
 		_durability_bar.call("configure", weapon_data)
+	_refresh_target_filter_overlay()
 	_refresh_text()
 	queue_redraw()
 
@@ -97,6 +134,17 @@ func set_cooldown_ratio(new_cooldown_ratio: float) -> void:
 
 func set_enhancement_target_highlight(enabled: bool) -> void:
 	is_enhancement_target_highlight = enabled and weapon_data != null
+	_weapon_target_selection_blocked = false
+	_refresh_target_filter_overlay()
+	queue_redraw()
+
+
+func set_weapon_target_selection_state(selection_active: bool, selectable: bool) -> void:
+	# 目标选择状态；空槽不参与选择表现，已有武器根据可用性显示绿色高亮或灰色滤镜。
+	var has_weapon: bool = weapon_data != null and str(weapon_data.get("weapon_type")) in ["ranged", "melee"]
+	is_enhancement_target_highlight = selection_active and selectable and has_weapon
+	_weapon_target_selection_blocked = selection_active and not selectable and has_weapon
+	_refresh_target_filter_overlay()
 	queue_redraw()
 
 
@@ -126,16 +174,18 @@ func _draw() -> void:
 
 
 func _get_drag_data(_at_position: Vector2) -> Variant:
-	if weapon_data == null:
+	if weapon_data == null or _weapon_target_selection_blocked:
 		return null
 	_pending_left_click = false
 	_left_drag_exceeded_threshold = true
 
 	# 拖拽预览控件；取值为临时 Label，默认显示武器名称，修改会影响拖拽时鼠标旁的提示。
-	var preview_label: Label = Label.new()
-	preview_label.text = _get_weapon_display_name(weapon_data, empty_text)
-	preview_label.modulate = Color(0.9, 0.98, 1.0, 0.92)
-	set_drag_preview(preview_label)
+	# 动态预览补充；当前使用临时卡片替代纯文本标签，背包武器会循环呼吸摆动，其他槽位不播放循环动画。
+	var preview_control: Control = _create_drag_preview_control()
+	set_drag_preview(preview_control)
+	if slot_context == "inventory":
+		_play_inventory_drag_source_animation()
+		_play_inventory_drag_preview_animation(preview_control)
 
 	_active_drag_data = {
 		"source_context": slot_context,
@@ -207,6 +257,7 @@ func _notification(what: int) -> void:
 		drag_released_outside.emit(_active_drag_data)
 
 	_active_drag_data = {}
+	_restore_inventory_interaction_visual()
 
 
 func _build_content() -> void:
@@ -250,6 +301,20 @@ func _build_durability_bar() -> void:
 	_durability_bar.call("configure", weapon_data)
 
 
+func _build_target_filter_overlay() -> void:
+	_target_filter_overlay = ColorRect.new()
+	_target_filter_overlay.color = UNAVAILABLE_TARGET_OVERLAY_COLOR
+	_target_filter_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_target_filter_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_target_filter_overlay.visible = false
+	add_child(_target_filter_overlay)
+
+
+func _refresh_target_filter_overlay() -> void:
+	if _target_filter_overlay != null:
+		_target_filter_overlay.visible = _weapon_target_selection_blocked and weapon_data != null
+
+
 func _refresh_text() -> void:
 	if _title_label == null or _name_label == null or _detail_label == null:
 		return
@@ -265,7 +330,7 @@ func _make_custom_tooltip(_for_text: String) -> Object:
 
 
 func _on_gui_input(event: InputEvent) -> void:
-	if weapon_data == null:
+	if weapon_data == null or _weapon_target_selection_blocked:
 		return
 	if event is InputEventMouseMotion and _pending_left_click:
 		# 鼠标移动事件；按压期间只记录是否跨过阈值，实际拖拽数据仍由 Godot 控件协议生成。
@@ -282,13 +347,97 @@ func _on_gui_input(event: InputEvent) -> void:
 		_pending_left_click = true
 		_left_press_position = mouse_event.position
 		_left_drag_exceeded_threshold = false
+		_play_inventory_click_press_animation()
 		return
 	# 是否触发普通点击；释放位置仍处于阈值内且拖拽协议没有启动时才发送选择信号。
 	var should_emit_selection: bool = _pending_left_click and not _left_drag_exceeded_threshold and mouse_event.position.distance_to(_left_press_position) <= click_drag_threshold_pixels
 	_pending_left_click = false
 	_left_drag_exceeded_threshold = false
 	if should_emit_selection:
+		_play_inventory_click_release_animation()
 		item_selected.emit(weapon_data, slot_context, slot_kind, slot_index)
+	else:
+		_restore_inventory_interaction_visual()
+
+
+func _create_drag_preview_control() -> Control:
+	# 预览面板；深色半透明底与青色边框延续背包卡片风格，并通过最小尺寸保证长名称可读。
+	var preview_panel: PanelContainer = PanelContainer.new()
+	preview_panel.custom_minimum_size = DRAG_PREVIEW_MINIMUM_SIZE
+	preview_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# 预览样式；圆角和两像素边框用于从静态背包槽中分离正在拖动的武器。
+	var preview_style: StyleBoxFlat = StyleBoxFlat.new()
+	preview_style.bg_color = DRAG_PREVIEW_BACKGROUND_COLOR
+	preview_style.border_color = DRAG_PREVIEW_BORDER_COLOR
+	preview_style.set_border_width_all(2)
+	preview_style.set_corner_radius_all(6)
+	preview_panel.add_theme_stylebox_override("panel", preview_style)
+	# 预览名称；只显示武器名称，完整属性仍由原槽位悬停提示承担。
+	var preview_label: Label = Label.new()
+	preview_label.text = _get_weapon_display_name(weapon_data, empty_text)
+	preview_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	preview_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	preview_label.add_theme_font_size_override("font_size", 14)
+	preview_panel.add_child(preview_label)
+	return preview_panel
+
+
+func _play_inventory_click_press_animation() -> void:
+	if slot_context != "inventory":
+		return
+	_prepare_inventory_interaction_tween()
+	_interaction_tween.tween_property(self, "scale", Vector2.ONE * inventory_click_press_scale, inventory_click_press_duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_interaction_tween.parallel().tween_property(self, "modulate", Color(0.84, 0.96, 1.0, 1.0), inventory_click_press_duration)
+
+
+func _play_inventory_click_release_animation() -> void:
+	if slot_context != "inventory":
+		return
+	_prepare_inventory_interaction_tween()
+	# 回弹阶段；先略微放大并提亮，再回到原始比例和颜色，形成明确但短促的点击确认感。
+	var bounce_duration: float = inventory_click_release_duration * 0.45
+	var settle_duration: float = inventory_click_release_duration - bounce_duration
+	_interaction_tween.tween_property(self, "scale", Vector2.ONE * inventory_click_bounce_scale, bounce_duration).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_interaction_tween.parallel().tween_property(self, "modulate", Color(0.72, 0.96, 1.0, 1.0), bounce_duration)
+	_interaction_tween.tween_property(self, "scale", Vector2.ONE, settle_duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_interaction_tween.parallel().tween_property(self, "modulate", Color.WHITE, settle_duration)
+
+
+func _play_inventory_drag_source_animation() -> void:
+	if slot_context != "inventory":
+		return
+	_prepare_inventory_interaction_tween()
+	_interaction_tween.tween_property(self, "scale", Vector2.ONE * inventory_drag_source_scale, inventory_click_press_duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_interaction_tween.parallel().tween_property(self, "modulate", Color(1.0, 1.0, 1.0, inventory_drag_source_opacity), inventory_click_press_duration)
+
+
+func _play_inventory_drag_preview_animation(preview_control: Control) -> void:
+	if preview_control == null:
+		return
+	preview_control.scale = Vector2.ONE * inventory_drag_preview_start_scale
+	preview_control.pivot_offset = DRAG_PREVIEW_MINIMUM_SIZE * 0.5
+	# 预览补间；循环缩放和轻微左右摆动让拖拽状态持续可见，预览释放时补间会随节点自动销毁。
+	var preview_tween: Tween = preview_control.create_tween().set_loops()
+	preview_tween.tween_property(preview_control, "scale", Vector2.ONE * inventory_drag_preview_pulse_scale, inventory_drag_preview_pulse_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	preview_tween.parallel().tween_property(preview_control, "rotation", inventory_drag_preview_tilt_radians, inventory_drag_preview_pulse_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	preview_tween.tween_property(preview_control, "scale", Vector2.ONE, inventory_drag_preview_pulse_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	preview_tween.parallel().tween_property(preview_control, "rotation", -inventory_drag_preview_tilt_radians, inventory_drag_preview_pulse_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+
+func _prepare_inventory_interaction_tween() -> void:
+	if _interaction_tween != null and _interaction_tween.is_valid():
+		_interaction_tween.kill()
+	pivot_offset = size * 0.5
+	_interaction_tween = create_tween()
+	_interaction_tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+
+
+func _restore_inventory_interaction_visual() -> void:
+	if slot_context != "inventory":
+		return
+	_prepare_inventory_interaction_tween()
+	_interaction_tween.tween_property(self, "scale", Vector2.ONE, inventory_click_release_duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_interaction_tween.parallel().tween_property(self, "modulate", Color.WHITE, inventory_click_release_duration)
 
 
 func _get_slot_title() -> String:

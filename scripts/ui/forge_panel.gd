@@ -25,6 +25,8 @@ const FORGE_ANIMATION_ROTATIONS: float = 1.5
 
 ## 锻造面板最小尺寸；默认 960×650，在主菜单 720 高窗口中保留外层遮罩边距。
 @export var panel_minimum_size: Vector2 = Vector2(960.0, 650.0)
+## 主武器槽与牺牲槽边长；默认 84 像素，相比旧版 104 像素更紧凑，运行时无需动态修改。
+@export_range(64.0, 104.0, 1.0) var forge_slot_size: float = 84.0
 
 ## 全局库存服务缓存；提供背包/仓库条目、金币、材料数量与强化应用。
 var _global_inventory: Node
@@ -272,16 +274,18 @@ func _build_interface() -> void:
 
 
 func _build_forge_slots() -> void:
+	# 槽位半边长；所有锚点偏移共用该值，保证检查器调整槽位大小后仍以中心准确对齐。
+	var slot_half_size: float = forge_slot_size * 0.5
 	_main_slot = FORGE_SLOT_CONTROL_SCRIPT.new() as Button
-	_main_slot.call("configure", -1, true)
+	_main_slot.call("configure", -1, true, forge_slot_size)
 	_main_slot.anchor_left = 0.5
 	_main_slot.anchor_top = 0.5
 	_main_slot.anchor_right = 0.5
 	_main_slot.anchor_bottom = 0.5
-	_main_slot.offset_left = -52.0
-	_main_slot.offset_top = -52.0
-	_main_slot.offset_right = 52.0
-	_main_slot.offset_bottom = 52.0
+	_main_slot.offset_left = -slot_half_size
+	_main_slot.offset_top = -slot_half_size
+	_main_slot.offset_right = slot_half_size
+	_main_slot.offset_bottom = slot_half_size
 	_main_slot.connect("item_requested", Callable(self, "_on_slot_item_requested"))
 	_main_slot.connect("return_requested", Callable(self, "_on_slot_return_requested"))
 	_forge_board.add_child(_main_slot)
@@ -290,15 +294,15 @@ func _build_forge_slots() -> void:
 		var slot_angle: float = -PI * 0.5 + TAU * float(slot_index) / float(SACRIFICE_SLOT_COUNT)
 		# 牺牲槽；锚点按椭圆半径分布，适配横向锻造板比例。
 		var sacrifice_slot: Button = FORGE_SLOT_CONTROL_SCRIPT.new() as Button
-		sacrifice_slot.call("configure", slot_index, false)
+		sacrifice_slot.call("configure", slot_index, false, forge_slot_size)
 		sacrifice_slot.anchor_left = 0.5 + cos(slot_angle) * 0.34
 		sacrifice_slot.anchor_top = 0.5 + sin(slot_angle) * 0.31
 		sacrifice_slot.anchor_right = sacrifice_slot.anchor_left
 		sacrifice_slot.anchor_bottom = sacrifice_slot.anchor_top
-		sacrifice_slot.offset_left = -52.0
-		sacrifice_slot.offset_top = -52.0
-		sacrifice_slot.offset_right = 52.0
-		sacrifice_slot.offset_bottom = 52.0
+		sacrifice_slot.offset_left = -slot_half_size
+		sacrifice_slot.offset_top = -slot_half_size
+		sacrifice_slot.offset_right = slot_half_size
+		sacrifice_slot.offset_bottom = slot_half_size
 		sacrifice_slot.connect("item_requested", Callable(self, "_on_slot_item_requested"))
 		sacrifice_slot.connect("return_requested", Callable(self, "_on_slot_return_requested"))
 		_forge_board.add_child(sacrifice_slot)

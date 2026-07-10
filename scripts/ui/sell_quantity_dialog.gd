@@ -3,11 +3,22 @@ class_name SellQuantityDialog
 
 ## 堆叠物品出售数量弹窗统一提供滑条和数字输入两种选择方式。
 ## 弹窗只负责数量展示与确认，不直接访问仓库、金币或存档服务。
+## 跨容器移动补充；同一弹窗可切换移动模式，并继续保持不直接访问库存服务的职责边界。
 
 signal quantity_confirmed(quantity: int)
 
+## 出售数量模式标识；默认显示金币收益并使用“出售”确认按钮。
+const DISPLAY_MODE_SALE: String = "sale"
+## 移动数量模式标识；跨仓库和背包拖拽堆叠时显示移动方向与实际数量。
+const DISPLAY_MODE_TRANSFER: String = "transfer"
+
 ## 弹窗默认宽度；默认 520 像素可容纳物品名称、数量滑条和数字输入框。
-@export_range(360, 900, 1) var dialog_width: int = 520
+## 当前尺寸补充；默认值已调整为 400 像素以保持紧凑，仍可在检查器中按界面语言长度调整，运行时无需动态修改。
+@export_range(320, 640, 1) var dialog_width: int = 400
+## 弹窗默认高度；默认 170 像素，完整容纳说明、数量选择和结果摘要且避免遮挡仓库，运行时无需动态修改。
+@export_range(140, 260, 1) var dialog_height: int = 170
+## 弹窗背景透明度；默认 0.82，数值越低越透明，修改后会同时影响出售和移动数量界面，运行时无需动态修改。
+@export_range(0.40, 1.0, 0.01) var dialog_background_alpha: float = 0.82
 
 ## 当前最大可出售数量；取值至少为 1，默认 1 用于弹窗尚未配置时的安全范围。
 var _maximum_quantity: int = 1
@@ -15,6 +26,8 @@ var _maximum_quantity: int = 1
 var _unit_sell_price: int = 0
 ## 当前物品显示名称；默认“物品”，配置后用于标题说明本次出售目标。
 var _item_display_name: String = "物品"
+## 当前展示模式；默认出售模式，移动模式下不计算金币并改为显示本次将移动的数量。
+var _display_mode: String = DISPLAY_MODE_SALE
 ## 数量滑条；默认运行时创建，取值范围与数字输入框保持双向同步。
 var _quantity_slider: HSlider
 ## 数量数字输入框；默认运行时创建，玩家可键盘直接输入精确数量。
@@ -27,38 +40,67 @@ var _description_label: Label
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	transparent = true
+	unresizable = true
 	title = "选择出售数量"
 	get_ok_button().text = "出售"
 	get_cancel_button().text = "取消"
+	_apply_dialog_visual_style()
 	_build_interface()
 	confirmed.connect(_on_confirmed)
 
 
 func present(item_display_name: String, maximum_quantity: int, unit_sell_price: int) -> void:
+	_display_mode = DISPLAY_MODE_SALE
 	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
 	_maximum_quantity = maxi(maximum_quantity, 1)
 	_unit_sell_price = maxi(unit_sell_price, 0)
+	title = "选择出售数量"
+	get_ok_button().text = "出售"
 	_description_label.text = "%s · 最多可出售 %d 个" % [_item_display_name, _maximum_quantity]
+	_present_current_configuration()
+
+
+func present_transfer(item_display_name: String, maximum_quantity: int, source_display_name: String, target_display_name: String) -> void:
+	_display_mode = DISPLAY_MODE_TRANSFER
+	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
+	_maximum_quantity = maxi(maximum_quantity, 1)
+	_unit_sell_price = 0
+	title = "选择移动数量"
+	get_ok_button().text = "移动"
+	_description_label.text = "%s · %s → %s · 最多 %d 个" % [_item_display_name, source_display_name, target_display_name, _maximum_quantity]
+	_present_current_configuration()
+
+
+func _present_current_configuration() -> void:
 	_quantity_slider.max_value = _maximum_quantity
 	_quantity_spin_box.max_value = _maximum_quantity
 	_quantity_slider.set_value_no_signal(1.0)
 	_quantity_spin_box.set_value_no_signal(1.0)
 	_refresh_total_price(1)
-	popup_centered(Vector2i(dialog_width, 0))
+	popup_centered(Vector2i(dialog_width, dialog_height))
 
 
 func _build_interface() -> void:
+	# 内容边距；紧凑留白避免控件贴近透明窗口边缘，同时减少弹窗整体占屏面积。
+	var content_margin: MarginContainer = MarginContainer.new()
+	content_margin.add_theme_constant_override("margin_left", 12)
+	content_margin.add_theme_constant_override("margin_top", 8)
+	content_margin.add_theme_constant_override("margin_right", 12)
+	content_margin.add_theme_constant_override("margin_bottom", 8)
+	add_child(content_margin)
 	# 内容容器；纵向排列说明、滑条、数字输入和总价信息。
+	# 移动模式补充；最后一行在移动模式下改为显示实际移动数量。
 	var content: VBoxContainer = VBoxContainer.new()
-	content.add_theme_constant_override("separation", 12)
-	add_child(content)
+	content.add_theme_constant_override("separation", 8)
+	content_margin.add_child(content)
 	_description_label = Label.new()
 	_description_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(_description_label)
 	# 数量选择行；滑条占据主要宽度，数字输入框用于精确键盘输入。
 	var quantity_row: HBoxContainer = HBoxContainer.new()
-	quantity_row.add_theme_constant_override("separation", 12)
+	quantity_row.add_theme_constant_override("separation", 8)
 	content.add_child(quantity_row)
 	_quantity_slider = HSlider.new()
 	_quantity_slider.min_value = 1.0
@@ -73,13 +115,28 @@ func _build_interface() -> void:
 	_quantity_spin_box.step = 1.0
 	_quantity_spin_box.allow_greater = false
 	_quantity_spin_box.allow_lesser = false
-	_quantity_spin_box.custom_minimum_size = Vector2(112.0, 38.0)
+	_quantity_spin_box.custom_minimum_size = Vector2(82.0, 32.0)
 	_quantity_spin_box.value_changed.connect(_on_spin_box_value_changed)
 	quantity_row.add_child(_quantity_spin_box)
 	_total_price_label = Label.new()
 	_total_price_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_total_price_label.add_theme_font_size_override("font_size", 18)
+	_total_price_label.add_theme_font_size_override("font_size", 14)
 	content.add_child(_total_price_label)
+
+
+func _apply_dialog_visual_style() -> void:
+	# 弹窗主题；半透明深色背景、细边框和圆角同时应用于出售与移动模式。
+	var dialog_theme: Theme = Theme.new()
+	# 弹窗面板样式；透明度由检查器参数统一控制，便于后续按整体 UI 风格调整。
+	var dialog_panel_style: StyleBoxFlat = StyleBoxFlat.new()
+	dialog_panel_style.bg_color = Color(0.035, 0.045, 0.055, dialog_background_alpha)
+	dialog_panel_style.border_color = Color(0.30, 0.50, 0.60, minf(dialog_background_alpha + 0.10, 1.0))
+	dialog_panel_style.set_border_width_all(1)
+	dialog_panel_style.set_corner_radius_all(8)
+	dialog_theme.set_stylebox("panel", "Window", dialog_panel_style)
+	dialog_theme.set_stylebox("panel", "AcceptDialog", dialog_panel_style)
+	dialog_theme.set_stylebox("panel", "ConfirmationDialog", dialog_panel_style)
+	theme = dialog_theme
 
 
 func _on_slider_value_changed(value: float) -> void:
@@ -97,8 +154,13 @@ func _on_spin_box_value_changed(value: float) -> void:
 
 
 func _refresh_total_price(quantity: int) -> void:
+	# 有效数量；滑条和数字框始终限制在当前堆叠范围，摘要只读取该标准化结果。
+	var resolved_quantity: int = clampi(quantity, 1, _maximum_quantity)
+	if _display_mode == DISPLAY_MODE_TRANSFER:
+		_total_price_label.text = "将移动 %d 个" % resolved_quantity
+		return
 	# 出售总价；单价乘当前数量，用于确认前即时预览金币收益。
-	var total_sell_price: int = _unit_sell_price * clampi(quantity, 1, _maximum_quantity)
+	var total_sell_price: int = _unit_sell_price * resolved_quantity
 	_total_price_label.text = "可获得 %d 金币" % total_sell_price
 
 

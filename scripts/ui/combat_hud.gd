@@ -511,14 +511,14 @@ func _refresh_equipment() -> void:
 		var ranged_weapon: Resource = _equipment_component.call("get_ranged_weapon", slot_index) as Resource
 		_ranged_slot_controls[slot_index].call("set_slot_data", "equipment", "ranged", slot_index, ranged_weapon, slot_index == current_slot)
 		_ranged_slot_controls[slot_index].call("set_empty_text", "空远程")
-		_ranged_slot_controls[slot_index].call("set_enhancement_target_highlight", _inventory_panel.visible and _can_pending_combat_repair_target(ranged_weapon))
+		_ranged_slot_controls[slot_index].call("set_weapon_target_selection_state", _inventory_panel.visible and _pending_combat_stone_resource != null, _can_pending_combat_repair_target(ranged_weapon))
 
 	if _melee_slot_control != null:
 		# 当前近战武器资源；取值为 Resource 或 null，默认来自装备组件，修改会影响近战槽显示内容。
 		var melee_weapon: Resource = _equipment_component.call("get_melee_weapon") as Resource
 		_melee_slot_control.call("set_slot_data", "equipment", "melee", -1, melee_weapon, true)
 		_melee_slot_control.call("set_empty_text", "空近战")
-		_melee_slot_control.call("set_enhancement_target_highlight", _inventory_panel.visible and _can_pending_combat_repair_target(melee_weapon))
+		_melee_slot_control.call("set_weapon_target_selection_state", _inventory_panel.visible and _pending_combat_stone_resource != null, _can_pending_combat_repair_target(melee_weapon))
 
 
 func _rebuild_inventory_slots() -> void:
@@ -579,7 +579,7 @@ func _rebuild_inventory_slots() -> void:
 			var inventory_slot: Control = _create_weapon_slot_control(inventory_slot_minimum_size)
 			inventory_slot.call("set_slot_data", "inventory", "inventory", source_index, item_data, false)
 			inventory_slot.call("set_empty_text", "空")
-			inventory_slot.call("set_enhancement_target_highlight", _can_pending_combat_repair_target(item_data))
+			inventory_slot.call("set_weapon_target_selection_state", _pending_combat_stone_resource != null, _can_pending_combat_repair_target(item_data))
 			_inventory_weapon_grid.add_child(inventory_slot)
 			_inventory_slot_controls.append(inventory_slot)
 
@@ -628,14 +628,14 @@ func _refresh_inventory_equipment_slots() -> void:
 		var ranged_weapon: Resource = _equipment_component.call("get_ranged_weapon", slot_index) as Resource
 		_inventory_equipment_ranged_controls[slot_index].call("set_slot_data", "equipment", "ranged", slot_index, ranged_weapon, slot_index == current_slot)
 		_inventory_equipment_ranged_controls[slot_index].call("set_empty_text", "空远程")
-		_inventory_equipment_ranged_controls[slot_index].call("set_enhancement_target_highlight", _can_pending_combat_repair_target(ranged_weapon))
+		_inventory_equipment_ranged_controls[slot_index].call("set_weapon_target_selection_state", _pending_combat_stone_resource != null, _can_pending_combat_repair_target(ranged_weapon))
 
 	if _inventory_equipment_melee_control != null:
 		# 背包界面当前近战武器资源；取值为 Resource 或 null，默认来自装备组件，修改会影响左侧近战槽显示。
 		var melee_weapon: Resource = _equipment_component.call("get_melee_weapon") as Resource
 		_inventory_equipment_melee_control.call("set_slot_data", "equipment", "melee", -1, melee_weapon, true)
 		_inventory_equipment_melee_control.call("set_empty_text", "空近战")
-		_inventory_equipment_melee_control.call("set_enhancement_target_highlight", _can_pending_combat_repair_target(melee_weapon))
+		_inventory_equipment_melee_control.call("set_weapon_target_selection_state", _pending_combat_stone_resource != null, _can_pending_combat_repair_target(melee_weapon))
 
 
 func _refresh_cooldown_overlays() -> void:
@@ -2270,6 +2270,8 @@ func _on_combat_weapon_selected(weapon_resource: Resource, selected_context: Str
 	if weapon_resource == null or not _inventory_panel.visible:
 		return
 	if _pending_combat_stone_resource != null:
+		if not _can_pending_combat_repair_target(weapon_resource):
+			return
 		_apply_combat_repair(_pending_combat_stone_resource, weapon_resource)
 		return
 	if selected_context == "equipment" and selected_kind == "ranged" and _equipment_component != null and _equipment_component.has_method("equip_ranged_slot"):

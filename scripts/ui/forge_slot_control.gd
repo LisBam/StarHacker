@@ -11,6 +11,8 @@ signal return_requested(slot_index: int)
 const STORAGE_DRAG_DATA_TYPE: String = "global_storage_item"
 ## 物品详情格式化器；槽位悬停继续显示完整武器或强化石信息。
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
+## 锻造槽允许的最小边长；默认 48 像素，用于保护外部调用传入异常小尺寸时的文字与投放区域可用性。
+const MINIMUM_SLOT_SIZE: float = 48.0
 
 ## 槽位下标；主锻造槽固定为 -1，周围牺牲槽使用 0 到 4。
 var _slot_index: int = -1
@@ -20,10 +22,12 @@ var _is_main_slot: bool = false
 var _entry: Dictionary = {}
 
 
-func configure(slot_index: int, is_main_slot: bool) -> void:
+func configure(slot_index: int, is_main_slot: bool, slot_size: float = 84.0) -> void:
 	_slot_index = slot_index
 	_is_main_slot = is_main_slot
-	custom_minimum_size = Vector2(104.0, 104.0)
+	# 槽位尺寸；由锻造面板统一配置，主槽和牺牲槽保持一致以维持环形布局的视觉平衡。
+	var resolved_slot_size: float = maxf(slot_size, MINIMUM_SLOT_SIZE)
+	custom_minimum_size = Vector2.ONE * resolved_slot_size
 	# 槽位基础样式；六个槽位统一正方形深色底与白色边框，主槽与牺牲槽仅通过位置区分职责。
 	var normal_style: StyleBoxFlat = StyleBoxFlat.new()
 	normal_style.bg_color = Color(0.06, 0.075, 0.09, 0.94)

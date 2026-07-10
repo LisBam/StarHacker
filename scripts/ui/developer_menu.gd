@@ -29,6 +29,8 @@ var _status_label: Label
 var _grant_weapons_button: Button
 ## 随机强化石按钮；默认运行时创建，点击后向永久仓库发放 10 颗随机强化石。
 var _grant_stones_button: Button
+## 获取全部道具按钮；默认运行时创建，点击后向永久仓库各发放一件已知修复包。
+var _grant_all_items_button: Button
 ## 增加金币按钮；默认运行时创建，点击增加 coin_step。
 var _add_coins_button: Button
 ## 减少金币按钮；默认运行时创建，金币最低限制为 0。
@@ -141,6 +143,12 @@ func _build_interface() -> void:
 	_grant_stones_button.pressed.connect(_on_grant_stones_pressed)
 	content.add_child(_grant_stones_button)
 	_economy_controls.append(_grant_stones_button)
+	_grant_all_items_button = Button.new()
+	_grant_all_items_button.custom_minimum_size = Vector2(0.0, 46.0)
+	_grant_all_items_button.text = "一键获取所有道具"
+	_grant_all_items_button.pressed.connect(_on_grant_all_items_pressed)
+	content.add_child(_grant_all_items_button)
+	_economy_controls.append(_grant_all_items_button)
 	_add_coins_button = Button.new()
 	_add_coins_button.custom_minimum_size = Vector2(0.0, 46.0)
 	_add_coins_button.text = "一键增加 %d 金币" % coin_step
@@ -219,6 +227,7 @@ func _refresh_availability() -> void:
 	var service_available: bool = _global_inventory != null
 	_grant_weapons_button.disabled = not service_available
 	_grant_stones_button.disabled = not service_available
+	_grant_all_items_button.disabled = not service_available
 	_add_coins_button.disabled = not service_available
 	_remove_coins_button.disabled = not service_available
 	_clear_warehouse_button.disabled = not service_available
@@ -282,6 +291,14 @@ func _on_grant_stones_pressed() -> void:
 	# 发放强化石数量；默认应为 10，随机同词条强化石可能在仓库中自动合并为同一堆叠。
 	var granted_count: int = int(_global_inventory.call("grant_random_enhancement_stones_to_warehouse", enhancement_stone_grant_count))
 	_status_label.text = "已向永久仓库发放 %d 颗随机强化石" % granted_count
+
+
+func _on_grant_all_items_pressed() -> void:
+	if _global_inventory == null or not _global_inventory.has_method("grant_all_repair_kits_to_warehouse"):
+		return
+	# 发放道具数量；当前应为初级、中级和高级修复包各一件，后续新增道具会由路径表自动纳入。
+	var granted_count: int = int(_global_inventory.call("grant_all_repair_kits_to_warehouse"))
+	_status_label.text = "已向永久仓库发放 %d 种道具" % granted_count
 
 
 func _on_add_coins_pressed() -> void:

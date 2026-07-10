@@ -407,6 +407,24 @@ func grant_random_enhancement_stones_to_warehouse(stone_count: int = DEVELOPER_S
 	return granted_count
 
 
+func grant_all_repair_kits_to_warehouse() -> int:
+	# 实际发放数量；每种已知修复包各发放一件，按 item_id 自动合并到已有同类堆叠。
+	var granted_count: int = 0
+	# 修复包标识；取值来自稳定路径表，新增道具后只需补充表项即可纳入开发者发放。
+	for repair_kit_id in REPAIR_KIT_RESOURCE_PATHS.keys():
+		# 修复包资源；从模板深拷贝，避免开发者发放的道具引用项目资源本体。
+		var repair_kit_resource: Resource = _load_repair_kit_resource(str(repair_kit_id))
+		if repair_kit_resource == null:
+			continue
+		_insert_record_with_stack_merge(_warehouse_records, _create_record(repair_kit_resource))
+		granted_count += 1
+	if granted_count <= 0:
+		return 0
+	_queue_save_inventory()
+	warehouse_changed.emit()
+	return granted_count
+
+
 func transfer_warehouse_to_backpack(item_resource: Resource, target_index: int = -1) -> bool:
 	# 永久仓库来源索引；取值为有效下标时才允许把安全物品转为下一局随身物品。
 	var warehouse_index: int = _find_warehouse_record_index(item_resource)

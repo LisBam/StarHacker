@@ -403,7 +403,7 @@ func _build_storage_entry_row(entry: Dictionary, location: String, entry_index: 
 	var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
 	item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	item_control.call("configure", item_resource, location, entry_index, _backpack_expanded, extraction_prefix, quantity)
-	item_control.call("set_enhancement_target_highlight", (_pending_stone_resource != null or _pending_repair_kit_resource != null) and str(item_resource.get("weapon_type")) in ["ranged", "melee"])
+	item_control.call("set_enhancement_target_highlight", _is_pending_item_usable_on_weapon(item_resource))
 	item_control.connect("quick_action_requested", Callable(self, "_on_quick_action_requested").bind(location))
 	item_control.connect("item_action_requested", Callable(self, "_on_item_action_requested").bind(location))
 	item_control.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
@@ -442,7 +442,7 @@ func _create_storage_equipment_slot(slot_label: String, location: String, weapon
 	slot_control.connect("item_selected", Callable(self, "_on_repair_kit_weapon_selected"))
 	slot_control.connect("enhancement_drop_requested", Callable(self, "_on_enhancement_drop_requested"))
 	slot_control.connect("repair_kit_drop_requested", Callable(self, "_on_repair_kit_drop_requested"))
-	slot_control.call("set_enhancement_target_highlight", (_pending_stone_resource != null or _pending_repair_kit_resource != null) and item_resource != null)
+	slot_control.call("set_enhancement_target_highlight", _is_pending_item_usable_on_weapon(item_resource))
 	slot_control.custom_minimum_size = Vector2(0.0, 46.0)
 	return slot_control
 
@@ -457,6 +457,18 @@ func _get_item_detail_tooltip(item_resource: Resource) -> String:
 	var detail_tooltip: String = detail_control.tooltip_text
 	detail_control.free()
 	return detail_tooltip
+
+
+func _is_pending_item_usable_on_weapon(weapon_resource: Resource) -> bool:
+	if weapon_resource == null or str(weapon_resource.get("weapon_type")) not in ["ranged", "melee"]:
+		return false
+	if _pending_repair_kit_resource != null:
+		# 当前耐久；修复包只应高亮仍有耐久缺口的武器，满耐久武器不提供无效选择。
+		var current_durability: float = maxf(float(weapon_resource.get("current_durability")), 0.0)
+		# 最大耐久；至少为 1，兼容旧资源字段缺失时的安全读取。
+		var maximum_durability: float = maxf(float(weapon_resource.get("max_durability")), 1.0)
+		return current_durability < maximum_durability
+	return _pending_stone_resource != null
 
 
 func _create_storage_category_button(target_bar: HBoxContainer, button_text: String, category_name: String, is_primary: bool) -> void:

@@ -8,6 +8,8 @@ signal purchase_requested(stock_id: String, failure_group_id: String)
 
 ## 物品详情格式化器；复用仓库的武器属性、耐久、强化词条和资源说明。
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
+## 武器耐久条组件；商店武器卡片复用仓库同款底部耐久条，直接反映二手武器状态。
+const WEAPON_DURABILITY_BAR_SCRIPT: Script = preload("res://scripts/ui/weapon_durability_bar.gd")
 
 ## 当前商品资源；配置后用于悬停详情和显示名称，空值时禁用按钮。
 var _item_resource: Resource
@@ -17,6 +19,8 @@ var _stock_id: String = ""
 var _failure_group_id: String = ""
 ## 当前商品数量；武器固定为一，资源允许显示堆叠数量。
 var _quantity: int = 1
+## 武器耐久条缓存；默认按需创建，资源商品保持隐藏，武器商品固定贴在卡片底部。
+var _durability_bar: Control
 
 
 func configure(entry: Dictionary, is_gray_market: bool) -> void:
@@ -41,16 +45,15 @@ func configure(entry: Dictionary, is_gray_market: bool) -> void:
 	# 价格显示文本；默认仅显示最终金币，开发者开启调试信息后才公开原价倍率。
 	var price_text: String = _build_price_text(purchase_price, price_multiplier)
 	if is_weapon:
-		# 当前耐久；商店武器保留二手磨损与历史强化后的真实状态，因此必须直接展示给玩家。
-		var current_durability: float = maxf(float(_item_resource.get("current_durability")), 0.0)
-		# 最大耐久；至少为 1，避免旧资源字段异常时产生无效展示。
-		var maximum_durability: float = maxf(float(_item_resource.get("max_durability")), 1.0)
-		text = "%s · %s\n耐久 %.0f / %.0f\n%s" % [item_name, item_type, current_durability, maximum_durability, price_text]
+		text = "%s · %s\n%s" % [item_name, item_type, price_text]
 	else:
 		text = "%s%s · %s\n%s" % [item_name, " x%d" % _quantity if _quantity > 1 else "", item_type, price_text]
+	_ensure_durability_bar()
+	_durability_bar.call("configure", _item_resource)
+	_durability_bar.visible = is_weapon
 	tooltip_text = ITEM_DETAIL_FORMATTER.call("build_plain_text", _item_resource, _quantity) if _item_resource != null else ""
 	disabled = _item_resource == null or _stock_id.is_empty()
-	custom_minimum_size = Vector2(0.0, 84.0 if is_weapon else 66.0)
+	custom_minimum_size = Vector2(0.0, 66.0)
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if not disabled else Control.CURSOR_ARROW
 	if not pressed.is_connected(_on_pressed):
 		pressed.connect(_on_pressed)
@@ -72,3 +75,11 @@ func _build_price_text(purchase_price: int, price_multiplier: float) -> String:
 	# 是否显示调试倍率；默认 false，仅在开发者菜单明确开启后显示原价计算过程。
 	var show_debug_information: bool = debug_settings != null and debug_settings.has_method("is_debug_information_visible") and bool(debug_settings.call("is_debug_information_visible"))
 	return "%d金币（原价×%.2f）" % [purchase_price, price_multiplier] if show_debug_information else "%d金币" % purchase_price
+
+
+func _ensure_durability_bar() -> void:
+	if _durability_bar != null:
+		return
+	_durability_bar = WEAPON_DURABILITY_BAR_SCRIPT.new() as Control
+	_durability_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_durability_bar)

@@ -48,12 +48,12 @@ func configure(item_resource: Resource, location: String, item_index: int, quick
 	_item_index = item_index
 	_quick_action_enabled = quick_action_enabled
 	_quantity = clampi(quantity, 1, 99)
-	# 物品摘要；强化石使用富文本方格，武器保持两列宽卡片显示分类和动态售价。
-	if _is_enhancement_stone():
+	# 物品摘要；强化石和修复包共用紧凑富文本资源卡，武器保持两列宽卡片显示分类和动态售价。
+	if _is_enhancement_stone() or _is_repair_kit():
 		text = ""
 		_ensure_stone_summary_label()
 		_stone_summary_label.visible = true
-		_stone_summary_label.text = _build_stone_card_bbcode(extraction_prefix)
+		_stone_summary_label.text = _build_stone_card_bbcode(extraction_prefix) if _is_enhancement_stone() else _build_repair_kit_card_bbcode(extraction_prefix)
 	else:
 		text = "%s%s · %s · 售价 %d" % [extraction_prefix, _get_item_display_name(), _get_weapon_type_label(), _get_sell_price()]
 		if _stone_summary_label != null:
@@ -78,8 +78,8 @@ func set_enhancement_target_highlight(enabled: bool) -> void:
 func set_weapon_slot_visual_style(enabled: bool) -> void:
 	_weapon_slot_visual_style_enabled = enabled
 	_apply_weapon_slot_visual_style()
-	if _stone_summary_label != null and _is_enhancement_stone():
-		_stone_summary_label.text = _build_stone_card_bbcode("")
+	if _stone_summary_label != null and (_is_enhancement_stone() or _is_repair_kit()):
+		_stone_summary_label.text = _build_stone_card_bbcode("") if _is_enhancement_stone() else _build_repair_kit_card_bbcode("")
 
 
 func refresh_durability() -> void:
@@ -172,6 +172,10 @@ func _is_enhancement_stone() -> bool:
 	return _item_resource != null and str(_item_resource.get("item_kind")) == "enhancement_stone"
 
 
+func _is_repair_kit() -> bool:
+	return _item_resource != null and str(_item_resource.get("item_kind")) == "repair_kit"
+
+
 func _is_weapon_resource() -> bool:
 	return _item_resource != null and str(_item_resource.get("weapon_type")) in ["ranged", "melee"]
 
@@ -251,6 +255,20 @@ func _build_stone_card_bbcode(extraction_prefix: String) -> String:
 		card_lines.append("[center][font_size=9]%s[/font_size][/center]" % (" ".join(colored_tokens) if not colored_tokens.is_empty() else "无词条"))
 	else:
 		card_lines.append("[center]%s  ·  售价 %d[/center]" % [(" ".join(colored_tokens) if not colored_tokens.is_empty() else "无词条"), _get_sell_price() * _quantity])
+	return "\n".join(card_lines)
+
+
+func _build_repair_kit_card_bbcode(extraction_prefix: String) -> String:
+	# 卡片文本行；道具与强化石使用相同的紧凑资源卡结构，仅将词条替换为固定耐久恢复效果。
+	var card_lines: Array[String] = []
+	if _weapon_slot_visual_style_enabled:
+		card_lines.append("[center][font_size=12][b]%s%s[/b]  x%d[/font_size][/center]" % [extraction_prefix, _get_item_display_name(), _quantity])
+	else:
+		card_lines.append("[center][b]%s%s[/b]  x%d[/center]" % [extraction_prefix, _get_item_display_name(), _quantity])
+	# 修复耐久；所有当前修复包使用整数数值，绿色明确表示该道具提供正向恢复效果。
+	var repair_amount: float = maxf(float(_item_resource.get("repair_amount")), 0.0)
+	var repair_text: String = "[color=%s]武器耐久+%.0f[/color]" % [STONE_BENEFICIAL_COLOR, repair_amount]
+	card_lines.append("[center][font_size=9]%s[/font_size][/center]" % repair_text if _weapon_slot_visual_style_enabled else "[center]%s[/center]" % repair_text)
 	return "\n".join(card_lines)
 
 

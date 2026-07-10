@@ -18,6 +18,8 @@ const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_form
 const STONE_BENEFICIAL_COLOR: String = "#70e889"
 ## 强化词条削弱颜色；默认亮红色，与悬停详情保持一致。
 const STONE_DETRIMENTAL_COLOR: String = "#ff7070"
+## 不可选武器灰色滤镜；默认降低亮度和饱和度，用于修复包目标选择期间明确区分满耐久武器。
+const UNAVAILABLE_TARGET_FILTER_COLOR: Color = Color(0.42, 0.42, 0.42, 0.78)
 ## 武器耐久条组件；用于仓库、展开背包和结算卡片统一显示武器剩余耐久。
 const WEAPON_DURABILITY_BAR_SCRIPT: Script = preload("res://scripts/ui/weapon_durability_bar.gd")
 
@@ -36,6 +38,10 @@ var _quantity: int = 1
 var _stone_summary_label: RichTextLabel
 ## 是否将当前武器标记为强化目标；默认 false，选择强化武器期间会临时点亮所有武器卡片。
 var _enhancement_target_highlight: bool = false
+## 当前是否处于武器目标选择状态；默认 false，启用后会同时管理可选高亮和不可选灰色滤镜。
+var _weapon_target_selection_active: bool = false
+## 当前武器是否因目标条件不满足而禁止选择；默认 false，修复包选择期间满耐久武器会设为 true。
+var _weapon_target_selection_blocked: bool = false
 ## 是否采用战斗武器槽视觉；默认 false 保持仓库宽卡布局，战斗背包开启后会同步深色背景、边框和三行排版。
 var _weapon_slot_visual_style_enabled: bool = false
 ## 武器耐久条缓存；默认按需创建，资源卡片隐藏，武器卡片始终贴在 UI 最底部。
@@ -72,6 +78,16 @@ func configure(item_resource: Resource, location: String, item_index: int, quick
 
 func set_enhancement_target_highlight(enabled: bool) -> void:
 	_enhancement_target_highlight = enabled and _is_weapon_resource()
+	_weapon_target_selection_active = _enhancement_target_highlight
+	_weapon_target_selection_blocked = false
+	_refresh_enhancement_target_highlight()
+
+
+func set_weapon_target_selection_state(selection_active: bool, selectable: bool) -> void:
+	# 武器选择状态；非武器卡片始终保持正常显示，避免资源卡片被目标选择滤镜误伤。
+	_weapon_target_selection_active = selection_active and _is_weapon_resource()
+	_enhancement_target_highlight = _weapon_target_selection_active and selectable
+	_weapon_target_selection_blocked = _weapon_target_selection_active and not selectable
 	_refresh_enhancement_target_highlight()
 
 
@@ -90,7 +106,7 @@ func refresh_durability() -> void:
 
 
 func _get_drag_data(_at_position: Vector2) -> Variant:
-	if _item_resource == null or _location.is_empty() or _item_index < 0:
+	if _item_resource == null or _location.is_empty() or _item_index < 0 or _weapon_target_selection_blocked:
 		return null
 
 	# 拖拽预览标签；显示物品名称并跟随鼠标，避免复制完整交互控件造成信号副作用。
@@ -137,7 +153,7 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 
 
 func _on_pressed() -> void:
-	if _item_resource == null:
+	if _item_resource == null or _weapon_target_selection_blocked:
 		return
 	# Shift 快速转移；只有展开背包模式启用，普通点击始终交给上层打开出售或使用菜单。
 	if _quick_action_enabled and Input.is_key_pressed(KEY_SHIFT):
@@ -182,7 +198,11 @@ func _is_weapon_resource() -> bool:
 
 func _refresh_enhancement_target_highlight() -> void:
 	# 卡片色调；浅绿色表示可点击或可投放的强化目标，取消选择后恢复白色不影响原主题。
-	self_modulate = Color(0.68, 1.0, 0.76, 1.0) if _enhancement_target_highlight else Color.WHITE
+	# 修复目标补充；当前不可选武器会优先使用灰色滤镜，可选武器继续使用浅绿色。
+	if _weapon_target_selection_blocked:
+		self_modulate = UNAVAILABLE_TARGET_FILTER_COLOR
+	else:
+		self_modulate = Color(0.68, 1.0, 0.76, 1.0) if _enhancement_target_highlight else Color.WHITE
 
 
 func _ensure_stone_summary_label() -> void:
@@ -239,7 +259,6 @@ func _build_stone_card_bbcode(extraction_prefix: String) -> String:
 	# 卡片文本行；名称、彩色方向词条、数量与整组价值固定居中显示。
 	var card_lines: Array[String] = []
 	if _weapon_slot_visual_style_enabled:
-		card_lines.append("[center][font_size=10]资源[/font_size][/center]")
 		card_lines.append("[center][font_size=12][b]%s%s[/b]  x%d[/font_size][/center]" % [extraction_prefix, _get_item_display_name(), _quantity])
 	else:
 		card_lines.append("[center][b]%s%s[/b]  x%d[/center]" % [extraction_prefix, _get_item_display_name(), _quantity])
@@ -268,7 +287,7 @@ func _build_repair_kit_card_bbcode(extraction_prefix: String) -> String:
 	# 修复耐久；所有当前修复包使用整数数值，绿色明确表示该道具提供正向恢复效果。
 	var repair_amount: float = maxf(float(_item_resource.get("repair_amount")), 0.0)
 	var repair_text: String = "[color=%s]武器耐久+%.0f[/color]" % [STONE_BENEFICIAL_COLOR, repair_amount]
-	card_lines.append("[center][font_size=9]%s[/font_size][/center]" % repair_text if _weapon_slot_visual_style_enabled else "[center]%s[/center]" % repair_text)
+	card_lines.append("[center][font_size=9]%s[/font_size][/center]" % repair_text if _weapon_slot_visual_style_enabled else "[center]%s  ·  售价 %d[/center]" % [repair_text, _get_sell_price() * _quantity])
 	return "\n".join(card_lines)
 
 

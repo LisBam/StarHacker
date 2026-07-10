@@ -60,23 +60,23 @@
 - `CombatStatsComponent`：维护玩家生命、能量、能量恢复和死亡状态，武器成功使用后由玩家控制器调用 `spend_energy()` 扣除能量，生命降到 0 时只派发一次 `died` 信号。
 - `InventoryComponent`：作为玩家节点上的背包能力代理，默认把增删、移动、堆叠条目查询和强化石使用转发给 `GlobalInventory`；强化可返回提升/削弱属性、百分比、基础值和实际变化值；自动加载缺失时才回退场景内本地数组。
 - `EquipmentComponent`：作为玩家节点上的装备能力代理，默认把远程槽、当前槽、近战槽和武器运行时状态持久化通知转发给 `GlobalInventory`，不直接执行攻击或扣除耐久。
-- `WeaponSlotControl`：显示单个武器槽或背包武器槽，负责拖拽数据、投放校验、白色冷却遮罩绘制、底部 5 像素耐久条、高亮强化目标、接收强化石投放和传递带上下文的点击事件；普通点击延迟到左键释放确认，鼠标移动达到默认 6 像素或进入拖拽后不会发送选择信号；耐久条通过完整槽位覆盖宿主承载，不会被 `PanelContainer` 拉伸覆盖武器信息。
+- `WeaponSlotControl`：显示单个武器槽或背包武器槽，负责拖拽数据、投放校验、白色冷却遮罩绘制、底部 5 像素耐久条、修复目标可用/禁用表现和传递带上下文的点击事件；普通点击延迟到左键释放确认，鼠标移动达到默认 6 像素或进入拖拽后不会发送选择信号；局内背包武器点击使用 0.94 按压、1.04 回弹动效，拖动时原槽缩放到 0.96 且透明度降为 0.58，鼠标预览以 0.32 秒单段周期在 0.92 至 1.04 缩放并左右摆动 0.035 弧度；耐久条通过完整槽位覆盖宿主承载，不会被 `PanelContainer` 拉伸覆盖武器信息。
 - `InventoryDropArea`：接收拖到背包空白区域的武器拖拽数据，并转发给 HUD 按背包末尾投放处理。
 - `InputBindings`：全局输入绑定管理器，以 AutoLoad 单例存在，不声明同名 `class_name`，保存可配置动作、默认事件、玩家自定义事件和恢复默认逻辑，直接写入 Godot `InputMap`，允许多个动作共享同一个输入事件。
 - `KeyBindingPanel`：复用型按键绑定 UI，主菜单设置和暂停设置的按键绑定页面都会动态创建它，用于捕获下一次键盘或鼠标输入并调用 `InputBindings.rebind_action()`。
 - `CombatCamera`：玩家子节点上的战斗相机，关闭 Camera2D 位置平滑并使用物理帧回调跟随玩家，避免物理移动和渲染相机不同步造成移动抖动；屏幕震动只修改相机 `offset`，不会改变玩家或相机节点真实位置。
-- `CombatHud`：除原战斗 HUD、背包和暂停职责外，负责显示左上角全地图存活怪物数量、调用全局背包完成结算，并以背包同款武器/资源两级分类和双列列表展示本局首次获得物品；局内背包支持点击远程装备槽切枪、点击背包武器直接替换当前远程/近战槽、强化目标高亮、红色取消使用、拖动强化、返回强化石页和结果弹窗；暂停时还负责“脱离卡死”、“逃跑”二次确认、识别 LISBAM 并打开战斗开发者菜单。
+- `CombatHud`：除原战斗 HUD、背包和暂停职责外，负责显示左上角全地图存活怪物数量、调用全局背包完成结算，并以背包同款武器/资源两级分类和双列列表展示本局首次获得物品；局内背包支持点击远程装备槽切枪、点击背包武器直接替换当前远程/近战槽、点击或拖动修复包恢复耐久，以及在修复目标选择期间高亮未满耐久武器、给满耐久武器添加灰色滤镜并阻止无效选择；暂停时还负责“脱离卡死”、“逃跑”二次确认、识别 LISBAM 并打开战斗开发者菜单。
 - `MiniMapControl`：读取 GameWorld 的地图、探索、撤离点和玩家导航标点；M 键大地图允许左键设置或点中已有标点取消，局部小地图与完整地图都会绘制玩家到标点的绿色虚线。
-- `WarehousePanel`：主菜单局外仓库 UI，只调用 `GlobalInventory`。展开背包后，远程武器提供“装备1”“装备2”并明确替换对应远程槽，近战武器提供“装备”；仓库/背包分隔拖条使用全局鼠标跟踪和按下时缓存的稳定高度，默认仓库占 0.38，可调范围为 0.10 至 0.90，背包缩小时通过外层滚动容器继续访问全部内容。
-- `StorageItemControl`：仓库、背包和结算共用物品控件，强化石卡片只显示品质、堆叠数量和属性方向，不显示具体百分比；武器卡片底部显示等宽耐久条，损坏武器名称追加“（损坏）”；修复包可点击或拖到武器上恢复耐久，强化石不再支持手动点击或拖动使用；控件不直接修改物品所有权。
+- `WarehousePanel`：主菜单局外仓库 UI，只调用 `GlobalInventory`。展开背包后，远程武器提供“装备1”“装备2”并明确替换对应远程槽，近战武器提供“装备”；仓库与背包之间拖动数量大于 1 的强化石或修复包时复用数量弹窗选择实际移动量，Shift+点击仍转移整组；仓库/背包分隔拖条使用全局鼠标跟踪和按下时缓存的稳定高度，默认仓库占 0.38，可调范围为 0.10 至 0.90，背包缩小时通过外层滚动容器继续访问全部内容。
+- `StorageItemControl`：仓库、背包和结算共用物品控件，强化石卡片只显示品质、堆叠数量和属性方向，不显示具体百分比；仓库内强化石和修复包都在效果行显示整组售价，局内背包强化石移除冗余“资源”首行；武器卡片底部显示等宽耐久条，损坏武器名称追加“（损坏）”；修复包可点击或拖到武器上恢复耐久，强化石不再支持手动点击或拖动使用；修复目标选择期间，不可用武器会被灰色滤镜覆盖并阻止点击或拖动；控件不直接修改物品所有权。
 - `StorageDropArea`：仓库与随身背包共用的两列网格拖放区域，只校验拖拽协议并把目标容器交给 `WarehousePanel`。
 - `InventoryQuery`：仓库与局内背包共用的只读查询组件，为条目附加真实来源下标并执行多层分类、关键词、强化属性正负方向筛选和获得时间/物品价值排序；下拉框按“+”属性与“-”属性分组，新版筛选键使用 `属性:1` 或 `属性:-1`，旧版纯属性键继续匹配任意方向，不修改全局库存顺序。
-- `EquipmentStorageSlotControl`：局外装备槽拖拽控件，校验远程或近战武器类型，支持装备与仓库、背包以及远程装备槽之间的双向拖拽，并可高亮为强化目标或接收强化石投放。
+- `EquipmentStorageSlotControl`：局外装备槽拖拽控件，校验远程或近战武器类型，支持装备与仓库、背包以及远程装备槽之间的双向拖拽；使用修复包时，未满耐久装备显示绿色高亮，满耐久装备显示灰色滤镜并阻止无效选择。
 - `WeaponDurabilityBar`：只读耐久显示组件，贴在父物品 UI 最底部并保持等宽；耐久高于 50% 为绿色、20% 至 50% 为黄色、低于 20% 为红色、归零为灰色。
 - `EnhancementResultDialog`：仓库与局内背包共用的强化结果弹窗，先列提升、后列削弱，每条显示使用时随机出的百分比、基础值、本次变化值和强化后数值，并显示强化前后售价与价格差。
-- `SellQuantityDialog`：堆叠出售共用数量弹窗，以 1 到当前堆叠数量为范围，同步提供整数滑条、可直接输入的数字框和实时金币预览，不直接修改库存。
+- `SellQuantityDialog`：堆叠出售与跨容器移动共用数量弹窗，以 1 到当前堆叠数量为范围，同步提供整数滑条和可直接输入的数字框；出售模式实时预览金币，移动模式实时预览实际移动数量。默认窗口为 400×170，背景透明度为 0.82，弹窗不直接修改库存。
 - `DeveloperMenu`：可复用隐藏开发者调试面板；主菜单上下文通过 `GlobalInventory` 发放武器、强化石、全部修复包和调整金币，战斗上下文隐藏经济操作并通过信号切换无限属性、不消耗武器耐久和训练场设置；“调试信息显示”写入 `DebugSettings`，供商店展示原价倍率等开发计算信息。
-- `GlobalInventory`：全局物品所有权服务，使用唯一记录区分武器与强化石堆叠，分别维护永久仓库、随身背包、装备、局外金币、临时拖拽记录、本局快照和存档。强化使用原子事务，在使用瞬间按品质随机具体幅度，成功后扣除一颗材料并返回数值与售价明细；只有品质、属性和方向全部相同的强化石才会堆叠，单组上限 99；出售接口支持指定数量、整组出售和开发者清空永久仓库。
+- `GlobalInventory`：全局物品所有权服务，使用唯一记录区分武器与可堆叠资源，分别维护永久仓库、随身背包、装备、局外金币、临时拖拽记录、本局快照和存档。仓库与背包的部分堆叠转移会复制独立资源实例、保留获得时间与撤离标记，并通过原子接口同时更新两侧数量；只有签名一致的强化石或同类修复包才会合并，单组上限 99；出售接口支持指定数量、整组出售和开发者清空永久仓库。
 - `MonsterSimulationManager`：维护整图轻量虚拟敌人人口，分批实例化玩家加载半径内的真实敌人，并在远离后保存位置和生命比例再释放节点；远处人口不执行任何 AI、物理、碰撞或绘制。
 - `BasicMonster`：基础怪物聚合入口，维护血量、攻击、韧性、个体数值随机和组件配置，通过子组件组合索敌与移动能力，并保留近战、击退和继承扩展接口。
 - `EnemyPerceptionComponent`：维护视野射线、目标记忆、视野丢失缓冲、遮挡次数、最后线索预测、障碍背后锚点、范围搜查和彻底脱战，不执行移动或攻击。
@@ -133,11 +133,11 @@
 
 背包通过 E 键打开或关闭。背包打开时，`CombatHud` 会通过 `PlayerInputComponent.set_combat_input_enabled(false)` 禁用射击、近战和切换武器，避免拖拽装备时误触战斗输入；WASD 移动不受影响。
 
-局内背包界面采用左右分栏：左侧是当前装备，右侧是随身物品。点击左侧已装备远程武器会切换当前手持槽；点击右侧背包武器会显示“装备”，远程武器替换当前手持槽，近战武器替换近战槽。武器槽在左键释放且移动距离小于等于 6 像素时才发送点击选择，移动达到阈值或已经开始拖拽时不会弹出菜单。强化石卡片与武器槽统一使用深色背景、边框和三行布局；点击“使用”后所有武器高亮并显示红色“取消使用”，成功强化或取消后返回原强化石页面，也可直接把强化石拖到背包或装备栏武器上。
+局内背包界面采用左右分栏：左侧是当前装备，右侧是随身物品。点击左侧已装备远程武器会切换当前手持槽；点击右侧背包武器会显示“装备”，远程武器替换当前手持槽，近战武器替换近战槽。武器槽在左键释放且移动距离小于等于 6 像素时才发送点击选择，移动达到阈值或已经开始拖拽时不会弹出菜单；右侧背包武器按下时缩放到 0.94，释放后回弹到 1.04 再恢复，拖动时原槽缩放到 0.96 且透明度降为 0.58，拖拽预览持续呼吸摆动。强化石卡片使用深色背景、边框和两行布局，第一行直接显示名称与数量，不再显示“资源”；强化石只能作为锻造材料，局内不可点击或拖动使用。修复包可点击“使用”进入目标选择，也可直接拖到武器上；选择期间未满耐久武器高亮，满耐久武器覆盖灰色滤镜且不可选择。
 
 装备和背包使用单实例流转规则：一把武器资源同一时间只能存在于一个位置。右侧背包武器拖到左侧装备槽后，会从背包列表移除；如果目标装备槽已有武器，旧武器会回到原背包位置。左侧装备拖回右侧背包的空白区域或任意背包物品上都会卸下并插入背包；背包武器之间拖拽会移动原物品顺序，不会复制资源；远程装备槽之间拖拽会移动或交换同一个武器引用。
 
-局外仓库与随身背包是两个独立容器。仓库和背包都使用每行两个物品的网格布局。普通点击强化石会显示出售和使用；堆叠出售可通过滑条或数字框选择数量，也可直接全部出售。选择使用后自动展开背包、高亮仓库/背包/装备栏的所有武器并显示红色“取消使用”；成功强化或取消后恢复跳转前的强化石分类、搜索和属性筛选。强化石也可直接拖到任意已有武器卡片或装备槽完成强化。
+局外仓库与随身背包是两个独立容器。仓库和背包都使用每行两个物品的网格布局。普通点击强化石只提供出售，强化石只能放入锻造系统；修复包提供出售和使用。堆叠出售可通过滑条或数字框选择数量，也可直接全部出售；把数量大于 1 的强化石或修复包拖到另一容器时，同一数量弹窗切换为移动模式，玩家可选择 1 到当前堆叠数量，目标侧按签名自动合并且单组不超过 99。修复包选择使用后自动展开背包并显示红色“取消使用”，仓库、背包和装备栏内未满耐久武器高亮，满耐久武器置灰且不可选择。
 
 永久仓库首次建立或从旧存档迁移时默认按获得时间从新到旧排列，之后会保存玩家手工调整的列表顺序。强化石保存品质、属性和方向；读取旧存档时，通用“强化石”按低级品质恢复，旧方向或百分比词条统一保留正负方向。
 
@@ -153,7 +153,7 @@
 
 正式战斗失败结算由 `GlobalInventory.combat_failure_losses_recorded` 发送实际遗失条目的只读快照，`ShopService` 将其加入灰市并只保留最近 5 次失败。灰市武器按当前强化状态的满耐久有效价值估价，强化石按单颗有效价值估价，最终购买价为 `满耐久或单颗价值 × 实际遗失数量 × 4 至 8 倍随机倍率`；回购物品保留失败时的实际耐久、强化状态和堆叠数量。
 
-`ForgePanel` 只维护一个主武器槽、五个牺牲槽、来源查询和动画状态，真实规则集中在无 UI 依赖的 `ForgeService`。槽位仅保存资源实例与原来源引用，放入时不会转移所有权；执行前服务再次校验主武器、有效材料数量与金币。牺牲武器可提供其当前耐久的 10%，且只按主武器实际缺失耐久结算；低级、中级、高级、极品强化石的基础费用分别为 2、5、10、20 金币。总费用为 `向上取整((实际恢复耐久 × 2 + 强化石基础费用合计) × (1 + 主武器当前有效售价 / 100 × 0.4))`，最低 1 金币。零耐久、超过修复上限或与主武器不兼容的材料不计费也不消费；强化石最终百分比只在 1.35 秒、一圈半的融合动画结束后随机并应用。
+`ForgePanel` 只维护一个主武器槽、五个牺牲槽、来源查询和动画状态，真实规则集中在无 UI 依赖的 `ForgeService`。主槽和牺牲槽边长统一为 `forge_slot_size = 84` 像素；槽位仅保存资源实例与原来源引用，放入时不会转移所有权；执行前服务再次校验主武器、有效材料数量与金币。牺牲武器可提供其当前耐久的 10%，且只按主武器实际缺失耐久结算；低级、中级、高级、极品强化石的基础费用分别为 2、5、10、20 金币。总费用为 `向上取整((实际恢复耐久 × 2 + 强化石基础费用合计) × (1 + 主武器当前有效售价 / 100 × 0.4))`，最低 1 金币。零耐久、超过修复上限或与主武器不兼容的材料不计费也不消费；强化石最终百分比只在 1.35 秒、一圈半的融合动画结束后随机并应用。
 
 ## 暂停与设置
 
@@ -262,12 +262,12 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 - 武器数据：`weapon_type`、`sell_price`、`max_durability`、`current_durability`、`durability_cost_per_use`、`energy_cost`、`projectile_speed`、`bullet_range`、`ranged_damage`、`ranged_cooldown`、`spread_degrees`、`recoil_force`、`front_recoil_force`、`impact_force`、`melee_damage`、`melee_cooldown`、`melee_active_duration`
 - 主菜单入口：`character_select_scene_path`、`WarehouseButton`、`ShopButton`、`ForgeButton`、`DEVELOPER_UNLOCK_SEQUENCE`
 - 全局仓库：`SAVE_PATH`、`DEFAULT_RANGED_SLOT_COUNT`、`WEAPON_RESOURCE_PATHS`、`DEFAULT_BACKPACK_WEAPON_IDS`、`DEFAULT_RANGED_WEAPON_IDS`、`DEFAULT_MELEE_WEAPON_ID`、`DEFAULT_STARTING_COINS`
-- 仓库与开发者面板：`panel_minimum_size`、`combat_panel_height`、`coin_step`、`enhancement_stone_grant_count`
+- 仓库与开发者面板：`panel_minimum_size`、`dialog_width`、`dialog_height`、`dialog_background_alpha`、`combat_panel_height`、`coin_step`、`enhancement_stone_grant_count`
 - 商店：`automatic_refresh_interval_seconds`、`weapon_stock_count`、`resource_stock_count`、`normal_price_multiplier_minimum`、`normal_price_multiplier_maximum`、`second_hand_firearm_chance`、`second_hand_durability_consumption_minimum`、`second_hand_durability_consumption_maximum`、`second_hand_enhancement_cumulative_chances`、`second_hand_stone_compatibility_attempts`、`manual_refresh_base_cost`、`manual_refresh_cost_growth`、`gray_market_price_multiplier_minimum`、`gray_market_price_multiplier_maximum`、`gray_market_failure_limit`、`weapon_resource_paths`
-- 锻造：`MAIN_WEAPON_VALUE_STEP`、`MAIN_WEAPON_MULTIPLIER_PER_STEP`、`BASE_COST_MULTIPLIER`、`SACRIFICE_WEAPON_DURABILITY_RATIO`、`COST_PER_RESTORED_DURABILITY`、`STONE_QUALITY_COSTS`、`SACRIFICE_SLOT_COUNT`、`FORGE_ANIMATION_DURATION`、`FORGE_ANIMATION_ROTATIONS`、`panel_minimum_size`
+- 锻造：`MAIN_WEAPON_VALUE_STEP`、`MAIN_WEAPON_MULTIPLIER_PER_STEP`、`BASE_COST_MULTIPLIER`、`SACRIFICE_WEAPON_DURABILITY_RATIO`、`COST_PER_RESTORED_DURABILITY`、`STONE_QUALITY_COSTS`、`SACRIFICE_SLOT_COUNT`、`FORGE_ANIMATION_DURATION`、`FORGE_ANIMATION_ROTATIONS`、`panel_minimum_size`、`forge_slot_size`
 - 角色选择：`game_scene_path`、`main_menu_scene_path`、`stat_bar_maximum`、`speed_bar_maximum`
 - 输入绑定：`SAVE_PATH`、`EVENT_TYPE_UNBOUND`、`_action_entries`
-- HUD：`DROP_LIST_COMBAT_SUPPRESSION_DURATION`、`DEVELOPER_UNLOCK_SEQUENCE`、`ranged_slot_minimum_size`、`melee_slot_minimum_size`、`inventory_slot_minimum_size`、`combat_developer_menu_half_size`、`toggle_inventory_action`、`toggle_large_map_action`、`pause_action`、`pickup_action`、`toggle_drop_list_action`、`extraction_action`、`nearby_drop_pickup_range`、`max_nearby_drop_buttons`、`nearby_drop_refresh_interval`、`nearby_drop_expanded_height`、`nearby_drop_collapsed_height`、`main_menu_scene_path`
+- HUD：`DROP_LIST_COMBAT_SUPPRESSION_DURATION`、`DEVELOPER_UNLOCK_SEQUENCE`、`ranged_slot_minimum_size`、`melee_slot_minimum_size`、`inventory_slot_minimum_size`、`inventory_click_press_scale`、`inventory_click_bounce_scale`、`inventory_click_press_duration`、`inventory_click_release_duration`、`inventory_drag_source_scale`、`inventory_drag_source_opacity`、`inventory_drag_preview_start_scale`、`inventory_drag_preview_pulse_scale`、`inventory_drag_preview_pulse_duration`、`inventory_drag_preview_tilt_radians`、`combat_developer_menu_half_size`、`toggle_inventory_action`、`toggle_large_map_action`、`pause_action`、`pickup_action`、`toggle_drop_list_action`、`extraction_action`、`nearby_drop_pickup_range`、`max_nearby_drop_buttons`、`nearby_drop_refresh_interval`、`nearby_drop_expanded_height`、`nearby_drop_collapsed_height`、`main_menu_scene_path`
 - 按键绑定面板：`title_text`、`list_minimum_height`
 - 小地图和大地图：`game_world_path`、`player_path`、`display_mode`、`local_view_radius`、`local_redraw_interval`、`full_redraw_interval`、`redraw_player_move_distance`、`fallback_map_half_size`、`minimap_background_color`、`minimap_border_color`、`obstacle_color`、`fog_overlay_color`、`player_color`、`extraction_marker_color`、`player_marker_radius`、`extraction_marker_radius`、`navigation_marker_color`、`navigation_line_width`、`navigation_dash_length`、`navigation_dash_gap`、`navigation_marker_radius`、`navigation_marker_cancel_radius`、`allow_navigation_marker_input`
 

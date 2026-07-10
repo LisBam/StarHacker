@@ -457,6 +457,46 @@ func transfer_backpack_to_warehouse(item_resource: Resource, target_index: int =
 	return true
 
 
+func transfer_storage_resource_quantity(item_resource: Resource, source_location: String, target_location: String, requested_quantity: int, target_index: int = -1) -> bool:
+	if item_resource == null or requested_quantity <= 0 or source_location == target_location:
+		return false
+	if not _is_storage_location(source_location) or not _is_storage_location(target_location):
+		return false
+	# 来源记录下标；使用资源实例和来源容器精确定位，避免同类堆叠之间发生错误拆分。
+	var source_record_index: int = _find_storage_record_index(source_location, item_resource)
+	# 来源记录数组；只接受仓库或随身背包，非法位置会在前置校验中直接拒绝。
+	var source_records: Array[Dictionary] = _get_storage_records(source_location)
+	if source_record_index < 0 or source_record_index >= source_records.size():
+		return false
+	# 来源记录；部分移动时保留原资源实例并减少数量，整组移动继续复用原有转移接口。
+	var source_record: Dictionary = source_records[source_record_index]
+	# 当前堆叠数量；所有可堆叠资源限制为 1 到 99，异常旧数据在此标准化。
+	var stored_quantity: int = clampi(int(source_record.get("quantity", 1)), 1, MAX_STACK_QUANTITY)
+	# 实际移动数量；弹窗打开后若库存数量发生变化，会安全限制到当前仍持有的数量。
+	var transfer_quantity: int = clampi(requested_quantity, 1, stored_quantity)
+	if transfer_quantity >= stored_quantity:
+		return transfer_warehouse_to_backpack(item_resource, target_index) if source_location == STORAGE_LOCATION_WAREHOUSE else transfer_backpack_to_warehouse(item_resource, target_index)
+	if not _is_stackable_resource(item_resource):
+		return false
+
+	# 拆分资源实例；来源和目标必须拥有独立资源引用，确保后续按实例定位、消费和存档互不干扰。
+	var moving_resource: Resource = item_resource.duplicate(true) as Resource
+	if moving_resource == null:
+		return false
+	# 拆分记录；保留原获得时间与撤离标记，但使用新的唯一记录编号表示新形成的目标堆叠。
+	var moving_record: Dictionary = _create_record(moving_resource, float(source_record.get("acquired_at", -1.0)))
+	moving_record["last_extraction_epoch"] = int(source_record.get("last_extraction_epoch", 0))
+	moving_record["quantity"] = transfer_quantity
+	source_record["quantity"] = stored_quantity - transfer_quantity
+	# 目标记录数组；插入时会优先合并相同签名堆叠，超过单组上限的剩余数量自动形成新记录。
+	var target_records: Array[Dictionary] = _get_storage_records(target_location)
+	_insert_record_with_stack_merge(target_records, moving_record, target_index)
+	_queue_save_inventory()
+	_emit_storage_changed(source_location)
+	_emit_storage_changed(target_location)
+	return true
+
+
 func move_warehouse_item(source_index: int, target_index: int) -> bool:
 	if source_index < 0 or source_index >= _warehouse_records.size() or target_index < 0 or target_index > _warehouse_records.size():
 		return false

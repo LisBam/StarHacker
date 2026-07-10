@@ -39,6 +39,12 @@ const STORAGE_SPLIT_MIN_RATIO: float = 0.10
 const STORAGE_SPLIT_MAX_RATIO: float = 0.90
 ## 仓库菜单可选择的远程装备槽数量；默认 2，与当前双远程装备结构保持一致。
 const WAREHOUSE_RANGED_EQUIPMENT_SLOT_COUNT: int = 2
+## 数量弹窗空闲操作标识；默认表示当前没有待确认的出售或跨容器移动请求。
+const QUANTITY_OPERATION_NONE: String = ""
+## 数量弹窗出售操作标识；确认后按选择数量结算金币并减少来源堆叠。
+const QUANTITY_OPERATION_SALE: String = "sale"
+## 数量弹窗移动操作标识；确认后把选择数量从仓库或背包原子拆分到另一容器。
+const QUANTITY_OPERATION_TRANSFER: String = "transfer"
 
 ## 面板最小尺寸；默认 960x620，适配当前 1280x720 主菜单并保留边缘空间。
 @export var panel_minimum_size: Vector2 = Vector2(960.0, 620.0)
@@ -114,6 +120,16 @@ var _sell_quantity_dialog: ConfirmationDialog
 var _quantity_sale_item_resource: Resource
 ## 数量出售待处理位置；取值 warehouse 或 backpack，默认空字符串表示没有有效出售请求。
 var _quantity_sale_item_location: String = ""
+## 数量弹窗当前操作；取值为空、sale 或 transfer，默认空字符串防止旧弹窗确认执行错误动作。
+var _quantity_operation: String = QUANTITY_OPERATION_NONE
+## 数量移动待处理资源；默认 null，拖动堆叠到另一容器后保存真实资源实例直到玩家确认。
+var _quantity_transfer_item_resource: Resource
+## 数量移动来源位置；取值 warehouse 或 backpack，默认空字符串表示没有有效移动来源。
+var _quantity_transfer_source_location: String = ""
+## 数量移动目标位置；取值 warehouse 或 backpack，默认空字符串表示没有有效移动目标。
+var _quantity_transfer_target_location: String = ""
+## 数量移动目标下标；取值 -1 或目标容器合法插入位置，默认 -1 表示追加或按堆叠规则合并。
+var _quantity_transfer_target_index: int = -1
 ## 强化选择前主分类；默认资源分类，成功强化后用于返回跳转之前的强化石页面。
 var _stone_return_primary_category: String = InventoryQuery.PRIMARY_RESOURCES
 ## 强化选择前子分类；默认强化石，成功强化后用于恢复原页面筛选。
@@ -403,7 +419,7 @@ func _build_storage_entry_row(entry: Dictionary, location: String, entry_index: 
 	var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
 	item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	item_control.call("configure", item_resource, location, entry_index, _backpack_expanded, extraction_prefix, quantity)
-	item_control.call("set_enhancement_target_highlight", _is_pending_item_usable_on_weapon(item_resource))
+	item_control.call("set_weapon_target_selection_state", _is_weapon_target_selection_active(), _is_pending_item_usable_on_weapon(item_resource))
 	item_control.connect("quick_action_requested", Callable(self, "_on_quick_action_requested").bind(location))
 	item_control.connect("item_action_requested", Callable(self, "_on_item_action_requested").bind(location))
 	item_control.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
@@ -442,7 +458,7 @@ func _create_storage_equipment_slot(slot_label: String, location: String, weapon
 	slot_control.connect("item_selected", Callable(self, "_on_repair_kit_weapon_selected"))
 	slot_control.connect("enhancement_drop_requested", Callable(self, "_on_enhancement_drop_requested"))
 	slot_control.connect("repair_kit_drop_requested", Callable(self, "_on_repair_kit_drop_requested"))
-	slot_control.call("set_enhancement_target_highlight", _is_pending_item_usable_on_weapon(item_resource))
+	slot_control.call("set_weapon_target_selection_state", _is_weapon_target_selection_active(), _is_pending_item_usable_on_weapon(item_resource))
 	slot_control.custom_minimum_size = Vector2(0.0, 46.0)
 	return slot_control
 
@@ -469,6 +485,10 @@ func _is_pending_item_usable_on_weapon(weapon_resource: Resource) -> bool:
 		var maximum_durability: float = maxf(float(weapon_resource.get("max_durability")), 1.0)
 		return current_durability < maximum_durability
 	return _pending_stone_resource != null
+
+
+func _is_weapon_target_selection_active() -> bool:
+	return _pending_stone_resource != null or _pending_repair_kit_resource != null
 
 
 func _create_storage_category_button(target_bar: HBoxContainer, button_text: String, category_name: String, is_primary: bool) -> void:
@@ -587,6 +607,8 @@ func _on_item_action_requested(item_resource: Resource, source_location: String)
 	if item_resource == null or _global_inventory == null:
 		return
 	if _pending_repair_kit_resource != null and str(item_resource.get("weapon_type")) in ["melee", "ranged"]:
+		if not _is_pending_item_usable_on_weapon(item_resource):
+			return
 		_on_repair_kit_weapon_selected(item_resource)
 		return
 	if _pending_stone_resource != null and str(item_resource.get("weapon_type")) in ["melee", "ranged"]:
@@ -736,6 +758,8 @@ func _present_enhancement_result(enhancement_result: Dictionary) -> void:
 func _open_sell_quantity_dialog(item_resource: Resource, source_location: String, maximum_quantity: int) -> void:
 	if _sell_quantity_dialog == null or item_resource == null:
 		return
+	_reset_quantity_operation()
+	_quantity_operation = QUANTITY_OPERATION_SALE
 	_quantity_sale_item_resource = item_resource
 	_quantity_sale_item_location = source_location
 	# 单件售价；整组总价除以当前数量，统一复用 GlobalInventory 的动态售价结果。
@@ -750,11 +774,44 @@ func _open_sell_quantity_dialog(item_resource: Resource, source_location: String
 
 
 func _on_sell_quantity_confirmed(quantity: int) -> void:
-	if _global_inventory == null or _quantity_sale_item_resource == null or _quantity_sale_item_location.is_empty():
+	if _global_inventory == null:
 		return
-	_global_inventory.call("sell_storage_resource_quantity", _quantity_sale_item_resource, _quantity_sale_item_location, quantity)
+	if _quantity_operation == QUANTITY_OPERATION_TRANSFER:
+		if _quantity_transfer_item_resource != null and not _quantity_transfer_source_location.is_empty() and not _quantity_transfer_target_location.is_empty():
+			_global_inventory.call("transfer_storage_resource_quantity", _quantity_transfer_item_resource, _quantity_transfer_source_location, _quantity_transfer_target_location, quantity, _quantity_transfer_target_index)
+		_reset_quantity_operation()
+		return
+	if _quantity_operation == QUANTITY_OPERATION_SALE and _quantity_sale_item_resource != null and not _quantity_sale_item_location.is_empty():
+		_global_inventory.call("sell_storage_resource_quantity", _quantity_sale_item_resource, _quantity_sale_item_location, quantity)
+	_reset_quantity_operation()
+
+
+func _open_transfer_quantity_dialog(item_resource: Resource, source_location: String, target_location: String, target_index: int, maximum_quantity: int) -> void:
+	if _sell_quantity_dialog == null or item_resource == null:
+		return
+	_reset_quantity_operation()
+	_quantity_operation = QUANTITY_OPERATION_TRANSFER
+	_quantity_transfer_item_resource = item_resource
+	_quantity_transfer_source_location = source_location
+	_quantity_transfer_target_location = target_location
+	_quantity_transfer_target_index = target_index
+	# 物品名称；统一复用详情格式化器，确保修复包和不同品质强化石名称与卡片一致。
+	var item_display_name: String = str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", item_resource))
+	# 来源中文名；只对仓库和随身背包开放，便于弹窗明确显示移动方向。
+	var source_display_name: String = "永久仓库" if source_location == "warehouse" else "随身背包"
+	# 目标中文名；与来源使用同一术语，避免玩家误解为出售或装备操作。
+	var target_display_name: String = "永久仓库" if target_location == "warehouse" else "随身背包"
+	_sell_quantity_dialog.call("present_transfer", item_display_name, maxi(maximum_quantity, 1), source_display_name, target_display_name)
+
+
+func _reset_quantity_operation() -> void:
+	_quantity_operation = QUANTITY_OPERATION_NONE
 	_quantity_sale_item_resource = null
 	_quantity_sale_item_location = ""
+	_quantity_transfer_item_resource = null
+	_quantity_transfer_source_location = ""
+	_quantity_transfer_target_location = ""
+	_quantity_transfer_target_index = -1
 
 
 func _equip_backpack_weapon(weapon_resource: Resource, target_ranged_slot: int = -1) -> void:
@@ -855,15 +912,33 @@ func _on_item_drop_requested(drag_data: Dictionary, target_location: String, tar
 		return
 
 	if source_location == "warehouse" and target_location == "backpack":
-		_global_inventory.call("transfer_warehouse_to_backpack", item_resource, target_index)
+		# 跨容器堆叠数量；数量大于 1 时先让玩家选择拆分数量，单件资源和武器保持直接移动。
+		var warehouse_stack_quantity: int = int(_global_inventory.call("get_storage_resource_quantity", item_resource, source_location))
+		if _is_stackable_storage_resource(item_resource) and warehouse_stack_quantity > 1:
+			_open_transfer_quantity_dialog(item_resource, source_location, target_location, target_index, warehouse_stack_quantity)
+		else:
+			_global_inventory.call("transfer_warehouse_to_backpack", item_resource, target_index)
 	elif source_location == "backpack" and target_location == "warehouse":
-		_global_inventory.call("transfer_backpack_to_warehouse", item_resource, target_index)
+		# 跨容器堆叠数量；背包转仓库与仓库转背包使用同一选择和原子拆分流程。
+		var backpack_stack_quantity: int = int(_global_inventory.call("get_storage_resource_quantity", item_resource, source_location))
+		if _is_stackable_storage_resource(item_resource) and backpack_stack_quantity > 1:
+			_open_transfer_quantity_dialog(item_resource, source_location, target_location, target_index, backpack_stack_quantity)
+		else:
+			_global_inventory.call("transfer_backpack_to_warehouse", item_resource, target_index)
 	elif source_is_storage and not target_is_storage:
 		_global_inventory.call("transfer_storage_to_equipment", item_resource, source_location, target_location)
 	elif not source_is_storage and target_is_storage:
 		_global_inventory.call("transfer_equipment_to_storage", source_location, target_location, target_index)
 	elif not source_is_storage and not target_is_storage:
 		_global_inventory.call("swap_equipment_locations", source_location, target_location)
+
+
+func _is_stackable_storage_resource(item_resource: Resource) -> bool:
+	if item_resource == null:
+		return false
+	# 物品类型；当前强化石和修复包支持堆叠，未来新增堆叠资源时可在此扩展稳定类型表。
+	var item_kind: String = str(item_resource.get("item_kind"))
+	return item_kind in ["enhancement_stone", "repair_kit"]
 
 
 func _clear_container(container: Node) -> void:
@@ -879,5 +954,6 @@ func _on_close_pressed() -> void:
 	_pending_stone_resource = null
 	_pending_stone_location = ""
 	_stone_return_view_pending = false
+	_reset_quantity_operation()
 	_apply_storage_display_mode()
 	closed.emit()

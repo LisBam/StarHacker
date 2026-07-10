@@ -15,6 +15,8 @@ const DRAG_DATA_TYPE: String = "global_storage_item"
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
 ## 武器耐久条组件；局外装备槽使用与战斗和仓库卡片相同的底部读条。
 const WEAPON_DURABILITY_BAR_SCRIPT: Script = preload("res://scripts/ui/weapon_durability_bar.gd")
+## 不可选武器灰色滤镜；默认保留一定透明度以继续显示武器名称和耐久信息。
+const UNAVAILABLE_TARGET_FILTER_COLOR: Color = Color(0.42, 0.42, 0.42, 0.78)
 
 ## 当前装备资源；默认 null 表示空槽，空槽可以接收兼容武器但不能作为拖拽来源。
 var _item_resource: Resource
@@ -26,6 +28,8 @@ var _slot_label: String = "装备槽"
 var _accepted_weapon_type: String = "ranged"
 ## 是否将当前装备标记为强化目标；默认 false，使用强化石期间会点亮所有非空装备槽。
 var _enhancement_target_highlight: bool = false
+## 当前装备是否处于目标选择但不可选择状态；默认 false，满耐久武器在修复包选择期间会启用灰色滤镜。
+var _weapon_target_selection_blocked: bool = false
 ## 武器耐久条缓存；默认首次配置时创建，空槽隐藏，有武器时显示剩余耐久。
 var _durability_bar: Control
 
@@ -48,6 +52,15 @@ func configure(slot_label: String, location: String, accepted_weapon_type: Strin
 
 func set_enhancement_target_highlight(enabled: bool) -> void:
 	_enhancement_target_highlight = enabled and _item_resource != null
+	_weapon_target_selection_blocked = false
+	_refresh_enhancement_target_highlight()
+
+
+func set_weapon_target_selection_state(selection_active: bool, selectable: bool) -> void:
+	# 目标选择状态；空装备槽不参与可用或不可用表现，只有真实武器会被高亮或置灰。
+	var has_weapon: bool = _item_resource != null and str(_item_resource.get("weapon_type")) in ["ranged", "melee"]
+	_enhancement_target_highlight = selection_active and selectable and has_weapon
+	_weapon_target_selection_blocked = selection_active and not selectable and has_weapon
 	_refresh_enhancement_target_highlight()
 
 
@@ -58,12 +71,12 @@ func refresh_durability() -> void:
 
 
 func _on_pressed() -> void:
-	if _item_resource != null:
+	if _item_resource != null and not _weapon_target_selection_blocked:
 		item_selected.emit(_item_resource)
 
 
 func _get_drag_data(_at_position: Vector2) -> Variant:
-	if _item_resource == null or _location.is_empty():
+	if _item_resource == null or _location.is_empty() or _weapon_target_selection_blocked:
 		return null
 	# 装备拖拽预览；只显示槽名和武器名，避免复制真实装备控件产生重复投放信号。
 	var preview_label: Label = Label.new()
@@ -119,7 +132,11 @@ func _make_custom_tooltip(_for_text: String) -> Object:
 
 func _refresh_enhancement_target_highlight() -> void:
 	# 装备槽色调；浅绿色明确表示当前可作为强化目标，取消后恢复原主题。
-	self_modulate = Color(0.68, 1.0, 0.76, 1.0) if _enhancement_target_highlight else Color.WHITE
+	# 修复目标补充；当前不可选武器会优先应用灰色滤镜，可选武器继续沿用浅绿色反馈。
+	if _weapon_target_selection_blocked:
+		self_modulate = UNAVAILABLE_TARGET_FILTER_COLOR
+	else:
+		self_modulate = Color(0.68, 1.0, 0.76, 1.0) if _enhancement_target_highlight else Color.WHITE
 
 
 func _ensure_durability_bar() -> void:

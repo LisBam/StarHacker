@@ -136,7 +136,7 @@ var _is_medium_memory_recheck: bool = false
 var _medium_recheck_cooldown_remaining: float = 0.0
 ## 可见情报广播剩余时间；取值大于等于 0，默认 0，进入可见状态后立即广播并按间隔刷新。
 var _visible_intelligence_broadcast_remaining: float = 0.0
-## 最近情报类型；取值为 visible_contact 或 occlusion_loss，默认空字符串表示尚未形成共享报告。
+## 最近情报类型；取值为 visible_contact、occlusion_loss 或 target_lost，默认空字符串表示尚未形成共享报告。
 var _last_intelligence_type: String = ""
 
 
@@ -258,6 +258,10 @@ func _begin_lost_target_search(occlusion_blocked_view: bool, line_of_sight_hit: 
 	_target_is_visible = false
 	_target_ai_state = TARGET_AI_STATE_SEARCHING
 	_vision_loss_elapsed = 0.0
+	# 本次丢失情报类型；墙体遮挡同步墙角信息，超出视野距离等情况只同步最后线索并继续追踪。
+	var lost_intelligence_type: String = "occlusion_loss" if occlusion_blocked_view else "target_lost"
+	_target_memory_remaining = maxf(_target_memory_remaining, target_memory_duration)
+	_update_long_term_region(_last_known_target_position)
 	if occlusion_blocked_view:
 		_line_of_sight_loss_count += 1
 		_remember_occlusion_position(line_of_sight_hit)
@@ -265,11 +269,11 @@ func _begin_lost_target_search(occlusion_blocked_view: bool, line_of_sight_hit: 
 
 	# 二级封锁进入计数；取值为脱战阈值减提前量，最小为 1，用于在临界前扩大封锁范围。
 	var blockade_start_count: int = maxi(occlusion_break_forget_count - blockade_loss_margin, 1)
-	if _line_of_sight_loss_count >= blockade_start_count and _line_of_sight_loss_count < occlusion_break_forget_count:
+	if occlusion_blocked_view and _line_of_sight_loss_count >= blockade_start_count and _line_of_sight_loss_count < occlusion_break_forget_count:
 		_target_ai_state = TARGET_AI_STATE_BLOCKADE
 
-	if _line_of_sight_loss_count >= occlusion_break_forget_count:
-		_mark_intelligence_changed("occlusion_loss")
+	if occlusion_blocked_view and _line_of_sight_loss_count >= occlusion_break_forget_count:
+		_mark_intelligence_changed(lost_intelligence_type)
 		_enter_regular_alert_state()
 		return
 
@@ -283,8 +287,7 @@ func _begin_lost_target_search(occlusion_blocked_view: bool, line_of_sight_hit: 
 	_target_search_remaining = 0.0
 	_target_search_wait_remaining = 0.0
 	_is_medium_memory_recheck = false
-	if occlusion_blocked_view:
-		_mark_intelligence_changed("occlusion_loss")
+	_mark_intelligence_changed(lost_intelligence_type)
 	_emit_state_change(previous_ai_state)
 
 
@@ -722,7 +725,7 @@ func receive_shared_intelligence(report: Dictionary) -> void:
 	if is_instance_valid(_target) and shared_target_id != 0 and shared_target_id != _target.get_instance_id():
 		return
 
-	# 共享情报类型；visible_contact 表示队友当前发现玩家，occlusion_loss 表示玩家刚进入实心墙体后方。
+	# 共享情报类型；visible_contact 表示队友当前发现玩家，occlusion_loss 表示玩家刚进入实心墙体后方，target_lost 表示玩家快速离开有效视野但仍需前往最后线索追踪。
 	var shared_intelligence_type: String = str(report.get("intelligence_type", "occlusion_loss"))
 
 	# 共享消失位置原始值；取值应为 Vector2，缺失或异常时不改变本地记忆。

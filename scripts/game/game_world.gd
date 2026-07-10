@@ -65,9 +65,9 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export var monster_scene: PackedScene
 ## 随机怪物场景池；默认由场景填入近战和远程怪物，非空时会优先从池中随机选择生成对象。
 @export var monster_scenes: Array[PackedScene] = []
-## 怪物生成数量；取值建议 0 到 64，默认 8，运行时修改会影响开局战斗压力。
-## 全地图布怪补充：项目当前默认生成 48 名敌人，旧 8 名说明保留用于追溯原型基线。
-@export_range(0, 256, 1) var monster_spawn_count: int = 48
+## 怪物生成数量；取值建议 0 到 256，默认 96，运行时修改会直接影响开局整图敌人密度和性能开销。
+## 全地图布怪补充：正式战斗默认生成 96 名敌人，使大型地图各片区持续存在遭遇压力。
+@export_range(0, 256, 1) var monster_spawn_count: int = 96
 ## 怪物生成最小距离；取值应大于等于 0，默认 280 像素，运行时修改会影响怪物是否离玩家过近。
 ## 全地图布怪补充：项目当前默认至少离玩家 900 像素，避免开局和补充刷新直接出现在屏幕附近。
 @export_range(0.0, 8000.0, 1.0) var monster_spawn_min_distance: float = 900.0
@@ -77,12 +77,12 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export var monster_spawn_across_full_map: bool = true
 ## 全地图敌人生成边界留白；默认 256 像素，防止敌人贴着边界墙或生成到地图外侧。
 @export_range(0.0, 4000.0, 1.0) var monster_spawn_edge_margin: float = 256.0
-## 正式战斗最低存活敌人数；默认 36，低于该值时会在玩家安全范围外分批补充敌人。
-@export_range(0, 256, 1) var monster_minimum_alive_count: int = 36
+## 正式战斗最低存活敌人数；默认 80，低于该值时会在玩家安全范围外分批补充敌人。
+@export_range(0, 256, 1) var monster_minimum_alive_count: int = 80
 ## 敌人补充检查间隔；默认 2 秒，避免每帧统计和生成大量节点。
 @export_range(0.1, 60.0, 0.1) var monster_replenish_interval: float = 2.0
-## 单次补充敌人数量；默认 4，实际生成数不会超过恢复到最低存活数量所需的缺口。
-@export_range(1, 32, 1) var monster_replenish_batch_size: int = 4
+## 单次补充敌人数量；默认 8，实际生成数不会超过恢复到最低存活数量所需的缺口。
+@export_range(1, 32, 1) var monster_replenish_batch_size: int = 8
 ## 敌人尺寸与属性随机波动比例；默认 0.3 表示每只敌人的大小和战斗属性分别在 70% 到 130% 范围内生成。
 @export_range(0.0, 0.9, 0.05) var monster_spawn_variation_ratio: float = 0.3
 ## 怪物父节点路径；默认指向 Enemies 容器，允许为空并回退到 GameWorld，修改会影响怪物节点层级。

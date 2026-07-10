@@ -10,7 +10,7 @@ radius = 17.0
 
 [node name="BasicMonster" type="CharacterBody2D" unique_id=1926162471]
 collision_layer = 2
-collision_mask = 17
+collision_mask = 16
 script = ExtResource("1_basic_monster")
 vision_range = 500.0
 

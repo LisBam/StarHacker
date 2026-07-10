@@ -60,6 +60,8 @@ class_name WeaponData
 
 ## 强化后售价最低倍率；默认 0.1，防止大量负词条把售价降为负数，运行时通常不修改。
 const MINIMUM_SELL_PRICE_MULTIPLIER: float = 0.1
+## 损坏武器最低耐久售价倍率；默认 0.1，使零耐久武器仍可按满耐久有效售价的 10% 出售。
+const MINIMUM_DURABILITY_SELL_PRICE_MULTIPLIER: float = 0.1
 ## 冷却和判定时长最小有效值；默认 0.01 秒，防止负强化导致除零或无限攻击。
 const MINIMUM_DURATION_VALUE: float = 0.01
 ## 可应用于所有武器的统一强化属性；新增通用战斗字段时应同步详情格式化器。
@@ -212,8 +214,12 @@ func get_effective_sell_price() -> int:
 				sell_price_ratio += absf(accumulated_ratio) if EnhancementRules.is_direction_beneficial(str(raw_stat_name), accumulated_direction) else -absf(accumulated_ratio)
 	# 强化后基础售价；先应用强化利弊，保证耐久折损与强化价格变化可以稳定组合。
 	var enhanced_sell_price: float = float(sell_price) * maxf(1.0 + sell_price_ratio, MINIMUM_SELL_PRICE_MULTIPLIER)
-	# 最终售价；按当前耐久比例线性折损，损坏武器耐久为 0 因此售价为 0。
-	return maxi(roundi(enhanced_sell_price * get_durability_ratio()), 0)
+	# 耐久售价倍率；从零耐久的 10% 线性增长到满耐久的 100%，确保损坏武器仍保留回收价值。
+	var durability_sell_price_multiplier: float = lerpf(MINIMUM_DURABILITY_SELL_PRICE_MULTIPLIER, 1.0, get_durability_ratio())
+	# 四舍五入售价；强化价格和耐久折损依次组合，零耐久时为强化后满耐久售价的 10%。
+	var calculated_sell_price: int = roundi(enhanced_sell_price * durability_sell_price_multiplier)
+	# 最终售价；原始售价大于 0 的武器至少可出售 1 金币，避免低价损坏武器因整数舍入变为不可出售。
+	return maxi(calculated_sell_price, 1) if sell_price > 0 else 0
 
 
 func _resolve_base_property_name(stat_name: String) -> String:

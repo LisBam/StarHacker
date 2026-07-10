@@ -17,6 +17,9 @@ const GLOBAL_STORAGE_DRAG_DATA_TYPE: String = "global_storage_item"
 ## 武器耐久条组件；统一贴在槽位底部并只读取 WeaponData 耐久状态。
 const WEAPON_DURABILITY_BAR_SCRIPT: Script = preload("res://scripts/ui/weapon_durability_bar.gd")
 
+## 点击与拖拽判定阈值；默认 6 像素，鼠标移动达到该距离后只允许拖拽，不再触发点击操作菜单。
+@export_range(0.0, 64.0, 0.5) var click_drag_threshold_pixels: float = 6.0
+
 ## 槽位所属上下文；取值为 equipment 或 inventory，默认 equipment，修改会影响拖拽来源和投放规则。
 var slot_context: String = "equipment"
 ## 槽位类型；取值为 ranged、melee、inventory 或 inventory_drop，默认 ranged，修改会影响可接受的武器类型。
@@ -46,6 +49,12 @@ var _active_drag_data: Dictionary = {}
 var _durability_bar: Control
 ## 武器耐久条覆盖宿主；默认由 PanelContainer 拉伸为完整槽位，耐久条在宿主内部仅贴底占用 5 像素。
 var _durability_overlay: Control
+## 左键点击是否等待释放确认；默认 false，按下武器时设为 true，进入拖拽或释放后立即清理。
+var _pending_left_click: bool = false
+## 左键按下位置；默认零向量，使用槽位本地坐标计算移动距离并区分普通点击与拖拽。
+var _left_press_position: Vector2 = Vector2.ZERO
+## 当前按压是否已超过拖拽阈值；默认 false，超过后即使没有成功投放也不会弹出“装备”菜单。
+var _left_drag_exceeded_threshold: bool = false
 
 
 func _ready() -> void:
@@ -118,6 +127,8 @@ func _draw() -> void:
 func _get_drag_data(_at_position: Vector2) -> Variant:
 	if weapon_data == null:
 		return null
+	_pending_left_click = false
+	_left_drag_exceeded_threshold = true
 
 	# 拖拽预览控件；取值为临时 Label，默认显示武器名称，修改会影响拖拽时鼠标旁的提示。
 	var preview_label: Label = Label.new()
@@ -253,11 +264,29 @@ func _make_custom_tooltip(_for_text: String) -> Object:
 
 
 func _on_gui_input(event: InputEvent) -> void:
-	if weapon_data == null or not (event is InputEventMouseButton):
+	if weapon_data == null:
 		return
-	# 鼠标事件；左键按下时通知 HUD，只有处于强化选择状态时 HUD 才会消费该选择。
+	if event is InputEventMouseMotion and _pending_left_click:
+		# 鼠标移动事件；按压期间只记录是否跨过阈值，实际拖拽数据仍由 Godot 控件协议生成。
+		var motion_event: InputEventMouseMotion = event as InputEventMouseMotion
+		_left_drag_exceeded_threshold = _left_drag_exceeded_threshold or motion_event.position.distance_to(_left_press_position) >= click_drag_threshold_pixels
+		return
+	if not (event is InputEventMouseButton):
+		return
+	# 鼠标按钮事件；左键按下只登记候选点击，释放且未拖动时才通知 HUD 打开装备或强化操作。
 	var mouse_event: InputEventMouseButton = event as InputEventMouseButton
-	if mouse_event.button_index == MOUSE_BUTTON_LEFT and mouse_event.pressed:
+	if mouse_event.button_index != MOUSE_BUTTON_LEFT:
+		return
+	if mouse_event.pressed:
+		_pending_left_click = true
+		_left_press_position = mouse_event.position
+		_left_drag_exceeded_threshold = false
+		return
+	# 是否触发普通点击；释放位置仍处于阈值内且拖拽协议没有启动时才发送选择信号。
+	var should_emit_selection: bool = _pending_left_click and not _left_drag_exceeded_threshold and mouse_event.position.distance_to(_left_press_position) <= click_drag_threshold_pixels
+	_pending_left_click = false
+	_left_drag_exceeded_threshold = false
+	if should_emit_selection:
 		item_selected.emit(weapon_data, slot_context, slot_kind, slot_index)
 
 

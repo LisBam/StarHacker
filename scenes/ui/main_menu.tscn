@@ -84,6 +84,34 @@ offset_bottom = -24.0
 grow_vertical = 0
 text = "仓库"
 
+[node name="ShopButton" type="Button" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(170, 48)
+layout_mode = 1
+anchors_preset = -1
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 206.0
+offset_top = -72.0
+offset_right = 376.0
+offset_bottom = -24.0
+grow_vertical = 0
+text = "商店"
+
+[node name="ForgeButton" type="Button" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(170, 48)
+layout_mode = 1
+anchors_preset = -1
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 388.0
+offset_top = -72.0
+offset_right = 558.0
+offset_bottom = -24.0
+grow_vertical = 0
+text = "锻造"
+
 [node name="SettingsPanel" type="PanelContainer" parent="."]
 unique_name_in_owner = true
 visible = false

@@ -227,9 +227,13 @@ func _build_storage_interface() -> void:
 	_stone_attribute_option.custom_minimum_size = Vector2(142.0, 36.0)
 	_stone_attribute_option.add_item("全部强化属性")
 	_stone_attribute_option.set_item_metadata(0, "")
-	for stat_name in EnhancementRules.STAT_KEYS:
-		_stone_attribute_option.add_item(EnhancementRules.get_stat_label(stat_name))
-		_stone_attribute_option.set_item_metadata(_stone_attribute_option.item_count - 1, stat_name)
+	# 筛选方向顺序；先列出全部“+”词条，再列出全部“-”词条，方便按方向连续浏览。
+	for direction in InventoryQuery.STONE_FILTER_DIRECTIONS:
+		_stone_attribute_option.add_separator(InventoryQuery.get_stone_attribute_direction_group_label(direction))
+		# 可筛选属性；每个属性分别建立精确方向选项，例如“伤害+”和“伤害-”。
+		for stat_name in EnhancementRules.STAT_KEYS:
+			_stone_attribute_option.add_item(InventoryQuery.get_stone_attribute_filter_label(stat_name, direction))
+			_stone_attribute_option.set_item_metadata(_stone_attribute_option.item_count - 1, InventoryQuery.build_stone_attribute_filter_key(stat_name, direction))
 	_stone_attribute_option.item_selected.connect(_on_stone_attribute_selected)
 	query_bar.add_child(_stone_attribute_option)
 
@@ -281,7 +285,7 @@ func _build_storage_interface() -> void:
 	_backpack_scroll.add_child(_backpack_section)
 	# 随身区标题；默认强调下半区会进入战斗并参与失败损失结算。
 	var backpack_title: Label = Label.new()
-	backpack_title.text = "随身背包 · 会带入战斗，死亡或主动退出时随机保留约 20%"
+	backpack_title.text = "随身背包 · 会带入战斗，死亡或主动退出时随机保留约 50%"
 	backpack_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	backpack_title.add_theme_font_size_override("font_size", 17)
 	_backpack_section.add_child(backpack_title)

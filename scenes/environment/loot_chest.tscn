@@ -1,0 +1,59 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/environment/loot_chest.gd" id="1_loot_chest"]
+[ext_resource type="Script" path="res://scripts/components/damage_receiver_component.gd" id="2_damage_receiver"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_chest"]
+size = Vector2(64, 52)
+
+[node name="LootChest" type="StaticBody2D"]
+collision_layer = 16
+collision_mask = 0
+script = ExtResource("1_loot_chest")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_chest")
+
+[node name="MeleeDamageReceiver" type="Area2D" parent="."]
+collision_layer = 2
+collision_mask = 0
+monitoring = false
+script = ExtResource("2_damage_receiver")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="MeleeDamageReceiver"]
+shape = SubResource("RectangleShape2D_chest")
+
+[node name="Shadow" type="Polygon2D" parent="."]
+position = Vector2(0, 7)
+color = Color(0, 0, 0, 0.34)
+polygon = PackedVector2Array(-38, -23, 38, -23, 42, 25, -42, 25)
+
+[node name="BodyVisual" type="Polygon2D" parent="."]
+color = Color(0.48, 0.62, 0.7, 1)
+polygon = PackedVector2Array(-34, -26, 34, -26, 36, 26, -36, 26)
+
+[node name="InnerPanel" type="Polygon2D" parent="."]
+color = Color(0.055, 0.075, 0.09, 0.9)
+polygon = PackedVector2Array(-28, -18, 28, -18, 29, 20, -29, 20)
+
+[node name="Lock" type="Polygon2D" parent="."]
+color = Color(1, 0.9, 0.46, 1)
+polygon = PackedVector2Array(-7, -7, 7, -7, 9, 9, -9, 9)
+
+[node name="QualityLabel" type="Label" parent="."]
+offset_left = -70.0
+offset_top = 32.0
+offset_right = 70.0
+offset_bottom = 52.0
+theme_override_font_sizes/font_size = 12
+text = "普通宝箱  10/10"
+horizontal_alignment = 1
+
+[node name="OpenProgress" type="ProgressBar" parent="."]
+visible = false
+offset_left = -48.0
+offset_top = -48.0
+offset_right = 48.0
+offset_bottom = -38.0
+max_value = 1.0
+show_percentage = false

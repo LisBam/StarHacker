@@ -21,20 +21,31 @@ const STONE_QUALITY_COSTS: Dictionary = {
 	EnhancementRules.QUALITY_HIGH: 10,
 	EnhancementRules.QUALITY_SUPREME: 20,
 }
+## 强化石升阶单槽成功率；默认每颗同品质牺牲石提供 20%，五个槽全部放满时达到 100%。
+const STONE_UPGRADE_SUCCESS_RATE_PER_SACRIFICE: float = 0.20
+## 武器锻造模式标识；用于让 UI 区分耐久/词条预览与强化石升阶预览。
+const FORGE_MODE_WEAPON: String = "weapon"
+## 强化石升阶模式标识；主槽为可升阶强化石时启用，不收取金币。
+const FORGE_MODE_STONE_UPGRADE: String = "stone_upgrade"
 
 ## 全局库存服务；负责校验来源数量、扣除金币、消费材料和应用随机强化倍率。
 var _global_inventory: Node
+## 锻造随机数生成器；默认初始化时随机化，仅用于强化石升阶成功判定，不提前生成结果。
+var _random: RandomNumberGenerator = RandomNumberGenerator.new()
 
 
 func _init(global_inventory: Node) -> void:
 	_global_inventory = global_inventory
+	_random.randomize()
 
 
 func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary]) -> Dictionary:
-	# 主武器；必须仍是仓库或背包中的武器资源，锻造不会接受强化石或空槽作为主物品。
+	# 主物品；武器进入原有修复强化流程，可升阶强化石进入同品质合成流程。
 	var main_weapon: Resource = main_entry.get("resource") as Resource
+	if _is_enhancement_stone(main_weapon):
+		return _build_stone_upgrade_preview(main_entry, sacrifice_entries)
 	if not _is_weapon(main_weapon):
-		return _build_invalid_preview("请先放入主锻造武器")
+		return _build_invalid_preview("请先放入主锻造武器或可升阶强化石")
 	# 强化前耐久；预览和结果弹窗共同使用，取值限制在 0 到最大耐久。
 	var durability_before: float = maxf(float(main_weapon.get("current_durability")), 0.0)
 	# 最大耐久；支持未来不同武器拥有不同上限。
@@ -51,6 +62,8 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 	var effective_material_count: int = 0
 	# 有效牺牲材料；只记录实际恢复耐久或能应用强化的条目，执行阶段不会误消耗无效果材料。
 	var effective_sacrifice_entries: Array[Dictionary] = []
+	# 无效牺牲材料；任一非空槽不能产生锻造效果时整次锻造禁用，UI 会将对应槽位标为红色。
+	var invalid_sacrifice_entries: Array[Dictionary] = []
 	for sacrifice_entry in sacrifice_entries:
 		# 牺牲资源；武器提供耐久，强化石提供随机强化，其他资源不参与锻造。
 		var sacrifice_resource: Resource = sacrifice_entry.get("resource") as Resource
@@ -64,13 +77,19 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 				remaining_durability_capacity -= applied_durability
 				effective_material_count += 1
 				effective_sacrifice_entries.append(sacrifice_entry)
+			else:
+				invalid_sacrifice_entries.append(sacrifice_entry)
 		elif _is_enhancement_stone(sacrifice_resource) and bool(sacrifice_resource.call("can_apply_to_weapon", main_weapon)):
 			stone_base_cost += _get_stone_quality_cost(sacrifice_resource)
 			compatible_stone_count += 1
 			effective_material_count += 1
 			effective_sacrifice_entries.append(sacrifice_entry)
+		else:
+			invalid_sacrifice_entries.append(sacrifice_entry)
 	if sacrifice_entries.is_empty():
 		return _build_invalid_preview("请至少放入一件牺牲材料")
+	if not invalid_sacrifice_entries.is_empty():
+		return _build_invalid_preview("牺牲槽中存在无法用于当前主物品的材料", invalid_sacrifice_entries)
 	if effective_material_count <= 0:
 		return _build_invalid_preview("当前材料无法为主武器提供有效锻造效果")
 	# 主武器当前价值；强化与耐久共同影响有效售价，价值越高最终锻造倍率越高。
@@ -83,6 +102,7 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 	var total_cost: int = maxi(ceili((durability_base_cost + float(stone_base_cost)) * cost_multiplier), 1)
 	return {
 		"valid": true,
+		"forge_mode": FORGE_MODE_WEAPON,
 		"message": "可以锻造",
 		"weapon": main_weapon,
 		"main_weapon_value": main_weapon_value,
@@ -92,6 +112,7 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 		"durability_restored": durability_restored,
 		"compatible_stone_count": compatible_stone_count,
 		"effective_sacrifice_entries": effective_sacrifice_entries,
+		"invalid_sacrifice_entries": [],
 		"cost": total_cost,
 	}
 
@@ -101,6 +122,8 @@ func execute_forge(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 	var preview: Dictionary = build_preview(main_entry, sacrifice_entries)
 	if not bool(preview.get("valid", false)):
 		return {"success": false, "message": str(preview.get("message", "无法锻造"))}
+	if str(preview.get("forge_mode", FORGE_MODE_WEAPON)) == FORGE_MODE_STONE_UPGRADE:
+		return _execute_stone_upgrade(main_entry, sacrifice_entries, preview)
 	if _global_inventory == null:
 		return {"success": false, "message": "全局库存服务不可用"}
 	# 主武器；执行前再次确认仍存在于原来源，防止动画期间库存状态发生变化。
@@ -161,6 +184,117 @@ func execute_forge(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 	return combined_result
 
 
+func can_use_as_main(item_resource: Resource) -> bool:
+	# 主槽允许武器或仍有下一品质的强化石；极品强化石不能作为升阶主石，但仍可保留为武器强化材料。
+	if _is_weapon(item_resource):
+		return true
+	if not _is_enhancement_stone(item_resource):
+		return false
+	return EnhancementRules.can_upgrade_quality(_get_stone_quality_id(item_resource))
+
+
+func can_use_as_sacrifice(main_resource: Resource, candidate_resource: Resource) -> bool:
+	if main_resource == null or candidate_resource == null:
+		return false
+	if _is_enhancement_stone(main_resource):
+		# 升阶牺牲石只比较品质，不要求词条组合一致；极品主石没有下一阶，因此始终拒绝材料。
+		return EnhancementRules.can_upgrade_quality(_get_stone_quality_id(main_resource)) and _is_enhancement_stone(candidate_resource) and _get_stone_quality_id(candidate_resource) == _get_stone_quality_id(main_resource)
+	if not _is_weapon(main_resource):
+		return false
+	if _is_weapon(candidate_resource):
+		# 牺牲武器必须仍有耐久且主武器存在耐久缺口，否则放入后不会产生任何效果。
+		var main_maximum_durability: float = maxf(float(main_resource.get("max_durability")), 1.0)
+		return float(main_resource.get("current_durability")) < main_maximum_durability and float(candidate_resource.get("current_durability")) > 0.0
+	return _is_enhancement_stone(candidate_resource) and bool(candidate_resource.call("can_apply_to_weapon", main_resource))
+
+
+func _build_stone_upgrade_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary]) -> Dictionary:
+	# 主强化石；主槽中的资源实例在失败时保留，成功时仅替换其中一颗为下一品质。
+	var main_stone: Resource = main_entry.get("resource") as Resource
+	# 主石品质；升阶路径只允许初级、中级和高级。
+	var main_quality_id: String = _get_stone_quality_id(main_stone)
+	# 下一品质；空字符串表示已经达到极品品质。
+	var next_quality_id: String = EnhancementRules.get_next_quality_id(main_quality_id)
+	if next_quality_id.is_empty():
+		return _build_invalid_preview("极品强化石已经达到最高品质")
+	if sacrifice_entries.is_empty():
+		return _build_invalid_preview("请至少放入一颗同品质牺牲强化石")
+	# 无效牺牲材料；不同品质、非强化石或其他资源都会阻止开始升阶。
+	var invalid_sacrifice_entries: Array[Dictionary] = []
+	for sacrifice_entry in sacrifice_entries:
+		# 当前牺牲资源；必须是与主石品质完全相同的强化石。
+		var sacrifice_resource: Resource = sacrifice_entry.get("resource") as Resource
+		if not can_use_as_sacrifice(main_stone, sacrifice_resource):
+			invalid_sacrifice_entries.append(sacrifice_entry)
+	if not invalid_sacrifice_entries.is_empty():
+		return _build_invalid_preview("牺牲槽只能放入与主石同品质的强化石", invalid_sacrifice_entries)
+	# 升阶成功率；每个有效牺牲槽固定提供 20%，五槽上限 100%。
+	var success_rate: float = clampf(float(sacrifice_entries.size()) * STONE_UPGRADE_SUCCESS_RATE_PER_SACRIFICE, 0.0, 1.0)
+	return {
+		"valid": true,
+		"forge_mode": FORGE_MODE_STONE_UPGRADE,
+		"message": "可以升阶强化石",
+		"main_stone": main_stone,
+		"main_quality_id": main_quality_id,
+		"next_quality_id": next_quality_id,
+		"success_rate": success_rate,
+		"compatible_stone_count": sacrifice_entries.size(),
+		"effective_sacrifice_entries": sacrifice_entries.duplicate(true),
+		"invalid_sacrifice_entries": [],
+		"cost": 0,
+	}
+
+
+func _execute_stone_upgrade(main_entry: Dictionary, sacrifice_entries: Array[Dictionary], preview: Dictionary) -> Dictionary:
+	if _global_inventory == null:
+		return {"success": false, "message": "全局库存服务不可用"}
+	# 主强化石与来源；失败不消费主石，成功时在同一来源完成一颗替换。
+	var main_stone: Resource = main_entry.get("resource") as Resource
+	# 主石来源；取值为 backpack 或 warehouse，升阶成功后新品质资源写回该容器。
+	var main_location: String = str(main_entry.get("source_location", ""))
+	# 全部需求；执行前把主石与牺牲石合并校验，支持同一堆叠同时占据主槽和多个牺牲槽。
+	var all_required_entries: Array[Dictionary] = []
+	all_required_entries.append(main_entry.duplicate())
+	all_required_entries.append_array(sacrifice_entries)
+	# 合并需求表；同一堆叠同时占据主槽和牺牲槽时按总数量一次校验。
+	var all_required_materials: Dictionary = _build_required_material_counts(all_required_entries)
+	for material_key in all_required_materials.keys():
+		# 单项需求；包含资源实例、来源位置和主槽加牺牲槽的合计数量。
+		var requirement: Dictionary = all_required_materials[material_key] as Dictionary
+		if not bool(_global_inventory.call("has_storage_resource_quantity", requirement.get("resource") as Resource, str(requirement.get("source_location", "")), int(requirement.get("quantity", 1)))):
+			return {"success": false, "message": "强化石数量不足或已被移动"}
+	# 升阶资源；在消费任何材料前先完成复制校验，避免异常资源导致牺牲石已经扣除却无法生成结果。
+	var upgraded_stone: Resource = main_stone.call("create_upgraded_copy") as Resource if main_stone != null and main_stone.has_method("create_upgraded_copy") else null
+	if upgraded_stone == null:
+		return {"success": false, "message": "无法创建升阶后的强化石"}
+	# 升阶结果；随机值只在动画结束后的执行阶段生成，预览只显示确定成功率。
+	var upgrade_succeeded: bool = _random.randf() < clampf(float(preview.get("success_rate", 0.0)), 0.0, 1.0)
+	# 牺牲材料始终全部消耗；预检已经保证逐项扣除不会在中途失败。
+	for sacrifice_entry in sacrifice_entries:
+		_global_inventory.call("consume_storage_resource_quantity", sacrifice_entry.get("resource") as Resource, str(sacrifice_entry.get("source_location", "")), 1)
+	if not upgrade_succeeded:
+		return {
+			"success": true,
+			"forge_mode": FORGE_MODE_STONE_UPGRADE,
+			"upgrade_succeeded": false,
+			"message": "升阶失败，主强化石已保留",
+			"result_main_entry": main_entry.duplicate(),
+			"success_rate": float(preview.get("success_rate", 0.0)),
+		}
+	_global_inventory.call("consume_storage_resource_quantity", main_stone, main_location, 1)
+	if not bool(_global_inventory.call("add_storage_resource", upgraded_stone, main_location, 1)):
+		return {"success": false, "message": "升阶物品写入原来源失败"}
+	return {
+		"success": true,
+		"forge_mode": FORGE_MODE_STONE_UPGRADE,
+		"upgrade_succeeded": true,
+		"message": "%s已升级为%s" % [EnhancementRules.get_quality_display_name(str(preview.get("main_quality_id", EnhancementRules.QUALITY_LOW))), EnhancementRules.get_quality_display_name(str(preview.get("next_quality_id", EnhancementRules.QUALITY_MEDIUM)))],
+		"upgraded_stone": upgraded_stone,
+		"result_main_entry": {"resource": upgraded_stone, "source_location": main_location},
+		"success_rate": float(preview.get("success_rate", 0.0)),
+	}
+
+
 func _build_required_material_counts(sacrifice_entries: Array[Dictionary]) -> Dictionary:
 	# 合并需求表；键由来源与资源实例编号组成，确保同一堆强化石多槽引用时正确累计数量。
 	var required_materials: Dictionary = {}
@@ -185,7 +319,16 @@ func _get_stone_quality_cost(stone_resource: Resource) -> int:
 	return int(STONE_QUALITY_COSTS.get(quality_id, STONE_QUALITY_COSTS[EnhancementRules.QUALITY_LOW]))
 
 
-func _build_invalid_preview(message: String) -> Dictionary:
+func _get_stone_quality_id(stone_resource: Resource) -> String:
+	# 统一品质读取；异常资源回退初级品质，使比较、费用和升级路径使用同一解释。
+	if stone_resource == null:
+		return EnhancementRules.QUALITY_LOW
+	if stone_resource.has_method("get_resolved_quality_id"):
+		return str(stone_resource.call("get_resolved_quality_id"))
+	return str(stone_resource.get("quality_id"))
+
+
+func _build_invalid_preview(message: String, invalid_sacrifice_entries: Array[Dictionary] = []) -> Dictionary:
 	return {
 		"valid": false,
 		"message": message,
@@ -195,6 +338,7 @@ func _build_invalid_preview(message: String) -> Dictionary:
 		"durability_restored": 0.0,
 		"compatible_stone_count": 0,
 		"effective_sacrifice_entries": [],
+		"invalid_sacrifice_entries": invalid_sacrifice_entries.duplicate(true),
 	}
 
 

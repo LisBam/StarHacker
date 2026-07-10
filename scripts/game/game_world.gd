@@ -12,6 +12,10 @@ const CHARACTER_STELLE: String = "stelle"
 const CHARACTER_CAEULUS: String = "caelus"
 ## 银狼角色标识；默认与主菜单角色选择保持一致，修改会影响角色属性随机分支。
 const CHARACTER_SILVER_WOLF: String = "silver_wolf"
+## 宝箱脚本资源；用于调用统一品质抽取，不要求 GameWorld 强类型依赖宝箱节点类缓存。
+const LOOT_CHEST_SCRIPT: Script = preload("res://scripts/environment/loot_chest.gd")
+## 宝箱高品质掉落概率；普通、中级、高级和极品分别使用 10%、30%、55% 和 75%，极品另保证至少 5 件高品质物品。
+const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, "high": 0.55, "supreme": 0.75}
 
 ## 游戏世界场景负责提供当前关卡的基础承载环境。
 ## 玩家、敌人、掉落物、地图装饰都可以作为它的子节点存在。
@@ -124,6 +128,24 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export_range(0.0, 1.0, 0.001) var repair_kit_drop_chance: float = 0.05
 ## 修复包掉落随机池；元素为 RepairKitData 资源，怪物死亡后会深拷贝其中一项形成独立掉落物。
 @export var repair_kit_drop_table: Array[Resource] = []
+## 宝箱场景；默认由 game_world.tscn 指向 LootChest，必须实例化为静态 Node2D 建筑。
+@export var loot_chest_scene: PackedScene
+## 单局最少宝箱数量；默认 10，与最大值组成进入地图时的等概率整数范围。
+@export_range(0, 100, 1) var loot_chest_spawn_count_min: int = 10
+## 单局最多宝箱数量；默认 20，实际生成数量会先与最少值排序后随机抽取。
+@export_range(0, 100, 1) var loot_chest_spawn_count_max: int = 20
+## 宝箱优先在建筑周围生成的概率；默认 0.72，其余候选在整张地图均匀抽取。
+@export_range(0.0, 1.0, 0.01) var loot_chest_near_building_chance: float = 0.72
+## 封闭建筑在附近宝箱候选中的权重倍率；默认 3.0，使封闭建筑周边比普通环境结构更容易被选中。
+@export_range(1.0, 12.0, 0.1) var loot_chest_enclosed_building_weight: float = 3.0
+## 单个宝箱生成尝试次数；默认 48，用于寻找不与建筑、边界或其他宝箱重叠的位置。
+@export_range(1, 160, 1) var loot_chest_spawn_attempt_count: int = 48
+## 宝箱离玩家出生点最小距离；默认 240 像素，避免开局直接阻挡玩家移动。
+@export_range(0.0, 3000.0, 1.0) var loot_chest_min_distance_from_player: float = 240.0
+## 宝箱碰撞检测半径；默认 40 像素，大于实际半尺寸以保留与墙体的移动间隙。
+@export_range(16.0, 160.0, 1.0) var loot_chest_clearance_radius: float = 40.0
+## 相邻宝箱最小中心距离；默认 112 像素，避免多个静态建筑堆叠成不可通行团块。
+@export_range(32.0, 640.0, 1.0) var loot_chest_minimum_spacing: float = 112.0
 ## 玩家丢弃武器散落半径；取值建议大于玩家半径，默认 52 像素，修改会影响拖出背包时武器落点距离。
 @export_range(0.0, 400.0, 1.0) var dropped_weapon_scatter_radius: float = 52.0
 ## 地面掉落最小分离距离；默认 36 像素，多个物品同时生成时会尽量避开已有掉落物中心。
@@ -148,6 +170,22 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export var extraction_fill_color: Color = Color(0.1, 0.9, 0.62, 0.18)
 ## 撤离点边框颜色；默认亮青绿色，修改只影响撤离范围边界视觉反馈。
 @export var extraction_ring_color: Color = Color(0.35, 1.0, 0.76, 0.88)
+## 物资撤离点数量权重；默认 2、3、4、5 个的概率依次为 45%、30%、17%、8%，数量越多概率越低。
+@export var supply_extraction_count_weights: Array[float] = [0.45, 0.30, 0.17, 0.08]
+## 物资撤离点驻留时长；默认 3 秒，玩家连续停留后按闪避打开暂停式送回面板。
+@export_range(0.1, 30.0, 0.1) var supply_extraction_hold_duration_seconds: float = 3.0
+## 物资撤离点半径；默认 96 像素，与正式撤离点保持相同站位宽容度。
+@export_range(16.0, 512.0, 1.0) var supply_extraction_radius: float = 96.0
+## 物资撤离点边缘留白；默认 420 像素，避免点位范围压到地图边界墙。
+@export_range(0.0, 4000.0, 1.0) var supply_extraction_spawn_edge_margin: float = 420.0
+## 物资撤离点离玩家出生点最小距离；默认 720 像素，鼓励玩家先探索地图。
+@export_range(0.0, 8000.0, 1.0) var supply_extraction_min_distance_from_player: float = 720.0
+## 单个物资撤离点生成尝试次数；默认 48，用于避开建筑、宝箱和其他撤离点。
+@export_range(1, 160, 1) var supply_extraction_spawn_attempt_count: int = 48
+## 物资撤离点填充颜色；默认金黄色半透明，用于和绿色正式撤离点区分。
+@export var supply_extraction_fill_color: Color = Color(1.0, 0.66, 0.12, 0.16)
+## 物资撤离点边框颜色；默认亮金黄色，地图内始终可见但不代表战斗结束。
+@export var supply_extraction_ring_color: Color = Color(1.0, 0.72, 0.22, 0.92)
 ## 星的固定生命上限；取值应大于 0，默认 130，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var stelle_max_health: float = 130.0
 ## 星的固定能量上限；取值应大于 0，默认 110，切换角色时直接应用，不再随机。
@@ -175,6 +213,10 @@ var _active_map_seed: int = 0
 var _environment_obstacle_rects: Array[Rect2] = []
 ## 小地图障碍版本号；取值从 0 递增，默认用于地图 UI 判断是否需要重新复制障碍矩形。
 var _environment_obstacle_version: int = 0
+## 环境结构整体边界缓存；每项包含 bounds 和 enclosed，用于让宝箱优先在建筑周围特别是封闭建筑附近生成。
+var _environment_feature_bounds: Array[Dictionary] = []
+## 宝箱障碍矩形表；键为宝箱实例编号，值为写入小地图与导航缓存的世界矩形，宝箱开启后用于精确移除。
+var _loot_chest_obstacle_rects: Dictionary = {}
 ## 已探索迷雾格子缓存；键为 Vector2i，值为 true，默认由玩家位置持续写入，修改会影响大地图可见区域。
 var _explored_cells: Dictionary = {}
 ## 已探索格版本号；取值从 0 递增，默认仅在新增探索格时变化，供地图 UI 避免重复构建查询表。
@@ -207,6 +249,14 @@ var _player_inside_extraction_area: bool = false
 var _extraction_hold_elapsed_seconds: float = 0.0
 ## 是否已经满足撤离条件；取值为 true/false，默认 false，达到驻留时长且仍在范围内时变为 true。
 var _extraction_ready_to_leave: bool = false
+## 物资撤离点位置列表；默认空数组，进入地图时按 2 至 5 个递减概率生成。
+var _supply_extraction_positions: Array[Vector2] = []
+## 当前玩家所在物资撤离点下标；默认 -1 表示未进入任一点位范围。
+var _active_supply_extraction_index: int = -1
+## 当前物资撤离点驻留累计时间；默认 0，离开范围或切换点位时重置。
+var _supply_extraction_hold_elapsed_seconds: float = 0.0
+## 当前物资撤离点是否可以打开送回面板；默认 false，驻留满 3 秒后变为 true。
+var _supply_extraction_ready: bool = false
 ## 敌人补充检查剩余时间；取值大于等于 0，默认按配置间隔初始化，正式战斗中持续递减。
 var _monster_replenish_remaining: float = 0.0
 ## 是否由训练工具暂停自动补怪；默认 false，正式模式使用开发者清怪后保持为空，手动重生怪物时恢复人口曲线补充。
@@ -235,9 +285,13 @@ func _ready() -> void:
 	_begin_global_inventory_run()
 	_prepare_map_seed()
 	_environment_obstacle_rects.clear()
+	_environment_feature_bounds.clear()
+	_loot_chest_obstacle_rects.clear()
 	_navigation_grid_cache.clear()
 	_spawn_boundary_walls()
 	_spawn_random_environment()
+	_spawn_loot_chests()
+	_spawn_supply_extraction_points()
 	_environment_obstacle_version += 1
 	if _monster_simulation_manager != null and _monster_simulation_manager.has_method("initialize"):
 		# 怪物挂载父节点；优先使用 Enemies 容器，缺失时回退 GameWorld，供加载管理器按需创建真实节点。
@@ -253,6 +307,7 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_update_survival_time(delta)
 	_update_extraction_state(delta)
+	_update_supply_extraction_state(delta)
 	_update_explored_cells_if_needed(delta)
 	_update_monster_replenishment(delta)
 	if _monster_simulation_manager != null and _monster_simulation_manager.has_method("update"):
@@ -382,6 +437,27 @@ func get_extraction_hold_duration_seconds() -> float:
 
 func get_extraction_point_position() -> Vector2:
 	return _extraction_point_position
+
+
+func get_supply_extraction_positions() -> Array[Vector2]:
+	# 位置副本；地图 UI 和 HUD 只能读取，不能修改世界内部点位状态。
+	return _supply_extraction_positions.duplicate()
+
+
+func is_player_inside_supply_extraction_area() -> bool:
+	return _active_supply_extraction_index >= 0
+
+
+func is_supply_extraction_ready() -> bool:
+	return _supply_extraction_ready
+
+
+func get_supply_extraction_hold_elapsed_seconds() -> float:
+	return maxf(_supply_extraction_hold_elapsed_seconds, 0.0)
+
+
+func get_supply_extraction_hold_duration_seconds() -> float:
+	return maxf(supply_extraction_hold_duration_seconds, 0.1)
 
 
 func set_navigation_marker(marker_position: Vector2) -> void:
@@ -584,6 +660,14 @@ func spawn_weapon_drop_near_player(weapon_data: Resource) -> bool:
 	# 丢弃位置；取值为玩家附近随机点，默认尽量避免直接落入墙体。
 	var drop_position: Vector2 = _get_scattered_drop_position(drop_center)
 	return spawn_weapon_drop(weapon_data, drop_position)
+
+
+func spawn_item_drop_near_player(item_data: Resource) -> bool:
+	if item_data == null:
+		return false
+	# 通用丢弃中心；强化石和修复包与武器共用玩家附近散落及墙体避让规则。
+	var drop_center: Vector2 = _player.global_position if _player != null else Vector2.ZERO
+	return spawn_item_drop(item_data, _get_scattered_drop_position(drop_center))
 
 
 func switch_character(character_id: String) -> void:
@@ -800,6 +884,121 @@ func _create_extraction_point_node(point_position: Vector2) -> Node2D:
 	])
 	extraction_point.add_child(center_vertical_line)
 	return extraction_point
+
+
+func _spawn_supply_extraction_points() -> void:
+	_supply_extraction_positions.clear()
+	# 物资撤离点数量；数组四项分别对应 2、3、4、5 个，默认权重随数量递减。
+	var point_count: int = _roll_supply_extraction_count()
+	for point_index in range(point_count):
+		# 当前点位位置；每次生成都会避开环境障碍、玩家出生点和已生成点位。
+		var point_position: Vector2 = _get_random_supply_extraction_position()
+		_supply_extraction_positions.append(point_position)
+		_create_supply_extraction_point_node(point_position, point_index)
+
+
+func _roll_supply_extraction_count() -> int:
+	# 权重总和；允许检查器自定义但所有负值按 0 处理，异常全零时回退 2 个点。
+	var total_weight: float = 0.0
+	for raw_weight in supply_extraction_count_weights:
+		total_weight += maxf(raw_weight, 0.0)
+	if total_weight <= 0.0:
+		return 2
+	# 数量随机值；在全部有效权重总和内映射到 2 至 5 个点位。
+	var count_roll: float = _random.randf_range(0.0, total_weight)
+	# 累计数量权重；按 2、3、4、5 的顺序逐项覆盖随机区间。
+	var cumulative_weight: float = 0.0
+	for weight_index in range(4):
+		# 当前数量权重；缺失数组项按 0 处理，允许检查器保留较短兼容配置。
+		var configured_weight: float = float(supply_extraction_count_weights[weight_index]) if weight_index < supply_extraction_count_weights.size() else 0.0
+		cumulative_weight += maxf(configured_weight, 0.0)
+		if count_roll <= cumulative_weight:
+			return weight_index + 2
+	return 5
+
+
+func _get_random_supply_extraction_position() -> Vector2:
+	for _attempt_index in range(maxi(supply_extraction_spawn_attempt_count, 1)):
+		# 当前候选位置；通过统一有效性校验后才作为实际物资撤离点。
+		var candidate_position: Vector2 = _get_random_supply_extraction_candidate()
+		if _is_supply_extraction_position_valid(candidate_position):
+			return candidate_position
+	return _get_random_supply_extraction_candidate()
+
+
+func _get_random_supply_extraction_candidate() -> Vector2:
+	# 地图半边长；用于计算扣除边缘留白后的均匀生成范围。
+	var half_size: float = get_map_half_size()
+	# 实际边缘留白；至少等于点位半径，避免范围压到边界墙。
+	var edge_margin: float = maxf(supply_extraction_spawn_edge_margin, supply_extraction_radius)
+	# 坐标生成上限；在正负范围内分别均匀抽取 X 与 Y。
+	var spawn_limit: float = maxf(half_size - edge_margin, 1.0)
+	return Vector2(_random.randf_range(-spawn_limit, spawn_limit), _random.randf_range(-spawn_limit, spawn_limit))
+
+
+func _is_supply_extraction_position_valid(candidate_position: Vector2) -> bool:
+	if _player != null and candidate_position.distance_to(_player.global_position) < maxf(supply_extraction_min_distance_from_player, 0.0):
+		return false
+	if _is_position_blocked_by_environment(candidate_position, maxf(supply_extraction_radius, 1.0)):
+		return false
+	# 点位间距；至少保持两倍半径，防止两个驻留范围重叠导致当前点下标抖动。
+	for existing_position in _supply_extraction_positions:
+		if existing_position.distance_to(candidate_position) < maxf(supply_extraction_radius * 2.0, 1.0):
+			return false
+	return true
+
+
+func _create_supply_extraction_point_node(point_position: Vector2, point_index: int) -> void:
+	# 物资撤离点根节点；始终在地图内显示金色圆环，属于地面提示且不产生实体碰撞。
+	var supply_point: Node2D = Node2D.new()
+	supply_point.name = "SupplyExtractionPoint%d" % (point_index + 1)
+	supply_point.add_to_group("supply_extraction_points")
+	add_child(supply_point)
+	supply_point.global_position = point_position
+	# 范围填充；使用半透明金色圆形表示驻留区域。
+	var fill_polygon: Polygon2D = Polygon2D.new()
+	fill_polygon.color = supply_extraction_fill_color
+	fill_polygon.polygon = _build_circle_points(maxf(supply_extraction_radius, 1.0), 48, false)
+	supply_point.add_child(fill_polygon)
+	# 范围边框；闭合圆环用于远距离识别点位边界。
+	var ring_line: Line2D = Line2D.new()
+	ring_line.default_color = supply_extraction_ring_color
+	ring_line.width = 4.0
+	ring_line.closed = true
+	ring_line.points = _build_circle_points(maxf(supply_extraction_radius, 1.0), 64, false)
+	supply_point.add_child(ring_line)
+	# 中心标签；明确该点位只负责物资送回而不是直接结束战斗。
+	var center_label: Label = Label.new()
+	center_label.text = "物资撤离"
+	center_label.position = Vector2(-42.0, -10.0)
+	center_label.size = Vector2(84.0, 20.0)
+	center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	center_label.add_theme_color_override("font_color", supply_extraction_ring_color)
+	supply_point.add_child(center_label)
+
+
+func _update_supply_extraction_state(delta: float) -> void:
+	if _player == null or _is_player_dead() or _supply_extraction_positions.is_empty():
+		_active_supply_extraction_index = -1
+		_supply_extraction_hold_elapsed_seconds = 0.0
+		_supply_extraction_ready = false
+		return
+	# 当前所在点；按列表顺序寻找第一个命中范围，生成阶段已保证范围不会互相重叠。
+	var next_active_index: int = -1
+	for point_index in range(_supply_extraction_positions.size()):
+		if _player.global_position.distance_to(_supply_extraction_positions[point_index]) <= maxf(supply_extraction_radius, 1.0):
+			next_active_index = point_index
+			break
+	if next_active_index < 0:
+		_active_supply_extraction_index = -1
+		_supply_extraction_hold_elapsed_seconds = 0.0
+		_supply_extraction_ready = false
+		return
+	if next_active_index != _active_supply_extraction_index:
+		_active_supply_extraction_index = next_active_index
+		_supply_extraction_hold_elapsed_seconds = 0.0
+	_supply_extraction_hold_elapsed_seconds = minf(_supply_extraction_hold_elapsed_seconds + maxf(delta, 0.0), get_supply_extraction_hold_duration_seconds())
+	_supply_extraction_ready = _supply_extraction_hold_elapsed_seconds >= get_supply_extraction_hold_duration_seconds()
 
 
 func _build_circle_points(radius: float, point_count: int, close_loop: bool) -> PackedVector2Array:
@@ -1111,6 +1310,11 @@ func _place_environment_instance(obstacle_instance: Node2D) -> bool:
 		# 当前实例矩形遍历项；取值为世界坐标 Rect2，默认写入小地图障碍缓存。
 		for obstacle_rect in obstacle_rects:
 			_environment_obstacle_rects.append(obstacle_rect)
+		# 环境结构记录；封闭环形建筑和实心紧凑建筑使用更高宝箱生成权重，其余结构仍可作为周边候选。
+		var obstacle_name: String = obstacle_instance.name.to_lower()
+		# 封闭建筑判断；当前环形建筑和紧凑实心建筑使用三倍默认候选权重。
+		var is_enclosed_building: bool = obstacle_name.contains("wallring") or obstacle_name.contains("compact")
+		_environment_feature_bounds.append({"bounds": obstacle_bounds, "enclosed": is_enclosed_building})
 
 		return true
 
@@ -1226,6 +1430,200 @@ func _get_rects_bounds(rects: Array[Rect2]) -> Rect2:
 		merged_bounds = merged_bounds.merge(rects[rect_index])
 
 	return merged_bounds
+
+
+func _spawn_loot_chests() -> void:
+	if loot_chest_scene == null:
+		return
+	# 宝箱数量范围；先排序检查器最小和最大值，再在闭区间内等概率抽取 10 至 20 的默认数量。
+	var minimum_count: int = maxi(mini(loot_chest_spawn_count_min, loot_chest_spawn_count_max), 0)
+	# 宝箱数量上限；异常反向配置会自动与最小值交换解释。
+	var maximum_count: int = maxi(maxi(loot_chest_spawn_count_min, loot_chest_spawn_count_max), minimum_count)
+	# 本局宝箱数量；最小与最大相同时使用固定值，否则在闭区间内等概率抽取。
+	var chest_count: int = _random.randi_range(minimum_count, maximum_count) if maximum_count > minimum_count else minimum_count
+	# 宝箱父节点；作为建筑挂在 Environment 下，统一参与世界层级、移动阻挡和小地图障碍缓存。
+	var spawn_parent: Node = _environment_parent if _environment_parent != null else self
+	for _chest_index in range(chest_count):
+		# 宝箱实例；必须能够作为 Node2D 放入 Environment 层级。
+		var chest_instance: Node2D = loot_chest_scene.instantiate() as Node2D
+		if chest_instance == null:
+			continue
+		# 宝箱位置；无法在规定尝试次数内找到安全点时返回无穷向量并跳过本实例。
+		var chest_position: Vector2 = _get_random_loot_chest_position()
+		if chest_position == Vector2.INF:
+			chest_instance.queue_free()
+			continue
+		spawn_parent.add_child(chest_instance)
+		chest_instance.global_position = chest_position
+		# 宝箱品质；每个实例独立按 47%、35%、15% 和 3% 权重抽取。
+		var quality_id: String = str(LOOT_CHEST_SCRIPT.call("roll_quality", _random))
+		if chest_instance.has_method("configure_quality"):
+			chest_instance.call("configure_quality", quality_id)
+		if chest_instance.has_signal("loot_released"):
+			chest_instance.connect("loot_released", Callable(self, "_on_loot_chest_released"))
+		if chest_instance.has_signal("chest_removed"):
+			chest_instance.connect("chest_removed", Callable(self, "_on_loot_chest_removed"))
+		# 宝箱障碍矩形；与场景 64×52 碰撞尺寸一致，供小地图、生成避让和共享导航网格读取。
+		var chest_rect: Rect2 = Rect2(chest_position - Vector2(32.0, 26.0), Vector2(64.0, 52.0))
+		_environment_obstacle_rects.append(chest_rect)
+		_loot_chest_obstacle_rects[chest_instance.get_instance_id()] = chest_rect
+
+
+func _get_random_loot_chest_position() -> Vector2:
+	for _attempt_index in range(maxi(loot_chest_spawn_attempt_count, 1)):
+		# 候选点；优先从建筑周边生成，剩余概率覆盖整张地图，保证开阔区仍可能出现宝箱。
+		var candidate_position: Vector2 = _get_loot_chest_candidate()
+		if _is_loot_chest_position_valid(candidate_position):
+			return candidate_position
+	return Vector2.INF
+
+
+func _get_loot_chest_candidate() -> Vector2:
+	if not _environment_feature_bounds.is_empty() and _random.randf() < clampf(loot_chest_near_building_chance, 0.0, 1.0):
+		# 加权环境结构；封闭建筑默认拥有普通结构三倍被选中概率。
+		var selected_feature: Dictionary = _select_weighted_environment_feature()
+		if not selected_feature.is_empty():
+			# 建筑整体边界；用于从四条外侧边随机选择宝箱周边位置。
+			var feature_bounds: Rect2 = selected_feature.get("bounds", Rect2())
+			# 建筑周边边距；碰撞检测半径再增加 20 像素，避免宝箱紧贴墙体导致无法绕行或开启。
+			var perimeter_margin: float = maxf(loot_chest_clearance_radius, 1.0) + 20.0
+			# 周边边选择；0 至 3 分别表示上、右、下、左。
+			var side_index: int = _random.randi_range(0, 3)
+			if side_index == 0:
+				return Vector2(_random.randf_range(feature_bounds.position.x, feature_bounds.end.x), feature_bounds.position.y - perimeter_margin)
+			if side_index == 1:
+				return Vector2(feature_bounds.end.x + perimeter_margin, _random.randf_range(feature_bounds.position.y, feature_bounds.end.y))
+			if side_index == 2:
+				return Vector2(_random.randf_range(feature_bounds.position.x, feature_bounds.end.x), feature_bounds.end.y + perimeter_margin)
+			return Vector2(feature_bounds.position.x - perimeter_margin, _random.randf_range(feature_bounds.position.y, feature_bounds.end.y))
+	# 整图候选；使用环境生成边界留白，避免宝箱压到地图边界墙。
+	var half_size: float = get_map_half_size()
+	# 宝箱实际边缘留白；至少等于清障半径，防止静态碰撞越界。
+	var edge_margin: float = maxf(obstacle_spawn_edge_margin, loot_chest_clearance_radius)
+	# 宝箱均匀生成坐标上限；用于非建筑周边候选。
+	var spawn_limit: float = maxf(half_size - edge_margin, 1.0)
+	return Vector2(_random.randf_range(-spawn_limit, spawn_limit), _random.randf_range(-spawn_limit, spawn_limit))
+
+
+func _select_weighted_environment_feature() -> Dictionary:
+	# 总权重；封闭建筑按默认 3 倍计入，普通结构权重为 1。
+	var total_weight: float = 0.0
+	for feature in _environment_feature_bounds:
+		total_weight += maxf(loot_chest_enclosed_building_weight, 1.0) if bool(feature.get("enclosed", false)) else 1.0
+	if total_weight <= 0.0:
+		return {}
+	# 结构选择随机值；在全部普通与封闭结构权重总和中抽取。
+	var selection_roll: float = _random.randf_range(0.0, total_weight)
+	# 累计结构权重；达到随机值时返回当前结构记录。
+	var cumulative_weight: float = 0.0
+	for feature in _environment_feature_bounds:
+		cumulative_weight += maxf(loot_chest_enclosed_building_weight, 1.0) if bool(feature.get("enclosed", false)) else 1.0
+		if selection_roll <= cumulative_weight:
+			return feature
+	return _environment_feature_bounds.back()
+
+
+func _is_loot_chest_position_valid(candidate_position: Vector2) -> bool:
+	if _player != null and candidate_position.distance_to(_player.global_position) < maxf(loot_chest_min_distance_from_player, 0.0):
+		return false
+	if _is_position_blocked_by_environment(candidate_position, maxf(loot_chest_clearance_radius, 1.0)):
+		return false
+	# 已生成宝箱中心；按缓存矩形中心检查最小间距，避免多个宝箱互相堵死。
+	for chest_rect in _loot_chest_obstacle_rects.values():
+		if chest_rect is Rect2 and chest_rect.get_center().distance_to(candidate_position) < maxf(loot_chest_minimum_spacing, 1.0):
+			return false
+	return true
+
+
+func _on_loot_chest_released(chest_position: Vector2, quality_id: String, drop_count: int, minimum_high_quality_count: int) -> void:
+	# 宝箱掉落循环；极品前五件强制高品质，其余物品按当前宝箱品质对应概率独立判定。
+	for drop_index in range(maxi(drop_count, 0)):
+		# 是否为极品保底高品质物品；默认前五件为 true，其余按品质概率判定。
+		var force_high_quality: bool = drop_index < maxi(minimum_high_quality_count, 0)
+		# 本次掉落资源；从枪械、强化石和修复包池中生成独立实例。
+		var item_resource: Resource = _create_random_loot_chest_item(quality_id, force_high_quality)
+		if item_resource != null:
+			spawn_item_drop(item_resource, _get_scattered_drop_position(chest_position))
+
+
+func _create_random_loot_chest_item(quality_id: String, force_high_quality: bool) -> Resource:
+	# 高品质判定；普通、中级、高级和极品的非保底物品分别使用 10%、30%、55% 和 75%。
+	var high_quality_chance: float = clampf(float(CHEST_HIGH_QUALITY_CHANCES.get(quality_id, 0.10)), 0.0, 1.0)
+	# 是否使用高品质物品池；极品保底直接为 true，其余按当前品质概率随机。
+	var should_use_high_quality_pool: bool = force_high_quality or _random.randf() < high_quality_chance
+	# 类别抽取；枪械 50%、强化石 30%、修复包 20%，缺失资源池时由各分支回退其他现有池。
+	var category_roll: float = _random.randf()
+	if category_roll < 0.50:
+		return _get_random_chest_weapon(should_use_high_quality_pool)
+	if category_roll < 0.80:
+		return _get_random_chest_stone(should_use_high_quality_pool)
+	return _get_random_chest_repair_kit(should_use_high_quality_pool)
+
+
+func _get_random_chest_weapon(high_quality: bool) -> Resource:
+	if weapon_drop_table.is_empty():
+		return _get_random_chest_stone(high_quality)
+	# 高品质武器池；当前以基础售价不低于 120 金币识别，覆盖脉冲步枪、散射爆能枪和磁轨炮等高价值枪械。
+	var candidate_weapons: Array[Resource] = []
+	for weapon_template in weapon_drop_table:
+		if weapon_template != null and (not high_quality or int(weapon_template.get("sell_price")) >= 120):
+			candidate_weapons.append(weapon_template)
+	if candidate_weapons.is_empty():
+		candidate_weapons = weapon_drop_table.duplicate()
+	# 选中武器模板；从当前普通或高品质候选池等概率抽取。
+	var selected_weapon: Resource = candidate_weapons[_random.randi_range(0, candidate_weapons.size() - 1)]
+	# 独立武器实例；保留模板数值但避免多个宝箱掉落共享耐久与强化状态。
+	var duplicated_weapon: Resource = selected_weapon.duplicate(true) as Resource
+	return duplicated_weapon if duplicated_weapon != null else selected_weapon
+
+
+func _get_random_chest_stone(high_quality: bool) -> Resource:
+	# 高品质强化石；最多尝试 12 次抽取高级或极品，确保保底物品确实进入高品质池。
+	var selected_stone: EnhancementStoneData
+	for _attempt_index in range(12 if high_quality else 1):
+		selected_stone = _create_random_enhancement_stone()
+		if selected_stone == null or not high_quality:
+			break
+		# 当前强化石品质；高级或极品即可满足高品质池要求。
+		var stone_quality_id: String = selected_stone.get_resolved_quality_id()
+		if stone_quality_id in [EnhancementRules.QUALITY_HIGH, EnhancementRules.QUALITY_SUPREME]:
+			return selected_stone
+	if high_quality and selected_stone != null:
+		# 极小概率连续未命中时强制提升到高级，保留已生成词条方向并更新统一品质名称。
+		selected_stone.quality_id = EnhancementRules.QUALITY_HIGH
+		selected_stone.display_name = EnhancementRules.get_quality_display_name(EnhancementRules.QUALITY_HIGH)
+	return selected_stone
+
+
+func _get_random_chest_repair_kit(high_quality: bool) -> Resource:
+	if repair_kit_drop_table.is_empty():
+		return _get_random_chest_stone(high_quality)
+	# 高品质修复包；选择售价最高的模板，当前为恢复 500 耐久的高级修复包。
+	var selected_template: Resource = repair_kit_drop_table[0]
+	if high_quality:
+		for repair_template in repair_kit_drop_table:
+			if repair_template != null and int(repair_template.get("sell_price")) > int(selected_template.get("sell_price")):
+				selected_template = repair_template
+	else:
+		selected_template = repair_kit_drop_table[_random.randi_range(0, repair_kit_drop_table.size() - 1)]
+	# 独立修复包实例；避免相同模板资源被多个地面掉落共享。
+	var duplicated_repair_kit: Resource = selected_template.duplicate(true) as Resource
+	return duplicated_repair_kit if duplicated_repair_kit != null else selected_template
+
+
+func _on_loot_chest_removed(chest: Node) -> void:
+	if chest == null:
+		return
+	# 宝箱实例键；与生成时写入的障碍矩形表精确对应。
+	var chest_key: int = chest.get_instance_id()
+	if not _loot_chest_obstacle_rects.has(chest_key):
+		return
+	# 宝箱障碍移除；开启或击毁后立即恢复导航、小地图和后续生成点的通行状态。
+	var chest_rect: Rect2 = _loot_chest_obstacle_rects[chest_key]
+	_loot_chest_obstacle_rects.erase(chest_key)
+	_environment_obstacle_rects.erase(chest_rect)
+	_navigation_grid_cache.clear()
+	_environment_obstacle_version += 1
 
 
 func _spawn_monster_batch(requested_count: int = -1) -> void:

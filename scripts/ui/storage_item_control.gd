@@ -42,6 +42,14 @@ var _enhancement_target_highlight: bool = false
 var _weapon_target_selection_active: bool = false
 ## 当前武器是否因目标条件不满足而禁止选择；默认 false，修复包选择期间满耐久武器会设为 true。
 var _weapon_target_selection_blocked: bool = false
+## 当前物品是否由外部界面标记为可选目标；默认 false，锻造与物资撤离界面会用它统一控制所有物品类型的滤镜。
+var _item_selection_active: bool = false
+## 当前物品是否因外部规则不满足而禁止选择；默认 false，启用时会覆盖灰色滤镜并同时阻止点击与拖拽。
+var _item_selection_blocked: bool = false
+## 当前物品是否在外部选择状态中显示可选高亮；默认 false，锻造可选材料通常保持原色，目标道具可按需启用绿色提示。
+var _item_selection_highlight: bool = false
+## 当前卡片是否允许生成拖拽数据；默认 true，物资撤离等纯点击界面会关闭以避免跨系统拖动物品。
+var _drag_enabled: bool = true
 ## 是否采用战斗武器槽视觉；默认 false 保持仓库宽卡布局，战斗背包开启后会同步深色背景、边框和三行排版。
 var _weapon_slot_visual_style_enabled: bool = false
 ## 武器耐久条缓存；默认按需创建，资源卡片隐藏，武器卡片始终贴在 UI 最底部。
@@ -91,6 +99,19 @@ func set_weapon_target_selection_state(selection_active: bool, selectable: bool)
 	_refresh_enhancement_target_highlight()
 
 
+func set_item_selection_state(selection_active: bool, selectable: bool, highlight_selectable: bool = false) -> void:
+	# 通用物品选择状态；与武器专用目标状态并行，适用于强化石、道具和武器的统一灰显与点击阻断。
+	_item_selection_active = selection_active and _item_resource != null
+	_item_selection_blocked = _item_selection_active and not selectable
+	_item_selection_highlight = _item_selection_active and selectable and highlight_selectable
+	_refresh_enhancement_target_highlight()
+
+
+func set_drag_enabled(enabled: bool) -> void:
+	# 拖拽开关只影响新的拖拽开始，不改变普通点击、悬停详情或已存在的物品所有权。
+	_drag_enabled = enabled
+
+
 func set_weapon_slot_visual_style(enabled: bool) -> void:
 	_weapon_slot_visual_style_enabled = enabled
 	_apply_weapon_slot_visual_style()
@@ -106,7 +127,7 @@ func refresh_durability() -> void:
 
 
 func _get_drag_data(_at_position: Vector2) -> Variant:
-	if _item_resource == null or _location.is_empty() or _item_index < 0 or _weapon_target_selection_blocked:
+	if not _drag_enabled or _item_resource == null or _location.is_empty() or _item_index < 0 or _weapon_target_selection_blocked or _item_selection_blocked:
 		return null
 
 	# 拖拽预览标签；显示物品名称并跟随鼠标，避免复制完整交互控件造成信号副作用。
@@ -153,7 +174,7 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 
 
 func _on_pressed() -> void:
-	if _item_resource == null or _weapon_target_selection_blocked:
+	if _item_resource == null or _weapon_target_selection_blocked or _item_selection_blocked:
 		return
 	# Shift 快速转移；只有展开背包模式启用，普通点击始终交给上层打开出售或使用菜单。
 	if _quick_action_enabled and Input.is_key_pressed(KEY_SHIFT):
@@ -199,10 +220,10 @@ func _is_weapon_resource() -> bool:
 func _refresh_enhancement_target_highlight() -> void:
 	# 卡片色调；浅绿色表示可点击或可投放的强化目标，取消选择后恢复白色不影响原主题。
 	# 修复目标补充；当前不可选武器会优先使用灰色滤镜，可选武器继续使用浅绿色。
-	if _weapon_target_selection_blocked:
+	if _weapon_target_selection_blocked or _item_selection_blocked:
 		self_modulate = UNAVAILABLE_TARGET_FILTER_COLOR
 	else:
-		self_modulate = Color(0.68, 1.0, 0.76, 1.0) if _enhancement_target_highlight else Color.WHITE
+		self_modulate = Color(0.68, 1.0, 0.76, 1.0) if _enhancement_target_highlight or _item_selection_highlight else Color.WHITE
 
 
 func _ensure_stone_summary_label() -> void:

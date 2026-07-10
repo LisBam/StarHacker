@@ -44,7 +44,7 @@ static func get_stone_attribute_direction_group_label(direction: int) -> String:
 	return "“%s”属性" % EnhancementRules.get_direction_symbol(direction)
 
 
-static func filter_and_sort_entries(entries: Array, primary_category: String, subcategory: String, search_keyword: String, stone_attribute: String, sort_mode: String) -> Array[Dictionary]:
+static func filter_and_sort_entries(entries: Array, primary_category: String, subcategory: String, search_keyword: String, stone_attribute: Variant, sort_mode: String) -> Array[Dictionary]:
 	# 标准化搜索词；忽略首尾空格和英文大小写，中文关键词保持原样。
 	var normalized_keyword: String = search_keyword.strip_edges().to_lower()
 	# 查询结果；每项复制展示字段并附加真实 source_index，供排序视图中的拖拽仍能操作正确记录。
@@ -89,8 +89,10 @@ static func _matches_category(entry: Dictionary, primary_category: String, subca
 	return false
 
 
-static func _matches_stone_attribute(entry: Dictionary, stone_attribute: String) -> bool:
-	if stone_attribute.is_empty():
+static func _matches_stone_attribute(entry: Dictionary, stone_attribute: Variant) -> bool:
+	# 多选筛选键；兼容旧版单字符串调用，新版数组中的任意条件命中即可展示，形成并集规则。
+	var stone_attribute_filters: Array[String] = _normalize_stone_attribute_filters(stone_attribute)
+	if stone_attribute_filters.is_empty():
 		return true
 	# 条目资源；属性筛选只对强化石生效，选择属性后其他物品不会显示。
 	var item_resource: Resource = entry.get("resource") as Resource
@@ -98,19 +100,41 @@ static func _matches_stone_attribute(entry: Dictionary, stone_attribute: String)
 		return false
 	# 归一化强化词典；旧百分比存档也能按属性键正确筛选。
 	var modifiers: Dictionary = EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary)
-	# 筛选键分段；新版键为“属性:方向”，旧版纯属性键继续匹配该属性的任意方向。
-	var filter_parts: PackedStringArray = stone_attribute.split(STONE_ATTRIBUTE_DIRECTION_SEPARATOR, false, 1)
-	# 筛选属性名；新版读取分隔符前内容，旧版直接使用完整键。
-	var filter_stat_name: String = filter_parts[0] if not filter_parts.is_empty() else stone_attribute
-	if not modifiers.has(filter_stat_name):
-		return false
-	if filter_parts.size() < 2:
-		return true
-	# 目标筛选方向；无效值按 +1 兜底，正常 UI 始终写入明确的 +1 或 -1。
-	var filter_direction: int = EnhancementRules.normalize_direction(int(filter_parts[1]))
-	# 强化石实际方向；归一化后与目标方向精确匹配。
-	var modifier_direction: int = EnhancementRules.normalize_direction(modifiers.get(filter_stat_name, 1))
-	return modifier_direction == filter_direction
+	for stone_attribute_filter in stone_attribute_filters:
+		# 筛选键分段；新版键为“属性:方向”，旧版纯属性键继续匹配该属性的任意方向。
+		var filter_parts: PackedStringArray = stone_attribute_filter.split(STONE_ATTRIBUTE_DIRECTION_SEPARATOR, false, 1)
+		# 筛选属性名；新版读取分隔符前内容，旧版直接使用完整键。
+		var filter_stat_name: String = filter_parts[0] if not filter_parts.is_empty() else stone_attribute_filter
+		if not modifiers.has(filter_stat_name):
+			continue
+		if filter_parts.size() < 2:
+			return true
+		# 目标筛选方向；无效值按 +1 兜底，正常 UI 始终写入明确的 +1 或 -1。
+		var filter_direction: int = EnhancementRules.normalize_direction(int(filter_parts[1]))
+		# 强化石实际方向；归一化后与目标方向精确匹配。
+		var modifier_direction: int = EnhancementRules.normalize_direction(modifiers.get(filter_stat_name, 1))
+		if modifier_direction == filter_direction:
+			return true
+	return false
+
+
+static func _normalize_stone_attribute_filters(stone_attribute: Variant) -> Array[String]:
+	# 标准化筛选结果；每个非空键只保留一次，避免 UI 重复勾选造成无意义查询开销。
+	var normalized_filters: Array[String] = []
+	if stone_attribute is String:
+		# 旧版单选筛选键；空字符串表示不限制属性。
+		var single_filter: String = str(stone_attribute)
+		if not single_filter.is_empty():
+			normalized_filters.append(single_filter)
+		return normalized_filters
+	if stone_attribute is Array or stone_attribute is PackedStringArray:
+		# 多选筛选项；数组内任意一个属性方向命中即可展示对应强化石。
+		for raw_filter in stone_attribute:
+			# 当前筛选键；转为字符串后排除空值和重复项。
+			var filter_key: String = str(raw_filter)
+			if not filter_key.is_empty() and filter_key not in normalized_filters:
+				normalized_filters.append(filter_key)
+	return normalized_filters
 
 
 static func _build_search_text(entry: Dictionary) -> String:

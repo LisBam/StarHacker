@@ -66,6 +66,20 @@ func get_resolved_quality_id() -> String:
 	return quality_id if quality_id in EnhancementRules.QUALITY_ORDER else EnhancementRules.QUALITY_LOW
 
 
+func create_upgraded_copy() -> EnhancementStoneData:
+	# 下一品质；空字符串表示当前已经是极品强化石，不能再生成更高阶资源。
+	var next_quality_id: String = EnhancementRules.get_next_quality_id(get_resolved_quality_id())
+	if next_quality_id.is_empty():
+		return null
+	# 升阶资源；完整复制词条方向、说明、图标和售价，仅替换品质与统一显示名称，保证主石特征不会被重新随机。
+	var upgraded_stone: EnhancementStoneData = duplicate(true) as EnhancementStoneData
+	if upgraded_stone == null:
+		return null
+	upgraded_stone.quality_id = next_quality_id
+	upgraded_stone.display_name = EnhancementRules.get_quality_display_name(next_quality_id)
+	return upgraded_stone
+
+
 func get_modifier_tokens(beneficial_only: bool = false) -> PackedStringArray:
 	# 可见词条；按规则目录稳定顺序生成“伤害+”“冷却+”等不含具体数值的短文本。
 	var modifier_tokens: PackedStringArray = PackedStringArray()

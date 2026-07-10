@@ -27,10 +27,16 @@ const QUALITY_WEIGHTS: Dictionary = {
 }
 ## 品质中文名称；用于掉落物、背包、仓库和结算界面的统一显示。
 const QUALITY_DISPLAY_NAMES: Dictionary = {
-	QUALITY_LOW: "低级强化石",
+	QUALITY_LOW: "初级强化石",
 	QUALITY_MEDIUM: "中级强化石",
 	QUALITY_HIGH: "高级强化石",
 	QUALITY_SUPREME: "极品强化石",
+}
+## 强化石升阶映射；初级依次升为中级、高级和极品，极品没有下一品质并禁止继续升阶。
+const QUALITY_UPGRADE_PATH: Dictionary = {
+	QUALITY_LOW: QUALITY_MEDIUM,
+	QUALITY_MEDIUM: QUALITY_HIGH,
+	QUALITY_HIGH: QUALITY_SUPREME,
 }
 ## 品质数值配置；百分比使用 0 到 1 小数，额外增强和削弱均最多追加一条不重复属性。
 const QUALITY_CONFIGS: Dictionary = {
@@ -162,6 +168,16 @@ static func roll_quality_modifier_ratio(random_source: RandomNumberGenerator, qu
 
 static func get_quality_display_name(quality_id: String) -> String:
 	return str(QUALITY_DISPLAY_NAMES.get(quality_id, QUALITY_DISPLAY_NAMES[QUALITY_LOW]))
+
+
+static func get_next_quality_id(quality_id: String) -> String:
+	# 下一品质标识；空字符串明确表示当前品质已经到达上限，调用方不得继续执行升阶。
+	return str(QUALITY_UPGRADE_PATH.get(quality_id, ""))
+
+
+static func can_upgrade_quality(quality_id: String) -> bool:
+	# 可升阶判断只读取稳定映射，避免各锻造界面自行维护不同的品质上限规则。
+	return not get_next_quality_id(quality_id).is_empty()
 
 
 static func get_quality_config(quality_id: String) -> Dictionary:

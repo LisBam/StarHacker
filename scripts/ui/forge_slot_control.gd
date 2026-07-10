@@ -20,6 +20,8 @@ var _slot_index: int = -1
 var _is_main_slot: bool = false
 ## 当前槽位条目；包含资源和来源位置，空字典表示尚未放入物品。
 var _entry: Dictionary = {}
+## 当前槽位物品是否不符合主物品锻造规则；默认 false，启用时显示红色滤镜但仍允许点击归还。
+var _is_invalid: bool = false
 
 
 func configure(slot_index: int, is_main_slot: bool, slot_size: float = 84.0) -> void:
@@ -60,8 +62,14 @@ func refresh(entry: Dictionary) -> void:
 		# 物品名称；槽位保持简洁，仅展示已放入材料的名称，完整来源和属性仍可通过悬停查看。
 		text = str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", item_resource))
 		tooltip_text = ITEM_DETAIL_FORMATTER.call("build_plain_text", item_resource, 1)
-		self_modulate = Color(0.78, 0.95, 1.0, 1.0) if _is_main_slot else Color(1.0, 0.88, 0.66, 1.0)
+		self_modulate = Color(1.0, 0.28, 0.28, 0.92) if _is_invalid else (Color(0.78, 0.95, 1.0, 1.0) if _is_main_slot else Color(1.0, 0.88, 0.66, 1.0))
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+
+
+func set_invalid_state(is_invalid: bool) -> void:
+	# 无效状态只改变当前槽位视觉与提示，不禁用按钮，玩家仍可单击移除红色材料。
+	_is_invalid = is_invalid
+	refresh(_entry)
 
 
 func get_entry() -> Dictionary:
@@ -75,7 +83,7 @@ func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
 	var drag_data: Dictionary = data as Dictionary
 	if str(drag_data.get("type", "")) != STORAGE_DRAG_DATA_TYPE:
 		return false
-	# 拖拽物品；主槽只允许武器，牺牲槽允许武器和强化石。
+	# 拖拽物品；主槽允许武器或强化石，牺牲槽先接受两类锻造物品，再由面板结合主物品做精确校验。
 	var item_resource: Resource = drag_data.get("resource") as Resource
 	if item_resource == null:
 		return false
@@ -83,7 +91,7 @@ func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
 	var is_weapon: bool = str(item_resource.get("weapon_type")) in ["ranged", "melee"]
 	# 是否为强化石；当前唯一可锻造资源类型。
 	var is_stone: bool = str(item_resource.get("item_kind")) == "enhancement_stone"
-	return is_weapon if _is_main_slot else (is_weapon or is_stone)
+	return is_weapon or is_stone
 
 
 func _drop_data(_at_position: Vector2, data: Variant) -> void:

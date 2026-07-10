@@ -3,8 +3,6 @@ extends Node
 ## 敌人战术组件只读取本怪物的感知线索并生成二维搜查与伏击目标。
 ## 组件不发现队友、不共享情报，也不直接修改感知状态、攻击逻辑或物理速度。
 
-## 旧敌人战术组名称；当前不再把怪物加入该组，仅保留常量避免旧调试工具解析失败。
-const ENEMY_TACTICAL_GROUP: StringName = &"enemy_tactical_agents"
 ## 搜查单位职能；默认优先分配给近战单位，负责逐层排查墙角、死角和最后消失区域。
 const TACTICAL_ROLE_SEARCHER: int = 0
 ## 卡位单位职能；默认远近搭配占据墙体近口、外围岔路和预测逃生路线。
@@ -12,12 +10,6 @@ const TACTICAL_ROLE_HOLDER: int = 1
 ## 迂回单位职能；默认优先或仅由远程单位从墙体外侧绕行并封堵远端路线。
 const TACTICAL_ROLE_FLANKER: int = 2
 
-## 旧同区域小队识别半径；当前不再读取，仅保留旧场景配置兼容。
-var squad_region_radius: float = 1200.0
-## 独立职能初始化检查间隔；默认 0.25 秒，首次确定单体搜查职能后后续检查会直接返回。
-var coordination_update_interval: float = 0.25
-## 旧多人职能轮换间隔；当前不再读取，仅保留旧场景配置兼容。
-var role_rotation_interval: float = 18.0
 ## 近层搜查半径；默认 88 像素，用于近战单位贴墙排查拐角和房间近角。
 var search_near_radius: float = 88.0
 ## 中层搜查半径；默认 176 像素，用于墙体周边第二层扇形排查和近端路口封锁。
@@ -52,10 +44,7 @@ var tactical_destination_attempts: int = 8
 var obstacle_collision_mask: int = 16
 ## 实心墙体分组；默认 environment_obstacles，只有属于该组的碰撞体才作为墙角和遮挡物情报。
 var solid_wall_group: StringName = &"environment_obstacles"
-## 旧情报中继跳数；当前共享功能已删除，该值不参与运行逻辑。
-var intelligence_relay_max_hops: int = 6
-
-## 战术宿主；取值为 CharacterBody2D 或 null，默认由敌人聚合脚本注入，用于位置和队友发现。
+## 战术宿主；取值为 CharacterBody2D 或 null，默认由敌人聚合脚本注入，用于读取本怪物位置。
 var _actor: CharacterBody2D
 ## 感知组件；取值为 Node 或 null，默认通过只读接口提供警戒状态和本地情报，不形成具体脚本类型依赖。
 var _perception_component: Node
@@ -69,19 +58,13 @@ var _intelligence: Dictionary = {}
 var _has_intelligence: bool = false
 ## 已处理的本地线索版本；默认 -1，版本递增时刷新本怪物独立战术路线。
 var _last_local_intelligence_revision: int = -1
-## 小队协调刷新剩余时间；默认 0 表示初始化后立即计算一次在场人数和职能。
-var _coordination_update_remaining: float = 0.0
 ## 当前职能；取值为 TACTICAL_ROLE_* 常量，默认搜查单位以兼容单 AI 行为。
 var _current_role: int = TACTICAL_ROLE_SEARCHER
 ## 当前职能内序号；取值从 0 开始，用于把同职能单位分配到不同扇区、岔路深度和墙体侧面。
 var _role_slot_index: int = 0
-## 当前同区域有效队友总数；最小值为 1，默认只包含自己。
-var _active_squad_size: int = 1
-## 当前分工签名；默认空字符串，人数、职能、序号或轮换周期变化时清理旧目的地并重新规划。
-var _assignment_signature: String = ""
 ## 当前战术目的地；取值为世界坐标，仅在 _has_tactical_destination 为 true 时有效。
 var _tactical_destination: Vector2 = Vector2.ZERO
-## 当前是否已有战术目的地；默认 false，需要时由角色和共享情报生成。
+## 当前是否已有战术目的地；默认 false，需要时由固定单体职能和本怪物感知线索生成。
 var _has_tactical_destination: bool = false
 ## 当前战术点观察剩余时间；默认 0，到达搜查点后随机暂停再前往下一层或下一扇区。
 var _tactical_wait_remaining: float = 0.0
@@ -93,10 +76,6 @@ var _visited_search_point_count: int = 0
 var _ambush_mode: bool = false
 ## 当前卡位或伏击点是否已经到达；默认 false，到达后宿主停止主动移动但继续执行视野检测和攻击。
 var _hold_position_reached: bool = false
-## 旧消息缓存表；当前不再写入，仅在重置接口中清空以兼容旧运行状态。
-var _processed_message_ids: Dictionary = {}
-
-
 func initialize(actor: CharacterBody2D, perception_component: Node, movement_component: Node, random_source: RandomNumberGenerator) -> void:
 	_actor = actor
 	_perception_component = perception_component
@@ -105,9 +84,6 @@ func initialize(actor: CharacterBody2D, perception_component: Node, movement_com
 
 
 func apply_configuration(settings: Dictionary) -> void:
-	squad_region_radius = maxf(float(settings.get("squad_region_radius", squad_region_radius)), 1.0)
-	coordination_update_interval = maxf(float(settings.get("coordination_update_interval", coordination_update_interval)), 0.05)
-	role_rotation_interval = maxf(float(settings.get("role_rotation_interval", role_rotation_interval)), 0.5)
 	search_near_radius = maxf(float(settings.get("search_near_radius", search_near_radius)), 1.0)
 	search_middle_radius = maxf(float(settings.get("search_middle_radius", search_middle_radius)), search_near_radius)
 	search_far_radius = maxf(float(settings.get("search_far_radius", search_far_radius)), search_middle_radius)
@@ -125,14 +101,12 @@ func apply_configuration(settings: Dictionary) -> void:
 	tactical_destination_attempts = maxi(int(settings.get("tactical_destination_attempts", tactical_destination_attempts)), 1)
 	obstacle_collision_mask = int(settings.get("obstacle_collision_mask", obstacle_collision_mask))
 	solid_wall_group = StringName(str(settings.get("solid_wall_group", solid_wall_group)))
-	intelligence_relay_max_hops = maxi(int(settings.get("intelligence_relay_max_hops", intelligence_relay_max_hops)), 0)
 
 
 func reset_intelligence() -> void:
 	_intelligence.clear()
 	_has_intelligence = false
 	_last_local_intelligence_revision = -1
-	_processed_message_ids.clear()
 	_reset_tactical_route()
 
 
@@ -141,10 +115,6 @@ func update(delta: float) -> void:
 		return
 
 	_pull_local_intelligence()
-	_coordination_update_remaining = maxf(_coordination_update_remaining - delta, 0.0)
-	if _coordination_update_remaining <= 0.0:
-		_refresh_squad_assignment()
-		_coordination_update_remaining = coordination_update_interval
 
 	if not _is_tactical_state_active() or not _has_intelligence:
 		_hold_position_reached = false
@@ -180,11 +150,6 @@ func update(delta: float) -> void:
 	_hold_position_reached = false
 
 
-func receive_shared_intelligence(_report: Dictionary) -> bool:
-	# 小队情报共享已删除；每只怪物只使用自身感知生成的最后线索。
-	return false
-
-
 func get_tactical_destination(fallback_destination: Vector2) -> Vector2:
 	if not _is_tactical_state_active() or not _has_intelligence:
 		return fallback_destination
@@ -202,14 +167,6 @@ func should_pause_movement() -> bool:
 		return _hold_position_reached
 
 	return _is_observing_search_point
-
-
-func get_current_role() -> int:
-	return _current_role
-
-
-func get_active_squad_size() -> int:
-	return _active_squad_size
 
 
 func _pull_local_intelligence() -> void:
@@ -234,18 +191,6 @@ func _pull_local_intelligence() -> void:
 	_last_local_intelligence_revision = report_revision
 	_intelligence = report.duplicate(true)
 	_has_intelligence = true
-	_reset_tactical_route()
-
-
-func _refresh_squad_assignment() -> void:
-	# 独立战术签名；所有怪物固定按单体搜查单位运行，不扫描附近怪物或执行多人分工。
-	var independent_signature: String = "1:%d:0:0" % TACTICAL_ROLE_SEARCHER
-	if independent_signature == _assignment_signature:
-		return
-	_active_squad_size = 1
-	_current_role = TACTICAL_ROLE_SEARCHER
-	_role_slot_index = 0
-	_assignment_signature = independent_signature
 	_reset_tactical_route()
 
 
@@ -504,7 +449,7 @@ func _get_route_prediction(maximum_distance: float) -> Vector2:
 
 
 func _get_intelligence_vector(key: String, fallback_value: Vector2) -> Vector2:
-	# 情报原始值；取值可能为任意 Variant，默认只接收 Vector2 以避免共享数据类型异常。
+	# 线索原始值；取值可能为任意 Variant，默认只接收 Vector2 以避免本地报告数据类型异常。
 	var raw_value: Variant = _intelligence.get(key, fallback_value)
 	return raw_value if raw_value is Vector2 else fallback_value
 

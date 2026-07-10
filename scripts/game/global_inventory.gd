@@ -59,9 +59,11 @@ var _acquisition_sequence: int = 0
 var _last_extraction_epoch: int = 0
 ## 当前是否处于正式战斗局；默认 false，只有 GameWorld 正式骇入模式会开启损失与撤离结算。
 var _run_active: bool = false
-## 本局开始时的物品编号集合；键为记录编号，值为 true，用于结算本局新获得物品。
-var _run_start_record_ids: Dictionary = {}
-## 最近一次战斗结算；包含 result、gained_items、lost_items 和 retained_items，默认空字典。
+## 本局已经持有过的资源实例集合；键为 Resource 实例编号，值为 true，用于排除自己丢弃后重新捡回的开局物品。
+var _run_seen_resource_instance_ids: Dictionary = {}
+## 本局首次从战场获得的资源；元素为稳定 Resource 引用，同一实例反复丢弃和捡回只记录一次。
+var _run_gained_resources: Array[Resource] = []
+## 最近一次战斗结算；包含 result、gained_entries、lost_entries 及兼容名称数组，默认空字典。
 var _last_run_outcome: Dictionary = {}
 ## 存档是否已排队；默认 false，同一帧多次拖拽操作只在帧末写盘一次。
 var _save_queued: bool = false
@@ -87,10 +89,14 @@ func _notification(what: int) -> void:
 
 func begin_combat_run() -> void:
 	_run_active = true
-	_run_start_record_ids.clear()
-	# 开局物品记录；取值为背包和装备中的全部有效记录，用于识别本局新增物品。
+	_run_seen_resource_instance_ids.clear()
+	_run_gained_resources.clear()
+	# 开局物品记录；取值为背包和装备中的全部有效记录，用于建立战斗内已见资源身份集合。
 	for record in _get_all_owned_records():
-		_run_start_record_ids[str(record.get("record_id", ""))] = true
+		# 开局物品资源；加入已见实例集合后，玩家把它扔到地面再捡回时不会误算为本局战利品。
+		var item_resource: Resource = record.get("resource") as Resource
+		if item_resource != null:
+			_run_seen_resource_instance_ids[item_resource.get_instance_id()] = true
 	_last_run_outcome.clear()
 	run_state_changed.emit()
 
@@ -104,16 +110,13 @@ func complete_combat_run_success() -> Dictionary:
 		return _last_run_outcome.duplicate(true)
 
 	_last_extraction_epoch += 1
-	# 本局获得物品名称；元素为显示名，用于撤离结算界面向玩家展示收益。
-	var gained_items: Array[String] = []
+	# 本局获得物品条目；由首次从战场拾取的资源构建，自己丢弃后重新捡回不会重复或新增统计。
+	var gained_entries: Array[Dictionary] = _build_run_gained_entries()
+	# 本局获得物品名称；保留为兼容字段，列表式结算优先读取包含 Resource 的 gained_entries。
+	var gained_items: Array[String] = _get_outcome_entry_names(gained_entries)
 	# 成功撤离携带记录；包含背包与装备，全部写入本次撤离编号以支持以后卸下时仍优先排序。
 	for record in _get_all_owned_records():
 		record["last_extraction_epoch"] = _last_extraction_epoch
-		# 记录编号；取值为稳定字符串，用于判断是否在本局开始快照中出现过。
-		var record_id: String = str(record.get("record_id", ""))
-		if not _run_start_record_ids.has(record_id):
-			gained_items.append(_get_record_display_name(record))
-
 	# 成功撤离背包记录；撤离后自动转入永久仓库，避免玩家下一局未整理时再次承担死亡损失。
 	var extracted_backpack_records: Array[Dictionary] = _backpack_records.duplicate()
 	_backpack_records.clear()
@@ -121,13 +124,15 @@ func complete_combat_run_success() -> Dictionary:
 	extracted_backpack_records.append_array(_warehouse_records)
 	_warehouse_records = extracted_backpack_records
 	_run_active = false
-	_run_start_record_ids.clear()
+	_run_seen_resource_instance_ids.clear()
+	_run_gained_resources.clear()
 	_last_run_outcome = {
 		"result": "success",
 		"title": "撤离成功",
+		"gained_entries": gained_entries,
+		"lost_entries": [],
 		"gained_items": gained_items,
 		"lost_items": [],
-		"retained_items": [],
 	}
 	_queue_save_inventory()
 	warehouse_changed.emit()
@@ -160,30 +165,36 @@ func complete_combat_run_failure(reason: String = "战斗失败", retained_ratio
 
 	# 结算后背包记录；只保留随机选中的约 20% 物品，并维持原仓库相对顺序。
 	var retained_records: Array[Dictionary] = []
+	# 本局获得物品条目；失败结算同样展示本局真正首次拾取的战利品，不因最终是否保留而改变获得事实。
+	var gained_entries: Array[Dictionary] = _build_run_gained_entries()
+	# 本局获得物品名称；保留为兼容字段，列表式结算使用 gained_entries 提供悬停详情。
+	var gained_items: Array[String] = _get_outcome_entry_names(gained_entries)
+	# 丢失物品条目；每项携带 Resource 与显示名，结算列表可直接复用仓库物品详情。
+	var lost_entries: Array[Dictionary] = []
 	# 丢失物品名称；元素为显示名，用于死亡或主动退出结算界面。
 	var lost_items: Array[String] = []
-	# 保留物品名称；元素为显示名，用于向玩家确认随机保留结果。
-	var retained_items: Array[String] = []
 	# 结算背包索引；取值为原背包有效下标，用于区分保留和丢失记录。
 	for record_index in range(_backpack_records.size()):
 		# 当前结算记录；取值为包含资源和元数据的物品记录。
 		var record: Dictionary = _backpack_records[record_index]
 		if retained_index_lookup.has(record_index):
 			retained_records.append(record)
-			retained_items.append(_get_record_display_name(record))
 		else:
+			lost_entries.append(_build_outcome_entry(record.get("resource") as Resource))
 			lost_items.append(_get_record_display_name(record))
 
 	_backpack_records = retained_records
 	_detached_records.clear()
 	_run_active = false
-	_run_start_record_ids.clear()
+	_run_seen_resource_instance_ids.clear()
+	_run_gained_resources.clear()
 	_last_run_outcome = {
 		"result": "failure",
 		"title": reason,
-		"gained_items": [],
+		"gained_entries": gained_entries,
+		"lost_entries": lost_entries,
+		"gained_items": gained_items,
 		"lost_items": lost_items,
-		"retained_items": retained_items,
 	}
 	_queue_save_inventory()
 	inventory_changed.emit()
@@ -461,6 +472,7 @@ func add_backpack_resource(item_resource: Resource, target_index: int = -1) -> b
 	var is_new_acquisition: bool = record.is_empty()
 	if is_new_acquisition:
 		record = _create_record(item_resource)
+		_track_combat_acquisition(item_resource)
 
 	if target_index < 0:
 		_backpack_records.append(record)
@@ -982,6 +994,46 @@ func _get_record_display_name(record: Dictionary) -> String:
 	# 物品显示名；取值来自资源 display_name，空字符串时回退 weapon_id。
 	var display_name: String = str(item_resource.get("display_name"))
 	return str(item_resource.get("weapon_id")) if display_name.is_empty() else display_name
+
+
+func _track_combat_acquisition(item_resource: Resource) -> void:
+	if not _run_active or item_resource == null:
+		return
+	# 资源实例编号；当前战斗内保持稳定，用于区分首次战场拾取与自己丢弃后的重新捡回。
+	var resource_instance_id: int = item_resource.get_instance_id()
+	if _run_seen_resource_instance_ids.has(resource_instance_id):
+		return
+	_run_seen_resource_instance_ids[resource_instance_id] = true
+	_run_gained_resources.append(item_resource)
+
+
+func _build_run_gained_entries() -> Array[Dictionary]:
+	# 本局收益条目；顺序与首次拾取顺序一致，便于结算界面还原本次探索过程。
+	var gained_entries: Array[Dictionary] = []
+	# 本局收益资源遍历项；每个资源实例只会在首次拾取时加入一次。
+	for item_resource in _run_gained_resources:
+		if item_resource != null:
+			gained_entries.append(_build_outcome_entry(item_resource))
+	return gained_entries
+
+
+func _build_outcome_entry(item_resource: Resource) -> Dictionary:
+	if item_resource == null:
+		return {"resource": null, "display_name": "未知物品"}
+	# 物品显示名称；优先使用 display_name，空值时回退稳定 weapon_id，供兼容文本与列表标题共同使用。
+	var display_name: String = str(item_resource.get("display_name"))
+	if display_name.is_empty():
+		display_name = str(item_resource.get("weapon_id"))
+	return {"resource": item_resource, "display_name": display_name}
+
+
+func _get_outcome_entry_names(entries: Array[Dictionary]) -> Array[String]:
+	# 兼容名称数组；从结构化条目提取显示名，旧调用方仍可读取 gained_items 或 lost_items。
+	var item_names: Array[String] = []
+	# 结算条目遍历项；每项都使用 display_name 字段，缺失时回退未知物品。
+	for entry in entries:
+		item_names.append(str(entry.get("display_name", "未知物品")))
+	return item_names
 
 
 func _shuffle_integer_array(values: Array[int]) -> void:

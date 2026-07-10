@@ -65,9 +65,8 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export var monster_scene: PackedScene
 ## 随机怪物场景池；默认由场景填入近战和远程怪物，非空时会优先从池中随机选择生成对象。
 @export var monster_scenes: Array[PackedScene] = []
-## 怪物生成数量；取值建议 0 到 256，默认 160，远距离怪物会休眠所以主要增加地图遭遇密度而非持续 AI 开销。
-## 全地图布怪补充：正式战斗默认生成 160 名敌人，使大型地图各片区持续存在遭遇压力。
-@export_range(0, 256, 1) var monster_spawn_count: int = 160
+## 怪物开局人口；默认 400，远处人口只保存虚拟记录，进入玩家加载范围后才实例化并执行 AI。
+@export_range(0, 20000, 1) var monster_spawn_count: int = 400
 ## 怪物生成最小距离；取值应大于等于 0，默认 280 像素，运行时修改会影响怪物是否离玩家过近。
 ## 全地图布怪补充：项目当前默认至少离玩家 900 像素，避免开局和补充刷新直接出现在屏幕附近。
 @export_range(0.0, 8000.0, 1.0) var monster_spawn_min_distance: float = 900.0
@@ -77,12 +76,20 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export var monster_spawn_across_full_map: bool = true
 ## 全地图敌人生成边界留白；默认 256 像素，防止敌人贴着边界墙或生成到地图外侧。
 @export_range(0.0, 4000.0, 1.0) var monster_spawn_edge_margin: float = 256.0
-## 正式战斗最低存活敌人数；默认 144，低于该值时会在玩家安全范围外分批补充敌人。
-@export_range(0, 256, 1) var monster_minimum_alive_count: int = 144
-## 敌人补充检查间隔；默认 2 秒，避免每帧统计和生成大量节点。
-@export_range(0.1, 60.0, 0.1) var monster_replenish_interval: float = 2.0
-## 单次补充敌人数量；默认 16，实际生成数不会超过恢复到最低存活数量所需的缺口。
-@export_range(1, 32, 1) var monster_replenish_batch_size: int = 16
+## 正式战斗最低开局人口；默认 400，与开局生成量共同决定 0 秒人口下限，低于目标时持续补充虚拟记录。
+@export_range(0, 20000, 1) var monster_minimum_alive_count: int = 400
+## 第一人口里程碑时间；默认 300 秒，达到时全地图敌人人口增长到 monster_population_five_minute_count。
+@export_range(1.0, 3600.0, 1.0) var monster_population_first_milestone_seconds: float = 300.0
+## 第一人口里程碑数量；默认 2400，0 秒到第一里程碑之间按游戏时长线性增长。
+@export_range(0, 20000, 1) var monster_population_five_minute_count: int = 2400
+## 第二人口里程碑时间；默认 600 秒，达到时全地图敌人人口增长到 monster_population_ten_minute_count。
+@export_range(1.0, 7200.0, 1.0) var monster_population_second_milestone_seconds: float = 600.0
+## 第二人口里程碑数量；默认 10000，达到第二里程碑后维持该目标人口并补充死亡缺口。
+@export_range(0, 20000, 1) var monster_population_ten_minute_count: int = 10000
+## 敌人人口补充检查间隔；默认 0.25 秒，平滑创建虚拟记录并及时跟随人口增长曲线。
+@export_range(0.05, 60.0, 0.05) var monster_replenish_interval: float = 0.25
+## 单次补充虚拟敌人人口数量；默认 64，只创建轻量记录，不会在同一帧实例化同等数量的 AI 节点。
+@export_range(1, 1024, 1) var monster_replenish_batch_size: int = 64
 ## 敌人尺寸与属性随机波动比例；默认 0.3 表示每只敌人的大小和战斗属性分别在 70% 到 130% 范围内生成。
 @export_range(0.0, 0.9, 0.05) var monster_spawn_variation_ratio: float = 0.3
 ## 怪物父节点路径；默认指向 Enemies 容器，允许为空并回退到 GameWorld，修改会影响怪物节点层级。
@@ -205,7 +212,11 @@ func _ready() -> void:
 	_spawn_random_environment()
 	_environment_obstacle_version += 1
 	if _monster_simulation_manager != null and _monster_simulation_manager.has_method("initialize"):
-		_monster_simulation_manager.call("initialize", _player)
+		# 怪物挂载父节点；优先使用 Enemies 容器，缺失时回退 GameWorld，供加载管理器按需创建真实节点。
+		var spawn_parent: Node = _monster_parent if _monster_parent != null else self
+		_monster_simulation_manager.call("initialize", _player, spawn_parent, _player, TRAINING_MONSTER_GROUP)
+		if _monster_simulation_manager.has_signal("virtual_monster_died") and not _monster_simulation_manager.is_connected("virtual_monster_died", Callable(self, "_on_monster_died")):
+			_monster_simulation_manager.connect("virtual_monster_died", Callable(self, "_on_monster_died"))
 	_spawn_monster_batch()
 	_monster_replenish_remaining = monster_replenish_interval
 	_update_explored_cells(true)
@@ -1119,24 +1130,31 @@ func _spawn_monster_batch(requested_count: int = -1) -> void:
 	if not _has_monster_scene_available() or resolved_spawn_count <= 0:
 		return
 
-	# 怪物挂载父节点；取值为 Enemies 容器或 GameWorld，默认用于组织随机生成物。
-	var spawn_parent: Node = _monster_parent if _monster_parent != null else self
-	# 怪物生成循环索引；取值为 0 到实际生成数量减一，默认逐个生成并分散到整张地图。
+	# 怪物生成循环索引；取值为 0 到实际生成数量减一，默认逐个创建虚拟人口并分散到整张地图。
 	for _spawn_index in range(resolved_spawn_count):
 		# 本次怪物场景；取值来自 monster_scenes 随机池或 monster_scene 兜底，默认用于生成不同怪物类型。
 		var selected_monster_scene: PackedScene = _get_random_monster_scene()
 		if selected_monster_scene == null:
 			continue
 
-		# 怪物实例；取值为 Node2D 或 null，默认由选中的怪物场景实例化，修改会影响生成对象。
+		# 怪物生成位置；始终位于玩家安全距离外并避开环境障碍，虚拟记录和真实节点使用同一套位置规则。
+		var spawn_position: Vector2 = _get_random_monster_spawn_position()
+		# 怪物出生倍率；x 为尺寸倍率、y 为属性倍率，首次生成后由虚拟记录永久保存。
+		var spawn_variation: Vector2 = _get_monster_spawn_variation()
+		if _monster_simulation_manager != null and _monster_simulation_manager.has_method("add_virtual_monster"):
+			_monster_simulation_manager.call("add_virtual_monster", selected_monster_scene, spawn_position, spawn_variation.x, spawn_variation.y)
+			continue
+
+		# 兼容怪物实例；加载管理器缺失时回退旧式直接实例化，确保独立场景仍可生成敌人。
 		var monster: Node2D = selected_monster_scene.instantiate() as Node2D
 		if monster == null:
 			continue
-
-		_apply_monster_spawn_variation(monster)
+		_apply_monster_spawn_variation_values(monster, spawn_variation.x, spawn_variation.y)
 		monster.add_to_group(TRAINING_MONSTER_GROUP)
+		# 怪物挂载父节点；取值为 Enemies 容器或 GameWorld，默认用于组织兼容生成节点。
+		var spawn_parent: Node = _monster_parent if _monster_parent != null else self
 		spawn_parent.add_child(monster)
-		monster.global_position = _get_random_monster_spawn_position()
+		monster.global_position = spawn_position
 		if monster.has_signal("died"):
 			monster.connect("died", Callable(self, "_on_monster_died").bind(monster))
 		if monster.has_method("set_target"):
@@ -1162,6 +1180,9 @@ func _get_random_monster_scene() -> PackedScene:
 
 
 func clear_monsters() -> void:
+	if _monster_simulation_manager != null and _monster_simulation_manager.has_method("clear_population"):
+		_monster_simulation_manager.call("clear_population")
+
 	# 组内怪物节点列表；取值来自场景树训练场怪物组，默认用于清理曾经生成但不在 Enemies 容器中的怪物。
 	var grouped_monsters: Array = get_tree().get_nodes_in_group(TRAINING_MONSTER_GROUP)
 	# 组内怪物遍历项；取值为 Node 或其他对象，默认只处理有效 Node，修改循环来源会影响兜底清理范围。
@@ -1184,7 +1205,7 @@ func respawn_monsters() -> void:
 
 
 func _update_monster_replenishment(delta: float) -> void:
-	if _is_training_mode or monster_minimum_alive_count <= 0:
+	if _is_training_mode:
 		return
 
 	_monster_replenish_remaining = maxf(_monster_replenish_remaining - delta, 0.0)
@@ -1192,19 +1213,27 @@ func _update_monster_replenishment(delta: float) -> void:
 		return
 	_monster_replenish_remaining = maxf(monster_replenish_interval, 0.1)
 
-	# 当前存活敌人数；取值为怪物组内有效且未排队释放的节点数量。
-	var alive_monster_count: int = _get_alive_monster_count()
-	if alive_monster_count >= monster_minimum_alive_count:
+	# 当前目标人口；根据正式战斗存活时间从开局人口连续增长到 5 分钟和 10 分钟里程碑。
+	var target_monster_population: int = _get_target_monster_population()
+	if target_monster_population <= 0:
 		return
 
-	# 当前敌人缺口；取值为最低数量减存活数量，用于限制单次补充不会超过目标总数。
-	var monster_deficit: int = monster_minimum_alive_count - alive_monster_count
+	# 当前存活敌人数；优先读取虚拟人口总量，加载范围外且未实例化的敌人同样计入。
+	var alive_monster_count: int = _get_alive_monster_count()
+	if alive_monster_count >= target_monster_population:
+		return
+
+	# 当前敌人缺口；取值为时间目标人口减存活人口，用于限制单批补充不会越过曲线目标。
+	var monster_deficit: int = target_monster_population - alive_monster_count
 	# 本次补充数量；取值为缺口与批次上限较小值，避免瞬间生成过多节点。
 	var replenish_count: int = mini(monster_deficit, maxi(monster_replenish_batch_size, 1))
 	_spawn_monster_batch(replenish_count)
 
 
 func _get_alive_monster_count() -> int:
+	if _monster_simulation_manager != null and _monster_simulation_manager.has_method("get_population_count"):
+		return int(_monster_simulation_manager.call("get_population_count"))
+
 	# 存活数量；默认从 0 开始统计组内有效敌人。
 	var alive_count: int = 0
 	# 怪物组成员；取值可能包含即将释放节点，默认逐项校验。
@@ -1219,6 +1248,12 @@ func _get_alive_monster_count() -> int:
 func _apply_monster_spawn_variation(monster: Node2D) -> void:
 	if monster == null:
 		return
+	# 怪物出生倍率；x 为尺寸倍率、y 为属性倍率，兼容直接实例化路径使用同一随机规则。
+	var spawn_variation: Vector2 = _get_monster_spawn_variation()
+	_apply_monster_spawn_variation_values(monster, spawn_variation.x, spawn_variation.y)
+
+
+func _get_monster_spawn_variation() -> Vector2:
 
 	# 标准化波动比例；取值为 0 到 0.9，默认 0.3 形成 70% 到 130% 范围。
 	var variation_ratio: float = clampf(monster_spawn_variation_ratio, 0.0, 0.9)
@@ -1226,10 +1261,34 @@ func _apply_monster_spawn_variation(monster: Node2D) -> void:
 	var size_multiplier: float = _random.randf_range(1.0 - variation_ratio, 1.0 + variation_ratio)
 	# 属性倍率；与尺寸独立随机，避免大体型敌人必然拥有完全相同强度趋势。
 	var attribute_multiplier: float = _random.randf_range(1.0 - variation_ratio, 1.0 + variation_ratio)
+	return Vector2(size_multiplier, attribute_multiplier)
+
+
+func _apply_monster_spawn_variation_values(monster: Node2D, size_multiplier: float, attribute_multiplier: float) -> void:
+	if monster == null:
+		return
 	if monster.has_method("apply_spawn_variation"):
 		monster.call("apply_spawn_variation", size_multiplier, attribute_multiplier)
 	else:
 		monster.scale *= Vector2(size_multiplier, size_multiplier)
+
+
+func _get_target_monster_population() -> int:
+	# 开局目标人口；取开局生成量与最低人口较大值，保证 0 秒正式战斗至少拥有 400 名地图人口。
+	var initial_population: int = maxi(monster_spawn_count, monster_minimum_alive_count)
+	# 第一里程碑时间；至少为 1 秒，避免检查器异常值导致插值除零。
+	var first_milestone_time: float = maxf(monster_population_first_milestone_seconds, 1.0)
+	# 第二里程碑时间；至少比第一里程碑晚 1 秒，保证第二段插值区间有效。
+	var second_milestone_time: float = maxf(monster_population_second_milestone_seconds, first_milestone_time + 1.0)
+	if _survival_time_seconds <= first_milestone_time:
+		# 第一阶段比例；取值 0 到 1，控制人口从 400 连续增长到 2400。
+		var first_stage_ratio: float = clampf(_survival_time_seconds / first_milestone_time, 0.0, 1.0)
+		return roundi(lerpf(float(initial_population), float(monster_population_five_minute_count), first_stage_ratio))
+	if _survival_time_seconds <= second_milestone_time:
+		# 第二阶段比例；取值 0 到 1，控制人口从 2400 连续增长到 10000。
+		var second_stage_ratio: float = clampf((_survival_time_seconds - first_milestone_time) / (second_milestone_time - first_milestone_time), 0.0, 1.0)
+		return roundi(lerpf(float(monster_population_five_minute_count), float(monster_population_ten_minute_count), second_stage_ratio))
+	return maxi(monster_population_ten_minute_count, 0)
 
 
 func _on_monster_died(monster_node: Node) -> void:

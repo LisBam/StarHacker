@@ -62,19 +62,19 @@
 - `InputBindings`：全局输入绑定管理器，以 AutoLoad 单例存在，不声明同名 `class_name`，保存可配置动作、默认事件、玩家自定义事件和恢复默认逻辑，直接写入 Godot `InputMap`，允许多个动作共享同一个输入事件。
 - `KeyBindingPanel`：复用型按键绑定 UI，主菜单设置和暂停设置的按键绑定页面都会动态创建它，用于捕获下一次键盘或鼠标输入并调用 `InputBindings.rebind_action()`。
 - `CombatCamera`：玩家子节点上的战斗相机，关闭 Camera2D 位置平滑并使用物理帧回调跟随玩家，避免物理移动和渲染相机不同步造成移动抖动；屏幕震动只修改相机 `offset`，不会改变玩家或相机节点真实位置。
-- `CombatHud`：除原战斗 HUD、背包和暂停职责外，负责调用全局背包完成撤离成功、死亡和主动退出结算，并在滚动结算界面完整展示获得、保留和丢失物品。
+- `CombatHud`：除原战斗 HUD、背包和暂停职责外，负责调用全局背包完成撤离成功、死亡和主动退出结算，并以仓库式双列列表展示本局首次获得与实际丢失物品；列表物品支持悬停查看完整详情，不展示随机保留物品。
 - `MiniMapControl`：读取 GameWorld 的地图、探索、撤离点和玩家导航标点；M 键大地图允许左键设置或点中已有标点取消，局部小地图与完整地图都会绘制玩家到标点的黄色指示线。
-- `WarehousePanel`：主菜单局外仓库 UI，只调用 `GlobalInventory`。纯仓库模式仅显示永久仓库、局外金币和出售按钮；展开背包后，上方保留仓库，下方左侧显示装备栏、右侧显示随身背包，并支持点击快捷转移、拖拽转移、列表排序、装备替换和卸下。
+- `WarehousePanel`：主菜单局外仓库 UI，只调用 `GlobalInventory`。纯仓库模式仅显示永久仓库、局外金币和出售按钮；展开背包后，上方保留仓库，下方左侧显示装备栏、右侧显示随身背包，并支持点击快捷转移、拖拽转移、列表排序和装备替换。仓库打开时按 E 展开或收起背包，按 ESC 关闭仓库。
 - `StorageItemControl`：局外物品交互控件，统一生成摘要、完整悬停属性、快捷点击和跨容器拖拽数据，不直接修改物品所有权。
 - `StorageDropArea`：仓库与随身背包共用的两列网格拖放区域，只校验拖拽协议并把目标容器交给 `WarehousePanel`。
 - `EquipmentStorageSlotControl`：局外装备槽拖拽控件，校验远程或近战武器类型，支持装备与仓库、背包以及远程装备槽之间的双向拖拽。
 - `DeveloperMenu`：隐藏开发者调试面板，通过 `GlobalInventory` 公开接口发放武器和调整金币。
 - `GlobalInventory`：全局物品所有权服务，使用唯一记录区分同类重复武器，分别维护永久仓库、随身背包、装备、局外金币、临时拖拽记录、本局快照和存档。正式战斗失败只随机保留约 20% 随身背包物品，永久仓库和局外金币不进入战斗；成功撤离会把随身背包全部转入永久仓库。
-- `MonsterSimulationManager`：集中注册整图怪物，分批启用玩家加载半径内的 AI、物理、碰撞和绘制，并让远距离怪物保持原坐标休眠。
+- `MonsterSimulationManager`：维护整图轻量虚拟敌人人口，分批实例化玩家加载半径内的真实敌人，并在远离后保存位置和生命比例再释放节点；远处人口不执行任何 AI、物理、碰撞或绘制。
 - `BasicMonster`：基础怪物聚合入口，维护血量、攻击、韧性、个体数值随机和组件配置，通过子组件组合索敌与移动能力，并保留近战、击退和继承扩展接口。
 - `EnemyPerceptionComponent`：维护视野射线、目标记忆、视野丢失缓冲、遮挡次数、最后线索预测、障碍背后锚点、范围搜查和彻底脱战，不执行移动或攻击。
 - `EnemyMovementComponent`：维护预设巡逻、出生点游荡、A* 路径缓存、局部绕障、空路径重试节流、卡住恢复、击退和实际移动，不读取玩家实时位置。
-- `RangedMonster`：远程测试怪物，继承基础怪物受击、韧性、索敌记忆、绕障、个体移动差异和游荡逻辑，只有基础索敌确认玩家可见且射击线无遮挡时才保持距离并按个体射击冷却差异发射敌方子弹。
+- `RangedMonster`：远程测试怪物，继承基础怪物受击、韧性、索敌记忆、绕障、个体移动差异和游荡逻辑；只有玩家可见、实时距离不超过 `shoot_range` 且射击线无遮挡时才发射敌方子弹，发射瞬间会二次校验以避免放空枪。
 - `WeaponDrop`：地面武器掉落物，保存单把武器资源并加入 `weapon_drops` 组，HUD 按距离扫描后生成附近掉落列表；拾取成功后会把同一个武器资源加入背包并释放掉落物节点。
 - `CombatBurstEffect`：代码绘制的短促战斗爆发特效，用于玩家和怪物受击、死亡反馈；默认挂到当前场景根节点，保证死亡节点释放后特效仍能播放完成。
 - `SessionState`：入口会话状态，保存当前模式和当前角色，供主菜单、GameWorld 和训练场角色切换复用。
@@ -118,7 +118,7 @@
 
 装备和背包使用单实例流转规则：一把武器资源同一时间只能存在于一个位置。右侧背包武器拖到左侧装备槽后，会从背包列表移除；如果目标装备槽已有武器，旧武器会回到原背包位置。左侧装备拖回右侧背包的空白区域或任意背包物品上都会卸下并插入背包；背包武器之间拖拽会移动原物品顺序，不会复制资源；远程装备槽之间拖拽会移动或交换同一个武器引用。
 
-局外仓库与随身背包是两个独立容器。仓库和背包都使用每行两个物品的网格布局，不显示上下调整按钮。纯仓库模式只显示永久物品，允许查看完整属性并按武器 `sell_price` 出售为局外金币；金币不会带入战斗。展开背包后，上方为永久仓库，下方为装备栏和随身背包：点击仓库物品会快速装入背包，点击背包物品会快速存回仓库；拖拽物品可以在仓库、背包、远程装备槽和近战装备槽之间原子交换。装备栏不提供“装1”“装2”或卸下按钮，所有装备调整统一使用拖拽。
+局外仓库与随身背包是两个独立容器。仓库和背包都使用每行两个物品的网格布局，不显示上下调整按钮。纯仓库模式只显示永久物品，允许查看完整属性并按武器 `sell_price` 出售为局外金币；金币不会带入战斗。展开背包后，上方为永久仓库，下方为装备栏和随身背包：点击仓库物品会快速装入背包，点击背包物品会快速存回仓库；拖拽物品可以在仓库、背包、远程装备槽和近战装备槽之间原子交换。装备栏不提供“装1”“装2”或卸下按钮，所有装备调整统一使用拖拽。仓库内按 E 可随时展开或收起背包，按 ESC 直接关闭仓库并返回主菜单。
 
 永久仓库首次建立或从旧存档迁移时默认按获得时间从新到旧排列，之后会保存玩家手工调整的列表顺序。成功撤离时，本局随身背包全部写入新的撤离编号并自动转入永久仓库前方；上次撤离物品显示“上次撤离”标记并整体排在原有仓库物品之前。存档版本 2 分别保存 `warehouse`、`backpack`、装备槽与 `coins`；读取没有 `warehouse` 字段的旧存档时，会把旧版混合背包物品安全迁移到永久仓库。
 
@@ -126,9 +126,9 @@
 
 ## 暂停与设置
 
-ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打开暂停菜单。正式战斗点击“返回主菜单”会先按失败规则结算：随身背包物品随机保留约 20%，其余约 80% 从背包移除，然后显示完整保留/丢失列表；永久仓库和局外金币完全不参与该结算。结算窗口下方按钮统一显示“确定”，点击后返回主菜单。操作系统关闭窗口时，`GlobalInventory` 也会在正式战斗活动期间执行同一失败结算并立即保存。
+ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打开暂停菜单。正式战斗点击“返回主菜单”会先按失败规则结算：随身背包物品随机保留约 20%，其余约 80% 从背包移除；永久仓库和局外金币完全不参与该结算。结算窗口下方按钮统一显示“确定”，点击后返回主菜单。操作系统关闭窗口时，`GlobalInventory` 也会在正式战斗活动期间执行同一失败结算并立即保存。
 
-玩家生命值降到 0 后，`CombatStatsComponent.died` 会通知 `CombatHud`。正式战斗随机保留约 20% 随身背包物品，已装备物品、永久仓库物品和局外金币不参与“背包内 80% 掉落”规则；滚动结算框会逐项展示保留和丢失物品。训练场死亡或从暂停菜单返回主菜单时都不会打开物品结算窗口，也不会修改永久仓库、背包或金币。
+玩家生命值降到 0 后，`CombatStatsComponent.died` 会通知 `CombatHud`。正式战斗随机保留约 20% 随身背包物品，已装备物品、永久仓库物品和局外金币不参与“背包内 80% 掉落”规则；仓库式双列结算列表只展示本局首次获得和实际丢失物品，不展示随机保留列表。每个物品都可悬停查看完整详情。训练场死亡或从暂停菜单返回主菜单时都不会打开物品结算窗口，也不会修改永久仓库、背包或金币。
 
 暂停设置和主菜单设置共用同一条 Master 音量规则：滑条范围为 0 到 100，0 会静音 Master 总线，大于 0 时使用 `linear_to_db()` 写入音量。
 
@@ -165,7 +165,6 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 - `long_term_region_radius`、`long_term_alert_patrol_speed_multiplier`：长期交战片区。短中期记忆消退后仍保留路过时的低速高警戒，但不会隔墙重新锁定玩家。
 - `target_search_duration_after_arrival`、`target_search_radius`、`target_search_point_wait_min`、`target_search_point_wait_max`：感知组件的兜底区域搜查参数。`search_move_speed_multiplier` 保留为旧场景兼容项，主动追击、搜查、卡位和迂回当前统一使用固定个体移速。
 - `occlusion_break_forget_count`、`occlusion_count_reset_duration`、`blockade_loss_margin`、`lost_search_occlusion_offset`、`lost_search_destination_attempts`：反卡墙与状态流参数。临近阈值进入二级全域封锁，达到阈值后停止主动搜寻但不一次性清空短中长期记忆。
-- `squad_region_radius`、`coordination_update_interval`、`intelligence_relay_max_hops`、`role_rotation_interval`：旧场景兼容字段，当前不参与队友发现、级联传播或人数职能分配。
 - `tactical_search_near_radius`、`tactical_search_middle_radius`、`tactical_search_far_radius`、`tactical_blockade_radius_multiplier`、`melee_search_radius_multiplier`、`ranged_search_radius_multiplier`、`search_fan_half_angle_degrees`、`wall_corner_clearance`、`route_prediction_time`、`lane_segment_spacing`、`tactical_point_arrive_distance`、`tactical_point_wait_min`、`tactical_point_wait_max`、`search_points_before_ambush`、`tactical_destination_attempts`：三层扇形搜查、分段卡位、外侧迂回与静止伏击参数。
 - `patrol_route_path`、`patrol_route_loop`、`wander_radius`、`wander_speed_multiplier`、`wander_arrive_distance`、`wander_wait_min`、`wander_wait_max`：无目标巡逻参数。配置路线容器时按其 Node2D 子节点顺序巡逻，脱战后从最近路线点返程；未配置路线时围绕出生点随机游荡。
 - `avoidance_probe_distance`、`avoidance_angle_step_degrees`、`avoidance_candidate_count`：局部绕障参数。怪物追击或游荡时会先尝试直线方向，若前方被墙体挡住，则按每只怪物随机生成的左右偏好寻找可移动方向。
@@ -194,15 +193,15 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 
 `GameWorld` 会按 `exploration_cell_size` 和 `exploration_radius` 记录玩家探索过的地图格子。该数据只由地图 UI 读取，不影响怪物索敌和碰撞。探索记录不会每帧重算，而是按 `exploration_update_interval` 定期检查，并在玩家移动超过 `exploration_update_distance` 时提前刷新；只有新增探索格时才递增探索版本号，供大地图复用迷雾查询缓存。调整格子尺寸会影响迷雾精度和缓存数量；调整探索半径会影响玩家走过后大地图可见区域大小。`GameWorld.find_navigation_path()` 会按寻路格尺寸和代理半径缓存整张地图的 A* 网格，供怪物在目标被墙体或建筑阻挡时自动绕路；寻路网格禁用斜向移动，避免路径从墙角缝隙穿过。环境障碍在地图生成完成后保持静态，因此缓存网格可以被所有怪物复用；如果后续加入可破坏墙体或动态门，需要在障碍变化后清空导航缓存和小地图障碍版本。
 
-`GameWorld` 默认使用 `monster_spawn_across_full_map = true` 在整张地图可用区域均匀生成 160 名敌人；所有候选点必须位于 `monster_spawn_min_distance` 默认 900 像素之外、避开环境障碍并保留 `monster_spawn_edge_margin`。正式模式中，存活敌人数低于 `monster_minimum_alive_count` 默认 144 时，每隔 2 秒检查并按每批 16 名补充。训练场清怪后不会自动补充，手动“重新生成怪物”使用当前批次数量。
+`GameWorld` 默认使用 `monster_spawn_across_full_map = true` 在整张地图可用区域均匀建立 400 名虚拟敌人人口；所有候选点必须位于 `monster_spawn_min_distance` 默认 900 像素之外、避开环境障碍并保留 `monster_spawn_edge_margin`。正式模式的人口目标按存活时间连续增长：0 秒 400 名、300 秒 2400 名、600 秒 10000 名，之后维持 10000 名并持续补充死亡缺口。人口每 0.25 秒检查一次，单批最多补充 64 条轻量记录。训练场清怪后不会自动补充，手动“重新生成怪物”使用当前开局人口配置。
 
-整图敌人生成后统一注册到 `MonsterSimulationManager`。默认只有玩家 2400 像素范围内的怪物加载 AI、碰撞和绘制；已激活怪物离开 2800 像素后休眠。管理器每 0.1 秒检查最多 40 名怪物，160 名怪物约 0.4 秒完成一轮。休眠怪物仍存在于远处并计入存活数量，但不会执行任何 AI 或物理逻辑。加载范围内怪物的感知、射线、绕障和寻路也按 `ai_update_interval` 默认 0.1 秒错峰更新，移动保持逐帧执行。
+整图敌人由 `MonsterSimulationManager` 保存为虚拟记录。默认只有玩家 2400 像素范围内的记录会分批实例化，真实敌人离开 2800 像素后保存位置与生命比例并释放；远处人口没有节点，因此不会执行 AI、物理、碰撞或绘制。管理器每 0.05 秒扫描最多 256 条记录，每批最多实例化 12 名，并以 `max_materialized_monsters = 220` 限制同时运行的真实敌人数量。一万条记录约两秒完成一轮加载范围扫描。加载范围内怪物的感知、射线、绕障和寻路按 `ai_update_interval` 默认 0.1 秒错峰更新，移动保持逐帧执行。
 
 每只随机生成敌人在加入场景树前分别生成尺寸倍率和属性倍率，范围由 `monster_spawn_variation_ratio` 控制，默认 0.3 即 70% 到 130%。尺寸直接影响视觉和碰撞缩放；基础属性倍率作用于生命、伤害、冲击力、移速、视野和攻击节奏，远程怪物还会同步波动射击距离、保持距离、弹体伤害、弹体冲击力和射击冷却。
 
 `GameWorld` 通过 `drop_parent_path`、`weapon_drop_scene`、`weapon_drop_table` 和 `dropped_weapon_scatter_radius` 控制地面武器生成。怪物死亡掉落会从掉落表复制武器模板，背包拖出丢弃会直接使用背包里的同一个武器资源；落点会尽量避开环境障碍并限制在地图范围内。
 
-`GameWorld` 会记录进入战斗后的存活时间，玩家死亡后不再增加。默认存活 120 秒时生成撤离点，300 秒时标记到地图。玩家在撤离范围内连续停留 `extraction_hold_duration_seconds` 默认 5 秒后按闪避确认撤离。成功撤离会调用 `GlobalInventory.complete_combat_run_success()`：保留装备，把随身背包全部转入永久仓库，标记上次撤离携带记录，统计本局快照之后新增的物品，并先显示“撤离成功”收益结算界面；玩家确认后才返回主菜单。
+`GameWorld` 会记录进入战斗后的存活时间，玩家死亡后不再增加。默认存活 120 秒时生成撤离点，300 秒时标记到地图。玩家在撤离范围内连续停留 `extraction_hold_duration_seconds` 默认 5 秒后按闪避确认撤离。成功撤离会调用 `GlobalInventory.complete_combat_run_success()`：保留装备，把随身背包全部转入永久仓库，标记上次撤离携带记录，并显示本局首次从战场获得的物品。统计使用 Resource 实例身份去重，开局自带物品自己扔出后重新捡回不会算作新收益；玩家确认结算后才返回主菜单。
 
 训练场提供 `clear_monsters()` 和 `respawn_monsters()` 两个接口给 HUD 训练场设置调用。清怪会先按训练怪物组清理，再清理 `monster_parent_path` 指向的怪物容器；重新生成会按当前配置追加一批新怪物，不会清空场上已有怪物。
 
@@ -222,7 +221,7 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 - 怪物：`max_health`、`current_health`、`weapon_drop_chance`、`attack_damage`、`toughness`、`attack_impact_force`、`move_speed`、`move_speed_random_multiplier_min`、`move_speed_random_multiplier_max`、`vision_range`、`attack_range`、`attack_cooldown`、`attack_cooldown_random_multiplier_min`、`attack_cooldown_random_multiplier_max`、`lose_target_range_multiplier`、`vision_requires_line_of_sight`、`vision_line_of_sight_collision_mask`、`vision_loss_grace_duration`、`target_memory_duration`、`target_prediction_time`、`target_prediction_max_distance`、`occlusion_break_forget_count`、`medium_memory_duration`、`long_term_region_radius`、`solid_wall_group`、`ai_update_interval`、`hide_when_simulation_inactive`、`disable_collision_when_simulation_inactive`、`tactical_search_near_radius`、`tactical_search_middle_radius`、`tactical_search_far_radius`、`search_points_before_ambush`、`patrol_route_path`、`patrol_route_loop`、`wander_radius`、`wander_speed_multiplier`、`pathfinding_enabled`、`pathfinding_cell_size`、`pathfinding_agent_radius`、`path_recalculation_min_interval`、`path_recalculation_max_interval`、`stuck_detection_time`、`knockback_decay`、`perception_component_path`、`movement_component_path`、`tactical_component_path`、`hit_effect_color`、`death_effect_color`
 - 远程怪物：`projectile_scene`、`shoot_range`、`keep_distance`、`ranged_projectile_speed`、`ranged_projectile_damage`、`ranged_projectile_range`、`ranged_projectile_impact_force`、`shoot_cooldown`、`shoot_cooldown_random_multiplier_min`、`shoot_cooldown_random_multiplier_max`、`muzzle_offset`、`line_of_sight_collision_mask`、`projectile_parent_path`
 - 战斗地图：`grid_size`、`grid_extent`、`map_seed`、`base_floor_color`、`grid_color`、`axis_color`、`exploration_cell_size`、`exploration_radius`、`exploration_update_interval`、`exploration_update_distance`、`boundary_wall_thickness`、`boundary_wall_color`、`extraction_spawn_time_seconds`、`extraction_map_marker_time_seconds`、`extraction_hold_duration_seconds`、`extraction_radius`、`extraction_spawn_edge_margin`、`extraction_spawn_min_distance_from_player`、`extraction_spawn_attempt_count`、`extraction_fill_color`、`extraction_ring_color`
-- 敌人生成与加载：`monster_scene`、`monster_scenes`、`monster_spawn_count`、`monster_spawn_min_distance`、`monster_spawn_max_distance`、`monster_spawn_across_full_map`、`monster_spawn_edge_margin`、`monster_minimum_alive_count`、`monster_replenish_interval`、`monster_replenish_batch_size`、`monster_spawn_variation_ratio`、`monster_parent_path`、`monster_simulation_manager_path`、`active_radius`、`sleep_hysteresis`、`update_interval`、`monsters_per_update`
+- 敌人生成与加载：`monster_scene`、`monster_scenes`、`monster_spawn_count`、`monster_spawn_min_distance`、`monster_spawn_max_distance`、`monster_spawn_across_full_map`、`monster_spawn_edge_margin`、`monster_minimum_alive_count`、`monster_population_first_milestone_seconds`、`monster_population_five_minute_count`、`monster_population_second_milestone_seconds`、`monster_population_ten_minute_count`、`monster_replenish_interval`、`monster_replenish_batch_size`、`monster_spawn_variation_ratio`、`monster_parent_path`、`monster_simulation_manager_path`、`active_radius`、`sleep_hysteresis`、`update_interval`、`monsters_per_update`、`materializations_per_update`、`max_materialized_monsters`
 - 掉落物：`drop_parent_path`、`weapon_drop_scene`、`weapon_drop_table`、`dropped_weapon_scatter_radius`、`weapon_data`、`pickup_radius`、`bob_amplitude`、`bob_speed`
 - 环境生成：`environment_parent_path`、`obstacle_scenes`、`obstacle_spawn_count`、`obstacle_spawn_min_distance_from_player`、`obstacle_spawn_edge_margin`、`obstacle_spawn_min_spacing`、`obstacle_spawn_attempts_per_item`、`obstacle_scale_min`、`obstacle_scale_max`
 - 角色占位属性：`stelle_max_health`、`stelle_max_energy`、`stelle_move_speed`、`caelus_max_health`、`caelus_max_energy`、`caelus_move_speed`、`silver_wolf_max_health`、`silver_wolf_max_energy`、`silver_wolf_move_speed`

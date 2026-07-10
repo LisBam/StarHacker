@@ -22,7 +22,7 @@ const TARGET_AI_STATE_IDLE: int = 0
 const TARGET_AI_STATE_VISIBLE: int = 1
 ## AI 丢失搜查状态；默认表示玩家被障碍遮挡，怪物只根据最后线索前往遮挡物背后和附近区域搜索。
 const TARGET_AI_STATE_SEARCHING: int = 2
-## AI 二级全域封锁状态；默认表示玩家反复卡墙且临近脱战阈值，小队扩大远近双向封锁。
+## AI 二级扩大搜查状态；默认表示玩家反复卡墙且临近脱战阈值，本怪物扩大自身搜查范围。
 const TARGET_AI_STATE_BLOCKADE: int = 3
 
 ## 最大血量；取值应大于 0，默认 60 用于训练场怪物强度，运行时修改会影响怪物承伤能力。
@@ -115,14 +115,6 @@ const TARGET_AI_STATE_BLOCKADE: int = 3
 @export_range(1, 64, 1) var line_of_sight_skip_limit: int = 12
 ## 可见线索刷新间隔；默认 0.45 秒，持续看见玩家时只刷新本怪物内部最后可见坐标，不会通知其他怪物。
 @export_range(0.05, 5.0, 0.05) var visible_intelligence_broadcast_interval: float = 0.45
-## 同区域小队识别半径；默认 1200 像素，只与范围内且锁定同一玩家的存活 AI 共享情报和分工。
-@export_range(1.0, 5000.0, 1.0) var squad_region_radius: float = 1200.0
-## 小队协调刷新间隔；默认 0.25 秒，控制人数、射程和职能动态重算频率。
-@export_range(0.05, 2.0, 0.05) var coordination_update_interval: float = 0.25
-## 情报最大中继跳数；默认 6，一个敌人发现玩家后可由周围敌人逐层传递到更远区域。
-@export_range(0, 32, 1) var intelligence_relay_max_hops: int = 6
-## 多人职能轮换间隔；默认 18 秒，4 名及以上 AI 会在完成一轮有效搜查后轮换同类职能顺序。
-@export_range(0.5, 60.0, 0.5) var role_rotation_interval: float = 18.0
 ## 近层搜查半径；默认 88 像素，近战 AI 用于贴墙排查拐角和房间近角。
 @export_range(1.0, 1000.0, 1.0) var tactical_search_near_radius: float = 88.0
 ## 中层搜查半径；默认 176 像素，用于第二层扇形排查和近端路口封锁。
@@ -455,10 +447,6 @@ func _build_movement_configuration() -> Dictionary:
 
 func _build_tactical_configuration() -> Dictionary:
 	return {
-		"squad_region_radius": squad_region_radius,
-		"coordination_update_interval": coordination_update_interval,
-		"intelligence_relay_max_hops": intelligence_relay_max_hops,
-		"role_rotation_interval": role_rotation_interval,
 		"search_near_radius": tactical_search_near_radius,
 		"search_middle_radius": tactical_search_middle_radius,
 		"search_far_radius": tactical_search_far_radius,
@@ -745,11 +733,6 @@ func get_target_search_destination() -> Vector2:
 	return raw_destination if raw_destination is Vector2 else global_position
 
 
-func receive_squad_intelligence(_report: Dictionary) -> void:
-	# 小队情报共享已删除；兼容入口不会再改变本怪物索敌状态。
-	return
-
-
 func get_tactical_target_instance_id() -> int:
 	return _target.get_instance_id() if is_instance_valid(_target) else 0
 
@@ -764,14 +747,6 @@ func get_tactical_attack_range() -> float:
 
 func get_tactical_preferred_distance() -> float:
 	return maxf(attack_range, 1.0)
-
-
-func get_squad_tactical_role() -> int:
-	return int(_tactical_component.call("get_current_role")) if _tactical_component != null else 0
-
-
-func get_active_squad_size() -> int:
-	return int(_tactical_component.call("get_active_squad_size")) if _tactical_component != null else 1
 
 
 func _spawn_hit_effect() -> void:

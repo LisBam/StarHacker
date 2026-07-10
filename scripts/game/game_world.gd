@@ -120,8 +120,14 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 ## 强化石基础出售价格；默认 30 金币，随机多词条会按词条数量增加单颗价值。
 @export_range(0, 999999, 1) var enhancement_stone_base_sell_price: int = 30
 ## 品质规则兼容说明；词条数量与削弱概率现由 EnhancementRules.QUALITY_CONFIGS 统一决定，上述最小/最大词条和通用削弱概率只保留旧扩展调用兼容。
+## 修复包死亡掉落概率；默认 0.05 表示每只被击杀怪物独立有 5% 概率掉落一个随机修复包。
+@export_range(0.0, 1.0, 0.001) var repair_kit_drop_chance: float = 0.05
+## 修复包掉落随机池；元素为 RepairKitData 资源，怪物死亡后会深拷贝其中一项形成独立掉落物。
+@export var repair_kit_drop_table: Array[Resource] = []
 ## 玩家丢弃武器散落半径；取值建议大于玩家半径，默认 52 像素，修改会影响拖出背包时武器落点距离。
 @export_range(0.0, 400.0, 1.0) var dropped_weapon_scatter_radius: float = 52.0
+## 地面掉落最小分离距离；默认 36 像素，多个物品同时生成时会尽量避开已有掉落物中心。
+@export_range(0.0, 256.0, 1.0) var dropped_item_minimum_separation: float = 36.0
 ## 撤离点生成时间；取值为进入战斗后的秒数，默认 120 表示存活 2 分钟后生成撤离点。
 @export_range(1.0, 7200.0, 1.0, "or_greater") var extraction_spawn_time_seconds: float = 120.0
 ## 撤离点地图标记时间；取值为进入战斗后的秒数，默认 300 表示存活 5 分钟后在地图上显示撤离点标记。
@@ -1397,6 +1403,7 @@ func _on_monster_died(monster_node: Node) -> void:
 
 	_try_spawn_monster_weapon_drop(monster_node as Node2D)
 	_try_spawn_enhancement_stone_drop(monster_node as Node2D)
+	_try_spawn_repair_kit_drop(monster_node as Node2D)
 	if _monster_simulation_manager != null and _monster_simulation_manager.has_method("unregister_monster"):
 		_monster_simulation_manager.call("unregister_monster", monster_node)
 
@@ -1416,7 +1423,7 @@ func _try_spawn_monster_weapon_drop(monster_node: Node2D) -> void:
 	if dropped_weapon == null:
 		return
 
-	spawn_weapon_drop(dropped_weapon, monster_node.global_position)
+	spawn_weapon_drop(dropped_weapon, _get_scattered_drop_position(monster_node.global_position))
 
 
 func _get_monster_weapon_drop_chance(monster_node: Node) -> float:
@@ -1456,7 +1463,23 @@ func _try_spawn_enhancement_stone_drop(monster_node: Node2D) -> void:
 	# 随机强化石；每次击杀独立创建资源实例，拾取后可按词条签名与库存已有堆叠合并。
 	var enhancement_stone: EnhancementStoneData = _create_random_enhancement_stone()
 	if enhancement_stone != null:
-		spawn_item_drop(enhancement_stone, monster_node.global_position)
+		spawn_item_drop(enhancement_stone, _get_scattered_drop_position(monster_node.global_position))
+
+
+func _try_spawn_repair_kit_drop(monster_node: Node2D) -> void:
+	if monster_node == null or weapon_drop_scene == null or repair_kit_drop_table.is_empty():
+		return
+	if repair_kit_drop_chance <= 0.0 or _random.randf() > clampf(repair_kit_drop_chance, 0.0, 1.0):
+		return
+	# 修复包随机下标；在已配置道具池中等概率选择一个模板。
+	var repair_kit_index: int = _random.randi_range(0, repair_kit_drop_table.size() - 1)
+	# 修复包模板；空资源不会生成无效掉落，也不会影响同一次击杀的其他掉落判定。
+	var repair_kit_template: Resource = repair_kit_drop_table[repair_kit_index]
+	if repair_kit_template == null:
+		return
+	# 独立修复包；复制后保留该品质的固定耐久恢复量与售价，避免共享资源状态。
+	var repair_kit: Resource = repair_kit_template.duplicate(true) as Resource
+	spawn_item_drop(repair_kit if repair_kit != null else repair_kit_template, _get_scattered_drop_position(monster_node.global_position))
 
 
 func _create_random_enhancement_stone() -> EnhancementStoneData:
@@ -1501,10 +1524,22 @@ func _get_scattered_drop_position(center_position: Vector2) -> Vector2:
 		var scatter_distance: float = _random.randf_range(scatter_radius * 0.45, scatter_radius)
 		# 候选位置；取值为中心点加随机偏移并夹到地图内。
 		var candidate_position: Vector2 = _clamp_position_to_map(center_position + Vector2.RIGHT.rotated(scatter_angle) * scatter_distance)
-		if not _is_position_blocked_by_environment(candidate_position, 18.0):
+		if not _is_position_blocked_by_environment(candidate_position, 18.0) and not _is_position_near_existing_drop(candidate_position):
 			return candidate_position
 
 	return _clamp_position_to_map(center_position)
+
+
+func _is_position_near_existing_drop(candidate_position: Vector2) -> bool:
+	# 最小分离距离；取值至少为 0，关闭时允许多个物品完全重叠以兼容旧调试配置。
+	var minimum_separation: float = maxf(dropped_item_minimum_separation, 0.0)
+	if minimum_separation <= 0.0:
+		return false
+	# 已有掉落物遍历项；只检查仍在场景树中且拥有二维位置的有效节点。
+	for drop_node in get_tree().get_nodes_in_group("item_drops"):
+		if drop_node is Node2D and is_instance_valid(drop_node) and (drop_node as Node2D).global_position.distance_to(candidate_position) < minimum_separation:
+			return true
+	return false
 
 
 func _free_monster_node(monster_node: Node) -> void:

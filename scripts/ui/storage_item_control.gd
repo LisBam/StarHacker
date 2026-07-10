@@ -8,6 +8,7 @@ signal quick_action_requested(item_resource: Resource)
 signal item_action_requested(item_resource: Resource)
 signal item_drop_requested(drag_data: Dictionary, target_location: String, target_index: int)
 signal enhancement_drop_requested(stone_resource: Resource, source_location: String, weapon_resource: Resource)
+signal repair_kit_drop_requested(repair_kit_resource: Resource, source_location: String, weapon_resource: Resource)
 
 ## 拖拽数据类型标识；默认用于拒绝来自其他 UI 系统的不兼容拖拽数据。
 const DRAG_DATA_TYPE: String = "global_storage_item"
@@ -113,9 +114,11 @@ func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
 	var drag_data: Dictionary = data
 	if str(drag_data.get("type", "")) != DRAG_DATA_TYPE or not (drag_data.get("resource") is Resource):
 		return false
-	# 拖拽资源；强化石投放到武器卡片时走强化协议，其他组合保持原容器移动协议。
+	# 拖拽资源；强化石不能再投放使用，修复包投放到武器卡片时走修复协议，其他组合保持原容器移动协议。
 	var dragged_resource: Resource = drag_data.get("resource") as Resource
 	if str(dragged_resource.get("item_kind")) == "enhancement_stone" and _is_weapon_resource():
+		return false
+	if str(dragged_resource.get("item_kind")) == "repair_kit" and _is_weapon_resource():
 		return not str(drag_data.get("source_location", "")).is_empty() and not _location.is_empty() and _item_index >= 0
 	return true
 
@@ -125,10 +128,10 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 		return
 	# 拖拽字典；已通过类型检查，复制后交给仓库面板决定移动或转移规则。
 	var drag_data: Dictionary = (data as Dictionary).duplicate()
-	# 拖拽资源；强化石命中武器时不改变容器位置，只由上层消费一颗并应用词条。
+	# 拖拽资源；修复包命中武器时不改变容器位置，只由上层消费一件并恢复耐久。
 	var dragged_resource: Resource = drag_data.get("resource") as Resource
-	if dragged_resource != null and str(dragged_resource.get("item_kind")) == "enhancement_stone" and _is_weapon_resource():
-		enhancement_drop_requested.emit(dragged_resource, str(drag_data.get("source_location", "")), _item_resource)
+	if dragged_resource != null and str(dragged_resource.get("item_kind")) == "repair_kit" and _is_weapon_resource():
+		repair_kit_drop_requested.emit(dragged_resource, str(drag_data.get("source_location", "")), _item_resource)
 		return
 	item_drop_requested.emit(drag_data, _location, _item_index)
 

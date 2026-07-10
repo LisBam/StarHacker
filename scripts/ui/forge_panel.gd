@@ -128,7 +128,7 @@ func _build_interface() -> void:
 	content.add_child(header)
 	# 标题文本；占据剩余宽度，避免金币和关闭按钮挤压。
 	var title_label: Label = Label.new()
-	title_label.text = "量子锻造"
+	title_label.text = "锻造"
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.add_theme_font_size_override("font_size", 25)
 	header.add_child(title_label)
@@ -278,10 +278,10 @@ func _build_forge_slots() -> void:
 	_main_slot.anchor_top = 0.5
 	_main_slot.anchor_right = 0.5
 	_main_slot.anchor_bottom = 0.5
-	_main_slot.offset_left = -69.0
-	_main_slot.offset_top = -36.0
-	_main_slot.offset_right = 69.0
-	_main_slot.offset_bottom = 36.0
+	_main_slot.offset_left = -52.0
+	_main_slot.offset_top = -52.0
+	_main_slot.offset_right = 52.0
+	_main_slot.offset_bottom = 52.0
 	_main_slot.connect("item_requested", Callable(self, "_on_slot_item_requested"))
 	_main_slot.connect("return_requested", Callable(self, "_on_slot_return_requested"))
 	_forge_board.add_child(_main_slot)
@@ -295,10 +295,10 @@ func _build_forge_slots() -> void:
 		sacrifice_slot.anchor_top = 0.5 + sin(slot_angle) * 0.31
 		sacrifice_slot.anchor_right = sacrifice_slot.anchor_left
 		sacrifice_slot.anchor_bottom = sacrifice_slot.anchor_top
-		sacrifice_slot.offset_left = -62.0
-		sacrifice_slot.offset_top = -32.0
-		sacrifice_slot.offset_right = 62.0
-		sacrifice_slot.offset_bottom = 32.0
+		sacrifice_slot.offset_left = -52.0
+		sacrifice_slot.offset_top = -52.0
+		sacrifice_slot.offset_right = 52.0
+		sacrifice_slot.offset_bottom = 52.0
 		sacrifice_slot.connect("item_requested", Callable(self, "_on_slot_item_requested"))
 		sacrifice_slot.connect("return_requested", Callable(self, "_on_slot_return_requested"))
 		_forge_board.add_child(sacrifice_slot)
@@ -333,7 +333,7 @@ func _refresh_preview() -> void:
 	# 锻造预览；只包含确定的耐久、材料数量和费用，不包含强化石最终随机倍率。
 	var preview: Dictionary = _forge_service.build_preview(_main_entry, active_sacrifices)
 	if not bool(preview.get("valid", false)):
-		_preview_label.text = "%s\n\n强化石最终倍率仅在锻造完成后揭晓。" % str(preview.get("message", "请配置锻造物品"))
+		_preview_label.text = str(preview.get("message", "请配置锻造物品"))
 		_forge_cost_label.text = "本次锻造消耗：--"
 		_forge_button.disabled = true
 		return
@@ -341,7 +341,7 @@ func _refresh_preview() -> void:
 	var main_weapon: Resource = preview.get("weapon") as Resource
 	# 耐久恢复；只展示最终可确定值，超过上限的牺牲耐久不会计入。
 	var restored_durability: float = float(preview.get("durability_restored", 0.0))
-	_preview_label.text = "主武器：%s\n耐久：%.1f → %.1f（+%.1f）\n强化石：%d 颗\n费用倍率：×%.2f\n\n强化石最终赋予倍率未知" % [
+	_preview_label.text = "主武器：%s\n耐久：%.1f → %.1f（+%.1f）\n强化石：%d 颗\n费用倍率：×%.2f" % [
 		str(main_weapon.get("display_name")) if main_weapon != null else "未知武器",
 		float(preview.get("durability_before", 0.0)),
 		float(preview.get("durability_after", 0.0)),
@@ -425,6 +425,11 @@ func _entry_matches(entry: Dictionary, item_resource: Resource, source_location:
 
 func _on_inventory_item_pressed(item_resource: Resource, source_location: String) -> void:
 	if _forging_in_progress or item_resource == null:
+		return
+	# 锻造材料类型；修复包等道具只能对武器使用，不允许进入主槽或牺牲槽。
+	var is_forge_material: bool = str(item_resource.get("weapon_type")) in ["ranged", "melee"] or str(item_resource.get("item_kind")) == "enhancement_stone"
+	if not is_forge_material:
+		_status_label.text = "该道具不能作为锻造材料"
 		return
 	# 快捷放入条目；来源必须保持为点击时所在背包或仓库，后续单击槽位即可回到原处。
 	var forge_entry: Dictionary = {"resource": item_resource, "source_location": source_location}
@@ -519,6 +524,8 @@ func _play_forge_animation() -> void:
 	var main_center: Vector2 = _main_slot.position + _main_slot.size * 0.5
 	for slot_index in range(_sacrifice_entries.size()):
 		if _sacrifice_entries[slot_index].is_empty():
+			# 空置牺牲槽；动画期间隐藏，避免材料旋转时留下无意义的空白提示。
+			_sacrifice_slots[slot_index].visible = false
 			continue
 		# 牺牲资源；动画标签只显示名称，不复制真实交互控件或所有权状态。
 		var item_resource: Resource = _sacrifice_entries[slot_index].get("resource") as Resource
@@ -608,6 +615,7 @@ func _rebuild_subcategory_buttons() -> void:
 		_create_category_button(_subcategory_bar, "远程", InventoryQuery.SUBCATEGORY_RANGED, false)
 	else:
 		_create_category_button(_subcategory_bar, "强化石", InventoryQuery.SUBCATEGORY_ENHANCEMENT_STONES, false)
+		_create_category_button(_subcategory_bar, "道具", InventoryQuery.SUBCATEGORY_ITEMS, false)
 	_refresh_source_and_category_buttons()
 
 

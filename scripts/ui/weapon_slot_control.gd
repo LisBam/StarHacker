@@ -9,6 +9,7 @@ signal drop_received(drop_data: Dictionary, target_context: String, target_kind:
 signal drag_released_outside(drop_data: Dictionary)
 signal item_selected(item_resource: Resource, selected_context: String, selected_kind: String, selected_index: int)
 signal enhancement_drop_received(stone_resource: Resource, source_location: String, weapon_resource: Resource)
+signal repair_kit_drop_received(repair_kit_resource: Resource, source_location: String, weapon_resource: Resource)
 
 ## 统一物品详情格式化器；用于在战斗装备栏与背包中显示带颜色的基础值和强化值。
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
@@ -152,9 +153,9 @@ func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
 	# 拖拽字典；取值来自其他 WeaponSlotControl，默认包含来源和武器资源，修改会影响投放校验。
 	var drop_data: Dictionary = data as Dictionary
 	if str(drop_data.get("type", "")) == GLOBAL_STORAGE_DRAG_DATA_TYPE:
-		# 全局存储拖拽资源；局内只接受强化石投放到已有武器的槽位。
+		# 全局存储拖拽资源；局内只接受修复包投放到已有武器的槽位，强化石只能进入锻造系统。
 		var storage_resource: Resource = drop_data.get("resource") as Resource
-		return storage_resource != null and str(storage_resource.get("item_kind")) == "enhancement_stone" and weapon_data != null and not str(drop_data.get("source_location", "")).is_empty()
+		return storage_resource != null and str(storage_resource.get("item_kind")) == "repair_kit" and weapon_data != null and not str(drop_data.get("source_location", "")).is_empty()
 	if not drop_data.has("weapon_data") or not (drop_data["weapon_data"] is Resource):
 		return false
 
@@ -180,9 +181,9 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 	# 投放数据；取值来自拖拽源，默认传递给 HUD 处理，修改会影响装备和卸下目标解析。
 	var drop_data: Dictionary = data as Dictionary
 	if str(drop_data.get("type", "")) == GLOBAL_STORAGE_DRAG_DATA_TYPE:
-		# 强化石资源；已通过投放校验，只发送强化请求而不执行武器位置交换。
-		var stone_resource: Resource = drop_data.get("resource") as Resource
-		enhancement_drop_received.emit(stone_resource, str(drop_data.get("source_location", "")), weapon_data)
+		# 修复包资源；已通过投放校验，只发送修复请求而不执行武器位置交换。
+		var repair_kit_resource: Resource = drop_data.get("resource") as Resource
+		repair_kit_drop_received.emit(repair_kit_resource, str(drop_data.get("source_location", "")), weapon_data)
 		return
 	drop_received.emit(drop_data, slot_context, slot_kind, slot_index)
 

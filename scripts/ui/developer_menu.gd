@@ -10,8 +10,8 @@ signal infinite_energy_toggled(enabled: bool)
 signal weapon_durability_consumption_toggled(disabled: bool)
 signal training_settings_requested
 
-## 菜单最小尺寸；默认 520x470，适合在主菜单中央显示武器、强化石和金币调试操作。
-@export var panel_minimum_size: Vector2 = Vector2(520.0, 540.0)
+## 菜单最小尺寸；默认 520x580，适合在主菜单中央显示资源操作和调试信息开关。
+@export var panel_minimum_size: Vector2 = Vector2(520.0, 580.0)
 ## 战斗调试上下文面板高度；默认 520 像素，用于容纳无限属性、免耐久和训练设置入口，运行时通常不动态修改。
 @export_range(360.0, 720.0, 1.0) var combat_panel_height: float = 520.0
 ## 单次金币调整数量；默认 1000，对应增加和减少按钮的固定测试步长。
@@ -37,6 +37,8 @@ var _remove_coins_button: Button
 var _clear_warehouse_button: Button
 ## 隐藏入口提示标签；默认显示 LISBAM 说明，战斗模式会改为局内调试提示。
 var _hint_label: Label
+## 调试信息显示开关；默认关闭，开启后允许商店等界面显示原价倍率等开发计算信息。
+var _debug_information_check_button: CheckButton
 ## 局外经济控件列表；元素为金币标签、武器、强化石和两个金币按钮，战斗模式中统一隐藏。
 var _economy_controls: Array[Control] = []
 ## 战斗调试控件容器；默认隐藏，配置战斗上下文后显示无限属性与训练工具入口。
@@ -116,6 +118,12 @@ func _build_interface() -> void:
 	_hint_label.text = "隐藏调试功能 · 输入序列 LISBAM 开启"
 	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	content.add_child(_hint_label)
+	# 调试信息开关；所有业务 UI 通过 DebugSettings 读取统一状态，菜单不直接修改商店节点。
+	_debug_information_check_button = CheckButton.new()
+	_debug_information_check_button.text = "调试信息显示"
+	_debug_information_check_button.custom_minimum_size = Vector2(0.0, 40.0)
+	_debug_information_check_button.toggled.connect(_on_debug_information_toggled)
+	content.add_child(_debug_information_check_button)
 	_coins_label = Label.new()
 	_coins_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_coins_label.add_theme_font_size_override("font_size", 18)
@@ -231,6 +239,7 @@ func _refresh_context_visibility() -> void:
 	if _status_label != null:
 		_status_label.text = "可切换无限属性或打开训练工具" if _combat_context_enabled else "请选择开发者操作"
 	sync_combat_states(_configured_infinite_health, _configured_infinite_energy, _configured_weapon_durability_disabled)
+	_refresh_debug_information_toggle()
 
 
 func _refresh_coins() -> void:
@@ -238,6 +247,25 @@ func _refresh_coins() -> void:
 		_coins_label.text = "当前金币：不可用"
 		return
 	_coins_label.text = "当前金币：%d" % int(_global_inventory.call("get_coins"))
+
+
+func _refresh_debug_information_toggle() -> void:
+	if _debug_information_check_button == null:
+		return
+	# 调试设置服务；缺失时禁用开关，避免 UI 选择与实际显示状态不一致。
+	var debug_settings: Node = get_tree().root.get_node_or_null("DebugSettings")
+	var is_available: bool = debug_settings != null and debug_settings.has_method("is_debug_information_visible")
+	_debug_information_check_button.disabled = not is_available
+	_debug_information_check_button.set_pressed_no_signal(bool(debug_settings.call("is_debug_information_visible")) if is_available else false)
+
+
+func _on_debug_information_toggled(enabled: bool) -> void:
+	# 调试设置服务；只调用公开开关接口，使所有监听者同步刷新其展示文本。
+	var debug_settings: Node = get_tree().root.get_node_or_null("DebugSettings")
+	if debug_settings == null or not debug_settings.has_method("set_debug_information_visible"):
+		return
+	debug_settings.call("set_debug_information_visible", enabled)
+	_status_label.text = "调试信息显示已%s" % ("开启" if enabled else "关闭")
 
 
 func _on_grant_weapons_pressed() -> void:

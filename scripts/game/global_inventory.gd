@@ -6,6 +6,8 @@ extends Node
 signal inventory_changed
 signal equipment_changed
 signal run_state_changed
+signal warehouse_changed
+signal coins_changed
 
 ## 全局背包存档路径；默认写入用户目录，保存物品标识、获得时间、排序优先级和装备槽。
 const SAVE_PATH: String = "user://global_inventory.json"
@@ -22,12 +24,17 @@ const WEAPON_RESOURCE_PATHS: Dictionary = {
 	"quantum_dagger": "res://data/weapons/quantum_dagger.tres",
 }
 ## 默认背包武器标识；首次建立存档时放入未装备武器，顺序会按获得时间默认排序。
+## 永久仓库初始化补充：常量名称为旧存档兼容保留，当前首次存档会把这些未装备武器放入永久仓库。
 const DEFAULT_BACKPACK_WEAPON_IDS: Array[String] = ["ion_smg", "rail_cannon", "scatter_blaster", "quantum_dagger"]
 ## 默认远程装备标识；首次建立存档时依次装入两个远程槽。
 const DEFAULT_RANGED_WEAPON_IDS: Array[String] = ["quantum_pistol", "pulse_rifle"]
 ## 默认近战装备标识；首次建立存档时装入近战槽。
 const DEFAULT_MELEE_WEAPON_ID: String = "phase_blade"
+## 默认局外金币数量；首次建立存档时为 0，金币只能通过出售永久仓库物品增加且不会进入战斗。
+const DEFAULT_STARTING_COINS: int = 0
 
+## 永久仓库记录数组；每项包含唯一记录编号、武器资源、获得时间与撤离优先级，战斗失败不会修改该数组。
+var _warehouse_records: Array[Dictionary] = []
 ## 背包记录数组；每项包含唯一记录编号、武器资源、获得时间与上次撤离优先级。
 var _backpack_records: Array[Dictionary] = []
 ## 远程装备记录数组；元素为 Dictionary 或 null，默认固定两个槽并允许空槽。
@@ -52,6 +59,8 @@ var _last_run_outcome: Dictionary = {}
 var _save_queued: bool = false
 ## 服务随机数生成器；默认启动时随机化，用于失败结算随机保留 20% 背包物品。
 var _random: RandomNumberGenerator = RandomNumberGenerator.new()
+## 局外金币余额；取值大于等于 0，默认 0，只在主菜单仓库出售永久物品时增加。
+var _coins: int = DEFAULT_STARTING_COINS
 
 
 func _ready() -> void:
@@ -97,7 +106,12 @@ func complete_combat_run_success() -> Dictionary:
 		if not _run_start_record_ids.has(record_id):
 			gained_items.append(_get_record_display_name(record))
 
-	_sort_backpack_default()
+	# 成功撤离背包记录；撤离后自动转入永久仓库，避免玩家下一局未整理时再次承担死亡损失。
+	var extracted_backpack_records: Array[Dictionary] = _backpack_records.duplicate()
+	_backpack_records.clear()
+	# 原有永久仓库记录；追加到撤离物品之后，保证最近一次撤离携带物品整体位于仓库前方且不打乱玩家手工顺序。
+	extracted_backpack_records.append_array(_warehouse_records)
+	_warehouse_records = extracted_backpack_records
 	_run_active = false
 	_run_start_record_ids.clear()
 	_last_run_outcome = {
@@ -108,6 +122,7 @@ func complete_combat_run_success() -> Dictionary:
 		"retained_items": [],
 	}
 	_queue_save_inventory()
+	warehouse_changed.emit()
 	inventory_changed.emit()
 	equipment_changed.emit()
 	run_state_changed.emit()
@@ -170,6 +185,120 @@ func complete_combat_run_failure(reason: String = "战斗失败", retained_ratio
 
 func get_last_run_outcome() -> Dictionary:
 	return _last_run_outcome.duplicate(true)
+
+
+func get_warehouse_resources() -> Array[Resource]:
+	# 永久仓库资源结果；元素与仓库记录顺序一致，返回副本防止外部直接修改所有权数据。
+	var result: Array[Resource] = []
+	# 永久仓库记录；取值为全部局外安全物品，用于提取运行时武器资源。
+	for record in _warehouse_records:
+		# 仓库物品资源；取值应为 Resource，异常记录不会暴露给外部组件。
+		var item_resource: Resource = record.get("resource") as Resource
+		if item_resource != null:
+			result.append(item_resource)
+	return result
+
+
+func get_warehouse_entries() -> Array[Dictionary]:
+	# 永久仓库展示条目；每项暴露资源、获得时间与上次撤离标记，UI 只能通过公开接口调整。
+	var result: Array[Dictionary] = []
+	# 仓库记录；取值按上次撤离优先、获得时间倒序排列，用于建立局外物品列表。
+	for record in _warehouse_records:
+		# 仓库条目资源；取值应为 Resource，资源恢复失败的异常记录不会生成交互控件。
+		var item_resource: Resource = record.get("resource") as Resource
+		if item_resource == null:
+			continue
+		result.append({
+			"resource": item_resource,
+			"acquired_at": float(record.get("acquired_at", 0.0)),
+			"is_last_extraction": _last_extraction_epoch > 0 and int(record.get("last_extraction_epoch", 0)) == _last_extraction_epoch,
+		})
+	return result
+
+
+func get_warehouse_count() -> int:
+	return _warehouse_records.size()
+
+
+func get_coins() -> int:
+	return _coins
+
+
+func transfer_warehouse_to_backpack(item_resource: Resource, target_index: int = -1) -> bool:
+	# 永久仓库来源索引；取值为有效下标时才允许把安全物品转为下一局随身物品。
+	var warehouse_index: int = _find_warehouse_record_index(item_resource)
+	if warehouse_index < 0:
+		return false
+
+	# 待转移记录；保持原记录编号和获得时间，避免跨容器移动被误判为新拾取物品。
+	var moving_record: Dictionary = _warehouse_records[warehouse_index]
+	_warehouse_records.remove_at(warehouse_index)
+	# 背包插入位置；负数表示追加到末尾，拖拽到具体条目时限制在合法边界内。
+	var insert_index: int = _backpack_records.size() if target_index < 0 else clampi(target_index, 0, _backpack_records.size())
+	_backpack_records.insert(insert_index, moving_record)
+	_queue_save_inventory()
+	warehouse_changed.emit()
+	inventory_changed.emit()
+	return true
+
+
+func transfer_backpack_to_warehouse(item_resource: Resource, target_index: int = -1) -> bool:
+	# 随身背包来源索引；取值为有效下标时才允许把物品转入永久安全仓库。
+	var backpack_index: int = _find_backpack_record_index(item_resource)
+	if backpack_index < 0:
+		return false
+
+	# 待转移记录；直接移动所有权记录，确保死亡结算只处理转移后仍留在背包的物品。
+	var moving_record: Dictionary = _backpack_records[backpack_index]
+	_backpack_records.remove_at(backpack_index)
+	if target_index < 0:
+		_warehouse_records.append(moving_record)
+	else:
+		# 仓库插入位置；取值限制在 0 到现有仓库数量，供拖拽精确调整展示顺序。
+		var insert_index: int = clampi(target_index, 0, _warehouse_records.size())
+		_warehouse_records.insert(insert_index, moving_record)
+	_queue_save_inventory()
+	warehouse_changed.emit()
+	inventory_changed.emit()
+	return true
+
+
+func move_warehouse_item(source_index: int, target_index: int) -> bool:
+	if source_index < 0 or source_index >= _warehouse_records.size() or target_index < 0 or target_index > _warehouse_records.size():
+		return false
+	if source_index == target_index or target_index == source_index + 1:
+		return true
+
+	# 仓库移动记录；从原位置移除后按插入语义调整目标下标，支持列表内拖拽排序。
+	var moved_record: Dictionary = _warehouse_records[source_index]
+	_warehouse_records.remove_at(source_index)
+	# 修正仓库插入索引；目标位于来源之后时减一，避免移除来源造成一位偏移。
+	var insert_index: int = target_index - 1 if target_index > source_index else target_index
+	_warehouse_records.insert(clampi(insert_index, 0, _warehouse_records.size()), moved_record)
+	_queue_save_inventory()
+	warehouse_changed.emit()
+	return true
+
+
+func sell_warehouse_resource(item_resource: Resource) -> bool:
+	# 待出售仓库索引；只有永久仓库内物品可以出售，背包和装备物品不会被误售。
+	var warehouse_index: int = _find_warehouse_record_index(item_resource)
+	if warehouse_index < 0:
+		return false
+
+	# 待出售资源；取值用于读取数据资源上的固定售价，缺失或零售价物品不可出售。
+	var stored_resource: Resource = _warehouse_records[warehouse_index].get("resource") as Resource
+	# 物品售价；取值大于 0，负值会被限制为 0，防止异常数据扣除玩家金币。
+	var sell_price: int = maxi(int(stored_resource.get("sell_price")) if stored_resource != null else 0, 0)
+	if sell_price <= 0:
+		return false
+
+	_warehouse_records.remove_at(warehouse_index)
+	_coins += sell_price
+	_queue_save_inventory()
+	warehouse_changed.emit()
+	coins_changed.emit()
+	return true
 
 
 func get_backpack_resources() -> Array[Resource]:
@@ -439,19 +568,22 @@ func _initialize_equipment_slots() -> void:
 
 
 func _initialize_default_inventory() -> void:
+	_warehouse_records.clear()
 	_backpack_records.clear()
 	_initialize_equipment_slots()
 	_melee_equipment_record = {}
 	_detached_records.clear()
 	_current_ranged_slot = 0
 	_last_extraction_epoch = 0
+	_coins = DEFAULT_STARTING_COINS
 
 	# 默认背包武器标识；取值来自项目初始配置，逐项加载为独立资源记录。
+	# 永久仓库初始化补充：历史常量名称保持兼容，当前这些未装备武器默认放入永久仓库而不是随身背包。
 	for weapon_id in DEFAULT_BACKPACK_WEAPON_IDS:
 		# 默认背包资源；取值为武器模板深拷贝，确保每个物品拥有独立实例身份。
 		var item_resource: Resource = _load_weapon_resource(weapon_id)
 		if item_resource != null:
-			_backpack_records.append(_create_record(item_resource))
+			_warehouse_records.append(_create_record(item_resource))
 
 	# 默认远程槽索引；取值为默认远程标识数组有效下标，最多填入项目远程槽数量。
 	for slot_index in range(mini(DEFAULT_RANGED_WEAPON_IDS.size(), _ranged_equipment_records.size())):
@@ -464,7 +596,7 @@ func _initialize_default_inventory() -> void:
 	var melee_resource: Resource = _load_weapon_resource(DEFAULT_MELEE_WEAPON_ID)
 	if melee_resource != null:
 		_melee_equipment_record = _create_record(melee_resource)
-	_sort_backpack_default()
+	_sort_warehouse_default()
 
 
 func _create_record(item_resource: Resource, acquired_at: float = -1.0, record_id: String = "") -> Dictionary:
@@ -486,6 +618,10 @@ func _create_record(item_resource: Resource, acquired_at: float = -1.0, record_i
 
 func _sort_backpack_default() -> void:
 	_backpack_records.sort_custom(Callable(self, "_compare_backpack_records"))
+
+
+func _sort_warehouse_default() -> void:
+	_warehouse_records.sort_custom(Callable(self, "_compare_backpack_records"))
 
 
 func _compare_backpack_records(first_record: Dictionary, second_record: Dictionary) -> bool:
@@ -510,6 +646,16 @@ func _find_backpack_record_index(item_resource: Resource) -> int:
 	# 背包查找索引；取值为所有记录有效下标，使用资源实例身份区分同 ID 重复物品。
 	for record_index in range(_backpack_records.size()):
 		if _backpack_records[record_index].get("resource") == item_resource:
+			return record_index
+	return -1
+
+
+func _find_warehouse_record_index(item_resource: Resource) -> int:
+	if item_resource == null:
+		return -1
+	# 永久仓库查找索引；取值为所有安全存储记录下标，使用资源实例身份区分同类重复物品。
+	for record_index in range(_warehouse_records.size()):
+		if _warehouse_records[record_index].get("resource") == item_resource:
 			return record_index
 	return -1
 
@@ -588,6 +734,7 @@ func _find_first_equipped_ranged_slot() -> int:
 
 func _get_all_owned_records() -> Array[Dictionary]:
 	# 全部所有权记录；包含背包、装备和临时记录，默认用于存档与本局快照。
+	# 战斗所有权补充：永久仓库不进入本局快照、战利品统计或死亡损失，只有随身背包、装备和临时操作记录属于当前战斗携带物。
 	var result: Array[Dictionary] = _backpack_records.duplicate()
 	# 远程记录原始值；取值为 Dictionary 或 null，只追加有效记录。
 	for raw_record in _ranged_equipment_records:
@@ -632,6 +779,11 @@ func _queue_save_inventory() -> void:
 
 func _save_inventory() -> void:
 	_save_queued = false
+	# 存档永久仓库记录；只序列化局外安全物品，读取后不会加入战斗背包或死亡结算范围。
+	var serialized_warehouse: Array[Dictionary] = []
+	# 永久仓库记录；取值为全部安全存储记录，逐项转换为可恢复的 JSON 字典。
+	for record in _warehouse_records:
+		serialized_warehouse.append(_serialize_record(record))
 	# 存档背包记录；临时记录会作为背包兜底写入，防止场景切换发生在分步拖拽中间时丢失物品。
 	var serialized_backpack: Array[Dictionary] = []
 	# 背包记录；取值为正式背包记录，逐项序列化可恢复字段。
@@ -648,12 +800,14 @@ func _save_inventory() -> void:
 	for raw_record in _ranged_equipment_records:
 		serialized_ranged.append(_serialize_record(raw_record as Dictionary) if raw_record is Dictionary else null)
 
-	# 存档根字典；保存版本、排序计数、背包和装备状态。
+	# 存档根字典；保存版本、排序计数、永久仓库、随身背包、装备和局外金币状态。
 	var save_data: Dictionary = {
-		"version": 1,
+		"version": 2,
 		"acquisition_sequence": _acquisition_sequence,
 		"last_extraction_epoch": _last_extraction_epoch,
 		"current_ranged_slot": _current_ranged_slot,
+		"coins": _coins,
+		"warehouse": serialized_warehouse,
 		"backpack": serialized_backpack,
 		"ranged_equipment": serialized_ranged,
 		"melee_equipment": _serialize_record(_melee_equipment_record) if not _melee_equipment_record.is_empty() else null,
@@ -680,12 +834,27 @@ func _load_inventory() -> bool:
 	# 存档字典；包含背包、装备和排序元数据。
 	var save_data: Dictionary = parsed_data
 	_initialize_equipment_slots()
+	_warehouse_records.clear()
 	_backpack_records.clear()
 	_detached_records.clear()
 	_melee_equipment_record = {}
 	_acquisition_sequence = maxi(int(save_data.get("acquisition_sequence", 0)), 0)
 	_last_extraction_epoch = maxi(int(save_data.get("last_extraction_epoch", 0)), 0)
 	_current_ranged_slot = clampi(int(save_data.get("current_ranged_slot", 0)), 0, DEFAULT_RANGED_SLOT_COUNT - 1)
+	_coins = maxi(int(save_data.get("coins", DEFAULT_STARTING_COINS)), 0)
+
+	# 存档是否包含独立永久仓库；旧版存档没有该字段，原“全局背包”物品会安全迁移到永久仓库。
+	var has_separate_warehouse: bool = save_data.has("warehouse")
+	# 存档永久仓库原始数组；新版本按安全存储恢复，异常值会被忽略。
+	var raw_warehouse: Variant = save_data.get("warehouse", [])
+	if raw_warehouse is Array:
+		# 永久仓库存档项；取值可能为 Dictionary 或异常值，只恢复合法武器记录。
+		for raw_record in raw_warehouse:
+			if raw_record is Dictionary:
+				# 恢复永久仓库记录；空字典表示资源无法加载，不会生成损坏物品。
+				var restored_record: Dictionary = _deserialize_record(raw_record as Dictionary)
+				if not restored_record.is_empty():
+					_warehouse_records.append(restored_record)
 
 	# 存档背包原始数组；取值为 Array 时逐项恢复有效武器记录。
 	var raw_backpack: Variant = save_data.get("backpack", [])
@@ -696,7 +865,10 @@ func _load_inventory() -> bool:
 				# 恢复背包记录；空字典表示武器资源无法加载，直接跳过。
 				var restored_record: Dictionary = _deserialize_record(raw_record as Dictionary)
 				if not restored_record.is_empty():
-					_backpack_records.append(restored_record)
+					if has_separate_warehouse:
+						_backpack_records.append(restored_record)
+					else:
+						_warehouse_records.append(restored_record)
 
 	# 存档远程槽原始数组；取值为 Array，按槽位下标恢复并限制到当前双远程槽数量。
 	var raw_ranged_equipment: Variant = save_data.get("ranged_equipment", [])
@@ -715,6 +887,8 @@ func _load_inventory() -> bool:
 	var raw_melee_equipment: Variant = save_data.get("melee_equipment")
 	if raw_melee_equipment is Dictionary:
 		_melee_equipment_record = _deserialize_record(raw_melee_equipment as Dictionary)
+	if not has_separate_warehouse:
+		_sort_warehouse_default()
 	return true
 
 

@@ -15,6 +15,8 @@ class_name WeaponData
 @export_multiline var description: String = ""
 ## HUD 图标文本；默认问号用于未配置图标时兜底，建议保持 1 到 2 个字符，修改会影响装备栏显示。
 @export var icon_text: String = "?"
+## 局外出售价格；取值大于等于 0，默认 0 表示不可出售，只在永久仓库出售时兑换为局外金币且运行时通常不修改。
+@export_range(0, 999999, 1) var sell_price: int = 0
 ## 每次成功使用武器消耗的能量；取值建议大于等于 0，默认 0 表示免费攻击，修改会影响玩家能量消耗节奏。
 @export_range(0.0, 9999.0, 0.1, "or_greater") var energy_cost: float = 0.0
 ## 远程武器使用的弹体场景；默认空表示不能发射，必须实例化为 Node2D，修改会影响远程攻击生成对象。

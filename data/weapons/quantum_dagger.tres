@@ -1,6 +1,6 @@
-[gd_resource type="Resource" script_class="WeaponData" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="WeaponData" format=3 uid="uid://dihi8wt6tljxl"]
 
-[ext_resource type="Script" path="res://scripts/data/weapon_data.gd" id="1_weapon_data"]
+[ext_resource type="Script" uid="uid://bnwiep4d7h6jo" path="res://scripts/data/weapon_data.gd" id="1_weapon_data"]
 
 [resource]
 script = ExtResource("1_weapon_data")
@@ -9,8 +9,8 @@ display_name = "量子短刃"
 weapon_type = "melee"
 description = "低消耗快速近战测试武器。"
 icon_text = "D"
+sell_price = 70
 energy_cost = 7.0
-recoil_force = 0.0
 front_recoil_force = 140.0
 impact_force = 160.0
 melee_damage = 18.0

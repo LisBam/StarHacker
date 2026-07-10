@@ -37,6 +37,19 @@ var _shoot_cooldown_remaining: float = 0.0
 var _shoot_cooldown_multiplier: float = 1.0
 
 
+func apply_spawn_variation(size_multiplier: float, attribute_multiplier: float) -> void:
+	super.apply_spawn_variation(size_multiplier, attribute_multiplier)
+	# 标准化属性倍率；取值至少 0.1，用于远程专属伤害、射程和冷却波动。
+	var resolved_attribute_multiplier: float = maxf(attribute_multiplier, 0.1)
+	# 标准化尺寸倍率；取值至少 0.1，用于保持距离随体型变化。
+	var resolved_size_multiplier: float = maxf(size_multiplier, 0.1)
+	shoot_range *= resolved_attribute_multiplier
+	keep_distance *= resolved_size_multiplier
+	ranged_projectile_damage *= resolved_attribute_multiplier
+	ranged_projectile_impact_force *= resolved_attribute_multiplier
+	shoot_cooldown /= resolved_attribute_multiplier
+
+
 func _ready() -> void:
 	super._ready()
 	_randomize_individual_shooting()
@@ -71,7 +84,8 @@ func _update_target_behavior(_delta: float, target_distance: float) -> void:
 		# 追击方向；取值为绕障后的单位向量，默认用于接近射击范围或寻找视线。
 		var chase_direction: Vector2 = _get_steered_direction_to(chase_destination)
 		# 当前状态速度倍率；取值为 1 或搜查倍率，默认让远程怪物同样以谨慎速度排查最后线索。
-		var state_speed_multiplier: float = 1.0 if _target_ai_state == TARGET_AI_STATE_VISIBLE else maxf(search_move_speed_multiplier, 0.0)
+		## 战术补充：远程怪物所有主动追击和搜查统一使用固定个体移速，安全感通过站位距离与静止卡点实现。
+		var state_speed_multiplier: float = 1.0
 		velocity = chase_direction * _get_resolved_move_speed() * state_speed_multiplier
 		return
 
@@ -121,13 +135,19 @@ func _has_line_of_sight_to_target() -> bool:
 	if not is_instance_valid(_target):
 		return false
 
-	# 射线查询参数；取值为怪物到玩家之间的线段，默认只检测环境墙体和建筑。
-	var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(global_position, _target.global_position, line_of_sight_collision_mask, [get_rid()])
-	query.collide_with_areas = false
-	query.collide_with_bodies = true
-	# 射线命中结果；取值为空表示无遮挡，默认用于判断是否可以直接射击。
-	var hit_result: Dictionary = get_world_2d().direct_space_state.intersect_ray(query)
-	return hit_result.is_empty()
+	return _has_vision_line_of_sight_to_target()
+
+
+func is_ranged_tactical_unit() -> bool:
+	return true
+
+
+func get_tactical_attack_range() -> float:
+	return maxf(shoot_range, 0.0)
+
+
+func get_tactical_preferred_distance() -> float:
+	return maxf(keep_distance, 1.0)
 
 
 func _resolve_projectile_parent() -> Node:

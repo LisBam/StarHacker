@@ -91,6 +91,8 @@ var _master_bus_index: int = -1
 var _is_training_mode: bool = false
 ## 玩家是否已经死亡；取值为 true/false，默认 false，生命归零后用于阻止继续打开暂停、背包和大地图。
 var _is_player_dead: bool = false
+## 本局结算是否已经完成；默认 false，成功撤离、死亡或主动退出只允许执行一次全局背包结算。
+var _run_outcome_resolved: bool = false
 ## 掉落物列表是否允许自动显示；取值为 true/false，默认 true，按 G 可切换以避免战斗时误触列表。
 var _drop_list_enabled: bool = true
 ## 掉落物列表点击后的战斗输入抑制时间；取值大于等于 0，默认 0 表示不额外阻止射击。
@@ -220,6 +222,10 @@ var _pause_settings_home_controls: Array[Control] = []
 @onready var _death_overlay: Control = %DeathOverlay
 ## 死亡返回主菜单按钮缓存；默认绑定 DeathReturnMainMenuButton，点击后解除暂停并切换回主菜单。
 @onready var _death_return_main_menu_button: Button = %DeathReturnMainMenuButton
+## 结算标题缓存；默认绑定 DeathTitle，成功撤离、死亡和主动退出会显示不同标题。
+@onready var _death_title_label: Label = %DeathTitle
+## 结算内容缓存；默认绑定 DeathMessage，展示本局获得、保留和丢失物品完整列表。
+@onready var _death_message_label: Label = %DeathMessage
 
 
 func _ready() -> void:
@@ -254,7 +260,7 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if _is_player_dead:
+	if _is_player_dead or _death_overlay.visible:
 		return
 
 	if _is_key_binding_capture_active():
@@ -262,7 +268,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	if _is_extraction_return_event(event):
 		_mark_input_as_handled()
-		_return_to_main_menu()
+		_show_success_settlement()
 		return
 
 	if event is InputEventKey:
@@ -1264,6 +1270,7 @@ func _spawn_dragged_weapon_or_restore_to_inventory(dragged_weapon: Resource, sou
 	# 是否成功生成世界掉落物；取值为 true/false，默认失败时把武器放回背包。
 	var drop_spawned: bool = bool(_game_world.call("spawn_weapon_drop_near_player", dragged_weapon))
 	if drop_spawned:
+		_discard_detached_inventory_record(dragged_weapon)
 		return true
 
 	_add_item_to_inventory(dragged_weapon, source_index)
@@ -1274,12 +1281,18 @@ func _spawn_dragged_weapon_or_restore_to_equipment(dragged_weapon: Resource, sou
 	# 是否成功生成世界掉落物；取值为 true/false，默认失败时把武器放回原装备槽。
 	var drop_spawned: bool = bool(_game_world.call("spawn_weapon_drop_near_player", dragged_weapon))
 	if drop_spawned:
+		_discard_detached_inventory_record(dragged_weapon)
 		return true
 
 	_equip_weapon_to_target(source_kind, source_index, dragged_weapon)
 	if source_was_current_ranged and _equipment_component.has_method("equip_ranged_slot"):
 		_equipment_component.call("equip_ranged_slot", source_index)
 	return false
+
+
+func _discard_detached_inventory_record(item_data: Resource) -> void:
+	if _inventory_component != null and _inventory_component.has_method("discard_detached_item"):
+		_inventory_component.call("discard_detached_item", item_data)
 
 
 func _toggle_pause_menu() -> void:
@@ -1705,7 +1718,7 @@ func _on_ranged_weapon_fired(_projectile: Node2D) -> void:
 
 func _on_player_died() -> void:
 	_is_player_dead = true
-	_set_death_overlay_visible(true)
+	_show_failure_settlement("角色死亡")
 
 
 func _on_inventory_filter_all_pressed() -> void:
@@ -1847,7 +1860,7 @@ func _on_test_settings_button_pressed() -> void:
 
 
 func _on_return_main_menu_button_pressed() -> void:
-	_return_to_main_menu()
+	_show_failure_settlement("主动退出战斗")
 
 
 func _on_death_return_main_menu_button_pressed() -> void:
@@ -1935,3 +1948,78 @@ func _set_death_overlay_visible(visible: bool) -> void:
 func _return_to_main_menu() -> void:
 	get_tree().paused = false
 	get_tree().change_scene_to_file(main_menu_scene_path)
+
+
+func _show_success_settlement() -> void:
+	if _run_outcome_resolved:
+		return
+	_run_outcome_resolved = true
+	# 全局背包服务；正式撤离时保存全部物品、标记上次撤离优先级并返回本局新增物品列表。
+	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+	# 成功结算；缺少全局服务时使用空收益兜底，仍展示撤离成功界面。
+	var outcome: Dictionary = {"result": "success", "title": "撤离成功", "gained_items": [], "lost_items": [], "retained_items": []}
+	if global_inventory != null and global_inventory.has_method("complete_combat_run_success"):
+		outcome = global_inventory.call("complete_combat_run_success")
+	_present_run_outcome(outcome)
+
+
+func _show_failure_settlement(reason: String) -> void:
+	if _run_outcome_resolved:
+		_set_death_overlay_visible(true)
+		return
+
+	# 全局背包服务；正式战斗失败时随机保留约 20% 背包物品并移除其余物品。
+	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+	if global_inventory == null or not global_inventory.has_method("is_combat_run_active") or not bool(global_inventory.call("is_combat_run_active")):
+		_run_outcome_resolved = true
+		_present_run_outcome({"result": "failure", "title": reason, "gained_items": [], "lost_items": [], "retained_items": []})
+		return
+
+	_run_outcome_resolved = true
+	# 失败结算；包含完整丢失与随机保留物品名称，直接用于结算界面。
+	var outcome: Dictionary = global_inventory.call("complete_combat_run_failure", reason, 0.2)
+	_present_run_outcome(outcome)
+
+
+func _present_run_outcome(outcome: Dictionary) -> void:
+	# 结算结果类型；success 表示撤离成功，其他值统一按失败展示。
+	var result_type: String = str(outcome.get("result", "failure"))
+	_death_title_label.text = str(outcome.get("title", "战斗结算"))
+	_death_message_label.text = _build_run_outcome_text(outcome)
+	_death_return_main_menu_button.text = "返回主菜单"
+	if result_type == "success":
+		_death_title_label.add_theme_color_override("font_color", Color(0.35, 1.0, 0.72, 1.0))
+	else:
+		_death_title_label.add_theme_color_override("font_color", Color(1.0, 0.46, 0.52, 1.0))
+	_set_death_overlay_visible(true)
+
+
+func _build_run_outcome_text(outcome: Dictionary) -> String:
+	# 结算文本段落；按获得、随机保留和丢失顺序组织，确保玩家能明确知道物品去向。
+	var sections: PackedStringArray = PackedStringArray()
+	# 本局获得物品；取值为名称数组，成功撤离时完整展示。
+	var gained_items: Array = outcome.get("gained_items", [])
+	# 随机保留物品；取值为失败结算中幸存的约 20% 背包物品。
+	var retained_items: Array = outcome.get("retained_items", [])
+	# 丢失物品；取值为失败结算中移除的约 80% 背包物品。
+	var lost_items: Array = outcome.get("lost_items", [])
+
+	if str(outcome.get("result", "failure")) == "success":
+		sections.append("本次撤离已保留背包与装备中的全部物品。")
+		sections.append("\n本局获得（%d）：\n%s" % [gained_items.size(), _format_item_name_list(gained_items, "本局没有获得新物品")])
+	else:
+		sections.append("背包物品随机保留约 20%，其余物品已经丢失；已装备物品不参与背包损失。")
+		sections.append("\n保留物品（%d）：\n%s" % [retained_items.size(), _format_item_name_list(retained_items, "没有保留背包物品")])
+		sections.append("\n丢失物品（%d）：\n%s" % [lost_items.size(), _format_item_name_list(lost_items, "没有丢失背包物品")])
+	return "\n".join(sections)
+
+
+func _format_item_name_list(items: Array, empty_text: String) -> String:
+	if items.is_empty():
+		return empty_text
+	# 名称文本数组；元素为带序号的单行物品名，便于大量物品在滚动结算框中逐项核对。
+	var item_lines: PackedStringArray = PackedStringArray()
+	# 物品名称索引；取值为数组有效下标，用于生成从 1 开始的显示序号。
+	for item_index in range(items.size()):
+		item_lines.append("%d. %s" % [item_index + 1, str(items[item_index])])
+	return "\n".join(item_lines)

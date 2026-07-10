@@ -27,15 +27,27 @@ var _melee_weapon: Resource
 
 ## 背包组件缓存；默认按 inventory_component_path 获取，允许为空，修改会影响装备初始化时的背包登记。
 @onready var _inventory_component = get_node_or_null(inventory_component_path)
+## 全局背包服务；默认从自动加载 GlobalInventory 获取，存在时装备槽与主菜单仓库共享同一份数据。
+var _global_inventory: Node
 
 
 func _ready() -> void:
+	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
+	if _global_inventory != null and _global_inventory.has_method("get_ranged_equipment_resources"):
+		if _global_inventory.has_signal("equipment_changed"):
+			_global_inventory.connect("equipment_changed", Callable(self, "_on_global_equipment_changed"))
+		_sync_from_global_inventory()
+		call_deferred("_emit_full_equipment_changed")
+		return
+
 	_initialize_equipment_slots()
 	_remove_equipped_items_from_inventory()
 	call_deferred("_emit_full_equipment_changed")
 
 
 func equip_ranged_weapon(slot_index: int, weapon_data: Resource) -> bool:
+	if _global_inventory != null and _global_inventory.has_method("equip_resource_to_ranged"):
+		return bool(_global_inventory.call("equip_resource_to_ranged", slot_index, weapon_data))
 	if not _is_valid_ranged_slot(slot_index) or not _is_ranged_weapon(weapon_data):
 		return false
 
@@ -49,6 +61,8 @@ func equip_ranged_weapon(slot_index: int, weapon_data: Resource) -> bool:
 
 
 func equip_melee_weapon(weapon_data: Resource) -> bool:
+	if _global_inventory != null and _global_inventory.has_method("equip_resource_to_melee"):
+		return bool(_global_inventory.call("equip_resource_to_melee", weapon_data))
 	if not _is_melee_weapon(weapon_data):
 		return false
 
@@ -59,6 +73,8 @@ func equip_melee_weapon(weapon_data: Resource) -> bool:
 
 
 func unequip_ranged_weapon(slot_index: int) -> bool:
+	if _global_inventory != null and _global_inventory.has_method("detach_ranged_equipment"):
+		return bool(_global_inventory.call("detach_ranged_equipment", slot_index))
 	if not _is_valid_ranged_slot(slot_index) or _ranged_weapons[slot_index] == null:
 		return false
 
@@ -72,6 +88,8 @@ func unequip_ranged_weapon(slot_index: int) -> bool:
 
 
 func unequip_melee_weapon() -> bool:
+	if _global_inventory != null and _global_inventory.has_method("detach_melee_equipment"):
+		return bool(_global_inventory.call("detach_melee_equipment"))
 	if _melee_weapon == null:
 		return false
 
@@ -82,6 +100,8 @@ func unequip_melee_weapon() -> bool:
 
 
 func equip_ranged_slot(slot_index: int) -> bool:
+	if _global_inventory != null and _global_inventory.has_method("set_current_ranged_slot"):
+		return bool(_global_inventory.call("set_current_ranged_slot", slot_index))
 	if not _is_valid_ranged_slot(slot_index) or _ranged_weapons[slot_index] == null:
 		return false
 
@@ -115,6 +135,8 @@ func cycle_ranged_weapon(step: int) -> bool:
 
 
 func get_current_ranged_weapon() -> Resource:
+	if _global_inventory != null:
+		_sync_from_global_inventory()
 	if not _is_valid_ranged_slot(_current_ranged_slot):
 		return null
 
@@ -122,14 +144,20 @@ func get_current_ranged_weapon() -> Resource:
 
 
 func get_current_ranged_slot() -> int:
+	if _global_inventory != null and _global_inventory.has_method("get_current_ranged_slot"):
+		_current_ranged_slot = int(_global_inventory.call("get_current_ranged_slot"))
 	return _current_ranged_slot
 
 
 func get_ranged_slot_count() -> int:
+	if _global_inventory != null and _global_inventory.has_method("get_ranged_slot_count"):
+		return int(_global_inventory.call("get_ranged_slot_count"))
 	return _ranged_weapons.size()
 
 
 func get_ranged_weapon(slot_index: int) -> Resource:
+	if _global_inventory != null and _global_inventory.has_method("get_ranged_equipment_resource"):
+		return _global_inventory.call("get_ranged_equipment_resource", slot_index) as Resource
 	if not _is_valid_ranged_slot(slot_index):
 		return null
 
@@ -137,10 +165,14 @@ func get_ranged_weapon(slot_index: int) -> Resource:
 
 
 func get_ranged_weapons() -> Array:
+	if _global_inventory != null and _global_inventory.has_method("get_ranged_equipment_resources"):
+		return _global_inventory.call("get_ranged_equipment_resources") as Array
 	return _ranged_weapons.duplicate()
 
 
 func get_melee_weapon() -> Resource:
+	if _global_inventory != null and _global_inventory.has_method("get_melee_equipment_resource"):
+		return _global_inventory.call("get_melee_equipment_resource") as Resource
 	return _melee_weapon
 
 
@@ -210,3 +242,19 @@ func _emit_full_equipment_changed() -> void:
 	ranged_weapon_changed.emit(_current_ranged_slot, get_current_ranged_weapon())
 	melee_weapon_changed.emit(_melee_weapon)
 	equipment_changed.emit()
+
+
+func _sync_from_global_inventory() -> void:
+	if _global_inventory == null:
+		return
+
+	# 全局远程装备原始数组；元素为 Resource 或 null，默认保持槽位下标同步到组件缓存。
+	var raw_ranged_weapons: Array = _global_inventory.call("get_ranged_equipment_resources")
+	_ranged_weapons = raw_ranged_weapons.duplicate()
+	_current_ranged_slot = int(_global_inventory.call("get_current_ranged_slot"))
+	_melee_weapon = _global_inventory.call("get_melee_equipment_resource") as Resource
+
+
+func _on_global_equipment_changed() -> void:
+	_sync_from_global_inventory()
+	_emit_full_equipment_changed()

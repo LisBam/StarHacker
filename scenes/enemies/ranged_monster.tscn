@@ -4,6 +4,7 @@
 [ext_resource type="PackedScene" uid="uid://dmucq8hm8hpqs" path="res://scenes/projectiles/enemy_projectile.tscn" id="2_enemy_projectile"]
 [ext_resource type="Script" uid="uid://7p7q431vfibk" path="res://scripts/components/enemy_perception_component.gd" id="3_perception"]
 [ext_resource type="Script" uid="uid://w6i2gkvfa1xa" path="res://scripts/components/enemy_movement_component.gd" id="4_movement"]
+[ext_resource type="Script" path="res://scripts/components/enemy_tactical_component.gd" id="5_tactical"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_body"]
 radius = 17.0
@@ -38,3 +39,6 @@ script = ExtResource("3_perception")
 
 [node name="EnemyMovementComponent" type="Node" parent="."]
 script = ExtResource("4_movement")
+
+[node name="EnemyTacticalComponent" type="Node" parent="."]
+script = ExtResource("5_tactical")

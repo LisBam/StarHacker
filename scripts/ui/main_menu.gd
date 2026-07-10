@@ -10,6 +10,8 @@ const GAME_MODE_HACK: String = "hack"
 const GAME_MODE_TRAINING: String = "training"
 ## 按键绑定面板脚本；默认用于主菜单设置中动态创建可重绑定操作列表。
 const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_panel.gd")
+## 局外仓库面板脚本；默认在主菜单点击仓库按钮后动态创建并读取全局背包服务。
+const WAREHOUSE_PANEL_SCRIPT: Script = preload("res://scripts/ui/warehouse_panel.gd")
 ## 角色选择场景路径；默认进入独立角色选择场景，只允许填写 tscn 资源，运行时通常不动态修改，改错会导致入口无法继续。
 @export_file("*.tscn") var character_select_scene_path: String = "res://scenes/ui/character_select.tscn"
 
@@ -21,6 +23,8 @@ const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_p
 @onready var _settings_button: Button = %SettingsButton
 ## 退出按钮缓存；默认绑定唯一名 QuitButton，必须是 Button，修改节点名会导致主菜单无法退出程序。
 @onready var _quit_button: Button = %QuitButton
+## 仓库按钮缓存；默认固定在主菜单左下角，点击后打开全局背包与装备调整界面。
+@onready var _warehouse_button: Button = %WarehouseButton
 ## 设置面板缓存；默认绑定唯一名 SettingsPanel，控制主菜单设置界面的显示和隐藏。
 @onready var _settings_panel: Control = %SettingsPanel
 ## 设置内容容器缓存；默认通过场景路径绑定，用于动态挂载按键绑定面板。
@@ -50,6 +54,10 @@ var _key_binding_page: VBoxContainer
 var _key_binding_back_button: Button
 ## 设置首页控件列表；元素为 Control，默认用于在多页设置之间统一隐藏或显示首页内容。
 var _settings_home_controls: Array[Control] = []
+## 仓库全屏遮罩；默认运行时创建并隐藏，打开时阻止主菜单其他按钮接收鼠标输入。
+var _warehouse_overlay: Control
+## 仓库面板实例；默认由 WarehousePanel 脚本创建，关闭后复用而不重复构建服务数据。
+var _warehouse_panel: Control
 
 
 func _ready() -> void:
@@ -58,9 +66,11 @@ func _ready() -> void:
 	_training_button.pressed.connect(_on_training_button_pressed)
 	_settings_button.pressed.connect(_on_settings_button_pressed)
 	_quit_button.pressed.connect(_on_quit_button_pressed)
+	_warehouse_button.pressed.connect(_on_warehouse_button_pressed)
 	_master_volume_slider.value_changed.connect(_on_master_volume_slider_value_changed)
 	_settings_back_button.pressed.connect(_on_settings_back_button_pressed)
 	_build_key_binding_navigation()
+	_build_warehouse_overlay()
 	_settings_panel.visible = false
 	_show_key_binding_page(false)
 	_sync_master_volume_slider()
@@ -83,6 +93,57 @@ func _on_settings_button_pressed() -> void:
 
 func _on_quit_button_pressed() -> void:
 	get_tree().quit()
+
+
+func _on_warehouse_button_pressed() -> void:
+	if _warehouse_overlay == null:
+		return
+	_settings_panel.visible = false
+	_warehouse_overlay.visible = true
+
+
+func _build_warehouse_overlay() -> void:
+	if _warehouse_overlay != null:
+		return
+
+	# 仓库遮罩；覆盖整个主菜单并拦截输入，关闭时整体隐藏。
+	var warehouse_overlay: Control = Control.new()
+	warehouse_overlay.name = "WarehouseOverlay"
+	warehouse_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	warehouse_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(warehouse_overlay)
+	_warehouse_overlay = warehouse_overlay
+
+	# 仓库背景遮罩；使用半透明黑色突出仓库内容。
+	var warehouse_dim: ColorRect = ColorRect.new()
+	warehouse_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	warehouse_dim.color = Color(0.0, 0.0, 0.0, 0.62)
+	warehouse_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	warehouse_overlay.add_child(warehouse_dim)
+
+	# 仓库面板；居中显示并由独立组件维护装备和物品列表。
+	var warehouse_panel: Control = WAREHOUSE_PANEL_SCRIPT.new() as Control
+	if warehouse_panel == null:
+		warehouse_overlay.visible = false
+		return
+	warehouse_panel.anchor_left = 0.5
+	warehouse_panel.anchor_top = 0.5
+	warehouse_panel.anchor_right = 0.5
+	warehouse_panel.anchor_bottom = 0.5
+	warehouse_panel.offset_left = -480.0
+	warehouse_panel.offset_top = -310.0
+	warehouse_panel.offset_right = 480.0
+	warehouse_panel.offset_bottom = 310.0
+	warehouse_panel.connect("closed", Callable(self, "_on_warehouse_closed"))
+	warehouse_overlay.add_child(warehouse_panel)
+	_warehouse_panel = warehouse_panel
+	warehouse_overlay.visible = false
+
+
+func _on_warehouse_closed() -> void:
+	if _warehouse_overlay != null:
+		_warehouse_overlay.visible = false
+	_warehouse_button.grab_focus()
 
 
 func _on_master_volume_slider_value_changed(value: float) -> void:

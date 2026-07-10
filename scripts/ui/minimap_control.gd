@@ -40,6 +40,16 @@ const DISPLAY_MODE_FULL: int = 1
 @export_range(1.0, 20.0, 0.5) var player_marker_radius: float = 4.0
 ## 撤离点标记半径；取值建议大于玩家点半径，默认 6 像素，修改会影响地图上撤离点识别度。
 @export_range(2.0, 32.0, 0.5) var extraction_marker_radius: float = 6.0
+## 玩家导航标点颜色；默认亮黄色，大小地图共同使用以区别撤离点与玩家位置。
+@export var navigation_marker_color: Color = Color(1.0, 0.82, 0.22, 1.0)
+## 玩家导航指示线宽度；默认 2 像素，从玩家点持续连接到标点或局部小地图边缘。
+@export_range(0.5, 12.0, 0.5) var navigation_line_width: float = 2.0
+## 玩家导航标点半径；默认 7 像素，用于绘制圆环和十字标记。
+@export_range(2.0, 32.0, 0.5) var navigation_marker_radius: float = 7.0
+## 大地图点击已有标点的取消半径；默认 16 像素，左键点中标点时清除而不是重新设置。
+@export_range(2.0, 64.0, 1.0) var navigation_marker_cancel_radius: float = 16.0
+## 是否允许鼠标设置导航标点；默认 true，M 键大地图开启，暂停菜单地图可在场景中关闭。
+@export var allow_navigation_marker_input: bool = true
 
 ## 小地图重绘剩余时间；取值大于等于 0，默认 0 表示下一帧可根据状态触发重绘。
 var _redraw_remaining: float = 0.0
@@ -65,6 +75,10 @@ var _last_redraw_extraction_visible: bool = false
 var _last_redraw_extraction_position: Vector2 = Vector2.ZERO
 ## 上次请求重绘时控件尺寸；取值为 Control.size，默认零向量，用于窗口或布局变化时刷新地图。
 var _last_redraw_size: Vector2 = Vector2.ZERO
+## 上次请求重绘时是否存在导航标点；默认 false，用于标点创建或取消后立即刷新大小地图。
+var _last_redraw_navigation_marker_visible: bool = false
+## 上次请求重绘时导航标点位置；默认零向量，用于标点移动后立即刷新指示线。
+var _last_redraw_navigation_marker_position: Vector2 = Vector2.ZERO
 
 ## 游戏世界节点缓存；默认按 game_world_path 获取，允许为空并使用兜底地图尺寸。
 @onready var _game_world: Node = get_node_or_null(game_world_path)
@@ -73,7 +87,9 @@ var _last_redraw_size: Vector2 = Vector2.ZERO
 
 
 func _ready() -> void:
-	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mouse_filter = Control.MOUSE_FILTER_STOP if display_mode == DISPLAY_MODE_FULL and allow_navigation_marker_input else Control.MOUSE_FILTER_IGNORE
+	if display_mode == DISPLAY_MODE_FULL and allow_navigation_marker_input:
+		gui_input.connect(_on_map_gui_input)
 
 
 func _process(delta: float) -> void:
@@ -101,6 +117,7 @@ func _draw() -> void:
 	_draw_obstacles(world_view_rect)
 	_draw_fog(world_view_rect)
 	_draw_extraction_marker(world_view_rect)
+	_draw_navigation_marker(world_view_rect)
 	_draw_player_marker(world_view_rect)
 	draw_rect(minimap_rect, minimap_border_color, false, 2.0)
 
@@ -182,6 +199,25 @@ func _draw_extraction_marker(world_view_rect: Rect2) -> void:
 	draw_line(marker_position + Vector2(0.0, -marker_radius * 1.7), marker_position + Vector2(0.0, marker_radius * 1.7), extraction_marker_color, 2.0)
 
 
+func _draw_navigation_marker(world_view_rect: Rect2) -> void:
+	if not _has_navigation_marker() or _player == null:
+		return
+
+	# 导航标点世界坐标；取值来自 GameWorld，局部小地图范围外坐标会映射到边缘形成方向指示。
+	var marker_world_position: Vector2 = _get_navigation_marker_position()
+	# 玩家地图坐标；取值为当前玩家世界位置映射结果，用于指示线起点。
+	var player_map_position: Vector2 = _world_position_to_minimap_position(_player.global_position, world_view_rect)
+	# 标点地图坐标；取值为世界标点映射结果，局部模式超出范围时自动夹在边缘。
+	var marker_map_position: Vector2 = _world_position_to_minimap_position(marker_world_position, world_view_rect)
+	draw_line(player_map_position, marker_map_position, navigation_marker_color, navigation_line_width, true)
+	# 标点半径；取值至少 2，用于绘制稳定圆环和十字。
+	var marker_radius: float = maxf(navigation_marker_radius, 2.0)
+	draw_circle(marker_map_position, marker_radius, Color(navigation_marker_color, 0.22))
+	draw_arc(marker_map_position, marker_radius, 0.0, TAU, 24, navigation_marker_color, 2.0, true)
+	draw_line(marker_map_position + Vector2(-marker_radius * 1.35, 0.0), marker_map_position + Vector2(marker_radius * 1.35, 0.0), navigation_marker_color, 2.0)
+	draw_line(marker_map_position + Vector2(0.0, -marker_radius * 1.35), marker_map_position + Vector2(0.0, marker_radius * 1.35), navigation_marker_color, 2.0)
+
+
 func _should_redraw_map() -> bool:
 	if not _has_last_redraw_player_position:
 		return true
@@ -195,6 +231,13 @@ func _should_redraw_map() -> bool:
 		return true
 
 	if extraction_visible and _get_extraction_marker_position() != _last_redraw_extraction_position:
+		return true
+
+	# 当前导航标点可见状态；取值来自 GameWorld，用于创建或取消标点时立即刷新。
+	var navigation_marker_visible: bool = _has_navigation_marker()
+	if navigation_marker_visible != _last_redraw_navigation_marker_visible:
+		return true
+	if navigation_marker_visible and _get_navigation_marker_position() != _last_redraw_navigation_marker_position:
 		return true
 
 	if _player != null:
@@ -211,6 +254,8 @@ func _remember_redraw_state() -> void:
 	_last_redraw_player_position = _player.global_position if _player != null else Vector2.ZERO
 	_last_redraw_extraction_visible = _is_extraction_marker_visible()
 	_last_redraw_extraction_position = _get_extraction_marker_position() if _last_redraw_extraction_visible else Vector2.ZERO
+	_last_redraw_navigation_marker_visible = _has_navigation_marker()
+	_last_redraw_navigation_marker_position = _get_navigation_marker_position() if _last_redraw_navigation_marker_visible else Vector2.ZERO
 	_last_redraw_size = size
 
 
@@ -307,6 +352,46 @@ func _get_extraction_marker_position() -> Vector2:
 	return Vector2.ZERO
 
 
+func _has_navigation_marker() -> bool:
+	return _game_world != null and _game_world.has_method("has_navigation_marker") and bool(_game_world.call("has_navigation_marker"))
+
+
+func _get_navigation_marker_position() -> Vector2:
+	if _game_world == null or not _game_world.has_method("get_navigation_marker_position"):
+		return Vector2.ZERO
+	# 导航标点原始位置；取值可能为任意 Variant，默认只接收 Vector2。
+	var raw_position: Variant = _game_world.call("get_navigation_marker_position")
+	return raw_position if raw_position is Vector2 else Vector2.ZERO
+
+
+func _on_map_gui_input(event: InputEvent) -> void:
+	if display_mode != DISPLAY_MODE_FULL or not allow_navigation_marker_input or _game_world == null or not (event is InputEventMouseButton):
+		return
+	# 地图鼠标事件；取值为完整地图上的鼠标按钮输入，只处理左键按下。
+	var mouse_event: InputEventMouseButton = event as InputEventMouseButton
+	if not mouse_event.pressed or mouse_event.button_index != MOUSE_BUTTON_LEFT:
+		return
+
+	# 完整地图世界范围；取值由 GameWorld 地图边界决定，用于把点击位置转换为世界坐标。
+	var world_view_rect: Rect2 = _get_current_world_view_rect()
+	if _has_navigation_marker():
+		# 已有标点本地位置；取值为当前标点映射坐标，用于判定点击是否命中取消范围。
+		var current_marker_local_position: Vector2 = _world_position_to_minimap_position(_get_navigation_marker_position(), world_view_rect)
+		if current_marker_local_position.distance_to(mouse_event.position) <= navigation_marker_cancel_radius:
+			if _game_world.has_method("clear_navigation_marker"):
+				_game_world.call("clear_navigation_marker")
+			queue_redraw()
+			accept_event()
+			return
+
+	# 点击世界位置；取值为大地图本地坐标反向映射结果，新标点会替换旧标点，始终最多保留一个。
+	var clicked_world_position: Vector2 = _minimap_position_to_world_position(mouse_event.position, world_view_rect)
+	if _game_world.has_method("set_navigation_marker"):
+		_game_world.call("set_navigation_marker", clicked_world_position)
+	queue_redraw()
+	accept_event()
+
+
 func _get_explored_cell_lookup() -> Dictionary:
 	if not _has_explored_cache:
 		_refresh_explored_cache_if_needed()
@@ -334,6 +419,17 @@ func _world_position_to_minimap_position(world_position: Vector2, world_view_rec
 	normalized_position.x = clampf(normalized_position.x, 0.0, 1.0)
 	normalized_position.y = clampf(normalized_position.y, 0.0, 1.0)
 	return Vector2(normalized_position.x * size.x, normalized_position.y * size.y)
+
+
+func _minimap_position_to_world_position(minimap_position: Vector2, world_view_rect: Rect2) -> Vector2:
+	# 控件有效尺寸；取值至少 1x1，防止布局初始化期间除零。
+	var control_size: Vector2 = Vector2(maxf(size.x, 1.0), maxf(size.y, 1.0))
+	# 标准化点击坐标；取值限制到 0 到 1，避免边缘点击映射到地图外。
+	var normalized_position: Vector2 = Vector2(
+		clampf(minimap_position.x / control_size.x, 0.0, 1.0),
+		clampf(minimap_position.y / control_size.y, 0.0, 1.0)
+	)
+	return world_view_rect.position + normalized_position * world_view_rect.size
 
 
 func _get_current_world_view_rect() -> Rect2:

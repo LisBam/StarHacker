@@ -442,6 +442,32 @@ func is_destination_immediately_reachable(destination: Vector2) -> bool:
 	return candidate_direction.is_zero_approx() or not _is_direction_blocked(candidate_direction.normalized())
 
 
+func is_destination_navigable(destination: Vector2) -> bool:
+	if not is_instance_valid(_actor):
+		return false
+
+	if not _is_path_to_destination_blocked(destination):
+		return true
+	if not pathfinding_enabled:
+		return false
+
+	# 寻路服务节点；取值为提供共享 A* 的 GameWorld，缺失时无法确认远端战术点可达性。
+	var navigation_provider: Node = _resolve_navigation_provider()
+	if navigation_provider == null or not navigation_provider.has_method("find_navigation_path"):
+		return false
+
+	# 战术验证路径；元素为世界坐标路点，非空表示候选墙角、岔路或出口可通过共享导航网格到达。
+	var raw_path_points: Array = navigation_provider.call(
+		"find_navigation_path",
+		_actor.global_position,
+		destination,
+		pathfinding_agent_radius,
+		pathfinding_cell_size,
+		path_max_point_count
+	)
+	return not raw_path_points.is_empty()
+
+
 func _is_direction_blocked(direction: Vector2) -> bool:
 	if direction.is_zero_approx() or not is_instance_valid(_actor):
 		return true

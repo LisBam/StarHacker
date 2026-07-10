@@ -14,12 +14,16 @@ const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat
 const ENEMY_PERCEPTION_COMPONENT_SCRIPT: Script = preload("res://scripts/components/enemy_perception_component.gd")
 ## 敌人移动组件脚本；默认用于兼容旧场景缺少组件节点时动态补齐，不依赖全局类名解析顺序。
 const ENEMY_MOVEMENT_COMPONENT_SCRIPT: Script = preload("res://scripts/components/enemy_movement_component.gd")
+## 敌人战术组件脚本；默认用于兼容旧场景缺少组件节点时动态补齐，负责区域情报共享与小队分工。
+const ENEMY_TACTICAL_COMPONENT_SCRIPT: Script = preload("res://scripts/components/enemy_tactical_component.gd")
 ## AI 空闲状态；默认表示怪物没有玩家记忆，会回到出生点附近巡逻或待机警戒。
 const TARGET_AI_STATE_IDLE: int = 0
 ## AI 可见追击状态；默认表示怪物拥有无遮挡视线，会直接锁定玩家并寻路追击。
 const TARGET_AI_STATE_VISIBLE: int = 1
 ## AI 丢失搜查状态；默认表示玩家被障碍遮挡，怪物只根据最后线索前往遮挡物背后和附近区域搜索。
 const TARGET_AI_STATE_SEARCHING: int = 2
+## AI 二级全域封锁状态；默认表示玩家反复卡墙且临近脱战阈值，小队扩大远近双向封锁。
+const TARGET_AI_STATE_BLOCKADE: int = 3
 
 ## 最大血量；取值应大于 0，默认 60 用于训练场怪物强度，运行时修改会影响怪物承伤能力。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var max_health: float = 60.0
@@ -58,7 +62,8 @@ const TARGET_AI_STATE_SEARCHING: int = 2
 ## 视野丢失确认时间；取值建议 0.1 到 0.4 秒，默认 0.2 秒，运行时修改需调用 refresh_ai_configuration() 同步到感知组件。
 @export_range(0.0, 2.0, 0.05) var vision_loss_grace_duration: float = 0.2
 ## 失去视野后的记忆时间；取值建议大于 0，默认 8 秒，怪物会在这段时间内前往最后看见或推断的玩家位置搜索。
-@export_range(0.0, 30.0, 0.1) var target_memory_duration: float = 8.0
+## 战术记忆补充：项目当前默认采用 30 秒短期记忆，原 8 秒说明保留用于追溯旧场景基线。
+@export_range(0.0, 120.0, 0.5) var target_memory_duration: float = 30.0
 ## 搜索到达距离；取值建议大于怪物半径，默认 54 像素，怪物靠近推断位置或当前搜索点后会进入扫荡或切换下一个搜索点。
 @export_range(1.0, 512.0, 1.0) var search_arrive_distance: float = 54.0
 ## 旧隔墙警觉追踪范围倍率；取值建议大于 1，默认 1.85，当前三阶段索敌不会读取墙后玩家实时位置。
@@ -86,6 +91,68 @@ const TARGET_AI_STATE_SEARCHING: int = 2
 @export_range(0.0, 600.0, 1.0) var lost_search_occlusion_offset: float = 96.0
 ## 搜查点选择尝试次数；取值建议 1 到 12，默认 6，用于在搜查锚点周边优先挑选不会直接撞墙的巡逻点。
 @export_range(1, 24, 1) var lost_search_destination_attempts: int = 6
+## 中期战术记忆时间；默认 60 秒，记录高频墙角和逃生通道，达到脱战阈值后仍保留供巡逻复查。
+@export_range(0.0, 300.0, 1.0) var medium_memory_duration: float = 60.0
+## 中期热点合并距离；默认 96 像素，相邻墙角记录会合并累计，运行时修改需刷新 AI 配置。
+@export_range(1.0, 512.0, 1.0) var medium_hotspot_merge_distance: float = 96.0
+## 中期热点最大数量；默认 12，限制单次交战片区保存的高频藏点和逃生路线规模。
+@export_range(1, 64, 1) var medium_hotspot_max_count: int = 12
+## 中期热点巡逻复查半径；默认 120 像素，三级常规警戒途经热点时主动驻足额外搜查。
+@export_range(1.0, 600.0, 1.0) var medium_recheck_trigger_radius: float = 120.0
+## 中期热点复查持续时间；默认 3.5 秒，结束后恢复预设巡逻或原地待机。
+@export_range(0.0, 30.0, 0.1) var medium_recheck_duration: float = 3.5
+## 中期热点复查冷却；默认 8 秒，避免同一 AI 在一个墙角反复转圈搜查。
+@export_range(0.0, 60.0, 0.5) var medium_recheck_cooldown: float = 8.0
+## 长期交战片区半径；默认 520 像素，短中期记忆消退后路过该片区仍降低巡逻速度并保持高警戒。
+@export_range(1.0, 3000.0, 1.0) var long_term_region_radius: float = 520.0
+## 长期警戒巡逻速度倍率；默认 0.72，只影响无主动目标时的巡逻，不改变追击和战术搜查固定移速。
+@export_range(0.0, 1.0, 0.05) var long_term_alert_patrol_speed_multiplier: float = 0.72
+## 二级封锁提前量；默认 1，卡墙次数距离脱战阈值剩余一次时进入全域封锁。
+@export_range(0, 6, 1) var blockade_loss_margin: int = 1
+## 实心墙体分组；默认 environment_obstacles，只有该组地图碰撞体能够完全阻断 AI 视线。
+@export var solid_wall_group: StringName = &"environment_obstacles"
+## 非墙体碰撞跳过上限；默认 12，视线射线会跳过其他地图元素并继续检测后方实心墙。
+@export_range(1, 64, 1) var line_of_sight_skip_limit: int = 12
+## 可见目标情报广播间隔；默认 0.45 秒，一个敌人持续看见玩家时会定期刷新周围小队坐标并级联传播。
+@export_range(0.05, 5.0, 0.05) var visible_intelligence_broadcast_interval: float = 0.45
+## 同区域小队识别半径；默认 1200 像素，只与范围内且锁定同一玩家的存活 AI 共享情报和分工。
+@export_range(1.0, 5000.0, 1.0) var squad_region_radius: float = 1200.0
+## 小队协调刷新间隔；默认 0.25 秒，控制人数、射程和职能动态重算频率。
+@export_range(0.05, 2.0, 0.05) var coordination_update_interval: float = 0.25
+## 情报最大中继跳数；默认 6，一个敌人发现玩家后可由周围敌人逐层传递到更远区域。
+@export_range(0, 32, 1) var intelligence_relay_max_hops: int = 6
+## 多人职能轮换间隔；默认 18 秒，4 名及以上 AI 会在完成一轮有效搜查后轮换同类职能顺序。
+@export_range(0.5, 60.0, 0.5) var role_rotation_interval: float = 18.0
+## 近层搜查半径；默认 88 像素，近战 AI 用于贴墙排查拐角和房间近角。
+@export_range(1.0, 1000.0, 1.0) var tactical_search_near_radius: float = 88.0
+## 中层搜查半径；默认 176 像素，用于第二层扇形排查和近端路口封锁。
+@export_range(1.0, 1600.0, 1.0) var tactical_search_middle_radius: float = 176.0
+## 远层搜查半径；默认 320 像素，远程 AI 用于覆盖外围岔路和开阔盲区。
+@export_range(1.0, 2400.0, 1.0) var tactical_search_far_radius: float = 320.0
+## 二级封锁范围倍率；默认 1.4，临近脱战阈值时扩大墙体外围与逃生岔路覆盖。
+@export_range(1.0, 3.0, 0.05) var tactical_blockade_radius_multiplier: float = 1.4
+## 近战搜查半径倍率；默认 0.78，让近战 AI 更贴近墙体而不执行过远迂回。
+@export_range(0.1, 2.0, 0.05) var melee_search_radius_multiplier: float = 0.78
+## 远程搜查半径倍率；默认 1.25，让远程 AI 保持安全距离并扩大扇形覆盖。
+@export_range(0.1, 3.0, 0.05) var ranged_search_radius_multiplier: float = 1.25
+## 扇形搜查半角；默认 72 度，以玩家消失前移动方向为中心向两侧分层排查。
+@export_range(1.0, 179.0, 1.0) var search_fan_half_angle_degrees: float = 72.0
+## 墙角站位净距；默认 44 像素，防止近战搜查与伏击点落入实心墙体内部。
+@export_range(0.0, 256.0, 1.0) var wall_corner_clearance: float = 44.0
+## 逃跑路线预测时间；默认 1.15 秒，只使用玩家最后可见速度预判近道和出口，不读取墙后实时位置。
+@export_range(0.0, 5.0, 0.05) var route_prediction_time: float = 1.15
+## 长巷道分段封锁间距；默认 164 像素，多名卡位 AI 会沿路线占据不同深度路口。
+@export_range(1.0, 1000.0, 1.0) var lane_segment_spacing: float = 164.0
+## 战术点到达距离；默认 42 像素，搜查单位到点观察，卡位与迂回单位到点静止驻守。
+@export_range(1.0, 256.0, 1.0) var tactical_point_arrive_distance: float = 42.0
+## 战术点最短观察时间；默认 0.35 秒，用于错开单位逐点排查节奏。
+@export_range(0.0, 5.0, 0.05) var tactical_point_wait_min: float = 0.35
+## 战术点最长观察时间；默认 0.85 秒，每只 AI 独立随机以避免全队同步移动。
+@export_range(0.0, 5.0, 0.05) var tactical_point_wait_max: float = 0.85
+## 完整搜查点数量；默认 6，覆盖近中远三层左右扇区后转为差异化墙角伏击。
+@export_range(1, 24, 1) var search_points_before_ambush: int = 6
+## 战术候选尝试次数；默认 8，不可达时旋转并收缩候选点寻找替代岔路或出口。
+@export_range(1, 24, 1) var tactical_destination_attempts: int = 8
 ## 游荡半径；取值建议大于等于 0，默认 180 表示怪物无目标时围绕出生点小范围移动，修改会影响巡游范围。
 @export_range(0.0, 2000.0, 1.0) var wander_radius: float = 180.0
 ## 游荡速度倍率；取值建议 0 到 1，默认 0.35 表示无目标时慢速移动，修改会影响游荡节奏。
@@ -134,6 +201,8 @@ const TARGET_AI_STATE_SEARCHING: int = 2
 @export var perception_component_path: NodePath = NodePath("EnemyPerceptionComponent")
 ## 移动组件节点路径；默认指向同级子节点 EnemyMovementComponent，运行时无需动态修改。
 @export var movement_component_path: NodePath = NodePath("EnemyMovementComponent")
+## 战术组件节点路径；默认指向同级子节点 EnemyTacticalComponent，运行时无需动态修改。
+@export var tactical_component_path: NodePath = NodePath("EnemyTacticalComponent")
 ## 怪物受击特效颜色；默认橙红色，修改会影响怪物被命中时的爆发反馈。
 @export var hit_effect_color: Color = Color(1.0, 0.45, 0.28, 0.95)
 ## 怪物死亡特效颜色；默认亮橙色，修改会影响怪物死亡时的爆发反馈。
@@ -159,6 +228,29 @@ var _random: RandomNumberGenerator = RandomNumberGenerator.new()
 var _perception_component: Node
 ## 移动组件实例；取值为 Node 或 null，默认从 movement_component_path 获取，负责寻路、巡逻、绕障和击退。
 var _movement_component: Node
+## 战术组件实例；取值为 Node 或 null，默认从 tactical_component_path 获取，负责情报共享、分工和合围点。
+var _tactical_component: Node
+## 出生尺寸倍率；取值通常为 0.7 到 1.3，默认 1，供调试和其他系统读取本敌人的体型波动。
+var _spawn_size_multiplier: float = 1.0
+## 出生属性倍率；取值通常为 0.7 到 1.3，默认 1，统一作用于生命、伤害、移速、射程和攻击节奏。
+var _spawn_attribute_multiplier: float = 1.0
+
+
+func apply_spawn_variation(size_multiplier: float, attribute_multiplier: float) -> void:
+	_spawn_size_multiplier = maxf(size_multiplier, 0.1)
+	_spawn_attribute_multiplier = maxf(attribute_multiplier, 0.1)
+	scale *= Vector2(_spawn_size_multiplier, _spawn_size_multiplier)
+	max_health *= _spawn_attribute_multiplier
+	current_health = max_health
+	attack_damage *= _spawn_attribute_multiplier
+	attack_impact_force *= _spawn_attribute_multiplier
+	move_speed *= _spawn_attribute_multiplier
+	vision_range *= _spawn_attribute_multiplier
+	attack_range *= _spawn_size_multiplier
+	attack_cooldown /= _spawn_attribute_multiplier
+	if is_inside_tree():
+		refresh_ai_configuration()
+		health_changed.emit(current_health, max_health)
 
 
 func _ready() -> void:
@@ -177,6 +269,8 @@ func _physics_process(delta: float) -> void:
 	if _perception_component != null:
 		_perception_component.call("update", delta)
 	_sync_perception_state()
+	if _tactical_component != null:
+		_tactical_component.call("update", delta)
 
 	if not _has_target:
 		_update_wander(delta)
@@ -195,6 +289,8 @@ func set_target(target_node: Node) -> void:
 		_movement_component.call("set_spawn_position", global_position)
 	if _perception_component != null:
 		_perception_component.call("set_target", target_node)
+	if _tactical_component != null:
+		_tactical_component.call("reset_intelligence")
 	_sync_perception_state()
 	_clear_navigation_path()
 
@@ -204,17 +300,22 @@ func refresh_ai_configuration() -> void:
 		_perception_component.call("apply_configuration", _build_perception_configuration())
 	if _movement_component != null:
 		_movement_component.call("apply_configuration", _build_movement_configuration())
+	if _tactical_component != null:
+		_tactical_component.call("apply_configuration", _build_tactical_configuration())
 
 
 func _resolve_ai_components() -> void:
 	_perception_component = _resolve_or_create_component(perception_component_path, ENEMY_PERCEPTION_COMPONENT_SCRIPT, "EnemyPerceptionComponent")
 	_movement_component = _resolve_or_create_component(movement_component_path, ENEMY_MOVEMENT_COMPONENT_SCRIPT, "EnemyMovementComponent")
+	_tactical_component = _resolve_or_create_component(tactical_component_path, ENEMY_TACTICAL_COMPONENT_SCRIPT, "EnemyTacticalComponent")
 	if _movement_component != null:
 		_movement_component.call("initialize", self, _random)
 	if _perception_component != null:
 		# 搜查点验证回调；取值为移动组件的即时可行性检查，默认缺少移动组件时不执行候选过滤。
 		var destination_validator: Callable = Callable(_movement_component, "is_destination_immediately_reachable") if _movement_component != null else Callable()
 		_perception_component.call("initialize", self, _random, destination_validator)
+	if _tactical_component != null:
+		_tactical_component.call("initialize", self, _perception_component, _movement_component, _random)
 
 
 func _resolve_or_create_component(component_path: NodePath, component_script: Script, fallback_name: String) -> Node:
@@ -249,7 +350,18 @@ func _build_perception_configuration() -> Dictionary:
 		"occlusion_break_forget_count": occlusion_break_forget_count,
 		"occlusion_count_reset_duration": occlusion_count_reset_duration,
 		"lost_search_occlusion_offset": lost_search_occlusion_offset,
-		"lost_search_destination_attempts": lost_search_destination_attempts
+		"lost_search_destination_attempts": lost_search_destination_attempts,
+		"medium_memory_duration": medium_memory_duration,
+		"medium_hotspot_merge_distance": medium_hotspot_merge_distance,
+		"medium_hotspot_max_count": medium_hotspot_max_count,
+		"medium_recheck_trigger_radius": medium_recheck_trigger_radius,
+		"medium_recheck_duration": medium_recheck_duration,
+		"medium_recheck_cooldown": medium_recheck_cooldown,
+		"long_term_region_radius": long_term_region_radius,
+		"blockade_loss_margin": blockade_loss_margin,
+		"solid_wall_group": solid_wall_group,
+		"line_of_sight_skip_limit": line_of_sight_skip_limit,
+		"visible_intelligence_broadcast_interval": visible_intelligence_broadcast_interval
 	}
 
 
@@ -278,6 +390,32 @@ func _build_movement_configuration() -> Dictionary:
 		"stuck_minimum_movement": stuck_minimum_movement,
 		"knockback_decay": knockback_decay,
 		"obstacle_collision_mask": vision_line_of_sight_collision_mask
+	}
+
+
+func _build_tactical_configuration() -> Dictionary:
+	return {
+		"squad_region_radius": squad_region_radius,
+		"coordination_update_interval": coordination_update_interval,
+		"intelligence_relay_max_hops": intelligence_relay_max_hops,
+		"role_rotation_interval": role_rotation_interval,
+		"search_near_radius": tactical_search_near_radius,
+		"search_middle_radius": tactical_search_middle_radius,
+		"search_far_radius": tactical_search_far_radius,
+		"blockade_radius_multiplier": tactical_blockade_radius_multiplier,
+		"melee_search_radius_multiplier": melee_search_radius_multiplier,
+		"ranged_search_radius_multiplier": ranged_search_radius_multiplier,
+		"search_fan_half_angle_degrees": search_fan_half_angle_degrees,
+		"wall_corner_clearance": wall_corner_clearance,
+		"route_prediction_time": route_prediction_time,
+		"lane_segment_spacing": lane_segment_spacing,
+		"tactical_point_arrive_distance": tactical_point_arrive_distance,
+		"tactical_point_wait_min": tactical_point_wait_min,
+		"tactical_point_wait_max": tactical_point_wait_max,
+		"search_points_before_ambush": search_points_before_ambush,
+		"tactical_destination_attempts": tactical_destination_attempts,
+		"obstacle_collision_mask": vision_line_of_sight_collision_mask,
+		"solid_wall_group": solid_wall_group
 	}
 
 
@@ -383,11 +521,22 @@ func _get_current_chase_destination() -> Vector2:
 
 	# 感知组件提供的目标点；取值为玩家实时位置、最后线索、遮挡物背后锚点或区域搜查点。
 	var raw_destination: Variant = _perception_component.call("get_current_chase_destination")
-	return raw_destination if raw_destination is Vector2 else global_position
+	# 感知兜底目标点；取值为合法 Vector2 或宿主当前位置，战术组件可在丢失状态下替换为分工点位。
+	var fallback_destination: Vector2 = raw_destination if raw_destination is Vector2 else global_position
+	if _tactical_component == null:
+		return fallback_destination
+
+	# 战术组件目标点；取值为墙角搜查、岔路卡位、外侧迂回或伏击坐标，异常时回退感知目标。
+	var raw_tactical_destination: Variant = _tactical_component.call("get_tactical_destination", fallback_destination)
+	return raw_tactical_destination if raw_tactical_destination is Vector2 else fallback_destination
 
 
 func _should_pause_target_movement() -> bool:
-	return _perception_component != null and bool(_perception_component.call("is_movement_paused"))
+	# 感知观察暂停；默认用于普通搜查点短暂停留。
+	var perception_pause: bool = _perception_component != null and bool(_perception_component.call("is_movement_paused"))
+	# 战术驻守暂停；默认用于卡位、迂回到点和完整搜查后的静止伏击。
+	var tactical_pause: bool = _tactical_component != null and bool(_tactical_component.call("should_pause_movement"))
+	return perception_pause or tactical_pause
 
 
 func _update_target_behavior(_delta: float, target_distance: float) -> void:
@@ -405,7 +554,8 @@ func _update_target_behavior(_delta: float, target_distance: float) -> void:
 	# 追击方向；取值为绕障后的单位向量，默认用于设置本帧速度。
 	var chase_direction: Vector2 = _get_steered_direction_to(chase_destination)
 	# 当前状态速度倍率；取值为 1 或搜查倍率，默认让谨慎搜查慢于正面追击。
-	var state_speed_multiplier: float = 1.0 if _target_ai_state == TARGET_AI_STATE_VISIBLE else maxf(search_move_speed_multiplier, 0.0)
+	## 战术补充：所有主动追击、搜查、卡位和迂回统一使用固定个体移速，谨慎感由观察停顿而非追击变速实现。
+	var state_speed_multiplier: float = 1.0
 	velocity = chase_direction * _get_resolved_move_speed() * state_speed_multiplier
 
 
@@ -417,6 +567,8 @@ func _update_wander(delta: float) -> void:
 	# 空闲移动速度；取值来自预设巡逻路线或出生点随机游荡，默认由移动组件统一处理绕障。
 	var raw_idle_velocity: Variant = _movement_component.call("get_idle_velocity", delta, _get_resolved_move_speed())
 	velocity = raw_idle_velocity if raw_idle_velocity is Vector2 else Vector2.ZERO
+	if _perception_component != null and bool(_perception_component.call("is_in_long_term_alert_region")):
+		velocity *= clampf(long_term_alert_patrol_speed_multiplier, 0.0, 1.0)
 
 
 func apply_knockback(direction: Vector2, force: float) -> void:
@@ -531,6 +683,40 @@ func get_target_search_destination() -> Vector2:
 	# 当前搜查点；取值由感知组件维护，默认供调试显示或扩展动画系统读取。
 	var raw_destination: Variant = _perception_component.call("get_search_destination")
 	return raw_destination if raw_destination is Vector2 else global_position
+
+
+func receive_squad_intelligence(report: Dictionary) -> void:
+	# 战术组件接收结果；默认缺少战术组件时直接允许感知同步，重复消息会在战术层去重并阻止反复重置搜查点。
+	var intelligence_accepted: bool = true
+	if _tactical_component != null:
+		intelligence_accepted = bool(_tactical_component.call("receive_shared_intelligence", report))
+	if intelligence_accepted and _perception_component != null:
+		_perception_component.call("receive_shared_intelligence", report)
+	_sync_perception_state()
+
+
+func get_tactical_target_instance_id() -> int:
+	return _target.get_instance_id() if is_instance_valid(_target) else 0
+
+
+func is_ranged_tactical_unit() -> bool:
+	return false
+
+
+func get_tactical_attack_range() -> float:
+	return maxf(attack_range, 0.0)
+
+
+func get_tactical_preferred_distance() -> float:
+	return maxf(attack_range, 1.0)
+
+
+func get_squad_tactical_role() -> int:
+	return int(_tactical_component.call("get_current_role")) if _tactical_component != null else 0
+
+
+func get_active_squad_size() -> int:
+	return int(_tactical_component.call("get_active_squad_size")) if _tactical_component != null else 1
 
 
 func _spawn_hit_effect() -> void:

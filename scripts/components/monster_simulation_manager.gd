@@ -12,7 +12,7 @@ signal virtual_monster_died(monster: Node2D)
 @export_range(0.0, 4000.0, 1.0) var sleep_hysteresis: float = 400.0
 ## 虚拟人口检查间隔；默认 0.05 秒，分批扫描记录以避免同一帧遍历一万名敌人。
 @export_range(0.02, 2.0, 0.01) var update_interval: float = 0.05
-## 每批检查虚拟记录数量；默认 256，一万条记录约两秒完成一轮加载范围检查。
+## 每批检查虚拟记录数量；默认 256，3200 条记录约 0.7 秒完成一轮加载范围检查。
 @export_range(1, 2048, 1) var monsters_per_update: int = 256
 ## 单批最大实例化数量；默认 12，玩家快速移动时分帧加载附近敌人，避免节点创建产生明显卡顿峰值。
 @export_range(1, 128, 1) var materializations_per_update: int = 12
@@ -35,7 +35,7 @@ var _records_by_id: Dictionary = {}
 var _node_record_ids: Dictionary = {}
 ## 下一条虚拟记录编号；默认 1，每新增一名地图人口后递增，确保记录身份在本局内稳定。
 var _next_record_id: int = 1
-## 下一批扫描起始下标；默认 0，按环形方式把一万条记录分散到多个更新批次。
+## 下一批扫描起始下标；默认 0，按环形方式把全地图虚拟记录分散到多个更新批次。
 var _scan_cursor: int = 0
 ## 下次扫描剩余时间；默认 0 表示初始化后立即检查玩家附近的虚拟人口。
 var _update_remaining: float = 0.0

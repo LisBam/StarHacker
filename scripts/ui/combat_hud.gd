@@ -11,6 +11,10 @@ const WEAPON_SLOT_CONTROL_SCRIPT: Script = preload("res://scripts/ui/weapon_slot
 const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_panel.gd")
 ## 结算物品控件脚本；默认复用仓库的双列物品摘要与完整悬停详情，但结算列表不启用点击和拖拽。
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
+## 隐藏开发者菜单脚本；默认在暂停界面输入 LISBAM 后以战斗调试上下文显示。
+const DEVELOPER_MENU_SCRIPT: Script = preload("res://scripts/ui/developer_menu.gd")
+## 战斗开发者模式解锁序列；默认六个英文字母，输入错误时按首字母重新开始匹配。
+const DEVELOPER_UNLOCK_SEQUENCE: String = "LISBAM"
 ## 背包全部分页标识；默认显示所有背包武器，修改会影响筛选按钮与背包网格过滤。
 const INVENTORY_FILTER_ALL: String = "all"
 ## 背包远程分页标识；默认匹配武器资源 weapon_type 的 ranged 值，修改会影响远程筛选页。
@@ -56,6 +60,10 @@ const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
 @export_range(1, 12, 1) var max_nearby_drop_buttons: int = 5
 ## 附近掉落物列表刷新间隔；取值建议 0.05 到 0.5 秒，默认 0.12 秒，修改会影响列表响应速度和 UI 重建频率。
 @export_range(0.01, 2.0, 0.01) var nearby_drop_refresh_interval: float = 0.12
+## 附近掉落物展开高度；默认 220 像素，显示标题和完整拾取按钮列表。
+@export_range(80.0, 600.0, 1.0) var nearby_drop_expanded_height: float = 220.0
+## 附近掉落物收起高度；默认 42 像素，只保留标题和紧贴标题的背景板。
+@export_range(24.0, 120.0, 1.0) var nearby_drop_collapsed_height: float = 42.0
 
 ## 玩家节点缓存；默认按 player_path 获取，允许为空但 HUD 不会显示有效状态，修改会影响所有组件绑定。
 var _player: Node
@@ -113,6 +121,8 @@ var _nearby_drop_refresh_remaining: float = 0.0
 var _nearby_drop_signature: Array[String] = []
 ## 最近一次显示的存活时间整秒数；默认 -1 表示尚未刷新，用于避免每帧重复写入相同计时文本。
 var _last_survival_time_whole_seconds: int = -1
+## 最近一次显示的存活怪物数量；默认 -1 表示尚未刷新，虚拟人口变化时才更新左上角文本。
+var _last_alive_monster_count: int = -1
 ## 最近一次显示的撤离状态文本；默认空字符串，用于避免每帧重复写入相同撤离提示。
 var _last_extraction_status_text: String = ""
 ## 最近一次撤离状态是否可见；默认 false，用于避免每帧重复写入相同可见状态。
@@ -125,6 +135,8 @@ var _last_combat_input_enabled: bool = true
 var _combat_status_container: VBoxContainer
 ## 生存时间文本缓存；默认运行时创建，显示进入战斗后的 mm:ss 计时。
 var _survival_timer_label: Label
+## 存活怪物数量文本缓存；默认运行时创建并固定在 HUD 左上角，显示全地图虚拟存活人口。
+var _monster_count_label: Label
 ## 撤离状态文本缓存；默认运行时创建，撤离点未出现时隐藏。
 var _extraction_status_label: Label
 ## 暂停设置按键绑定面板缓存；默认运行时创建，显示并修改 InputMap 的玩家操作绑定。
@@ -137,6 +149,14 @@ var _pause_key_binding_page: VBoxContainer
 var _pause_key_binding_back_button: Button
 ## 暂停设置首页控件列表；元素为 Control，默认用于在设置首页和按键绑定页之间切换可见性。
 var _pause_settings_home_controls: Array[Control] = []
+## 战斗开发者全屏遮罩；默认运行时创建并隐藏，暂停界面完成 LISBAM 序列后显示。
+var _combat_developer_overlay: Control
+## 战斗开发者菜单实例；默认复用 DeveloperMenu 并切换到无限属性与训练工具上下文。
+var _combat_developer_menu: Control
+## 战斗开发者序列当前匹配下标；取值 0 到序列长度，默认 0 表示等待字母 L。
+var _developer_sequence_index: int = 0
+## 是否已解锁正式模式训练工具；默认 false，完成 LISBAM 后允许打开训练场设置和切换角色。
+var _developer_training_access_unlocked: bool = false
 
 ## HUD 根控件缓存；默认绑定 Root，用于动态挂载附近掉落物面板。
 @onready var _root_control: Control = get_node("Root") as Control
@@ -240,6 +260,7 @@ func _ready() -> void:
 	_bind_pause_menu()
 	_build_combat_status_panel()
 	_build_nearby_drop_panel()
+	_build_combat_developer_overlay()
 	_refresh_all()
 	_refresh_combat_status()
 	_set_inventory_visible(false)
@@ -276,6 +297,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		# 当前键盘事件；取值来自输入系统，默认用于识别 E 键和背包动作，修改会影响背包开关响应。
 		var key_event: InputEventKey = event as InputEventKey
+		if _pause_overlay.visible and not _is_combat_developer_menu_visible() and key_event.pressed and not key_event.echo and _try_unlock_combat_developer_menu(key_event):
+			_mark_input_as_handled()
+			return
 		if key_event.pressed and not key_event.echo and _is_pause_event(key_event):
 			if _close_top_interactive_panel():
 				_mark_input_as_handled()
@@ -578,6 +602,26 @@ func _build_combat_status_panel() -> void:
 	status_container.add_child(extraction_status_label)
 	_extraction_status_label = extraction_status_label
 
+	# 存活怪物数量标签；固定在左上角显示全地图人口，不只统计玩家附近已实例化敌人。
+	var monster_count_label: Label = Label.new()
+	monster_count_label.name = "MonsterCountLabel"
+	monster_count_label.anchor_left = 0.0
+	monster_count_label.anchor_top = 0.0
+	monster_count_label.anchor_right = 0.0
+	monster_count_label.anchor_bottom = 0.0
+	monster_count_label.offset_left = 18.0
+	monster_count_label.offset_top = 16.0
+	monster_count_label.offset_right = 230.0
+	monster_count_label.offset_bottom = 48.0
+	monster_count_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	monster_count_label.text = "存活怪物：0"
+	monster_count_label.add_theme_font_size_override("font_size", 18)
+	monster_count_label.add_theme_color_override("font_color", Color(0.72, 1.0, 0.78, 1.0))
+	monster_count_label.add_theme_color_override("font_outline_color", Color(0.02, 0.05, 0.03, 0.9))
+	monster_count_label.add_theme_constant_override("outline_size", 4)
+	_root_control.add_child(monster_count_label)
+	_monster_count_label = monster_count_label
+
 
 func _build_nearby_drop_panel() -> void:
 	_nearby_drop_panel = PanelContainer.new()
@@ -628,6 +672,44 @@ func _build_nearby_drop_panel() -> void:
 	_nearby_drop_list.add_theme_constant_override("separation", 5)
 	_nearby_drop_list.gui_input.connect(_on_nearby_drop_panel_gui_input)
 	drop_content.add_child(_nearby_drop_list)
+	_apply_nearby_drop_panel_display_mode()
+
+
+func _build_combat_developer_overlay() -> void:
+	if _root_control == null or _combat_developer_overlay != null:
+		return
+	# 开发者遮罩；覆盖完整 HUD 并拦截鼠标，场景暂停时仍由 ALWAYS 模式处理交互。
+	var developer_overlay: Control = Control.new()
+	developer_overlay.name = "CombatDeveloperOverlay"
+	developer_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	developer_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	developer_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
+	developer_overlay.visible = false
+	_root_control.add_child(developer_overlay)
+	_combat_developer_overlay = developer_overlay
+	# 开发者背景遮罩；使用深色半透明背景把战斗调试菜单与暂停地图分离。
+	var developer_dim: ColorRect = ColorRect.new()
+	developer_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	developer_dim.color = Color(0.0, 0.0, 0.0, 0.76)
+	developer_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	developer_overlay.add_child(developer_dim)
+	# 战斗开发者菜单；复用局外组件，但隐藏金币与仓库操作并显示无限属性和训练工具。
+	var developer_menu: Control = DEVELOPER_MENU_SCRIPT.new() as Control
+	developer_menu.anchor_left = 0.5
+	developer_menu.anchor_top = 0.5
+	developer_menu.anchor_right = 0.5
+	developer_menu.anchor_bottom = 0.5
+	developer_menu.offset_left = -280.0
+	developer_menu.offset_top = -250.0
+	developer_menu.offset_right = 280.0
+	developer_menu.offset_bottom = 250.0
+	developer_menu.connect("closed", Callable(self, "_on_combat_developer_menu_closed"))
+	developer_menu.connect("infinite_health_toggled", Callable(self, "_on_developer_infinite_health_toggled"))
+	developer_menu.connect("infinite_energy_toggled", Callable(self, "_on_developer_infinite_energy_toggled"))
+	developer_menu.connect("training_settings_requested", Callable(self, "_on_developer_training_settings_requested"))
+	developer_overlay.add_child(developer_menu)
+	_combat_developer_menu = developer_menu
+	developer_menu.call("configure_combat_context", _is_infinite_health_enabled(), _is_infinite_energy_enabled())
 
 
 func _refresh_nearby_drop_panel() -> void:
@@ -646,6 +728,7 @@ func _refresh_nearby_drop_panel() -> void:
 
 	_nearby_drop_panel.visible = true
 	_refresh_nearby_drop_title()
+	_apply_nearby_drop_panel_display_mode()
 	if not _drop_list_enabled:
 		_clear_container(_nearby_drop_list)
 		_nearby_drop_list.visible = false
@@ -773,6 +856,16 @@ func _refresh_nearby_drop_title() -> void:
 	_nearby_drop_title_label.text = "附近掉落物  F拾取  G关闭" if _drop_list_enabled else "附近掉落物  G显示"
 
 
+func _apply_nearby_drop_panel_display_mode() -> void:
+	if _nearby_drop_panel == null:
+		return
+	# 当前面板高度；展开时容纳按钮列表，收起时只包裹标题和边距，不保留完整列表背景。
+	var panel_height: float = maxf(nearby_drop_expanded_height if _drop_list_enabled else nearby_drop_collapsed_height, 1.0)
+	_nearby_drop_panel.custom_minimum_size = Vector2(220.0, panel_height)
+	_nearby_drop_panel.offset_top = -panel_height * 0.5
+	_nearby_drop_panel.offset_bottom = panel_height * 0.5
+
+
 func _get_nearby_drop_signature(drop_nodes: Array[Node2D]) -> Array[String]:
 	# 掉落物列表签名；元素为实例、名称和位置组成的字符串，默认用于判断 UI 列表是否需要重建。
 	var signature: Array[String] = []
@@ -838,6 +931,13 @@ func _set_combat_input_enabled(enabled: bool) -> void:
 
 
 func _refresh_combat_status() -> void:
+	if _monster_count_label != null:
+		# 当前全地图存活怪物数量；由 GameWorld 虚拟人口管理器提供，远处未实例化敌人同样计入。
+		var alive_monster_count: int = _get_alive_monster_count()
+		if alive_monster_count != _last_alive_monster_count:
+			_last_alive_monster_count = alive_monster_count
+			_monster_count_label.text = "存活怪物：%d" % alive_monster_count
+
 	if _survival_timer_label != null:
 		# 当前存活整秒数；取值为非负整数，默认只在数值变化时刷新 Label 文本。
 		var survival_time_whole_seconds: int = maxi(floori(_get_survival_time_seconds()), 0)
@@ -853,6 +953,12 @@ func _get_survival_time_seconds() -> float:
 		return maxf(float(_game_world.call("get_survival_time_seconds")), 0.0)
 
 	return 0.0
+
+
+func _get_alive_monster_count() -> int:
+	if _game_world != null and _game_world.has_method("get_alive_monster_count"):
+		return maxi(int(_game_world.call("get_alive_monster_count")), 0)
+	return 0
 
 
 func _format_survival_time(total_seconds: float) -> String:
@@ -1068,9 +1174,13 @@ func _resolve_training_mode() -> bool:
 
 func _sync_mode_controls() -> void:
 	_test_settings_button.visible = _is_training_mode
-	if not _is_training_mode:
+	if not _can_use_training_tools():
 		_test_settings_panel.visible = false
 		_character_switch_panel.visible = false
+
+
+func _can_use_training_tools() -> bool:
+	return _is_training_mode or _developer_training_access_unlocked
 
 
 func _set_inventory_filter(new_filter: String) -> void:
@@ -1165,7 +1275,54 @@ func _is_action_explicitly_unbound(action_name: StringName) -> bool:
 	return bool(input_bindings.call("is_action_explicitly_unbound", action_name))
 
 
+func _try_unlock_combat_developer_menu(key_event: InputEventKey) -> bool:
+	if key_event.unicode <= 0:
+		return false
+	# 当前输入字符；统一转为大写，使大小写状态不会影响 LISBAM 解锁序列。
+	var input_character: String = String.chr(key_event.unicode).to_upper()
+	# 当前期望字符；由匹配下标读取，输入错误时仅在当前字符为 L 时立即开始下一轮。
+	var expected_character: String = DEVELOPER_UNLOCK_SEQUENCE.substr(_developer_sequence_index, 1)
+	if input_character == expected_character:
+		_developer_sequence_index += 1
+	else:
+		_developer_sequence_index = 1 if input_character == DEVELOPER_UNLOCK_SEQUENCE.substr(0, 1) else 0
+	if _developer_sequence_index < DEVELOPER_UNLOCK_SEQUENCE.length():
+		return false
+	_developer_sequence_index = 0
+	_developer_training_access_unlocked = true
+	_open_combat_developer_menu()
+	return true
+
+
+func _is_combat_developer_menu_visible() -> bool:
+	return _combat_developer_overlay != null and _combat_developer_overlay.visible
+
+
+func _open_combat_developer_menu() -> void:
+	if _combat_developer_overlay == null or _combat_developer_menu == null:
+		return
+	_pause_menu_panel.visible = false
+	_pause_settings_panel.visible = false
+	_test_settings_panel.visible = false
+	_character_switch_panel.visible = false
+	_combat_developer_menu.call("sync_combat_states", _is_infinite_health_enabled(), _is_infinite_energy_enabled())
+	_combat_developer_overlay.visible = true
+	_refresh_combat_input_state()
+
+
+func _is_infinite_health_enabled() -> bool:
+	return _stats_component != null and bool(_stats_component.get("infinite_health"))
+
+
+func _is_infinite_energy_enabled() -> bool:
+	return _stats_component != null and bool(_stats_component.get("infinite_energy"))
+
+
 func _close_top_interactive_panel() -> bool:
+	if _is_combat_developer_menu_visible():
+		_on_combat_developer_menu_closed()
+		return true
+
 	if _inventory_panel.visible:
 		_set_inventory_visible(false)
 		return true
@@ -1300,6 +1457,9 @@ func _discard_detached_inventory_record(item_data: Resource) -> void:
 func _toggle_pause_menu() -> void:
 	if _is_player_dead:
 		return
+	if _is_combat_developer_menu_visible():
+		_on_combat_developer_menu_closed()
+		return
 
 	if _pause_overlay.visible and _pause_settings_panel.visible and _is_pause_key_binding_page_visible():
 		_show_pause_key_binding_page(false)
@@ -1325,6 +1485,8 @@ func _set_pause_menu_visible(visible: bool) -> void:
 		return
 
 	_pause_overlay.visible = visible
+	if _combat_developer_overlay != null:
+		_combat_developer_overlay.visible = false
 	_pause_menu_panel.visible = visible
 	_pause_settings_panel.visible = false
 	_test_settings_panel.visible = false
@@ -1332,6 +1494,7 @@ func _set_pause_menu_visible(visible: bool) -> void:
 	_sync_mode_controls()
 	get_tree().paused = visible
 	if visible:
+		_developer_sequence_index = 0
 		if _inventory_panel.visible:
 			_set_inventory_visible(false)
 		if _large_map_overlay.visible:
@@ -1376,7 +1539,7 @@ func _is_pause_key_binding_page_visible() -> bool:
 
 
 func _show_test_settings(visible: bool) -> void:
-	if visible and not _is_training_mode:
+	if visible and not _can_use_training_tools():
 		return
 
 	_pause_menu_panel.visible = not visible
@@ -1387,11 +1550,14 @@ func _show_test_settings(visible: bool) -> void:
 		_sync_test_settings_controls()
 		_clear_monsters_button.grab_focus()
 	else:
-		_test_settings_button.grab_focus()
+		if _test_settings_button.visible:
+			_test_settings_button.grab_focus()
+		else:
+			_resume_button.grab_focus()
 
 
 func _show_character_switch(visible: bool) -> void:
-	if visible and not _is_training_mode:
+	if visible and not _can_use_training_tools():
 		return
 
 	_pause_menu_panel.visible = false
@@ -1668,7 +1834,7 @@ func _set_infinite_health_enabled(enabled: bool) -> void:
 
 
 func _switch_training_character(character_id: String) -> void:
-	if not _is_training_mode:
+	if not _can_use_training_tools():
 		return
 
 	if _game_world == null or not _game_world.has_method("switch_character"):
@@ -1853,6 +2019,36 @@ func _mark_input_as_handled() -> void:
 
 func _on_resume_button_pressed() -> void:
 	_set_pause_menu_visible(false)
+
+
+func _on_combat_developer_menu_closed() -> void:
+	if _combat_developer_overlay != null:
+		_combat_developer_overlay.visible = false
+	if _pause_overlay.visible:
+		_pause_menu_panel.visible = true
+		_pause_settings_panel.visible = false
+		_test_settings_panel.visible = false
+		_character_switch_panel.visible = false
+		_resume_button.grab_focus()
+	_refresh_combat_input_state()
+
+
+func _on_developer_infinite_health_toggled(enabled: bool) -> void:
+	_set_infinite_health_enabled(enabled)
+	_sync_test_settings_controls()
+
+
+func _on_developer_infinite_energy_toggled(enabled: bool) -> void:
+	_set_infinite_energy_enabled(enabled)
+	_sync_test_settings_controls()
+
+
+func _on_developer_training_settings_requested() -> void:
+	_developer_training_access_unlocked = true
+	if _combat_developer_overlay != null:
+		_combat_developer_overlay.visible = false
+	_show_test_settings(true)
+	_refresh_combat_input_state()
 
 
 func _on_pause_settings_button_pressed() -> void:

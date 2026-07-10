@@ -16,5 +16,6 @@ projectile_speed = 1450.0
 bullet_range = 520.0
 ranged_damage = 42.0
 ranged_cooldown = 0.85
+spread_degrees = 0.5
 recoil_force = 260.0
 impact_force = 520.0

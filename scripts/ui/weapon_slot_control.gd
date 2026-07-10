@@ -298,9 +298,12 @@ func _append_ranged_tooltip_lines(tooltip_lines: PackedStringArray) -> void:
 	var bullet_range: float = maxf(float(weapon_data.get("bullet_range")), 0.0)
 	# 远程冷却；取值来自资源 ranged_cooldown 字段，默认用于提示连续射击间隔。
 	var ranged_cooldown: float = maxf(float(weapon_data.get("ranged_cooldown")), 0.0)
+	# 武器扩散；取值来自资源 spread_degrees 字段，表示弹体相对瞄准方向的最大随机偏移角度。
+	var spread_degrees: float = maxf(float(weapon_data.get("spread_degrees")), 0.0)
 	tooltip_lines.append("远程伤害：%d" % roundi(ranged_damage))
 	tooltip_lines.append("子弹速度：%d" % roundi(projectile_speed))
 	tooltip_lines.append("子弹射程：%d" % roundi(bullet_range))
+	tooltip_lines.append("扩散：%.1f°" % spread_degrees)
 	tooltip_lines.append("射击冷却：%.2f 秒" % ranged_cooldown)
 
 

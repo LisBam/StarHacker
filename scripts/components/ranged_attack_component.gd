@@ -29,9 +29,15 @@ signal fired(projectile: Node2D)
 var _cooldown_remaining: float = 0.0
 ## 当前射击冷却总时长；取值大于等于 0，默认 0 表示无冷却基准，修改会影响 HUD 冷却覆盖比例。
 var _cooldown_duration: float = 0.0
+## 弹体扩散随机源；默认启动时随机化，每次开火独立生成对称角度偏移。
+var _spread_random: RandomNumberGenerator = RandomNumberGenerator.new()
 
 ## 枪口节点缓存；默认按 muzzle_path 解析，允许为空并走备用距离，修改会影响弹体出生位置来源。
 @onready var _muzzle: Node2D = get_node_or_null(muzzle_path) as Node2D
+
+
+func _ready() -> void:
+	_spread_random.randomize()
 
 
 func _process(delta: float) -> void:
@@ -51,13 +57,17 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	var selected_fire_cooldown: float = _get_weapon_float(weapon_data, "ranged_cooldown", fire_cooldown)
 	# 本次使用的弹体冲击力；取值来自武器数据，默认 0 表示只造成伤害不击退。
 	var selected_impact_force: float = _get_weapon_float(weapon_data, "impact_force", 0.0)
+	# 本次使用的扩散角度；取值来自武器数据，默认 0 度表示弹体严格沿瞄准方向发射。
+	var selected_spread_degrees: float = maxf(_get_weapon_float(weapon_data, "spread_degrees", 0.0), 0.0)
 
 	if selected_projectile_scene == null or _cooldown_remaining > 0.0 or direction.is_zero_approx():
 		return false
+	# 本次实际发射方向；在瞄准方向两侧按扩散角度随机偏移，扩散越高偏移范围越大。
+	var resolved_direction: Vector2 = direction.normalized().rotated(deg_to_rad(_spread_random.randf_range(-selected_spread_degrees, selected_spread_degrees)))
 
 	# 本次弹体出生位置；取值为全局坐标 Vector2，默认由枪口或备用距离计算，修改会影响弹体出现地点。
-	var spawn_position: Vector2 = _get_spawn_position(direction)
-	if _is_spawn_blocked(direction, spawn_position):
+	var spawn_position: Vector2 = _get_spawn_position(resolved_direction)
+	if _is_spawn_blocked(resolved_direction, spawn_position):
 		return false
 
 	# 本次射击生成的弹体实例；取值应为 Node2D 或 null，默认由 projectile_scene 实例化，修改会影响发射对象。
@@ -73,7 +83,7 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 		projectile.call("set_impact_force", selected_impact_force)
 
 	projectile.global_position = spawn_position
-	projectile.global_rotation = direction.angle()
+	projectile.global_rotation = resolved_direction.angle()
 
 	# 本次弹体挂载父节点；取值为有效 Node，默认当前场景或根节点，修改会影响弹体坐标系和生命周期组织。
 	var projectile_parent: Node = _resolve_projectile_parent()
@@ -81,10 +91,10 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 
 	# 加入场景树后再次写入全局坐标，确保父节点带变换时弹体仍从枪口出现。
 	projectile.global_position = spawn_position
-	projectile.global_rotation = direction.angle()
+	projectile.global_rotation = resolved_direction.angle()
 
 	if projectile.has_method("launch"):
-		projectile.call("launch", direction, selected_projectile_speed)
+		projectile.call("launch", resolved_direction, selected_projectile_speed)
 
 	_cooldown_remaining = selected_fire_cooldown
 	_cooldown_duration = selected_fire_cooldown

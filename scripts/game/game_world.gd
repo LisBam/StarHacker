@@ -65,8 +65,8 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export var monster_scene: PackedScene
 ## 随机怪物场景池；默认由场景填入近战和远程怪物，非空时会优先从池中随机选择生成对象。
 @export var monster_scenes: Array[PackedScene] = []
-## 怪物开局人口；默认 400，远处人口只保存虚拟记录，进入玩家加载范围后才实例化并执行 AI。
-@export_range(0, 20000, 1) var monster_spawn_count: int = 400
+## 怪物开局人口；默认 200，远处人口只保存虚拟记录，进入玩家加载范围后才实例化并执行 AI。
+@export_range(0, 20000, 1) var monster_spawn_count: int = 200
 ## 怪物生成最小距离；取值应大于等于 0，默认 280 像素，运行时修改会影响怪物是否离玩家过近。
 ## 全地图布怪补充：项目当前默认至少离玩家 900 像素，避免开局和补充刷新直接出现在屏幕附近。
 @export_range(0.0, 8000.0, 1.0) var monster_spawn_min_distance: float = 900.0
@@ -76,16 +76,16 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 @export var monster_spawn_across_full_map: bool = true
 ## 全地图敌人生成边界留白；默认 256 像素，防止敌人贴着边界墙或生成到地图外侧。
 @export_range(0.0, 4000.0, 1.0) var monster_spawn_edge_margin: float = 256.0
-## 正式战斗最低开局人口；默认 400，与开局生成量共同决定 0 秒人口下限，低于目标时持续补充虚拟记录。
-@export_range(0, 20000, 1) var monster_minimum_alive_count: int = 400
+## 正式战斗最低开局人口；默认 200，与开局生成量共同决定 0 秒人口下限，低于目标时持续补充虚拟记录。
+@export_range(0, 20000, 1) var monster_minimum_alive_count: int = 200
 ## 第一人口里程碑时间；默认 300 秒，达到时全地图敌人人口增长到 monster_population_five_minute_count。
 @export_range(1.0, 3600.0, 1.0) var monster_population_first_milestone_seconds: float = 300.0
-## 第一人口里程碑数量；默认 2400，0 秒到第一里程碑之间按游戏时长线性增长。
-@export_range(0, 20000, 1) var monster_population_five_minute_count: int = 2400
+## 第一人口里程碑数量；默认 1200，0 秒到第一里程碑之间按游戏时长线性增长。
+@export_range(0, 20000, 1) var monster_population_five_minute_count: int = 1200
 ## 第二人口里程碑时间；默认 600 秒，达到时全地图敌人人口增长到 monster_population_ten_minute_count。
 @export_range(1.0, 7200.0, 1.0) var monster_population_second_milestone_seconds: float = 600.0
-## 第二人口里程碑数量；默认 10000，达到第二里程碑后维持该目标人口并补充死亡缺口。
-@export_range(0, 20000, 1) var monster_population_ten_minute_count: int = 10000
+## 第二人口里程碑数量；默认 3200，达到第二里程碑后维持该目标人口并补充死亡缺口。
+@export_range(0, 20000, 1) var monster_population_ten_minute_count: int = 3200
 ## 敌人人口补充检查间隔；默认 0.25 秒，平滑创建虚拟记录并及时跟随人口增长曲线。
 @export_range(0.05, 60.0, 0.05) var monster_replenish_interval: float = 0.25
 ## 单次补充虚拟敌人人口数量；默认 64，只创建轻量记录，不会在同一帧实例化同等数量的 AI 节点。
@@ -183,6 +183,8 @@ var _extraction_hold_elapsed_seconds: float = 0.0
 var _extraction_ready_to_leave: bool = false
 ## 敌人补充检查剩余时间；取值大于等于 0，默认按配置间隔初始化，正式战斗中持续递减。
 var _monster_replenish_remaining: float = 0.0
+## 是否由训练工具暂停自动补怪；默认 false，正式模式使用开发者清怪后保持为空，手动重生怪物时恢复人口曲线补充。
+var _monster_replenishment_paused_by_training_tools: bool = false
 ## 玩家导航标点位置；取值为世界坐标，仅在 _has_navigation_marker 为 true 时有效。
 var _navigation_marker_position: Vector2 = Vector2.ZERO
 ## 是否存在玩家导航标点；默认 false，大地图左键设置后由大小地图共同读取。
@@ -315,6 +317,10 @@ func get_exploration_cell_size() -> float:
 
 func get_survival_time_seconds() -> float:
 	return maxf(_survival_time_seconds, 0.0)
+
+
+func get_alive_monster_count() -> int:
+	return _get_alive_monster_count()
 
 
 func has_extraction_point_spawned() -> bool:
@@ -1180,6 +1186,7 @@ func _get_random_monster_scene() -> PackedScene:
 
 
 func clear_monsters() -> void:
+	_monster_replenishment_paused_by_training_tools = true
 	if _monster_simulation_manager != null and _monster_simulation_manager.has_method("clear_population"):
 		_monster_simulation_manager.call("clear_population")
 
@@ -1201,11 +1208,12 @@ func clear_monsters() -> void:
 
 
 func respawn_monsters() -> void:
+	_monster_replenishment_paused_by_training_tools = false
 	_spawn_monster_batch()
 
 
 func _update_monster_replenishment(delta: float) -> void:
-	if _is_training_mode:
+	if _is_training_mode or _monster_replenishment_paused_by_training_tools:
 		return
 
 	_monster_replenish_remaining = maxf(_monster_replenish_remaining - delta, 0.0)
@@ -1274,18 +1282,18 @@ func _apply_monster_spawn_variation_values(monster: Node2D, size_multiplier: flo
 
 
 func _get_target_monster_population() -> int:
-	# 开局目标人口；取开局生成量与最低人口较大值，保证 0 秒正式战斗至少拥有 400 名地图人口。
+	# 开局目标人口；取开局生成量与最低人口较大值，保证 0 秒正式战斗至少拥有 200 名地图人口。
 	var initial_population: int = maxi(monster_spawn_count, monster_minimum_alive_count)
 	# 第一里程碑时间；至少为 1 秒，避免检查器异常值导致插值除零。
 	var first_milestone_time: float = maxf(monster_population_first_milestone_seconds, 1.0)
 	# 第二里程碑时间；至少比第一里程碑晚 1 秒，保证第二段插值区间有效。
 	var second_milestone_time: float = maxf(monster_population_second_milestone_seconds, first_milestone_time + 1.0)
 	if _survival_time_seconds <= first_milestone_time:
-		# 第一阶段比例；取值 0 到 1，控制人口从 400 连续增长到 2400。
+		# 第一阶段比例；取值 0 到 1，控制人口从 200 连续增长到 1200。
 		var first_stage_ratio: float = clampf(_survival_time_seconds / first_milestone_time, 0.0, 1.0)
 		return roundi(lerpf(float(initial_population), float(monster_population_five_minute_count), first_stage_ratio))
 	if _survival_time_seconds <= second_milestone_time:
-		# 第二阶段比例；取值 0 到 1，控制人口从 2400 连续增长到 10000。
+		# 第二阶段比例；取值 0 到 1，控制人口从 1200 连续增长到 3200。
 		var second_stage_ratio: float = clampf((_survival_time_seconds - first_milestone_time) / (second_milestone_time - first_milestone_time), 0.0, 1.0)
 		return roundi(lerpf(float(monster_population_five_minute_count), float(monster_population_ten_minute_count), second_stage_ratio))
 	return maxi(monster_population_ten_minute_count, 0)

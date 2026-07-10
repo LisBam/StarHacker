@@ -40,10 +40,14 @@ const DISPLAY_MODE_FULL: int = 1
 @export_range(1.0, 20.0, 0.5) var player_marker_radius: float = 4.0
 ## 撤离点标记半径；取值建议大于玩家点半径，默认 6 像素，修改会影响地图上撤离点识别度。
 @export_range(2.0, 32.0, 0.5) var extraction_marker_radius: float = 6.0
-## 玩家导航标点颜色；默认亮黄色，大小地图共同使用以区别撤离点与玩家位置。
-@export var navigation_marker_color: Color = Color(1.0, 0.82, 0.22, 1.0)
+## 玩家导航标点颜色；默认柔和绿色，大小地图共同使用以降低指引线对战斗画面的突兀感。
+@export var navigation_marker_color: Color = Color(0.30, 0.92, 0.48, 0.92)
 ## 玩家导航指示线宽度；默认 2 像素，从玩家点持续连接到标点或局部小地图边缘。
 @export_range(0.5, 12.0, 0.5) var navigation_line_width: float = 2.0
+## 玩家导航虚线单段长度；默认 10 像素，数值越大每段绿色指引线越长。
+@export_range(1.0, 64.0, 1.0) var navigation_dash_length: float = 10.0
+## 玩家导航虚线间隔长度；默认 7 像素，数值越大相邻指引线段之间留白越明显。
+@export_range(1.0, 64.0, 1.0) var navigation_dash_gap: float = 7.0
 ## 玩家导航标点半径；默认 7 像素，用于绘制圆环和十字标记。
 @export_range(2.0, 32.0, 0.5) var navigation_marker_radius: float = 7.0
 ## 大地图点击已有标点的取消半径；默认 16 像素，左键点中标点时清除而不是重新设置。
@@ -209,13 +213,35 @@ func _draw_navigation_marker(world_view_rect: Rect2) -> void:
 	var player_map_position: Vector2 = _world_position_to_minimap_position(_player.global_position, world_view_rect)
 	# 标点地图坐标；取值为世界标点映射结果，局部模式超出范围时自动夹在边缘。
 	var marker_map_position: Vector2 = _world_position_to_minimap_position(marker_world_position, world_view_rect)
-	draw_line(player_map_position, marker_map_position, navigation_marker_color, navigation_line_width, true)
+	_draw_dashed_navigation_line(player_map_position, marker_map_position)
 	# 标点半径；取值至少 2，用于绘制稳定圆环和十字。
 	var marker_radius: float = maxf(navigation_marker_radius, 2.0)
 	draw_circle(marker_map_position, marker_radius, Color(navigation_marker_color, 0.22))
 	draw_arc(marker_map_position, marker_radius, 0.0, TAU, 24, navigation_marker_color, 2.0, true)
 	draw_line(marker_map_position + Vector2(-marker_radius * 1.35, 0.0), marker_map_position + Vector2(marker_radius * 1.35, 0.0), navigation_marker_color, 2.0)
 	draw_line(marker_map_position + Vector2(0.0, -marker_radius * 1.35), marker_map_position + Vector2(0.0, marker_radius * 1.35), navigation_marker_color, 2.0)
+
+
+func _draw_dashed_navigation_line(start_position: Vector2, end_position: Vector2) -> void:
+	# 完整指引向量；取值为玩家地图坐标指向导航标点，用于计算虚线方向和总长度。
+	var line_vector: Vector2 = end_position - start_position
+	# 完整指引长度；小于等于 0 时不绘制，避免归一化零向量。
+	var line_length: float = line_vector.length()
+	if line_length <= 0.0:
+		return
+	# 虚线单位方向；用于按累计距离计算每一段的起点和终点。
+	var line_direction: Vector2 = line_vector / line_length
+	# 标准化单段长度；至少 1 像素，避免错误配置导致循环无法推进。
+	var dash_length: float = maxf(navigation_dash_length, 1.0)
+	# 标准化间隔长度；至少 1 像素，使绿色指引始终保持虚线表现。
+	var dash_gap: float = maxf(navigation_dash_gap, 1.0)
+	# 当前虚线累计距离；默认从玩家位置开始，按线段长度和间隔逐段推进。
+	var current_distance: float = 0.0
+	while current_distance < line_length:
+		# 当前线段结束距离；限制到完整指引长度，避免最后一段越过标点。
+		var dash_end_distance: float = minf(current_distance + dash_length, line_length)
+		draw_line(start_position + line_direction * current_distance, start_position + line_direction * dash_end_distance, navigation_marker_color, navigation_line_width, true)
+		current_distance += dash_length + dash_gap
 
 
 func _should_redraw_map() -> bool:

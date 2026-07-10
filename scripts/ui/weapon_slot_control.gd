@@ -7,6 +7,10 @@ class_name WeaponSlotControl
 
 signal drop_received(drop_data: Dictionary, target_context: String, target_kind: String, target_index: int)
 signal drag_released_outside(drop_data: Dictionary)
+signal item_selected(item_resource: Resource)
+
+## 统一物品详情格式化器；用于在战斗装备栏与背包中显示带颜色的基础值和强化值。
+const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
 
 ## 槽位所属上下文；取值为 equipment 或 inventory，默认 equipment，修改会影响拖拽来源和投放规则。
 var slot_context: String = "equipment"
@@ -39,6 +43,7 @@ func _ready() -> void:
 		custom_minimum_size = Vector2(96.0, 76.0)
 	_build_content()
 	_refresh_text()
+	gui_input.connect(_on_gui_input)
 
 
 func set_slot_data(new_context: String, new_kind: String, new_index: int, new_weapon_data: Resource, new_is_selected: bool) -> void:
@@ -195,7 +200,20 @@ func _refresh_text() -> void:
 	_title_label.text = _get_slot_title()
 	_name_label.text = _get_weapon_display_name(weapon_data, empty_text)
 	_detail_label.text = _get_weapon_detail_text()
-	tooltip_text = _get_weapon_tooltip_text()
+	tooltip_text = str(ITEM_DETAIL_FORMATTER.call("build_plain_text", weapon_data, 1)) if weapon_data != null else ""
+
+
+func _make_custom_tooltip(_for_text: String) -> Object:
+	return ITEM_DETAIL_FORMATTER.call("create_tooltip_control", weapon_data, 1)
+
+
+func _on_gui_input(event: InputEvent) -> void:
+	if weapon_data == null or not (event is InputEventMouseButton):
+		return
+	# 鼠标事件；左键按下时通知 HUD，只有处于强化选择状态时 HUD 才会消费该选择。
+	var mouse_event: InputEventMouseButton = event as InputEventMouseButton
+	if mouse_event.button_index == MOUSE_BUTTON_LEFT and mouse_event.pressed:
+		item_selected.emit(weapon_data)
 
 
 func _get_slot_title() -> String:
@@ -300,11 +318,11 @@ func _append_ranged_tooltip_lines(tooltip_lines: PackedStringArray) -> void:
 	var ranged_cooldown: float = maxf(float(weapon_data.get("ranged_cooldown")), 0.0)
 	# 武器扩散；取值来自资源 spread_degrees 字段，表示弹体相对瞄准方向的最大随机偏移角度。
 	var spread_degrees: float = maxf(float(weapon_data.get("spread_degrees")), 0.0)
-	tooltip_lines.append("远程伤害：%d" % roundi(ranged_damage))
+	tooltip_lines.append("伤害：%d" % roundi(ranged_damage))
 	tooltip_lines.append("子弹速度：%d" % roundi(projectile_speed))
 	tooltip_lines.append("子弹射程：%d" % roundi(bullet_range))
 	tooltip_lines.append("扩散：%.1f°" % spread_degrees)
-	tooltip_lines.append("射击冷却：%.2f 秒" % ranged_cooldown)
+	tooltip_lines.append("冷却：%.2f 秒" % ranged_cooldown)
 
 
 func _append_melee_tooltip_lines(tooltip_lines: PackedStringArray) -> void:
@@ -314,6 +332,6 @@ func _append_melee_tooltip_lines(tooltip_lines: PackedStringArray) -> void:
 	var melee_cooldown: float = maxf(float(weapon_data.get("melee_cooldown")), 0.0)
 	# 命中框持续时间；取值来自资源 melee_active_duration 字段，默认用于提示近战判定窗口。
 	var melee_active_duration: float = maxf(float(weapon_data.get("melee_active_duration")), 0.0)
-	tooltip_lines.append("近战伤害：%d" % roundi(melee_damage))
-	tooltip_lines.append("近战冷却：%.2f 秒" % melee_cooldown)
+	tooltip_lines.append("伤害：%d" % roundi(melee_damage))
+	tooltip_lines.append("冷却：%.2f 秒" % melee_cooldown)
 	tooltip_lines.append("判定时长：%.2f 秒" % melee_active_duration)

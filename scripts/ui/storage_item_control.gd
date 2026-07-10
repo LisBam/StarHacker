@@ -7,11 +7,16 @@ class_name StorageItemControl
 signal quick_action_requested(item_resource: Resource)
 signal item_action_requested(item_resource: Resource)
 signal item_drop_requested(drag_data: Dictionary, target_location: String, target_index: int)
+signal enhancement_drop_requested(stone_resource: Resource, source_location: String, weapon_resource: Resource)
 
 ## 拖拽数据类型标识；默认用于拒绝来自其他 UI 系统的不兼容拖拽数据。
 const DRAG_DATA_TYPE: String = "global_storage_item"
 ## 统一物品详情格式化器；默认生成基础值、强化值、资源词条和动态售价信息。
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
+## 强化词条增强颜色；默认亮绿色，与悬停详情保持一致。
+const STONE_BENEFICIAL_COLOR: String = "#70e889"
+## 强化词条削弱颜色；默认亮红色，与悬停详情保持一致。
+const STONE_DETRIMENTAL_COLOR: String = "#ff7070"
 
 ## 当前显示的物品资源；默认 null 表示尚未配置，配置后用于摘要、详情和拖拽身份校验。
 var _item_resource: Resource
@@ -23,6 +28,11 @@ var _item_index: int = -1
 var _quick_action_enabled: bool = false
 ## 当前堆叠数量；武器固定为 1，强化石取值 1 到 99，修改会影响卡片数量角标和整组售价。
 var _quantity: int = 1
+## 强化石卡片富文本；默认运行时按需创建，用于在方形资源格内直接区分绿色增强与红色削弱词条。
+## 宽卡布局补充；强化石已与武器统一为宽卡片，该富文本仅负责品质、百分比和利弊颜色。
+var _stone_summary_label: RichTextLabel
+## 是否将当前武器标记为强化目标；默认 false，选择强化武器期间会临时点亮所有武器卡片。
+var _enhancement_target_highlight: bool = false
 
 
 func configure(item_resource: Resource, location: String, item_index: int, quick_action_enabled: bool, extraction_prefix: String = "", quantity: int = 1) -> void:
@@ -31,15 +41,29 @@ func configure(item_resource: Resource, location: String, item_index: int, quick
 	_item_index = item_index
 	_quick_action_enabled = quick_action_enabled
 	_quantity = clampi(quantity, 1, 99)
-	# 物品摘要；资源使用方形卡片并显示堆叠数，武器保持两列宽卡片显示分类和动态售价。
-	text = "%s%s\n%s\nx%d · 售价 %d" % [extraction_prefix, _get_item_display_name(), _get_weapon_type_label(), _quantity, _get_sell_price() * _quantity] if _is_enhancement_stone() else "%s%s · %s · 售价 %d" % [extraction_prefix, _get_item_display_name(), _get_weapon_type_label(), _get_sell_price()]
+	# 物品摘要；强化石使用富文本方格，武器保持两列宽卡片显示分类和动态售价。
+	if _is_enhancement_stone():
+		text = ""
+		_ensure_stone_summary_label()
+		_stone_summary_label.visible = true
+		_stone_summary_label.text = _build_stone_card_bbcode(extraction_prefix)
+	else:
+		text = "%s%s · %s · 售价 %d" % [extraction_prefix, _get_item_display_name(), _get_weapon_type_label(), _get_sell_price()]
+		if _stone_summary_label != null:
+			_stone_summary_label.visible = false
 	tooltip_text = ITEM_DETAIL_FORMATTER.call("build_plain_text", _item_resource, _quantity)
 	disabled = _item_resource == null
-	custom_minimum_size = Vector2(132.0, 112.0) if _is_enhancement_stone() else Vector2(0.0, 48.0)
+	custom_minimum_size = Vector2(0.0, 48.0)
 	# 鼠标指针形态；可操作容器使用手型，结算只读条目使用普通箭头。
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if not _location.is_empty() and _item_index >= 0 else Control.CURSOR_ARROW
 	if not pressed.is_connected(_on_pressed):
 		pressed.connect(_on_pressed)
+	_refresh_enhancement_target_highlight()
+
+
+func set_enhancement_target_highlight(enabled: bool) -> void:
+	_enhancement_target_highlight = enabled and _is_weapon_resource()
+	_refresh_enhancement_target_highlight()
 
 
 func _get_drag_data(_at_position: Vector2) -> Variant:
@@ -65,7 +89,13 @@ func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
 		return false
 	# 拖拽字典；取值应由同类物品控件创建，类型和资源均合法时允许容器内排序或跨容器转移。
 	var drag_data: Dictionary = data
-	return str(drag_data.get("type", "")) == DRAG_DATA_TYPE and drag_data.get("resource") is Resource
+	if str(drag_data.get("type", "")) != DRAG_DATA_TYPE or not (drag_data.get("resource") is Resource):
+		return false
+	# 拖拽资源；强化石投放到武器卡片时走强化协议，其他组合保持原容器移动协议。
+	var dragged_resource: Resource = drag_data.get("resource") as Resource
+	if str(dragged_resource.get("item_kind")) == "enhancement_stone" and _is_weapon_resource():
+		return not str(drag_data.get("source_location", "")).is_empty() and not _location.is_empty() and _item_index >= 0
+	return true
 
 
 func _drop_data(_at_position: Vector2, data: Variant) -> void:
@@ -73,6 +103,11 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 		return
 	# 拖拽字典；已通过类型检查，复制后交给仓库面板决定移动或转移规则。
 	var drag_data: Dictionary = (data as Dictionary).duplicate()
+	# 拖拽资源；强化石命中武器时不改变容器位置，只由上层消费一颗并应用词条。
+	var dragged_resource: Resource = drag_data.get("resource") as Resource
+	if dragged_resource != null and str(dragged_resource.get("item_kind")) == "enhancement_stone" and _is_weapon_resource():
+		enhancement_drop_requested.emit(dragged_resource, str(drag_data.get("source_location", "")), _item_resource)
+		return
 	item_drop_requested.emit(drag_data, _location, _item_index)
 
 
@@ -114,3 +149,58 @@ func _make_custom_tooltip(_for_text: String) -> Object:
 
 func _is_enhancement_stone() -> bool:
 	return _item_resource != null and str(_item_resource.get("item_kind")) == "enhancement_stone"
+
+
+func _is_weapon_resource() -> bool:
+	return _item_resource != null and str(_item_resource.get("weapon_type")) in ["ranged", "melee"]
+
+
+func _refresh_enhancement_target_highlight() -> void:
+	# 卡片色调；浅绿色表示可点击或可投放的强化目标，取消选择后恢复白色不影响原主题。
+	self_modulate = Color(0.68, 1.0, 0.76, 1.0) if _enhancement_target_highlight else Color.WHITE
+
+
+func _ensure_stone_summary_label() -> void:
+	if _stone_summary_label != null:
+		return
+	# 方格富文本；覆盖按钮内部并忽略鼠标，让按钮继续负责点击、拖拽和 tooltip。
+	_stone_summary_label = RichTextLabel.new()
+	_stone_summary_label.bbcode_enabled = true
+	_stone_summary_label.fit_content = true
+	_stone_summary_label.scroll_active = false
+	_stone_summary_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stone_summary_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_stone_summary_label.offset_left = 6.0
+	_stone_summary_label.offset_top = 5.0
+	_stone_summary_label.offset_right = -6.0
+	_stone_summary_label.offset_bottom = -5.0
+	add_child(_stone_summary_label)
+
+
+func _build_stone_card_bbcode(extraction_prefix: String) -> String:
+	# 卡片文本行；名称、彩色方向词条、数量与整组价值固定居中显示。
+	var card_lines: Array[String] = []
+	card_lines.append("[center][b]%s%s[/b]  x%d[/center]" % [extraction_prefix, _get_item_display_name(), _quantity])
+	# 归一化词典；按规则目录顺序生成稳定且可堆叠识别的词条组合。
+	var modifiers: Dictionary = EnhancementRules.normalize_modifiers(_item_resource.get("modifiers") as Dictionary)
+	# 彩色词条；增强为绿色，削弱为红色，不显示具体百分比。
+	# 品质化数值补充；当前卡片会直接显示每条实际百分比，上述颜色规则保持不变。
+	var colored_tokens: PackedStringArray = PackedStringArray()
+	_append_colored_stone_tokens(colored_tokens, modifiers, true)
+	_append_colored_stone_tokens(colored_tokens, modifiers, false)
+	card_lines.append("[center]%s  ·  售价 %d[/center]" % [(" ".join(colored_tokens) if not colored_tokens.is_empty() else "无词条"), _get_sell_price() * _quantity])
+	return "\n".join(card_lines)
+
+
+func _append_colored_stone_tokens(target_tokens: PackedStringArray, modifiers: Dictionary, beneficial: bool) -> void:
+	# 属性顺序；先调用增强组再调用削弱组，保证任何强化石都按玩法利弊排列。
+	for stat_name in EnhancementRules.STAT_KEYS:
+		if not modifiers.has(stat_name):
+			continue
+		# 属性实际比例；值保留整数百分点精度，用于卡片直接显示强化幅度。
+		var modifier_ratio: float = float(modifiers.get(stat_name, 0.0))
+		if EnhancementRules.is_direction_beneficial(stat_name, modifier_ratio) != beneficial:
+			continue
+		# 词条颜色；由玩法利弊决定。
+		var color_code: String = STONE_BENEFICIAL_COLOR if beneficial else STONE_DETRIMENTAL_COLOR
+		target_tokens.append("[color=%s]%s[/color]" % [color_code, EnhancementRules.build_modifier_token(stat_name, modifier_ratio)])

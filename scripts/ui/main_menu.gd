@@ -196,9 +196,9 @@ func _build_developer_overlay() -> void:
 	developer_menu.anchor_right = 0.5
 	developer_menu.anchor_bottom = 0.5
 	developer_menu.offset_left = -260.0
-	developer_menu.offset_top = -210.0
+	developer_menu.offset_top = -240.0
 	developer_menu.offset_right = 260.0
-	developer_menu.offset_bottom = 210.0
+	developer_menu.offset_bottom = 240.0
 	developer_menu.connect("closed", Callable(self, "_on_developer_menu_closed"))
 	developer_overlay.add_child(developer_menu)
 	_developer_menu = developer_menu

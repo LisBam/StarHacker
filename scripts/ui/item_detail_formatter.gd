@@ -10,19 +10,6 @@ const POSITIVE_COLOR: String = "#70e889"
 const NEGATIVE_COLOR: String = "#ff7070"
 ## 中性数值颜色；默认浅色，用于尚未强化或与基础值相同的总值。
 const NEUTRAL_COLOR: String = "#d8e8ee"
-## 属性中文名称；键使用强化系统统一属性名，新增强化属性时应同步补充该表。
-const STAT_LABELS: Dictionary = {
-	"damage": "伤害",
-	"cooldown": "冷却",
-	"energy_cost": "能量消耗",
-	"projectile_speed": "弹体速度",
-	"bullet_range": "弹体射程",
-	"spread_degrees": "扩散",
-	"recoil_force": "后坐力",
-	"front_recoil_force": "前坐力",
-	"impact_force": "冲击力",
-	"melee_active_duration": "判定时长",
-}
 
 
 static func is_weapon(item_resource: Resource) -> bool:
@@ -107,18 +94,26 @@ static func create_tooltip_control(item_resource: Resource, quantity: int = 1) -
 
 static func _append_stone_lines(detail_lines: Array[String], item_resource: Resource) -> void:
 	detail_lines.append("[b]强化词条[/b]")
-	# 强化词典；键为统一属性名，值为百分比小数，按属性名排序保持不同界面显示一致。
-	var modifiers: Dictionary = item_resource.get("modifiers") as Dictionary
-	# 排序属性键；稳定顺序便于玩家比较相同强化石。
-	var modifier_keys: Array[String] = []
-	for raw_key in modifiers.keys():
-		modifier_keys.append(str(raw_key))
-	modifier_keys.sort()
-	for modifier_key in modifier_keys:
-		# 强化比例；0.1 显示为 +10%，负值使用红色。
-		var modifier_ratio: float = float(modifiers.get(modifier_key, 0.0))
-		var color_code: String = POSITIVE_COLOR if modifier_ratio >= 0.0 else NEGATIVE_COLOR
-		detail_lines.append("%s：[color=%s]%+.1f%%[/color]" % [str(STAT_LABELS.get(modifier_key, modifier_key)), color_code, modifier_ratio * 100.0])
+	# 强化词典；值只表示数值增减方向，详情不显示具体百分比。
+	# 品质化显示补充；当前详情保留每条实际百分比，并先显示增强、后显示削弱。
+	var modifiers: Dictionary = EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary)
+	_append_stone_lines_by_benefit(detail_lines, modifiers, true)
+	_append_stone_lines_by_benefit(detail_lines, modifiers, false)
+
+
+static func _append_stone_lines_by_benefit(detail_lines: Array[String], modifiers: Dictionary, beneficial: bool) -> void:
+	# 属性顺序；每一组内使用规则目录顺序，两次调用保证增强全部排在削弱之前。
+	for modifier_key in EnhancementRules.STAT_KEYS:
+		if not modifiers.has(modifier_key):
+			continue
+		# 属性方向；取值固定为 +1 或 -1，用于生成“伤害+”“冷却+”等短文本。
+		# 实际数值补充；取值为带方向的百分比小数，旧 +1/-1 会先迁移为 ±10%。
+		var modifier_direction: float = float(modifiers.get(modifier_key, 0.0))
+		if EnhancementRules.is_direction_beneficial(modifier_key, modifier_direction) != beneficial:
+			continue
+		# 词条颜色；按玩法效果判断增强或削弱，而不是简单按正负号判断。
+		var color_code: String = POSITIVE_COLOR if beneficial else NEGATIVE_COLOR
+		detail_lines.append("[color=%s]%s[/color]" % [color_code, EnhancementRules.build_modifier_token(modifier_key, modifier_direction)])
 
 
 static func _append_weapon_lines(detail_lines: Array[String], item_resource: Resource) -> void:
@@ -152,8 +147,12 @@ static func _append_weapon_stat_line(detail_lines: Array[String], item_resource:
 	# 数值格式；按属性精度生成 0.0 或 0.00 等稳定格式。
 	var value_format: String = "%%.%df" % decimals
 	# 总值文本；示例为“伤害：1200（1000+200）”，强化差值始终显式带正负号。
+	if is_zero_approx(enhancement_value):
+		detail_lines.append("%s：[color=%s]%s[/color]%s" % [EnhancementRules.get_stat_label(stat_name), total_color, value_format % effective_value, suffix])
+		return
+	# 有强化变化时才显示括号中的基础值和强化差值，避免出现“（100+0.0）”无效信息。
 	detail_lines.append("%s：[color=%s]%s[/color]（%s[color=%s]%s[/color]）%s" % [
-		str(STAT_LABELS.get(stat_name, stat_name)),
+		EnhancementRules.get_stat_label(stat_name),
 		total_color,
 		value_format % effective_value,
 		value_format % base_value,

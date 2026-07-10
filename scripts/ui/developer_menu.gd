@@ -9,10 +9,12 @@ signal infinite_health_toggled(enabled: bool)
 signal infinite_energy_toggled(enabled: bool)
 signal training_settings_requested
 
-## 菜单最小尺寸；默认 520x420，适合在主菜单中央显示三项开发者操作和结果反馈。
-@export var panel_minimum_size: Vector2 = Vector2(520.0, 420.0)
+## 菜单最小尺寸；默认 520x470，适合在主菜单中央显示武器、强化石和金币调试操作。
+@export var panel_minimum_size: Vector2 = Vector2(520.0, 470.0)
 ## 单次金币调整数量；默认 1000，对应增加和减少按钮的固定测试步长。
 @export_range(1, 9999999, 1) var coin_step: int = 1000
+## 单次随机强化石发放数量；默认 10，修改会同步按钮文案和实际永久仓库发放数量。
+@export_range(1, 999, 1) var enhancement_stone_grant_count: int = 10
 
 ## 全局物品服务；默认从 AutoLoad 获取，缺失时禁用资源修改按钮。
 var _global_inventory: Node
@@ -22,13 +24,15 @@ var _coins_label: Label
 var _status_label: Label
 ## 获取全部武器按钮；默认运行时创建，服务不可用时禁用。
 var _grant_weapons_button: Button
+## 随机强化石按钮；默认运行时创建，点击后向永久仓库发放 10 颗随机强化石。
+var _grant_stones_button: Button
 ## 增加金币按钮；默认运行时创建，点击增加 coin_step。
 var _add_coins_button: Button
 ## 减少金币按钮；默认运行时创建，金币最低限制为 0。
 var _remove_coins_button: Button
 ## 隐藏入口提示标签；默认显示 LISBAM 说明，战斗模式会改为局内调试提示。
 var _hint_label: Label
-## 局外经济控件列表；元素为金币标签和三个资源按钮，战斗模式中统一隐藏。
+## 局外经济控件列表；元素为金币标签、武器、强化石和两个金币按钮，战斗模式中统一隐藏。
 var _economy_controls: Array[Control] = []
 ## 战斗调试控件容器；默认隐藏，配置战斗上下文后显示无限属性与训练工具入口。
 var _combat_controls_container: VBoxContainer
@@ -82,7 +86,7 @@ func _build_interface() -> void:
 	margin.add_theme_constant_override("margin_right", 24)
 	margin.add_theme_constant_override("margin_bottom", 20)
 	add_child(margin)
-	# 主内容容器；纵向排列标题、余额、三项功能、状态与关闭按钮。
+	# 主内容容器；纵向排列标题、余额、武器/强化石/金币功能、状态与关闭按钮。
 	var content: VBoxContainer = VBoxContainer.new()
 	content.add_theme_constant_override("separation", 12)
 	margin.add_child(content)
@@ -108,6 +112,12 @@ func _build_interface() -> void:
 	_grant_weapons_button.pressed.connect(_on_grant_weapons_pressed)
 	content.add_child(_grant_weapons_button)
 	_economy_controls.append(_grant_weapons_button)
+	_grant_stones_button = Button.new()
+	_grant_stones_button.custom_minimum_size = Vector2(0.0, 46.0)
+	_grant_stones_button.text = "随机获得%d颗强化石" % enhancement_stone_grant_count
+	_grant_stones_button.pressed.connect(_on_grant_stones_pressed)
+	content.add_child(_grant_stones_button)
+	_economy_controls.append(_grant_stones_button)
 	_add_coins_button = Button.new()
 	_add_coins_button.custom_minimum_size = Vector2(0.0, 46.0)
 	_add_coins_button.text = "一键增加 %d 金币" % coin_step
@@ -167,6 +177,7 @@ func _refresh_availability() -> void:
 	# 服务是否可用；取值决定所有会修改局外存档的开发者按钮是否可点击。
 	var service_available: bool = _global_inventory != null
 	_grant_weapons_button.disabled = not service_available
+	_grant_stones_button.disabled = not service_available
 	_add_coins_button.disabled = not service_available
 	_remove_coins_button.disabled = not service_available
 	if not service_available:
@@ -200,6 +211,14 @@ func _on_grant_weapons_pressed() -> void:
 	# 发放武器数量；取值为本次成功加入永久仓库的已知武器种类数。
 	var granted_count: int = int(_global_inventory.call("grant_all_known_weapons_to_warehouse"))
 	_status_label.text = "已向永久仓库发放 %d 件武器" % granted_count
+
+
+func _on_grant_stones_pressed() -> void:
+	if _global_inventory == null or not _global_inventory.has_method("grant_random_enhancement_stones_to_warehouse"):
+		return
+	# 发放强化石数量；默认应为 10，随机同词条强化石可能在仓库中自动合并为同一堆叠。
+	var granted_count: int = int(_global_inventory.call("grant_random_enhancement_stones_to_warehouse", enhancement_stone_grant_count))
+	_status_label.text = "已向永久仓库发放 %d 颗随机强化石" % granted_count
 
 
 func _on_add_coins_pressed() -> void:

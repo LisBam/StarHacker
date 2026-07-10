@@ -13,14 +13,8 @@ const STORAGE_DROP_AREA_SCRIPT: Script = preload("res://scripts/ui/storage_drop_
 const EQUIPMENT_STORAGE_SLOT_SCRIPT: Script = preload("res://scripts/ui/equipment_storage_slot_control.gd")
 ## 物品详情格式化器；用于识别武器、强化石和动态售价，避免仓库面板重复拼接属性文本。
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
-## 仓库筛选全部武器标识；默认进入仓库时显示近战与远程武器。
-const STORAGE_FILTER_WEAPONS: String = "weapons"
-## 仓库筛选近战武器标识；只匹配 weapon_type 为 melee 的物品。
-const STORAGE_FILTER_MELEE: String = "melee"
-## 仓库筛选远程武器标识；只匹配 weapon_type 为 ranged 的物品。
-const STORAGE_FILTER_RANGED: String = "ranged"
-## 仓库筛选强化石标识；只匹配 item_kind 为 enhancement_stone 的资源。
-const STORAGE_FILTER_STONES: String = "enhancement_stones"
+## 强化结果弹窗脚本；仓库和局内背包共用同一数值说明格式。
+const ENHANCEMENT_RESULT_DIALOG_SCRIPT: Script = preload("res://scripts/ui/enhancement_result_dialog.gd")
 ## 操作菜单出售项编号；固定为 1，选择后出售当前仓库或背包整条记录。
 const ITEM_ACTION_SELL: int = 1
 ## 操作菜单使用项编号；固定为 2，只对强化石显示并进入武器选择状态。
@@ -53,10 +47,26 @@ var _mode_toggle_button: Button
 var _coins_label: Label
 ## 新版仓库摘要标签；默认显示永久仓库与随身背包数量，并明确安全和死亡损失边界。
 var _storage_summary_label: Label
-## 当前仓库与背包共用筛选标识；默认 weapons，修改会同步刷新上下两个容器。
-var _storage_filter: String = STORAGE_FILTER_WEAPONS
-## 筛选按钮表；键为筛选标识，值为运行时创建按钮，用于刷新互斥选中状态。
-var _storage_filter_buttons: Dictionary = {}
+## 当前主分类；取值为 weapons 或 resources，默认武器分类并同步作用于仓库和背包。
+var _storage_primary_category: String = InventoryQuery.PRIMARY_WEAPONS
+## 当前子分类；默认 all，进入武器或资源主分类时分别显示对应二级分类。
+var _storage_subcategory: String = InventoryQuery.SUBCATEGORY_ALL
+## 主分类按钮表；键为 weapons 或 resources，值为运行时按钮。
+var _storage_primary_buttons: Dictionary = {}
+## 子分类按钮表；键为当前分类标识，值为运行时按钮，每次切换主分类时重建。
+var _storage_subcategory_buttons: Dictionary = {}
+## 子分类按钮容器；默认位于主分类下一行，武器显示近战/远程，资源显示强化石。
+var _storage_subcategory_bar: HBoxContainer
+## 关键词搜索框；默认空字符串，输入时同时筛选永久仓库和随身背包的名称、说明与词条。
+var _storage_search_edit: LineEdit
+## 排序下拉框；默认获得时间，可切换为物品价值降序。
+var _storage_sort_option: OptionButton
+## 强化属性筛选下拉框；默认全部属性，只在资源分类显示并按强化石词条键筛选。
+var _stone_attribute_option: OptionButton
+## 当前强化属性筛选键；默认空字符串表示不过滤具体属性。
+var _stone_attribute_filter: String = ""
+## 当前展示排序；默认 acquired_time，可切换 item_value 且不修改真实库存顺序。
+var _storage_sort_mode: String = InventoryQuery.SORT_ACQUIRED_TIME
 ## 物品操作菜单；普通点击武器或强化石时显示出售与可选使用操作。
 var _item_action_menu: PopupMenu
 ## 当前操作物品资源；菜单关闭前保持资源实例引用，用于精确出售或启动强化选择。
@@ -67,6 +77,10 @@ var _action_item_location: String = ""
 var _pending_stone_resource: Resource
 ## 待使用强化石来源；取值 warehouse 或 backpack，强化成功后从对应堆叠扣除一颗。
 var _pending_stone_location: String = ""
+## 取消使用按钮；默认隐藏，玩家点击强化石“使用”后显示并可退出目标选择。
+var _cancel_stone_use_button: Button
+## 强化结果弹窗；默认运行时创建一次，每次成功强化时复用。
+var _enhancement_result_dialog: AcceptDialog
 
 
 func _ready() -> void:
@@ -97,7 +111,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_on_mode_toggle_pressed()
 		get_viewport().set_input_as_handled()
 	elif key_event.keycode == KEY_ESCAPE or key_event.physical_keycode == KEY_ESCAPE:
-		closed.emit()
+		_on_close_pressed()
 		get_viewport().set_input_as_handled()
 
 
@@ -105,14 +119,14 @@ func _build_storage_interface() -> void:
 	# 新版外层边距；默认让联合仓库界面在主菜单遮罩内保持稳定留白。
 	var margin: MarginContainer = MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 20)
-	margin.add_theme_constant_override("margin_top", 16)
+	margin.add_theme_constant_override("margin_top", 10)
 	margin.add_theme_constant_override("margin_right", 20)
-	margin.add_theme_constant_override("margin_bottom", 18)
+	margin.add_theme_constant_override("margin_bottom", 10)
 	add_child(margin)
 
 	# 新版主内容容器；纵向排列标题栏、永久仓库、可折叠背包与返回按钮。
 	var content: VBoxContainer = VBoxContainer.new()
-	content.add_theme_constant_override("separation", 8)
+	content.add_theme_constant_override("separation", 5)
 	margin.add_child(content)
 
 	# 新版标题栏；横向显示仓库标题、局外金币和模式切换按钮。
@@ -132,22 +146,63 @@ func _build_storage_interface() -> void:
 	_mode_toggle_button.custom_minimum_size = Vector2(128.0, 38.0)
 	_mode_toggle_button.pressed.connect(_on_mode_toggle_pressed)
 	header.add_child(_mode_toggle_button)
+	_cancel_stone_use_button = Button.new()
+	_cancel_stone_use_button.custom_minimum_size = Vector2(112.0, 38.0)
+	_cancel_stone_use_button.text = "取消使用"
+	_cancel_stone_use_button.visible = false
+	_cancel_stone_use_button.pressed.connect(_on_cancel_stone_use_pressed)
+	header.add_child(_cancel_stone_use_button)
+	# 顶部关闭按钮；固定在标题栏内，展开背包后不会被下方内容推到窗口外。
+	var close_button: Button = Button.new()
+	close_button.custom_minimum_size = Vector2(112.0, 38.0)
+	close_button.text = "关闭仓库"
+	close_button.pressed.connect(_on_close_pressed)
+	header.add_child(close_button)
 
 	_storage_summary_label = Label.new()
 	_storage_summary_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_storage_summary_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(_storage_summary_label)
 
-	# 分类筛选栏；武器与资源为主分类，近战、远程和强化石提供明确子分类入口。
-	var filter_bar: HBoxContainer = HBoxContainer.new()
-	filter_bar.alignment = BoxContainer.ALIGNMENT_CENTER
-	filter_bar.add_theme_constant_override("separation", 6)
-	content.add_child(filter_bar)
-	_create_storage_filter_button(filter_bar, "武器", STORAGE_FILTER_WEAPONS)
-	_create_storage_filter_button(filter_bar, "近战", STORAGE_FILTER_MELEE)
-	_create_storage_filter_button(filter_bar, "远程", STORAGE_FILTER_RANGED)
-	_create_storage_filter_button(filter_bar, "资源", STORAGE_FILTER_STONES)
-	_create_storage_filter_button(filter_bar, "强化石", STORAGE_FILTER_STONES)
+	# 搜索与排序栏；关键词、排序方式和强化属性过滤统一作用于上下两个库存区域。
+	var query_bar: HBoxContainer = HBoxContainer.new()
+	query_bar.add_theme_constant_override("separation", 8)
+	content.add_child(query_bar)
+	_storage_search_edit = LineEdit.new()
+	_storage_search_edit.placeholder_text = "搜索武器、强化石或属性关键词"
+	_storage_search_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_storage_search_edit.text_changed.connect(_on_storage_search_changed)
+	query_bar.add_child(_storage_search_edit)
+	_storage_sort_option = OptionButton.new()
+	_storage_sort_option.custom_minimum_size = Vector2(142.0, 36.0)
+	_storage_sort_option.add_item("获得时间")
+	_storage_sort_option.set_item_metadata(0, InventoryQuery.SORT_ACQUIRED_TIME)
+	_storage_sort_option.add_item("物品价值")
+	_storage_sort_option.set_item_metadata(1, InventoryQuery.SORT_ITEM_VALUE)
+	_storage_sort_option.item_selected.connect(_on_storage_sort_selected)
+	query_bar.add_child(_storage_sort_option)
+	_stone_attribute_option = OptionButton.new()
+	_stone_attribute_option.custom_minimum_size = Vector2(142.0, 36.0)
+	_stone_attribute_option.add_item("全部强化属性")
+	_stone_attribute_option.set_item_metadata(0, "")
+	for stat_name in EnhancementRules.STAT_KEYS:
+		_stone_attribute_option.add_item(EnhancementRules.get_stat_label(stat_name))
+		_stone_attribute_option.set_item_metadata(_stone_attribute_option.item_count - 1, stat_name)
+	_stone_attribute_option.item_selected.connect(_on_stone_attribute_selected)
+	query_bar.add_child(_stone_attribute_option)
+
+	# 一级分类栏；只显示武器和资源，二级分类由下一行根据主分类动态生成。
+	var primary_filter_bar: HBoxContainer = HBoxContainer.new()
+	primary_filter_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+	primary_filter_bar.add_theme_constant_override("separation", 8)
+	content.add_child(primary_filter_bar)
+	_create_storage_category_button(primary_filter_bar, "武器", InventoryQuery.PRIMARY_WEAPONS, true)
+	_create_storage_category_button(primary_filter_bar, "资源", InventoryQuery.PRIMARY_RESOURCES, true)
+	_storage_subcategory_bar = HBoxContainer.new()
+	_storage_subcategory_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+	_storage_subcategory_bar.add_theme_constant_override("separation", 6)
+	content.add_child(_storage_subcategory_bar)
+	_rebuild_storage_subcategory_buttons()
 
 	# 永久仓库标题；始终位于界面上方并说明安全存储属性。
 	var warehouse_title: Label = Label.new()
@@ -213,18 +268,13 @@ func _build_storage_interface() -> void:
 	carried_scroll.add_child(_carried_drop_area)
 	_carried_item_list = _carried_drop_area.call("get_content_container") as GridContainer
 
-	# 新版返回按钮；关闭仓库面板并恢复主菜单交互。
-	var close_button: Button = Button.new()
-	close_button.custom_minimum_size = Vector2(0.0, 42.0)
-	close_button.text = "返回主菜单"
-	close_button.pressed.connect(_on_close_pressed)
-	content.add_child(close_button)
-
 	_item_action_menu = PopupMenu.new()
 	_item_action_menu.id_pressed.connect(_on_item_action_menu_id_pressed)
 	add_child(_item_action_menu)
+	_enhancement_result_dialog = ENHANCEMENT_RESULT_DIALOG_SCRIPT.new() as AcceptDialog
+	add_child(_enhancement_result_dialog)
 	_apply_storage_display_mode()
-	_refresh_storage_filter_buttons()
+	_refresh_storage_category_buttons()
 
 
 func _rebuild_storage_content() -> void:
@@ -242,21 +292,20 @@ func _rebuild_storage_content() -> void:
 	var backpack_entries: Array = _global_inventory.call("get_backpack_entries")
 	_coins_label.text = "金币：%d" % int(_global_inventory.call("get_coins"))
 	_storage_summary_label.text = _get_storage_summary_text(warehouse_entries, backpack_entries)
-	_build_storage_entries(warehouse_entries, "warehouse", _warehouse_item_list)
+	# 已查询仓库条目；按当前多层分类、关键词、属性和排序生成展示副本。
+	var visible_warehouse_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(warehouse_entries, _storage_primary_category, _storage_subcategory, _storage_search_edit.text, _stone_attribute_filter, _storage_sort_mode)
+	# 已查询背包条目；使用同一查询条件保证上下区域对比一致。
+	var visible_backpack_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(backpack_entries, _storage_primary_category, _storage_subcategory, _storage_search_edit.text, _stone_attribute_filter, _storage_sort_mode)
+	_build_storage_entries(visible_warehouse_entries, "warehouse", _warehouse_item_list)
 	if _backpack_expanded:
-		_build_storage_entries(backpack_entries, "backpack", _carried_item_list)
+		_build_storage_entries(visible_backpack_entries, "backpack", _carried_item_list)
 		_build_loadout_entries()
 
 
 func _build_storage_entries(entries: Array, location: String, target_container: Container) -> void:
 	if target_container == null:
 		return
-	# 当前分类匹配数量；用于在容器有其他分类物品但当前页为空时仍显示明确空状态。
-	var matching_entry_count: int = 0
-	for raw_entry in entries:
-		if raw_entry is Dictionary and _does_entry_match_storage_filter(raw_entry as Dictionary):
-			matching_entry_count += 1
-	if matching_entry_count <= 0:
+	if entries.is_empty():
 		# 空容器提示；根据所在区域明确物品安全属性和快捷转移方向。
 		var empty_state_label: Label = Label.new()
 		empty_state_label.text = "当前分类没有永久仓库物品" if location == "warehouse" else "当前分类没有随身背包物品，可用 Shift+点击或拖入上方仓库物品"
@@ -266,11 +315,13 @@ func _build_storage_entries(entries: Array, location: String, target_container: 
 		return
 
 	# 展示条目索引；取值为列表所有有效下标，用于拖拽排序和上下移动按钮目标计算。
-	for entry_index in range(entries.size()):
+	for visible_index in range(entries.size()):
 		# 展示条目原始值；取值应为 Dictionary，异常数据不会生成可操作控件。
-		var raw_entry: Variant = entries[entry_index]
-		if raw_entry is Dictionary and _does_entry_match_storage_filter(raw_entry as Dictionary):
-			_build_storage_entry_row(raw_entry as Dictionary, location, entry_index, entries.size(), target_container)
+		var raw_entry: Variant = entries[visible_index]
+		if raw_entry is Dictionary:
+			# 真实来源下标；查询排序不会改变库存数组，拖拽和点击仍使用原始记录索引。
+			var source_index: int = int((raw_entry as Dictionary).get("source_index", visible_index))
+			_build_storage_entry_row(raw_entry as Dictionary, location, source_index, entries.size(), target_container)
 
 
 func _build_storage_entry_row(entry: Dictionary, location: String, entry_index: int, _entry_count: int, target_container: Container) -> void:
@@ -287,9 +338,11 @@ func _build_storage_entry_row(entry: Dictionary, location: String, entry_index: 
 	var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
 	item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	item_control.call("configure", item_resource, location, entry_index, _backpack_expanded, extraction_prefix, quantity)
+	item_control.call("set_enhancement_target_highlight", _pending_stone_resource != null and str(item_resource.get("weapon_type")) in ["ranged", "melee"])
 	item_control.connect("quick_action_requested", Callable(self, "_on_quick_action_requested").bind(location))
 	item_control.connect("item_action_requested", Callable(self, "_on_item_action_requested").bind(location))
 	item_control.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
+	item_control.connect("enhancement_drop_requested", Callable(self, "_on_enhancement_drop_requested"))
 	target_container.add_child(item_control)
 
 
@@ -320,7 +373,9 @@ func _create_storage_equipment_slot(slot_label: String, location: String, weapon
 	slot_control.call("configure", slot_label, location, weapon_type, item_resource, detail_tooltip)
 	slot_control.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
 	slot_control.connect("item_selected", Callable(self, "_on_enhancement_weapon_selected"))
-	slot_control.custom_minimum_size = Vector2(0.0, 54.0)
+	slot_control.connect("enhancement_drop_requested", Callable(self, "_on_enhancement_drop_requested"))
+	slot_control.call("set_enhancement_target_highlight", _pending_stone_resource != null and item_resource != null)
+	slot_control.custom_minimum_size = Vector2(0.0, 46.0)
 	return slot_control
 
 
@@ -336,47 +391,77 @@ func _get_item_detail_tooltip(item_resource: Resource) -> String:
 	return detail_tooltip
 
 
-func _create_storage_filter_button(filter_bar: HBoxContainer, button_text: String, filter_name: String) -> void:
-	# 分类按钮；同一筛选标识可由“资源”和“强化石”两个层级标签触发，按钮状态保持同步。
-	var filter_button: Button = Button.new()
-	filter_button.text = button_text
-	filter_button.toggle_mode = true
-	filter_button.custom_minimum_size = Vector2(92.0, 34.0)
-	filter_button.pressed.connect(Callable(self, "_on_storage_filter_pressed").bind(filter_name))
-	filter_bar.add_child(filter_button)
-	# 同标识按钮数组；资源主分类和强化石子分类都应同时显示为选中。
-	var filter_button_list: Array = _storage_filter_buttons.get(filter_name, [])
-	filter_button_list.append(filter_button)
-	_storage_filter_buttons[filter_name] = filter_button_list
+func _create_storage_category_button(target_bar: HBoxContainer, button_text: String, category_name: String, is_primary: bool) -> void:
+	# 分类按钮；一级与二级共用创建逻辑，但分别写入不同按钮表和回调。
+	var category_button: Button = Button.new()
+	category_button.text = button_text
+	category_button.toggle_mode = true
+	category_button.custom_minimum_size = Vector2(104.0, 30.0)
+	if is_primary:
+		category_button.pressed.connect(Callable(self, "_on_storage_primary_category_pressed").bind(category_name))
+		_storage_primary_buttons[category_name] = category_button
+	else:
+		category_button.pressed.connect(Callable(self, "_on_storage_subcategory_pressed").bind(category_name))
+		_storage_subcategory_buttons[category_name] = category_button
+	target_bar.add_child(category_button)
 
 
-func _on_storage_filter_pressed(filter_name: String) -> void:
-	_storage_filter = filter_name
-	_refresh_storage_filter_buttons()
+func _rebuild_storage_subcategory_buttons() -> void:
+	_clear_container(_storage_subcategory_bar)
+	_storage_subcategory_buttons.clear()
+	_create_storage_category_button(_storage_subcategory_bar, "全部", InventoryQuery.SUBCATEGORY_ALL, false)
+	if _storage_primary_category == InventoryQuery.PRIMARY_WEAPONS:
+		_create_storage_category_button(_storage_subcategory_bar, "近战", InventoryQuery.SUBCATEGORY_MELEE, false)
+		_create_storage_category_button(_storage_subcategory_bar, "远程", InventoryQuery.SUBCATEGORY_RANGED, false)
+	else:
+		_create_storage_category_button(_storage_subcategory_bar, "强化石", InventoryQuery.SUBCATEGORY_ENHANCEMENT_STONES, false)
+	_refresh_storage_category_buttons()
+
+
+func _on_storage_primary_category_pressed(category_name: String) -> void:
+	_storage_primary_category = category_name
+	_storage_subcategory = InventoryQuery.SUBCATEGORY_ALL
+	_stone_attribute_filter = ""
+	_stone_attribute_option.select(0)
+	_rebuild_storage_subcategory_buttons()
+	_refresh_storage_category_buttons()
 	_rebuild_storage_content()
 
 
-func _refresh_storage_filter_buttons() -> void:
-	for filter_name in _storage_filter_buttons.keys():
-		# 同分类按钮列表；资源主分类和强化石子分类共享选中状态。
-		var filter_button_list: Array = _storage_filter_buttons.get(filter_name, [])
-		for raw_button in filter_button_list:
-			if raw_button is Button:
-				(raw_button as Button).set_pressed_no_signal(str(filter_name) == _storage_filter)
+func _on_storage_subcategory_pressed(category_name: String) -> void:
+	_storage_subcategory = category_name
+	_refresh_storage_category_buttons()
+	_rebuild_storage_content()
 
 
-func _does_entry_match_storage_filter(entry: Dictionary) -> bool:
-	# 条目资源；异常空资源不参与任何分类。
-	var item_resource: Resource = entry.get("resource") as Resource
-	if item_resource == null:
-		return false
-	if _storage_filter == STORAGE_FILTER_STONES:
-		return str(item_resource.get("item_kind")) == "enhancement_stone"
-	# 武器类型；weapons 显示全部武器，melee/ranged 只显示对应子分类。
-	var weapon_type: String = str(item_resource.get("weapon_type"))
-	if _storage_filter == STORAGE_FILTER_WEAPONS:
-		return weapon_type in ["melee", "ranged"]
-	return weapon_type == _storage_filter
+func _refresh_storage_category_buttons() -> void:
+	for category_name in _storage_primary_buttons.keys():
+		# 一级分类按钮；当前主分类保持按下状态。
+		var primary_button: Button = _storage_primary_buttons.get(category_name) as Button
+		if primary_button != null:
+			primary_button.set_pressed_no_signal(str(category_name) == _storage_primary_category)
+	for category_name in _storage_subcategory_buttons.keys():
+		# 二级分类按钮；当前子分类保持按下状态。
+		var subcategory_button: Button = _storage_subcategory_buttons.get(category_name) as Button
+		if subcategory_button != null:
+			subcategory_button.set_pressed_no_signal(str(category_name) == _storage_subcategory)
+	_stone_attribute_option.visible = _storage_primary_category == InventoryQuery.PRIMARY_RESOURCES
+
+
+func _on_storage_search_changed(_new_text: String) -> void:
+	_rebuild_storage_content()
+
+
+func _on_storage_sort_selected(item_index: int) -> void:
+	# 排序元数据；取值为 acquired_time 或 item_value，异常值回退获得时间。
+	var selected_sort_mode: String = str(_storage_sort_option.get_item_metadata(item_index))
+	_storage_sort_mode = selected_sort_mode if selected_sort_mode in [InventoryQuery.SORT_ACQUIRED_TIME, InventoryQuery.SORT_ITEM_VALUE] else InventoryQuery.SORT_ACQUIRED_TIME
+	_rebuild_storage_content()
+
+
+func _on_stone_attribute_selected(item_index: int) -> void:
+	_stone_attribute_filter = str(_stone_attribute_option.get_item_metadata(item_index))
+	_rebuild_storage_content()
 
 
 func _get_storage_summary_text(warehouse_entries: Array, backpack_entries: Array) -> String:
@@ -388,8 +473,12 @@ func _get_storage_summary_text(warehouse_entries: Array, backpack_entries: Array
 func _apply_storage_display_mode() -> void:
 	_backpack_section.visible = _backpack_expanded
 	_mode_toggle_button.text = "收起背包 E" if _backpack_expanded else "展开背包 E"
-	_warehouse_scroll.custom_minimum_size = Vector2(0.0, 220.0 if _backpack_expanded else 430.0)
+	_warehouse_scroll.custom_minimum_size = Vector2(0.0, 120.0 if _backpack_expanded else 386.0)
+	if _carried_drop_area != null:
+		_carried_drop_area.custom_minimum_size = Vector2(0.0, 180.0 if _backpack_expanded else 215.0)
 	_warehouse_scroll.size_flags_vertical = Control.SIZE_SHRINK_BEGIN if _backpack_expanded else Control.SIZE_EXPAND_FILL
+	if _cancel_stone_use_button != null:
+		_cancel_stone_use_button.visible = _pending_stone_resource != null
 
 
 func _on_mode_toggle_pressed() -> void:
@@ -435,6 +524,16 @@ func _on_item_action_menu_id_pressed(action_id: int) -> void:
 	elif action_id == ITEM_ACTION_USE and str(_action_item_resource.get("item_kind")) == "enhancement_stone":
 		_pending_stone_resource = _action_item_resource
 		_pending_stone_location = _action_item_location
+		_backpack_expanded = true
+		# 强化目标选择页；自动切回全部武器并清空查询条件，确保仓库、背包和装备栏目标立即可见。
+		_storage_primary_category = InventoryQuery.PRIMARY_WEAPONS
+		_storage_subcategory = InventoryQuery.SUBCATEGORY_ALL
+		_stone_attribute_filter = ""
+		_stone_attribute_option.select(0)
+		_storage_search_edit.clear()
+		_rebuild_storage_subcategory_buttons()
+		_refresh_storage_category_buttons()
+		_apply_storage_display_mode()
 		_rebuild_storage_content()
 	_action_item_resource = null
 	_action_item_location = ""
@@ -443,10 +542,36 @@ func _on_item_action_menu_id_pressed(action_id: int) -> void:
 func _on_enhancement_weapon_selected(weapon_resource: Resource) -> void:
 	if _pending_stone_resource == null or weapon_resource == null or _global_inventory == null:
 		return
-	if bool(_global_inventory.call("use_enhancement_stone", _pending_stone_resource, _pending_stone_location, weapon_resource)):
+	# 强化结果；成功时扣除一颗材料并展示完整属性变化，失败时保留选择状态。
+	var enhancement_result: Dictionary = _global_inventory.call("use_enhancement_stone_with_result", _pending_stone_resource, _pending_stone_location, weapon_resource) as Dictionary
+	if bool(enhancement_result.get("success", false)):
 		_pending_stone_resource = null
 		_pending_stone_location = ""
+		_present_enhancement_result(enhancement_result)
+	_apply_storage_display_mode()
 	_rebuild_storage_content()
+
+
+func _on_enhancement_drop_requested(stone_resource: Resource, source_location: String, weapon_resource: Resource) -> void:
+	if _global_inventory == null or stone_resource == null or weapon_resource == null:
+		return
+	# 拖动强化结果；不进入点击选择状态，成功后直接弹出本次数值明细。
+	var enhancement_result: Dictionary = _global_inventory.call("use_enhancement_stone_with_result", stone_resource, source_location, weapon_resource) as Dictionary
+	if bool(enhancement_result.get("success", false)):
+		_present_enhancement_result(enhancement_result)
+	_rebuild_storage_content()
+
+
+func _on_cancel_stone_use_pressed() -> void:
+	_pending_stone_resource = null
+	_pending_stone_location = ""
+	_apply_storage_display_mode()
+	_rebuild_storage_content()
+
+
+func _present_enhancement_result(enhancement_result: Dictionary) -> void:
+	if _enhancement_result_dialog != null and _enhancement_result_dialog.has_method("present"):
+		_enhancement_result_dialog.call("present", enhancement_result)
 
 
 func _on_item_drop_requested(drag_data: Dictionary, target_location: String, target_index: int) -> void:
@@ -487,10 +612,6 @@ func _on_item_drop_requested(drag_data: Dictionary, target_location: String, tar
 		_global_inventory.call("swap_equipment_locations", source_location, target_location)
 
 
-func _on_sell_pressed(item_resource: Resource) -> void:
-	_global_inventory.call("sell_warehouse_resource", item_resource)
-
-
 func _clear_container(container: Node) -> void:
 	if container == null:
 		return
@@ -503,4 +624,5 @@ func _clear_container(container: Node) -> void:
 func _on_close_pressed() -> void:
 	_pending_stone_resource = null
 	_pending_stone_location = ""
+	_apply_storage_display_mode()
 	closed.emit()

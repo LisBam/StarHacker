@@ -13,6 +13,8 @@ const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_p
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
 ## 隐藏开发者菜单脚本；默认在暂停界面输入 LISBAM 后以战斗调试上下文显示。
 const DEVELOPER_MENU_SCRIPT: Script = preload("res://scripts/ui/developer_menu.gd")
+## 强化结果弹窗脚本；用于局内使用或拖动强化石后展示完整属性变化。
+const ENHANCEMENT_RESULT_DIALOG_SCRIPT: Script = preload("res://scripts/ui/enhancement_result_dialog.gd")
 ## 战斗开发者模式解锁序列；默认六个英文字母，输入错误时按首字母重新开始匹配。
 const DEVELOPER_UNLOCK_SEQUENCE: String = "LISBAM"
 ## 背包全部分页标识；默认显示所有背包武器，修改会影响筛选按钮与背包网格过滤。
@@ -25,6 +27,8 @@ const INVENTORY_FILTER_MELEE: String = "melee"
 const INVENTORY_FILTER_STONES: String = "enhancement_stones"
 ## 局内强化石操作菜单使用项编号；固定为 1，选择后进入背包或装备栏武器选择状态。
 const INVENTORY_ITEM_ACTION_USE: int = 1
+## 局内武器操作菜单装备项编号；固定为 2，远程武器替换当前手持槽，近战武器替换近战槽。
+const INVENTORY_ITEM_ACTION_EQUIP: int = 2
 ## 星角色标识；默认与 SessionState 和 GameWorld 保持一致，修改会影响训练场切换角色目标。
 const CHARACTER_STELLE: String = "stelle"
 ## 穹角色标识；默认与 SessionState 和 GameWorld 保持一致，修改会影响训练场切换角色目标。
@@ -97,16 +101,40 @@ var _inventory_equipment_ranged_controls: Array = []
 var _inventory_equipment_melee_control: Control
 ## 最近触发冷却的远程槽索引；取值为 -1 或有效远程槽，默认 -1 表示无远程冷却显示目标，修改会影响远程 CD 遮罩位置。
 var _last_cooling_ranged_slot: int = -1
-## 背包当前筛选页；取值为 all、ranged 或 melee，默认 all 显示全部武器，修改会影响右侧背包网格内容。
+## 背包当前二级筛选页；取值为 all、ranged、melee 或 enhancement_stones，默认 all。
 var _inventory_filter: String = INVENTORY_FILTER_ALL
+## 背包当前主分类；取值为 weapons 或 resources，默认武器并决定二级按钮内容。
+var _inventory_primary_category: String = InventoryQuery.PRIMARY_WEAPONS
+## 背包武器主分类按钮；默认运行时创建，点击后显示全部/近战/远程二级页。
+var _inventory_primary_weapons_button: Button
+## 背包资源主分类按钮；默认运行时创建，点击后显示全部/强化石二级页。
+var _inventory_primary_resources_button: Button
 ## 背包强化石筛选按钮；默认运行时追加到现有筛选栏，点击后显示正方形强化石格子。
 var _inventory_filter_stones_button: Button
+## 背包关键词搜索框；默认空字符串，按名称、说明和强化词条实时筛选。
+var _inventory_search_edit: LineEdit
+## 背包排序下拉框；默认获得时间，可切换物品价值降序。
+var _inventory_sort_option: OptionButton
+## 背包强化属性筛选框；默认全部属性，只在资源主分类显示。
+var _inventory_stone_attribute_option: OptionButton
+## 背包当前强化属性筛选键；默认空字符串表示不过滤具体属性。
+var _inventory_stone_attribute_filter: String = ""
+## 背包当前排序模式；默认 acquired_time，只改变显示顺序。
+var _inventory_sort_mode: String = InventoryQuery.SORT_ACQUIRED_TIME
 ## 局内资源操作菜单；点击强化石后显示“使用”选项，不在战斗内提供金币出售。
 var _inventory_item_action_menu: PopupMenu
 ## 当前局内待使用强化石；非空时下一次点击背包或装备栏武器会尝试强化。
 var _pending_combat_stone_resource: Resource
 ## 当前局内操作菜单指向的强化石；只有玩家确认“使用”后才复制到待选择状态，关闭菜单不会误消费。
 var _combat_action_stone_resource: Resource
+## 当前局内操作菜单指向的背包武器；非空时选择“装备”会替换对应装备槽。
+var _combat_action_weapon_resource: Resource
+## 当前局内操作武器的背包原始下标；默认 -1，装备替换后用于把旧武器放回相同位置。
+var _combat_action_weapon_source_index: int = -1
+## 局内取消使用按钮；默认隐藏，进入强化目标选择后显示。
+var _inventory_cancel_stone_use_button: Button
+## 局内强化结果弹窗；默认运行时创建一次并在每次成功强化时复用。
+var _enhancement_result_dialog: AcceptDialog
 ## Master 音频总线索引；取值为 -1 或有效总线下标，默认 -1 表示尚未解析，修改会影响暂停设置音量应用目标。
 var _master_bus_index: int = -1
 ## 当前是否为训练场模式；取值为 true/false，默认 false，修改会影响训练场设置按钮和角色切换入口是否可见。
@@ -450,12 +478,14 @@ func _refresh_equipment() -> void:
 		var ranged_weapon: Resource = _equipment_component.call("get_ranged_weapon", slot_index) as Resource
 		_ranged_slot_controls[slot_index].call("set_slot_data", "equipment", "ranged", slot_index, ranged_weapon, slot_index == current_slot)
 		_ranged_slot_controls[slot_index].call("set_empty_text", "空远程")
+		_ranged_slot_controls[slot_index].call("set_enhancement_target_highlight", _inventory_panel.visible and _pending_combat_stone_resource != null)
 
 	if _melee_slot_control != null:
 		# 当前近战武器资源；取值为 Resource 或 null，默认来自装备组件，修改会影响近战槽显示内容。
 		var melee_weapon: Resource = _equipment_component.call("get_melee_weapon") as Resource
 		_melee_slot_control.call("set_slot_data", "equipment", "melee", -1, melee_weapon, true)
 		_melee_slot_control.call("set_empty_text", "空近战")
+		_melee_slot_control.call("set_enhancement_target_highlight", _inventory_panel.visible and _pending_combat_stone_resource != null)
 
 
 func _rebuild_inventory_slots() -> void:
@@ -472,21 +502,32 @@ func _rebuild_inventory_slots() -> void:
 		_refresh_inventory_title(0, 0)
 		return
 
-	# 背包物品条目；包含资源与堆叠数量，强化石一组只生成一个正方形资源格。
+	# 背包物品条目；包含资源与堆叠数量，查询组件会附加真实来源下标。
 	var item_entries: Array = _inventory_component.call("get_item_entries")
+	# 当前查询结果；应用主/子分类、关键词、强化属性和排序，不修改全局库存顺序。
+	var visible_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(
+		item_entries,
+		_inventory_primary_category,
+		_inventory_filter,
+		_inventory_search_edit.text,
+		_inventory_stone_attribute_filter,
+		_inventory_sort_mode
+	)
 	# 当前筛选页可见物品数量；取值从 0 到背包物品总数，默认逐项统计，修改会影响标题数量显示。
 	var visible_item_count: int = 0
 
 	# 背包物品槽索引；取值为背包物品数组下标，默认逐个创建，修改循环范围会影响背包显示数量。
-	for item_index in range(item_entries.size()):
+	for visible_index in range(visible_entries.size()):
 		# 背包条目；异常值不生成槽位，避免损坏存档阻断整个背包界面。
-		var raw_entry: Variant = item_entries[item_index]
+		var raw_entry: Variant = visible_entries[visible_index]
 		if not (raw_entry is Dictionary):
 			continue
 		# 背包物品资源；取值为武器或强化石，类型决定使用武器槽还是资源方格。
 		var item_data: Resource = (raw_entry as Dictionary).get("resource") as Resource
-		if not _does_item_match_inventory_filter(item_data):
+		if item_data == null:
 			continue
+		# 真实来源下标；排序后的武器拖拽仍需指向 GlobalInventory 原始记录。
+		var source_index: int = int((raw_entry as Dictionary).get("source_index", visible_index))
 
 		visible_item_count += 1
 		if str(item_data.get("item_kind")) == "enhancement_stone":
@@ -494,15 +535,17 @@ func _rebuild_inventory_slots() -> void:
 			var quantity: int = clampi(int((raw_entry as Dictionary).get("quantity", 1)), 1, 99)
 			# 强化石资源格；复用仓库控件的方形布局和带颜色悬停详情，不参与武器装备拖拽。
 			var resource_slot: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
-			resource_slot.call("configure", item_data, "combat_backpack", item_index, false, "", quantity)
+			resource_slot.call("configure", item_data, "backpack", source_index, false, "", quantity)
+			resource_slot.custom_minimum_size = inventory_slot_minimum_size
 			resource_slot.connect("item_action_requested", Callable(self, "_on_combat_resource_action_requested"))
 			_inventory_weapon_grid.add_child(resource_slot)
 			_inventory_slot_controls.append(resource_slot)
 		else:
 			# 背包武器槽控件；继续使用原有装备、拖拽和丢弃协议。
 			var inventory_slot: Control = _create_weapon_slot_control(inventory_slot_minimum_size)
-			inventory_slot.call("set_slot_data", "inventory", "inventory", item_index, item_data, false)
+			inventory_slot.call("set_slot_data", "inventory", "inventory", source_index, item_data, false)
 			inventory_slot.call("set_empty_text", "空")
+			inventory_slot.call("set_enhancement_target_highlight", _pending_combat_stone_resource != null)
 			_inventory_weapon_grid.add_child(inventory_slot)
 			_inventory_slot_controls.append(inventory_slot)
 
@@ -513,10 +556,10 @@ func _refresh_inventory_title(item_count: int, visible_item_count: int) -> void:
 	var filter_label: String = _get_inventory_filter_label()
 	if _pending_combat_stone_resource != null:
 		_inventory_title_label.text = "请选择背包或装备栏中的一把兼容武器"
-	elif _inventory_filter == INVENTORY_FILTER_ALL:
-		_inventory_title_label.text = "背包 · 武器  E关闭  %d组物品" % item_count
 	else:
 		_inventory_title_label.text = "%s  E关闭  %d / %d组物品" % [filter_label, visible_item_count, item_count]
+	if _inventory_cancel_stone_use_button != null:
+		_inventory_cancel_stone_use_button.visible = _pending_combat_stone_resource != null
 
 
 func _rebuild_inventory_equipment_slots() -> void:
@@ -551,12 +594,14 @@ func _refresh_inventory_equipment_slots() -> void:
 		var ranged_weapon: Resource = _equipment_component.call("get_ranged_weapon", slot_index) as Resource
 		_inventory_equipment_ranged_controls[slot_index].call("set_slot_data", "equipment", "ranged", slot_index, ranged_weapon, slot_index == current_slot)
 		_inventory_equipment_ranged_controls[slot_index].call("set_empty_text", "空远程")
+		_inventory_equipment_ranged_controls[slot_index].call("set_enhancement_target_highlight", _pending_combat_stone_resource != null)
 
 	if _inventory_equipment_melee_control != null:
 		# 背包界面当前近战武器资源；取值为 Resource 或 null，默认来自装备组件，修改会影响左侧近战槽显示。
 		var melee_weapon: Resource = _equipment_component.call("get_melee_weapon") as Resource
 		_inventory_equipment_melee_control.call("set_slot_data", "equipment", "melee", -1, melee_weapon, true)
 		_inventory_equipment_melee_control.call("set_empty_text", "空近战")
+		_inventory_equipment_melee_control.call("set_enhancement_target_highlight", _pending_combat_stone_resource != null)
 
 
 func _refresh_cooldown_overlays() -> void:
@@ -583,7 +628,8 @@ func _create_weapon_slot_control(minimum_size: Vector2) -> Control:
 	slot_control.custom_minimum_size = minimum_size
 	slot_control.connect("drop_received", Callable(self, "_on_weapon_slot_drop_received"))
 	slot_control.connect("drag_released_outside", Callable(self, "_on_weapon_slot_drag_released_outside"))
-	slot_control.connect("item_selected", Callable(self, "_on_combat_enhancement_weapon_selected"))
+	slot_control.connect("item_selected", Callable(self, "_on_combat_weapon_selected"))
+	slot_control.connect("enhancement_drop_received", Callable(self, "_on_combat_enhancement_drop_received"))
 	return slot_control
 
 
@@ -929,6 +975,11 @@ func _set_inventory_visible(visible: bool) -> void:
 	else:
 		_pending_combat_stone_resource = null
 		_combat_action_stone_resource = null
+		_combat_action_weapon_resource = null
+		_combat_action_weapon_source_index = -1
+		if _inventory_cancel_stone_use_button != null:
+			_inventory_cancel_stone_use_button.visible = false
+		_refresh_equipment()
 
 	_refresh_combat_input_state()
 
@@ -1105,24 +1156,91 @@ func _bind_inventory_filter_buttons() -> void:
 	_inventory_filter_all_button.connect("pressed", Callable(self, "_on_inventory_filter_all_pressed"))
 	_inventory_filter_melee_button.connect("pressed", Callable(self, "_on_inventory_filter_melee_pressed"))
 	_inventory_filter_ranged_button.connect("pressed", Callable(self, "_on_inventory_filter_ranged_pressed"))
-	_inventory_filter_all_button.text = "武器"
+	_inventory_filter_all_button.text = "全部"
+	_inventory_filter_melee_button.text = "近战"
+	_inventory_filter_ranged_button.text = "远程"
 	# 强化石按钮；追加到原筛选栏，作为资源分类当前唯一子类入口。
-	var filter_parent: Node = _inventory_filter_all_button.get_parent()
+	var filter_parent: HBoxContainer = _inventory_filter_all_button.get_parent() as HBoxContainer
 	if filter_parent != null:
 		_inventory_filter_stones_button = Button.new()
-		_inventory_filter_stones_button.text = "资源 · 强化石"
+		_inventory_filter_stones_button.text = "强化石"
 		_inventory_filter_stones_button.toggle_mode = true
 		_inventory_filter_stones_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_inventory_filter_stones_button.pressed.connect(_on_inventory_filter_stones_pressed)
 		filter_parent.add_child(_inventory_filter_stones_button)
+
+		# 背包内容容器；查询栏和一级分类栏会插入现有二级分类栏之前。
+		var backpack_content: VBoxContainer = filter_parent.get_parent() as VBoxContainer
+		if backpack_content != null:
+			# 查询栏；提供关键词搜索、排序和强化属性筛选。
+			var query_bar: HBoxContainer = HBoxContainer.new()
+			query_bar.add_theme_constant_override("separation", 5)
+			backpack_content.add_child(query_bar)
+			backpack_content.move_child(query_bar, filter_parent.get_index())
+			_inventory_search_edit = LineEdit.new()
+			_inventory_search_edit.placeholder_text = "搜索物品或词条"
+			_inventory_search_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			_inventory_search_edit.text_changed.connect(_on_inventory_search_changed)
+			query_bar.add_child(_inventory_search_edit)
+			_inventory_sort_option = OptionButton.new()
+			_inventory_sort_option.custom_minimum_size = Vector2(112.0, 34.0)
+			_inventory_sort_option.add_item("获得时间")
+			_inventory_sort_option.set_item_metadata(0, InventoryQuery.SORT_ACQUIRED_TIME)
+			_inventory_sort_option.add_item("物品价值")
+			_inventory_sort_option.set_item_metadata(1, InventoryQuery.SORT_ITEM_VALUE)
+			_inventory_sort_option.item_selected.connect(_on_inventory_sort_selected)
+			query_bar.add_child(_inventory_sort_option)
+			_inventory_stone_attribute_option = OptionButton.new()
+			_inventory_stone_attribute_option.custom_minimum_size = Vector2(112.0, 34.0)
+			_inventory_stone_attribute_option.add_item("全部属性")
+			_inventory_stone_attribute_option.set_item_metadata(0, "")
+			for stat_name in EnhancementRules.STAT_KEYS:
+				_inventory_stone_attribute_option.add_item(EnhancementRules.get_stat_label(stat_name))
+				_inventory_stone_attribute_option.set_item_metadata(_inventory_stone_attribute_option.item_count - 1, stat_name)
+			_inventory_stone_attribute_option.item_selected.connect(_on_inventory_stone_attribute_selected)
+			query_bar.add_child(_inventory_stone_attribute_option)
+
+			# 一级分类栏；武器和资源独立于原二级分类栏，形成清晰的多层结构。
+			var primary_bar: HBoxContainer = HBoxContainer.new()
+			primary_bar.add_theme_constant_override("separation", 6)
+			backpack_content.add_child(primary_bar)
+			backpack_content.move_child(primary_bar, filter_parent.get_index())
+			_inventory_primary_weapons_button = Button.new()
+			_inventory_primary_weapons_button.text = "武器"
+			_inventory_primary_weapons_button.toggle_mode = true
+			_inventory_primary_weapons_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			_inventory_primary_weapons_button.pressed.connect(Callable(self, "_on_inventory_primary_category_pressed").bind(InventoryQuery.PRIMARY_WEAPONS))
+			primary_bar.add_child(_inventory_primary_weapons_button)
+			_inventory_primary_resources_button = Button.new()
+			_inventory_primary_resources_button.text = "资源"
+			_inventory_primary_resources_button.toggle_mode = true
+			_inventory_primary_resources_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			_inventory_primary_resources_button.pressed.connect(Callable(self, "_on_inventory_primary_category_pressed").bind(InventoryQuery.PRIMARY_RESOURCES))
+			primary_bar.add_child(_inventory_primary_resources_button)
+
+			# 背包滚动区高度；给新增查询和两级分类预留空间，避免面板内容溢出。
+			var inventory_scroll_control: Control = _inventory_drop_area as Control
+			if inventory_scroll_control != null:
+				inventory_scroll_control.custom_minimum_size = Vector2(0.0, 210.0)
 	_refresh_inventory_filter_buttons()
 
 
 func _build_inventory_item_action_menu() -> void:
 	_inventory_item_action_menu = PopupMenu.new()
-	_inventory_item_action_menu.add_item("使用", INVENTORY_ITEM_ACTION_USE)
 	_inventory_item_action_menu.id_pressed.connect(_on_inventory_item_action_menu_id_pressed)
 	_root_control.add_child(_inventory_item_action_menu)
+	# 取消使用按钮；插入背包标题下方，仅强化目标选择期间占用布局高度。
+	_inventory_cancel_stone_use_button = Button.new()
+	_inventory_cancel_stone_use_button.text = "取消使用"
+	_inventory_cancel_stone_use_button.visible = false
+	_inventory_cancel_stone_use_button.custom_minimum_size = Vector2(0.0, 32.0)
+	_inventory_cancel_stone_use_button.pressed.connect(_on_cancel_combat_stone_use_pressed)
+	# 背包标题容器；默认为 VBoxContainer，节点结构异常时按钮挂到背包面板作为兜底。
+	var title_parent: Node = _inventory_title_label.get_parent()
+	title_parent.add_child(_inventory_cancel_stone_use_button)
+	title_parent.move_child(_inventory_cancel_stone_use_button, _inventory_title_label.get_index() + 1)
+	_enhancement_result_dialog = ENHANCEMENT_RESULT_DIALOG_SCRIPT.new() as AcceptDialog
+	_root_control.add_child(_enhancement_result_dialog)
 
 
 func _bind_inventory_drop_area() -> void:
@@ -1245,25 +1363,23 @@ func _set_inventory_filter(new_filter: String) -> void:
 
 
 func _refresh_inventory_filter_buttons() -> void:
+	if _inventory_primary_weapons_button != null:
+		_inventory_primary_weapons_button.set_pressed_no_signal(_inventory_primary_category == InventoryQuery.PRIMARY_WEAPONS)
+	if _inventory_primary_resources_button != null:
+		_inventory_primary_resources_button.set_pressed_no_signal(_inventory_primary_category == InventoryQuery.PRIMARY_RESOURCES)
 	_inventory_filter_all_button.set_pressed_no_signal(_inventory_filter == INVENTORY_FILTER_ALL)
 	_inventory_filter_melee_button.set_pressed_no_signal(_inventory_filter == INVENTORY_FILTER_MELEE)
 	_inventory_filter_ranged_button.set_pressed_no_signal(_inventory_filter == INVENTORY_FILTER_RANGED)
 	if _inventory_filter_stones_button != null:
 		_inventory_filter_stones_button.set_pressed_no_signal(_inventory_filter == INVENTORY_FILTER_STONES)
-
-
-func _does_item_match_inventory_filter(item_data: Resource) -> bool:
-	if item_data == null:
-		return false
-
-	if _inventory_filter == INVENTORY_FILTER_ALL:
-		return str(item_data.get("weapon_type")) in ["ranged", "melee"]
-	if _inventory_filter == INVENTORY_FILTER_STONES:
-		return str(item_data.get("item_kind")) == "enhancement_stone"
-
-	# 背包物品武器类型；取值来自资源 weapon_type 字段，默认用于和当前筛选页比较，修改会影响物品是否显示。
-	var weapon_type: String = str(item_data.get("weapon_type"))
-	return weapon_type == _inventory_filter
+	# 二级分类可见性；武器显示全部/近战/远程，资源显示全部/强化石。
+	var weapon_category_visible: bool = _inventory_primary_category == InventoryQuery.PRIMARY_WEAPONS
+	_inventory_filter_melee_button.visible = weapon_category_visible
+	_inventory_filter_ranged_button.visible = weapon_category_visible
+	if _inventory_filter_stones_button != null:
+		_inventory_filter_stones_button.visible = not weapon_category_visible
+	if _inventory_stone_attribute_option != null:
+		_inventory_stone_attribute_option.visible = not weapon_category_visible
 
 
 func _get_inventory_filter_label() -> String:
@@ -1273,8 +1389,10 @@ func _get_inventory_filter_label() -> String:
 		return "远程"
 	if _inventory_filter == INVENTORY_FILTER_STONES:
 		return "资源 · 强化石"
+	if _inventory_primary_category == InventoryQuery.PRIMARY_RESOURCES:
+		return "资源 · 全部"
 
-	return "武器"
+	return "武器 · 全部"
 
 
 func _is_toggle_inventory_event(key_event: InputEventKey) -> bool:
@@ -1963,29 +2081,129 @@ func _on_inventory_filter_stones_pressed() -> void:
 	_set_inventory_filter(INVENTORY_FILTER_STONES)
 
 
+func _on_inventory_primary_category_pressed(category_name: String) -> void:
+	_inventory_primary_category = category_name
+	_inventory_filter = INVENTORY_FILTER_ALL
+	_inventory_stone_attribute_filter = ""
+	if _inventory_stone_attribute_option != null:
+		_inventory_stone_attribute_option.select(0)
+	_refresh_inventory_filter_buttons()
+	if _inventory_panel.visible:
+		_rebuild_inventory_slots()
+
+
+func _on_inventory_search_changed(_new_text: String) -> void:
+	if _inventory_panel.visible:
+		_rebuild_inventory_slots()
+
+
+func _on_inventory_sort_selected(item_index: int) -> void:
+	# 排序元数据；异常选项回退获得时间。
+	var selected_sort_mode: String = str(_inventory_sort_option.get_item_metadata(item_index))
+	_inventory_sort_mode = selected_sort_mode if selected_sort_mode in [InventoryQuery.SORT_ACQUIRED_TIME, InventoryQuery.SORT_ITEM_VALUE] else InventoryQuery.SORT_ACQUIRED_TIME
+	if _inventory_panel.visible:
+		_rebuild_inventory_slots()
+
+
+func _on_inventory_stone_attribute_selected(item_index: int) -> void:
+	_inventory_stone_attribute_filter = str(_inventory_stone_attribute_option.get_item_metadata(item_index))
+	if _inventory_panel.visible:
+		_rebuild_inventory_slots()
+
+
 func _on_combat_resource_action_requested(item_resource: Resource) -> void:
 	if item_resource == null or str(item_resource.get("item_kind")) != "enhancement_stone":
 		return
 	_combat_action_stone_resource = item_resource
+	_combat_action_weapon_resource = null
+	_combat_action_weapon_source_index = -1
+	_inventory_item_action_menu.clear()
+	_inventory_item_action_menu.add_item("使用", INVENTORY_ITEM_ACTION_USE)
 	_inventory_item_action_menu.position = Vector2i(get_viewport().get_mouse_position())
 	_inventory_item_action_menu.popup()
 
 
 func _on_inventory_item_action_menu_id_pressed(action_id: int) -> void:
-	if action_id != INVENTORY_ITEM_ACTION_USE or _combat_action_stone_resource == null:
+	if action_id == INVENTORY_ITEM_ACTION_USE and _combat_action_stone_resource != null:
+		_pending_combat_stone_resource = _combat_action_stone_resource
+		_combat_action_stone_resource = null
+		# 强化目标选择页；自动显示全部背包武器并清空资源属性筛选和关键词。
+		_inventory_primary_category = InventoryQuery.PRIMARY_WEAPONS
+		_inventory_filter = INVENTORY_FILTER_ALL
+		_inventory_stone_attribute_filter = ""
+		if _inventory_stone_attribute_option != null:
+			_inventory_stone_attribute_option.select(0)
+		if _inventory_search_edit != null:
+			_inventory_search_edit.clear()
+		_refresh_inventory_filter_buttons()
+		_refresh_equipment()
+		_rebuild_inventory_slots()
+	elif action_id == INVENTORY_ITEM_ACTION_EQUIP and _combat_action_weapon_resource != null and _equipment_component != null:
+		# 待装备武器；远程目标为当前手持槽，近战目标为唯一近战槽。
+		var weapon_resource: Resource = _combat_action_weapon_resource
+		# 装备目标类型；与武器 weapon_type 一致，用于复用原子替换流程。
+		var target_kind: String = str(weapon_resource.get("weapon_type"))
+		# 远程目标下标；近战槽使用 -1，远程读取当前手持槽以实现直接替换。
+		var target_index: int = int(_equipment_component.call("get_current_ranged_slot")) if target_kind == "ranged" else -1
+		# 伪装拖拽数据；复用现有背包到装备槽的原子替换逻辑，避免点击装备产生第二套所有权流程。
+		var drop_data: Dictionary = {"source_context": "inventory", "slot_kind": "inventory", "slot_index": _combat_action_weapon_source_index, "weapon_data": weapon_resource}
+		_equip_inventory_weapon_to_target(drop_data, target_kind, target_index)
+		_refresh_equipment()
+		_rebuild_inventory_slots()
+		_combat_action_weapon_resource = null
+		_combat_action_weapon_source_index = -1
+
+
+func _on_combat_weapon_selected(weapon_resource: Resource, selected_context: String, selected_kind: String, selected_index: int) -> void:
+	if weapon_resource == null or not _inventory_panel.visible:
 		return
-	_pending_combat_stone_resource = _combat_action_stone_resource
+	if _pending_combat_stone_resource != null:
+		_apply_combat_enhancement(_pending_combat_stone_resource, weapon_resource)
+		return
+	if selected_context == "equipment" and selected_kind == "ranged" and _equipment_component != null and _equipment_component.has_method("equip_ranged_slot"):
+		_equipment_component.call("equip_ranged_slot", selected_index)
+		_refresh_equipment()
+		_refresh_inventory_equipment_slots()
+		return
+	if selected_context != "inventory":
+		return
+	_combat_action_weapon_resource = weapon_resource
+	_combat_action_weapon_source_index = selected_index
 	_combat_action_stone_resource = null
+	_inventory_item_action_menu.clear()
+	_inventory_item_action_menu.add_item("装备", INVENTORY_ITEM_ACTION_EQUIP)
+	_inventory_item_action_menu.position = Vector2i(get_viewport().get_mouse_position())
+	_inventory_item_action_menu.popup()
+
+
+func _on_combat_enhancement_drop_received(stone_resource: Resource, source_location: String, weapon_resource: Resource) -> void:
+	if source_location != "backpack" or stone_resource == null or weapon_resource == null:
+		return
+	_apply_combat_enhancement(stone_resource, weapon_resource)
+
+
+func _apply_combat_enhancement(stone_resource: Resource, weapon_resource: Resource) -> void:
+	if _inventory_component == null or not _inventory_component.has_method("use_enhancement_stone_with_result"):
+		return
+	# 局内强化结果；点击选择和拖动投放共用同一个消费与弹窗流程。
+	var enhancement_result: Dictionary = _inventory_component.call("use_enhancement_stone_with_result", stone_resource, weapon_resource) as Dictionary
+	if bool(enhancement_result.get("success", false)):
+		_pending_combat_stone_resource = null
+		_present_combat_enhancement_result(enhancement_result)
+	_refresh_equipment()
 	_rebuild_inventory_slots()
 
 
-func _on_combat_enhancement_weapon_selected(weapon_resource: Resource) -> void:
-	if _pending_combat_stone_resource == null or weapon_resource == null or _inventory_component == null:
-		return
-	if _inventory_component.has_method("use_enhancement_stone") and bool(_inventory_component.call("use_enhancement_stone", _pending_combat_stone_resource, weapon_resource)):
-		_pending_combat_stone_resource = null
-		_refresh_equipment()
-		_rebuild_inventory_slots()
+func _on_cancel_combat_stone_use_pressed() -> void:
+	_pending_combat_stone_resource = null
+	_combat_action_stone_resource = null
+	_refresh_equipment()
+	_rebuild_inventory_slots()
+
+
+func _present_combat_enhancement_result(enhancement_result: Dictionary) -> void:
+	if _enhancement_result_dialog != null and _enhancement_result_dialog.has_method("present"):
+		_enhancement_result_dialog.call("present", enhancement_result)
 
 
 func _on_inventory_drop_area_drop_received(drop_data: Dictionary) -> void:

@@ -2,6 +2,8 @@
 
 本文档是敌人 AI 的快速理解入口，统一记录虚拟人口加载、实心墙体视野、独立记忆、四段警戒、平面搜查、巡逻与寻路规则。当前版本不共享任何怪物情报：一只怪物发现玩家不会改变其他怪物的索敌状态，共享接收入口、共享战术组和不可达旧接收逻辑均已从代码中物理删除。
 
+完整玩法规则和默认数值同时汇总在 `docs/游戏机制与玩法内容.md`。
+
 ## 架构职责
 
 - `res://scripts/enemies/basic_monster.gd`：敌人聚合入口，维护生命、攻击、个体随机属性、AI 错峰更新和模拟启停。
@@ -29,7 +31,7 @@
 - 真实怪物死亡后由 `GameWorld._on_monster_died()` 统一处理掉落和虚拟人口注销，怪物脚本不直接依赖库存或强化系统。
 - 武器继续读取怪物自身 `weapon_drop_chance`，默认 3%，并从 `weapon_drop_table` 随机复制独立武器实例。
 - 强化石使用世界级 `enhancement_stone_drop_chance`，默认 0.05，即每次击杀独立有 5% 概率掉落一颗。
-- 强化石可随机生成一到多个正负百分比词条。词条数量、负词条概率、比例范围和基础售价均由 `GameWorld` 导出参数控制，掉落后通过通用 `item_drops` 拾取协议进入随身背包。
+- 强化石品质权重为低级 40%、中级 30%、高级 20%、极品 10%。每颗必定 1 条增强；低级增强 10%–20% 且 80% 带 10%–20% 削弱，中级增强 20%–40%、10% 额外增强、40% 带 5%–20% 削弱，高级增强 30%–50%、20% 额外增强、10% 带 5%–10% 削弱，极品增强 40%–60%、30% 额外增强且无削弱。地面拾取列表只显示品质和增强属性预览，不显示削弱属性。
 - 虚拟记录本身不会在远处自动死亡或生成地面掉落；只有玩家附近已经实例化且实际被击杀的怪物才执行死亡掉落，避免远距离模拟产生无法拾取的资源节点。
 
 ## 实心墙体专属视野
@@ -97,7 +99,7 @@
 ## 参数分组
 
 - 加载与错峰：`active_radius`、`sleep_hysteresis`、`update_interval`、`monsters_per_update`、`materializations_per_update`、`max_materialized_monsters`、`ai_update_interval`。
-- 死亡掉落：`weapon_drop_chance`、`enhancement_stone_drop_chance`、`enhancement_stone_min_modifier_count`、`enhancement_stone_max_modifier_count`、`enhancement_stone_negative_modifier_chance`、`enhancement_stone_min_modifier_ratio`、`enhancement_stone_max_modifier_ratio`、`enhancement_stone_base_sell_price`。
+- 死亡掉落：`weapon_drop_chance`、`enhancement_stone_drop_chance`、`enhancement_stone_min_modifier_count`、`enhancement_stone_max_modifier_count`、`enhancement_stone_negative_modifier_chance`、`enhancement_stone_base_sell_price`、`EnhancementRules.ENHANCEMENT_STEP_RATIO`。
 - 实心墙体视野：`vision_range`、`lose_target_range_multiplier`、`vision_requires_line_of_sight`、`vision_line_of_sight_collision_mask`、`vision_loss_grace_duration`、`solid_wall_group`、`line_of_sight_skip_limit`。
 - 短期线索：`target_memory_duration`、`target_prediction_time`、`target_prediction_max_distance`、`search_arrive_distance`、`lost_search_occlusion_offset`。
 - 中长期记忆：`medium_memory_duration`、`medium_hotspot_merge_distance`、`medium_hotspot_max_count`、`medium_recheck_trigger_radius`、`medium_recheck_duration`、`medium_recheck_cooldown`、`long_term_region_radius`、`long_term_alert_patrol_speed_multiplier`。

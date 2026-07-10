@@ -126,6 +126,14 @@ func use_enhancement_stone(stone_resource: Resource, weapon_resource: Resource) 
 	return bool(_global_inventory.call("use_enhancement_stone", stone_resource, "backpack", weapon_resource))
 
 
+func use_enhancement_stone_with_result(stone_resource: Resource, weapon_resource: Resource) -> Dictionary:
+	# 强化结果；局内 HUD 通过背包代理读取完整变化明细，背包组件不直接修改武器或扣除材料。
+	var failed_result: Dictionary = {"success": false, "weapon": weapon_resource, "stone": stone_resource, "beneficial_changes": [], "detrimental_changes": []}
+	if _global_inventory == null or not _global_inventory.has_method("use_enhancement_stone_with_result"):
+		return failed_result
+	return _global_inventory.call("use_enhancement_stone_with_result", stone_resource, "backpack", weapon_resource) as Dictionary
+
+
 func get_item_count() -> int:
 	if _global_inventory != null and _global_inventory.has_method("get_backpack_count"):
 		return int(_global_inventory.call("get_backpack_count"))

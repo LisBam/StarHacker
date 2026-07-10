@@ -6,6 +6,7 @@ class_name EquipmentStorageSlotControl
 
 signal item_drop_requested(drag_data: Dictionary, target_location: String, target_index: int)
 signal item_selected(item_resource: Resource)
+signal enhancement_drop_requested(stone_resource: Resource, source_location: String, weapon_resource: Resource)
 
 ## 拖拽数据类型标识；必须与 StorageItemControl 和 StorageDropArea 保持一致。
 const DRAG_DATA_TYPE: String = "global_storage_item"
@@ -20,6 +21,8 @@ var _location: String = ""
 var _slot_label: String = "装备槽"
 ## 当前槽位接收武器类型；取值为 ranged 或 melee，默认 ranged。
 var _accepted_weapon_type: String = "ranged"
+## 是否将当前装备标记为强化目标；默认 false，使用强化石期间会点亮所有非空装备槽。
+var _enhancement_target_highlight: bool = false
 
 
 func configure(slot_label: String, location: String, accepted_weapon_type: String, item_resource: Resource, detail_tooltip: String = "") -> void:
@@ -33,6 +36,12 @@ func configure(slot_label: String, location: String, accepted_weapon_type: Strin
 	mouse_default_cursor_shape = Control.CURSOR_DRAG if _item_resource != null else Control.CURSOR_POINTING_HAND
 	if not pressed.is_connected(_on_pressed):
 		pressed.connect(_on_pressed)
+	_refresh_enhancement_target_highlight()
+
+
+func set_enhancement_target_highlight(enabled: bool) -> void:
+	_enhancement_target_highlight = enabled and _item_resource != null
+	_refresh_enhancement_target_highlight()
 
 
 func _on_pressed() -> void:
@@ -65,6 +74,8 @@ func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
 		return false
 	# 拖拽物品资源；取值为 WeaponData 或兼容 Resource，类型字段决定能否投放。
 	var dragged_resource: Resource = drag_data.get("resource") as Resource
+	if dragged_resource != null and str(dragged_resource.get("item_kind")) == "enhancement_stone":
+		return _item_resource != null and not str(drag_data.get("source_location", "")).is_empty()
 	return dragged_resource != null and str(dragged_resource.get("weapon_type")) == _accepted_weapon_type
 
 
@@ -73,6 +84,11 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 		return
 	# 拖拽字典；复制后发给仓库面板，装备槽目标不使用列表下标所以固定为 -1。
 	var drag_data: Dictionary = (data as Dictionary).duplicate()
+	# 拖拽资源；强化石命中已装备武器时直接请求强化，不进入装备交换逻辑。
+	var dragged_resource: Resource = drag_data.get("resource") as Resource
+	if dragged_resource != null and str(dragged_resource.get("item_kind")) == "enhancement_stone":
+		enhancement_drop_requested.emit(dragged_resource, str(drag_data.get("source_location", "")), _item_resource)
+		return
 	item_drop_requested.emit(drag_data, _location, -1)
 
 
@@ -86,3 +102,8 @@ func _get_item_display_name() -> String:
 
 func _make_custom_tooltip(_for_text: String) -> Object:
 	return ITEM_DETAIL_FORMATTER.call("create_tooltip_control", _item_resource, 1)
+
+
+func _refresh_enhancement_target_highlight() -> void:
+	# 装备槽色调；浅绿色明确表示当前可作为强化目标，取消后恢复原主题。
+	self_modulate = Color(0.68, 1.0, 0.76, 1.0) if _enhancement_target_highlight else Color.WHITE

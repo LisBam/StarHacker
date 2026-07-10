@@ -29,6 +29,8 @@ class_name WeaponData
 @export_range(0.0, 9999.0, 1.0, "or_greater") var ranged_damage: float = 12.0
 ## 远程射击冷却；取值应大于 0，默认 0.16 秒，修改会影响连续射击频率。
 @export_range(0.01, 5.0, 0.01) var ranged_cooldown: float = 0.16
+## 武器扩散角度；取值大于等于 0，默认 0 度表示完全精准，数值越高每次弹体相对瞄准方向的随机偏移越明显。
+@export_range(0.0, 45.0, 0.1, "or_greater") var spread_degrees: float = 0.0
 ## 武器后坐力；取值建议大于等于 0，默认 0 表示不推动使用者，远程开火时会把玩家向反方向推开。
 @export_range(0.0, 3000.0, 1.0, "or_greater") var recoil_force: float = 0.0
 ## 武器前坐力；取值建议大于等于 0，默认 0 表示不向攻击方向推动使用者，适合近战突进或特殊枪械反馈，屏幕震动按后坐力的一半换算。

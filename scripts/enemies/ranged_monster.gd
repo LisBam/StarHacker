@@ -18,6 +18,8 @@ class_name RangedMonster
 @export_range(1.0, 12000.0, 1.0, "or_greater") var ranged_projectile_range: float = 520.0
 ## 敌方弹体冲击力；取值建议大于等于 0，默认 90，命中玩家时会造成短距离击退。
 @export_range(0.0, 5000.0, 1.0, "or_greater") var ranged_projectile_impact_force: float = 90.0
+## 敌方弹体扩散角度；取值大于等于 0，默认 4 度，每次射击会在瞄准方向两侧随机偏移。
+@export_range(0.0, 45.0, 0.1, "or_greater") var ranged_projectile_spread_degrees: float = 4.0
 ## 射击冷却；取值应大于 0，默认 1.25 秒，修改会影响远程怪物连续开火频率。
 @export_range(0.05, 10.0, 0.05) var shoot_cooldown: float = 1.25
 ## 个体射击冷却最小倍率；取值建议 0.8 到 1，默认 0.85，让远程怪物射击间隔存在下限差异。
@@ -114,6 +116,8 @@ func _try_fire_projectile(direction: Vector2) -> void:
 		return
 	if not _has_line_of_sight_to_target():
 		return
+	# 实际发射方向；使用敌人独立随机源在配置扩散角度内偏移，避免所有远程敌人保持绝对精准。
+	var resolved_direction: Vector2 = direction.normalized().rotated(deg_to_rad(_random.randf_range(-maxf(ranged_projectile_spread_degrees, 0.0), maxf(ranged_projectile_spread_degrees, 0.0))))
 
 	# 敌方弹体实例；取值为 Node2D 或 null，默认由 projectile_scene 实例化。
 	var projectile: Node2D = projectile_scene.instantiate() as Node2D
@@ -121,20 +125,20 @@ func _try_fire_projectile(direction: Vector2) -> void:
 		return
 
 	# 子弹出生位置；取值为怪物前方偏移后的全局坐标，默认避免从怪物中心发射。
-	var spawn_position: Vector2 = global_position + muzzle_offset.rotated(direction.angle())
+	var spawn_position: Vector2 = global_position + muzzle_offset.rotated(resolved_direction.angle())
 	projectile.global_position = spawn_position
-	projectile.global_rotation = direction.angle()
+	projectile.global_rotation = resolved_direction.angle()
 
 	# 弹体父节点；取值为配置节点或当前场景，默认用于组织远程怪物弹体。
 	var projectile_parent: Node = _resolve_projectile_parent()
 	projectile_parent.add_child(projectile)
 	projectile.global_position = spawn_position
-	projectile.global_rotation = direction.angle()
+	projectile.global_rotation = resolved_direction.angle()
 
 	if projectile.has_method("configure_projectile"):
 		projectile.call("configure_projectile", ranged_projectile_damage, ranged_projectile_impact_force, ranged_projectile_range)
 	if projectile.has_method("launch"):
-		projectile.call("launch", direction, ranged_projectile_speed)
+		projectile.call("launch", resolved_direction, ranged_projectile_speed)
 
 	_shoot_cooldown_remaining = _get_resolved_shoot_cooldown()
 

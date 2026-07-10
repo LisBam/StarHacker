@@ -12,5 +12,6 @@ icon_text = "P"
 sell_price = 80
 energy_cost = 5.0
 projectile_scene = ExtResource("2_projectile")
+spread_degrees = 1.5
 recoil_force = 55.0
 impact_force = 180.0

@@ -740,11 +740,6 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 8
 
-[node name="DeathSpacer" type="Control" parent="BattleHUD/Root/DeathOverlay/DeathPanel/DeathMargin/DeathContent"]
-custom_minimum_size = Vector2(0, 18)
-layout_mode = 2
-size_flags_vertical = 3
-
 [node name="DeathReturnMainMenuButton" type="Button" parent="BattleHUD/Root/DeathOverlay/DeathPanel/DeathMargin/DeathContent"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 44)

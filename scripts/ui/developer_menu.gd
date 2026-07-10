@@ -1,10 +1,13 @@
 extends PanelContainer
 class_name DeveloperMenu
 
-## 隐藏开发者菜单提供局外测试资源快捷操作，仅由主菜单完成 LISBAM 序列后显示。
-## 菜单只调用 GlobalInventory 的公开调试接口，不直接修改存档数组或武器资源。
+## 隐藏开发者菜单根据所在场景显示局外资源操作或局内战斗调试操作。
+## 主菜单模式只调用 GlobalInventory；战斗模式通过信号把无限属性和训练工具请求交给 CombatHud。
 
 signal closed
+signal infinite_health_toggled(enabled: bool)
+signal infinite_energy_toggled(enabled: bool)
+signal training_settings_requested
 
 ## 菜单最小尺寸；默认 520x420，适合在主菜单中央显示三项开发者操作和结果反馈。
 @export var panel_minimum_size: Vector2 = Vector2(520.0, 420.0)
@@ -23,6 +26,24 @@ var _grant_weapons_button: Button
 var _add_coins_button: Button
 ## 减少金币按钮；默认运行时创建，金币最低限制为 0。
 var _remove_coins_button: Button
+## 隐藏入口提示标签；默认显示 LISBAM 说明，战斗模式会改为局内调试提示。
+var _hint_label: Label
+## 局外经济控件列表；元素为金币标签和三个资源按钮，战斗模式中统一隐藏。
+var _economy_controls: Array[Control] = []
+## 战斗调试控件容器；默认隐藏，配置战斗上下文后显示无限属性与训练工具入口。
+var _combat_controls_container: VBoxContainer
+## 无限血量开关；默认关闭，战斗模式中切换后向 CombatHud 发送状态。
+var _infinite_health_check_button: CheckButton
+## 无限能量开关；默认关闭，战斗模式中切换后向 CombatHud 发送状态。
+var _infinite_energy_check_button: CheckButton
+## 训练场设置按钮；默认只在战斗模式显示，请求 CombatHud 打开现有训练工具面板。
+var _training_settings_button: Button
+## 当前是否为战斗开发者上下文；默认 false 表示主菜单局外资源模式。
+var _combat_context_enabled: bool = false
+## 待同步无限血量状态；默认 false，允许在控件 ready 前先配置战斗状态。
+var _configured_infinite_health: bool = false
+## 待同步无限能量状态；默认 false，允许在控件 ready 前先配置战斗状态。
+var _configured_infinite_energy: bool = false
 
 
 func _ready() -> void:
@@ -34,6 +55,23 @@ func _ready() -> void:
 		_global_inventory.connect("coins_changed", Callable(self, "_refresh_coins"))
 	_refresh_availability()
 	_refresh_coins()
+	_refresh_context_visibility()
+
+
+func configure_combat_context(infinite_health_enabled: bool, infinite_energy_enabled: bool) -> void:
+	_combat_context_enabled = true
+	_configured_infinite_health = infinite_health_enabled
+	_configured_infinite_energy = infinite_energy_enabled
+	_refresh_context_visibility()
+
+
+func sync_combat_states(infinite_health_enabled: bool, infinite_energy_enabled: bool) -> void:
+	_configured_infinite_health = infinite_health_enabled
+	_configured_infinite_energy = infinite_energy_enabled
+	if _infinite_health_check_button != null:
+		_infinite_health_check_button.set_pressed_no_signal(_configured_infinite_health)
+	if _infinite_energy_check_button != null:
+		_infinite_energy_check_button.set_pressed_no_signal(_configured_infinite_energy)
 
 
 func _build_interface() -> void:
@@ -55,29 +93,59 @@ func _build_interface() -> void:
 	title_label.add_theme_font_size_override("font_size", 26)
 	content.add_child(title_label)
 	# 隐藏入口提示；明确该菜单属于调试能力，避免误认为正式经济系统入口。
-	var hint_label: Label = Label.new()
-	hint_label.text = "隐藏调试功能 · 输入序列 LISBAM 开启"
-	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	content.add_child(hint_label)
+	_hint_label = Label.new()
+	_hint_label.text = "隐藏调试功能 · 输入序列 LISBAM 开启"
+	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	content.add_child(_hint_label)
 	_coins_label = Label.new()
 	_coins_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_coins_label.add_theme_font_size_override("font_size", 18)
 	content.add_child(_coins_label)
+	_economy_controls.append(_coins_label)
 	_grant_weapons_button = Button.new()
 	_grant_weapons_button.custom_minimum_size = Vector2(0.0, 46.0)
 	_grant_weapons_button.text = "一键获取所有武器"
 	_grant_weapons_button.pressed.connect(_on_grant_weapons_pressed)
 	content.add_child(_grant_weapons_button)
+	_economy_controls.append(_grant_weapons_button)
 	_add_coins_button = Button.new()
 	_add_coins_button.custom_minimum_size = Vector2(0.0, 46.0)
 	_add_coins_button.text = "一键增加 %d 金币" % coin_step
 	_add_coins_button.pressed.connect(_on_add_coins_pressed)
 	content.add_child(_add_coins_button)
+	_economy_controls.append(_add_coins_button)
 	_remove_coins_button = Button.new()
 	_remove_coins_button.custom_minimum_size = Vector2(0.0, 46.0)
 	_remove_coins_button.text = "一键减少 %d 金币" % coin_step
 	_remove_coins_button.pressed.connect(_on_remove_coins_pressed)
 	content.add_child(_remove_coins_button)
+	_economy_controls.append(_remove_coins_button)
+
+	# 战斗调试容器；仅在 CombatHud 配置战斗上下文后显示，不访问具体玩家组件。
+	_combat_controls_container = VBoxContainer.new()
+	_combat_controls_container.add_theme_constant_override("separation", 10)
+	content.add_child(_combat_controls_container)
+	# 战斗调试标题；用于区分局外经济操作与局内无敌和训练工具。
+	var combat_title_label: Label = Label.new()
+	combat_title_label.text = "战斗调试"
+	combat_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	combat_title_label.add_theme_font_size_override("font_size", 18)
+	_combat_controls_container.add_child(combat_title_label)
+	_infinite_health_check_button = CheckButton.new()
+	_infinite_health_check_button.text = "无限血量"
+	_infinite_health_check_button.custom_minimum_size = Vector2(0.0, 40.0)
+	_infinite_health_check_button.toggled.connect(_on_infinite_health_toggled)
+	_combat_controls_container.add_child(_infinite_health_check_button)
+	_infinite_energy_check_button = CheckButton.new()
+	_infinite_energy_check_button.text = "无限能量"
+	_infinite_energy_check_button.custom_minimum_size = Vector2(0.0, 40.0)
+	_infinite_energy_check_button.toggled.connect(_on_infinite_energy_toggled)
+	_combat_controls_container.add_child(_infinite_energy_check_button)
+	_training_settings_button = Button.new()
+	_training_settings_button.text = "打开训练场设置"
+	_training_settings_button.custom_minimum_size = Vector2(0.0, 44.0)
+	_training_settings_button.pressed.connect(_on_training_settings_pressed)
+	_combat_controls_container.add_child(_training_settings_button)
 	_status_label = Label.new()
 	_status_label.text = "请选择开发者操作"
 	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -103,6 +171,20 @@ func _refresh_availability() -> void:
 	_remove_coins_button.disabled = not service_available
 	if not service_available:
 		_status_label.text = "GlobalInventory 服务不可用"
+
+
+func _refresh_context_visibility() -> void:
+	if _hint_label != null:
+		_hint_label.text = "战斗暂停时输入 LISBAM 开启" if _combat_context_enabled else "隐藏调试功能 · 输入序列 LISBAM 开启"
+	# 局外经济控件遍历项；战斗模式隐藏，避免把永久仓库和金币操作混入当前战斗工具。
+	for economy_control in _economy_controls:
+		if economy_control != null:
+			economy_control.visible = not _combat_context_enabled
+	if _combat_controls_container != null:
+		_combat_controls_container.visible = _combat_context_enabled
+	if _status_label != null:
+		_status_label.text = "可切换无限属性或打开训练工具" if _combat_context_enabled else "请选择开发者操作"
+	sync_combat_states(_configured_infinite_health, _configured_infinite_energy)
 
 
 func _refresh_coins() -> void:
@@ -135,6 +217,22 @@ func _adjust_coins(amount: int) -> void:
 	var adjusted_coins: int = int(_global_inventory.call("adjust_coins", amount))
 	_status_label.text = "金币已%s %d，当前为 %d" % ["增加" if amount >= 0 else "减少", absi(amount), adjusted_coins]
 	_refresh_coins()
+
+
+func _on_infinite_health_toggled(enabled: bool) -> void:
+	_configured_infinite_health = enabled
+	infinite_health_toggled.emit(enabled)
+	_status_label.text = "无限血量已%s" % ("开启" if enabled else "关闭")
+
+
+func _on_infinite_energy_toggled(enabled: bool) -> void:
+	_configured_infinite_energy = enabled
+	infinite_energy_toggled.emit(enabled)
+	_status_label.text = "无限能量已%s" % ("开启" if enabled else "关闭")
+
+
+func _on_training_settings_pressed() -> void:
+	training_settings_requested.emit()
 
 
 func _on_close_pressed() -> void:

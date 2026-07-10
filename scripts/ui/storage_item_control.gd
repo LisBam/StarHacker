@@ -108,6 +108,7 @@ func _build_item_details() -> String:
 		detail_lines.append("射击冷却：%.2f 秒" % float(_item_resource.get("ranged_cooldown")))
 		detail_lines.append("弹体射程：%.1f" % float(_item_resource.get("bullet_range")))
 		detail_lines.append("弹体速度：%.1f" % float(_item_resource.get("projectile_speed")))
+		detail_lines.append("扩散：%.1f°" % maxf(float(_item_resource.get("spread_degrees")), 0.0))
 	else:
 		detail_lines.append("近战伤害：%.1f" % float(_item_resource.get("melee_damage")))
 		detail_lines.append("近战冷却：%.2f 秒" % float(_item_resource.get("melee_cooldown")))

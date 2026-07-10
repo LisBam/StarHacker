@@ -299,7 +299,7 @@ func _get_item_detail_tooltip(item_resource: Resource) -> String:
 
 func _apply_storage_display_mode() -> void:
 	_backpack_section.visible = _backpack_expanded
-	_mode_toggle_button.text = "收起背包" if _backpack_expanded else "展开背包"
+	_mode_toggle_button.text = "收起背包 E" if _backpack_expanded else "展开背包 E"
 	_warehouse_scroll.custom_minimum_size = Vector2(0.0, 220.0 if _backpack_expanded else 430.0)
 	_warehouse_scroll.size_flags_vertical = Control.SIZE_SHRINK_BEGIN if _backpack_expanded else Control.SIZE_EXPAND_FILL
 

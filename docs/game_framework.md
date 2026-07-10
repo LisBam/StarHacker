@@ -7,9 +7,9 @@
 - `res://scenes/ui/main_menu.tscn` 是项目主场景，由 `project.godot` 的 `run/main_scene` 指向。
 - 主菜单脚本 `res://scripts/ui/main_menu.gd` 通过 `character_select_scene_path` 加载独立角色选择场景，默认第一行按钮文案为“骇入”。主菜单同时保留“训练场”按钮，两者都会先写入当前模式，再进入 `res://scenes/ui/character_select.tscn`。
 - `res://scenes/ui/character_select.tscn` 是进入战斗前的角色选择场景。玩家在左侧选择“星”“穹”“银狼”，右侧会显示角色名称、定位、说明、固定生命上限、固定能量上限、固定速度和技能占位信息，点击确认后进入 `res://scenes/game/game_world.tscn`。
-- 主菜单提供“设置”入口，设置首页包含全局 Master 主音量和“按键绑定”入口；左下角固定提供“仓库”按钮，打开后可调整全局背包顺序、双远程装备槽和近战装备槽。
+- 主菜单提供“设置”入口，设置首页包含全局 Master 主音量和“按键绑定”入口；左下角固定提供“仓库”按钮，打开后可在纯永久仓库模式与仓库/背包联合模式间切换，出售安全物品、调整随身背包并管理装备槽。
 - `res://scripts/game/session_state.gd` 通过 `project.godot` 自动加载为 `SessionState`，负责保存本次进入的模式和角色，避免把入口参数写进场景路径。
-- `res://scripts/game/global_inventory.gd` 通过 `project.godot` 自动加载为 `GlobalInventory`，统一保存局内背包、局外仓库、装备槽、获得时间、上次撤离优先级和战斗结算，并写入 `user://global_inventory.json`。
+- `res://scripts/game/global_inventory.gd` 通过 `project.godot` 自动加载为 `GlobalInventory`，分别保存随身背包、永久仓库、装备槽、局外金币、获得时间、上次撤离优先级和战斗结算，并写入 `user://global_inventory.json`。
 - `res://scenes/game/game_world.tscn` 是当前战斗承载场景，负责放置玩家、怪物、网格地图、随机墙体建筑和掉落物。它的脚本会在进入场景后生成大型网格地图，再随机摆放一批环境障碍和怪物。
 
 ## 玩家角色
@@ -63,8 +63,10 @@
 - `CombatCamera`：玩家子节点上的战斗相机，关闭 Camera2D 位置平滑并使用物理帧回调跟随玩家，避免物理移动和渲染相机不同步造成移动抖动；屏幕震动只修改相机 `offset`，不会改变玩家或相机节点真实位置。
 - `CombatHud`：除原战斗 HUD、背包和暂停职责外，负责调用全局背包完成撤离成功、死亡和主动退出结算，并在滚动结算界面完整展示获得、保留和丢失物品。
 - `MiniMapControl`：读取 GameWorld 的地图、探索、撤离点和玩家导航标点；M 键大地图允许左键设置或点中已有标点取消，局部小地图与完整地图都会绘制玩家到标点的黄色指示线。
-- `WarehousePanel`：主菜单局外仓库 UI，只调用 `GlobalInventory`，支持按获得时间查看、上次撤离标记、背包上移/下移、装备替换和卸下。
-- `GlobalInventory`：全局物品所有权服务，使用唯一记录区分同类重复武器，维护背包、装备、临时拖拽记录、本局快照和存档；正式战斗失败随机保留约 20% 背包物品，成功撤离保留全部。
+- `WarehousePanel`：主菜单局外仓库 UI，只调用 `GlobalInventory`。纯仓库模式仅显示永久仓库、局外金币和出售按钮；展开背包后，上方保留仓库，下方左侧显示装备栏、右侧显示随身背包，并支持点击快捷转移、拖拽转移、列表排序、装备替换和卸下。
+- `StorageItemControl`：局外物品交互控件，统一生成摘要、完整悬停属性、快捷点击和跨容器拖拽数据，不直接修改物品所有权。
+- `StorageDropArea`：仓库与随身背包共用的空白拖放区域，只校验拖拽协议并把目标容器交给 `WarehousePanel`。
+- `GlobalInventory`：全局物品所有权服务，使用唯一记录区分同类重复武器，分别维护永久仓库、随身背包、装备、局外金币、临时拖拽记录、本局快照和存档。正式战斗失败只随机保留约 20% 随身背包物品，永久仓库和局外金币不进入战斗；成功撤离会把随身背包全部转入永久仓库。
 - `BasicMonster`：基础怪物聚合入口，维护血量、攻击、韧性、个体数值随机和组件配置，通过子组件组合索敌与移动能力，并保留近战、击退和继承扩展接口。
 - `EnemyPerceptionComponent`：维护视野射线、目标记忆、视野丢失缓冲、遮挡次数、最后线索预测、障碍背后锚点、范围搜查和彻底脱战，不执行移动或攻击。
 - `EnemyMovementComponent`：维护预设巡逻、出生点游荡、A* 路径缓存、局部绕障、空路径重试节流、卡住恢复、击退和实际移动，不读取玩家实时位置。
@@ -108,19 +110,21 @@
 
 背包通过 E 键打开或关闭。背包打开时，`CombatHud` 会通过 `PlayerInputComponent.set_combat_input_enabled(false)` 禁用射击、近战和切换武器，避免拖拽装备时误触战斗输入；WASD 移动不受影响。
 
-背包界面采用左右分栏：左侧是当前装备，右侧是未装备物品。数据不再属于当前 Player 场景，而是通过 `InventoryComponent` 与 `EquipmentComponent` 代理到 `GlobalInventory`；因此游戏内拾取、装备、卸下和排序结果返回主菜单后会立即出现在仓库，主菜单仓库调整也会直接影响下一局装备。
+局内背包界面采用左右分栏：左侧是当前装备，右侧是随身物品。数据不再属于当前 Player 场景，而是通过 `InventoryComponent` 与 `EquipmentComponent` 代理到 `GlobalInventory`；随身背包会带入战斗并参与失败损失，永久仓库不会在局内背包中出现，也不会因玩家死亡或主动退出而丢失。
 
 装备和背包使用单实例流转规则：一把武器资源同一时间只能存在于一个位置。右侧背包武器拖到左侧装备槽后，会从背包列表移除；如果目标装备槽已有武器，旧武器会回到原背包位置。左侧装备拖回右侧背包的空白区域或任意背包物品上都会卸下并插入背包；背包武器之间拖拽会移动原物品顺序，不会复制资源；远程装备槽之间拖拽会移动或交换同一个武器引用。
 
-局外仓库默认按获得时间从新到旧排列。成功撤离时，本次携带记录写入新的撤离编号；上次撤离物品会显示“上次撤离”标记并排在普通获得时间物品之前。仓库允许将背包物品上移或下移，装备远程槽 1/2、装备近战槽，以及把现有装备卸回背包。
+局外仓库与随身背包是两个独立容器。纯仓库模式只显示永久物品，允许查看完整属性并按武器 `sell_price` 出售为局外金币；金币不会带入战斗。展开背包后，上方为永久仓库，下方为装备栏和随身背包：点击仓库物品会快速装入背包，点击背包物品会快速存回仓库，也可以把物品拖到目标容器或目标条目完成转移和排序。背包内物品可以装入远程槽 1/2 或近战槽，装备槽内物品可点击卸回背包。
+
+永久仓库首次建立或从旧存档迁移时默认按获得时间从新到旧排列，之后会保存玩家手工调整的列表顺序。成功撤离时，本局随身背包全部写入新的撤离编号并自动转入永久仓库前方；上次撤离物品显示“上次撤离”标记并整体排在原有仓库物品之前。存档版本 2 分别保存 `warehouse`、`backpack`、装备槽与 `coins`；读取没有 `warehouse` 字段的旧存档时，会把旧版混合背包物品安全迁移到永久仓库。
 
 地面掉落物使用同一套武器资源流转规则。怪物死亡时，`GameWorld` 会读取该怪物的 `weapon_drop_chance`，默认 0.03 表示 3% 概率从 `weapon_drop_table` 随机复制一把武器并生成 `WeaponDrop`。掉落物默认保持静止，不再播放上下浮动动画。玩家靠近地面武器时，HUD 左侧会显示附近掉落物面板；标题始终表示附近存在可拾取掉落物，按钮列表按距离从近到远显示武器名称。列表按钮不显示名称后的距离数字，距离只用于内部排序和 F 快速拾取最近目标。HUD 会按固定刷新间隔扫描附近掉落物，并用实例、名称和位置组成的签名判断是否需要重建按钮，避免从一个掉落物移动到另一个掉落物时继续显示旧列表。点击列表项会在鼠标按下时立即拾取指定武器。按 F 会拾取最近的一件，即使掉落物列表被关闭也可使用。鼠标悬停或点击掉落物面板时，HUD 会临时禁用射击、近战和切枪输入，避免点击拾取时触发开火。按 G 会常驻开启或关闭掉落物按钮列表；关闭后只隐藏按钮列表并保留标题，靠近掉落物时仍能看到标题提示，用于降低战斗中误触 UI 的概率。背包打开时，把右侧背包武器或左侧已装备武器拖到背包面板外，会从原位置移除该武器并在玩家附近生成地面掉落物；如果世界掉落生成失败，系统会把武器回滚到原背包位置或原装备槽。
 
 ## 暂停与设置
 
-ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打开暂停菜单。正式战斗点击“返回主菜单”会先按失败规则结算：背包物品随机保留约 20%，其余约 80% 从全局仓库移除，然后显示完整保留/丢失列表；玩家确认结算后才返回主菜单。操作系统关闭窗口时，`GlobalInventory` 也会在正式战斗活动期间执行同一失败结算并立即保存。
+ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打开暂停菜单。正式战斗点击“返回主菜单”会先按失败规则结算：随身背包物品随机保留约 20%，其余约 80% 从背包移除，然后显示完整保留/丢失列表；永久仓库和局外金币完全不参与该结算。玩家确认结算后才返回主菜单。操作系统关闭窗口时，`GlobalInventory` 也会在正式战斗活动期间执行同一失败结算并立即保存。
 
-玩家生命值降到 0 后，`CombatStatsComponent.died` 会通知 `CombatHud` 进入死亡结算。正式战斗同样随机保留约 20% 背包物品，已装备物品不参与“背包内 80% 掉落”规则；滚动结算框会逐项展示保留和丢失物品，玩家确认后返回主菜单。训练场不启动正式战斗快照，因此不会修改全局仓库。
+玩家生命值降到 0 后，`CombatStatsComponent.died` 会通知 `CombatHud` 进入死亡结算。正式战斗同样随机保留约 20% 随身背包物品，已装备物品、永久仓库物品和局外金币不参与“背包内 80% 掉落”规则；滚动结算框会逐项展示保留和丢失物品，玩家确认后返回主菜单。训练场不启动正式战斗快照，因此不会修改永久仓库、背包或金币。
 
 暂停设置和主菜单设置共用同一条 Master 音量规则：滑条范围为 0 到 100，0 会静音 Master 总线，大于 0 时使用 `linear_to_db()` 写入音量。
 
@@ -186,13 +190,13 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 
 `GameWorld` 会按 `exploration_cell_size` 和 `exploration_radius` 记录玩家探索过的地图格子。该数据只由地图 UI 读取，不影响怪物索敌和碰撞。探索记录不会每帧重算，而是按 `exploration_update_interval` 定期检查，并在玩家移动超过 `exploration_update_distance` 时提前刷新；只有新增探索格时才递增探索版本号，供大地图复用迷雾查询缓存。调整格子尺寸会影响迷雾精度和缓存数量；调整探索半径会影响玩家走过后大地图可见区域大小。`GameWorld.find_navigation_path()` 会按寻路格尺寸和代理半径缓存整张地图的 A* 网格，供怪物在目标被墙体或建筑阻挡时自动绕路；寻路网格禁用斜向移动，避免路径从墙角缝隙穿过。环境障碍在地图生成完成后保持静态，因此缓存网格可以被所有怪物复用；如果后续加入可破坏墙体或动态门，需要在障碍变化后清空导航缓存和小地图障碍版本。
 
-`GameWorld` 默认使用 `monster_spawn_across_full_map = true` 在整张地图可用区域均匀生成 48 名敌人，不再围绕玩家形成局部生成环；所有候选点必须位于 `monster_spawn_min_distance` 默认 900 像素之外、避开环境障碍并保留 `monster_spawn_edge_margin` 边界距离。正式模式中，存活敌人数低于 `monster_minimum_alive_count` 默认 36 时，每隔 `monster_replenish_interval` 检查并按 `monster_replenish_batch_size` 分批补充到安全距离外。训练场清怪后不会自动补充，手动“重新生成怪物”仍使用当前批次数量。关闭整图开关后，`monster_spawn_max_distance` 才重新参与玩家环形生成。
+`GameWorld` 默认使用 `monster_spawn_across_full_map = true` 在整张地图可用区域均匀生成 96 名敌人，不再围绕玩家形成局部生成环；所有候选点必须位于 `monster_spawn_min_distance` 默认 900 像素之外、避开环境障碍并保留 `monster_spawn_edge_margin` 边界距离。正式模式中，存活敌人数低于 `monster_minimum_alive_count` 默认 80 时，每隔 `monster_replenish_interval` 默认 2 秒检查一次，并按 `monster_replenish_batch_size` 默认每批 8 名补充到安全距离外。训练场清怪后不会自动补充，手动“重新生成怪物”仍使用当前批次数量。关闭整图开关后，`monster_spawn_max_distance` 才重新参与玩家环形生成。
 
 每只随机生成敌人在加入场景树前分别生成尺寸倍率和属性倍率，范围由 `monster_spawn_variation_ratio` 控制，默认 0.3 即 70% 到 130%。尺寸直接影响视觉和碰撞缩放；基础属性倍率作用于生命、伤害、冲击力、移速、视野和攻击节奏，远程怪物还会同步波动射击距离、保持距离、弹体伤害、弹体冲击力和射击冷却。
 
 `GameWorld` 通过 `drop_parent_path`、`weapon_drop_scene`、`weapon_drop_table` 和 `dropped_weapon_scatter_radius` 控制地面武器生成。怪物死亡掉落会从掉落表复制武器模板，背包拖出丢弃会直接使用背包里的同一个武器资源；落点会尽量避开环境障碍并限制在地图范围内。
 
-`GameWorld` 会记录进入战斗后的存活时间，玩家死亡后不再增加。默认存活 120 秒时生成撤离点，300 秒时标记到地图。玩家在撤离范围内连续停留 `extraction_hold_duration_seconds` 默认 5 秒后按闪避确认撤离。成功撤离会调用 `GlobalInventory.complete_combat_run_success()`：保留背包和装备全部物品、标记上次撤离携带记录、统计本局快照之后新增的物品，并先显示“撤离成功”收益结算界面；玩家确认后才返回主菜单。
+`GameWorld` 会记录进入战斗后的存活时间，玩家死亡后不再增加。默认存活 120 秒时生成撤离点，300 秒时标记到地图。玩家在撤离范围内连续停留 `extraction_hold_duration_seconds` 默认 5 秒后按闪避确认撤离。成功撤离会调用 `GlobalInventory.complete_combat_run_success()`：保留装备，把随身背包全部转入永久仓库，标记上次撤离携带记录，统计本局快照之后新增的物品，并先显示“撤离成功”收益结算界面；玩家确认后才返回主菜单。
 
 训练场提供 `clear_monsters()` 和 `respawn_monsters()` 两个接口给 HUD 训练场设置调用。清怪会先按训练怪物组清理，再清理 `monster_parent_path` 指向的怪物容器；重新生成会按当前配置追加一批新怪物，不会清空场上已有怪物。
 
@@ -216,9 +220,9 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 - 掉落物：`drop_parent_path`、`weapon_drop_scene`、`weapon_drop_table`、`dropped_weapon_scatter_radius`、`weapon_data`、`pickup_radius`、`bob_amplitude`、`bob_speed`
 - 环境生成：`environment_parent_path`、`obstacle_scenes`、`obstacle_spawn_count`、`obstacle_spawn_min_distance_from_player`、`obstacle_spawn_edge_margin`、`obstacle_spawn_min_spacing`、`obstacle_spawn_attempts_per_item`、`obstacle_scale_min`、`obstacle_scale_max`
 - 角色占位属性：`stelle_max_health`、`stelle_max_energy`、`stelle_move_speed`、`caelus_max_health`、`caelus_max_energy`、`caelus_move_speed`、`silver_wolf_max_health`、`silver_wolf_max_energy`、`silver_wolf_move_speed`
-- 武器数据：`weapon_type`、`energy_cost`、`projectile_speed`、`bullet_range`、`ranged_damage`、`ranged_cooldown`、`recoil_force`、`front_recoil_force`、`impact_force`、`melee_damage`、`melee_cooldown`、`melee_active_duration`
+- 武器数据：`weapon_type`、`sell_price`、`energy_cost`、`projectile_speed`、`bullet_range`、`ranged_damage`、`ranged_cooldown`、`recoil_force`、`front_recoil_force`、`impact_force`、`melee_damage`、`melee_cooldown`、`melee_active_duration`
 - 主菜单入口：`character_select_scene_path`、`WarehouseButton`
-- 全局仓库：`SAVE_PATH`、`DEFAULT_RANGED_SLOT_COUNT`、`WEAPON_RESOURCE_PATHS`、`DEFAULT_BACKPACK_WEAPON_IDS`、`DEFAULT_RANGED_WEAPON_IDS`、`DEFAULT_MELEE_WEAPON_ID`
+- 全局仓库：`SAVE_PATH`、`DEFAULT_RANGED_SLOT_COUNT`、`WEAPON_RESOURCE_PATHS`、`DEFAULT_BACKPACK_WEAPON_IDS`、`DEFAULT_RANGED_WEAPON_IDS`、`DEFAULT_MELEE_WEAPON_ID`、`DEFAULT_STARTING_COINS`
 - 仓库面板：`panel_minimum_size`
 - 角色选择：`game_scene_path`、`main_menu_scene_path`、`stat_bar_maximum`、`speed_bar_maximum`
 - 输入绑定：`SAVE_PATH`、`EVENT_TYPE_UNBOUND`、`_action_entries`

@@ -11,7 +11,7 @@ radius = 17.0
 
 [node name="RangedMonster" type="CharacterBody2D" unique_id=1983671995]
 collision_layer = 2
-collision_mask = 17
+collision_mask = 16
 script = ExtResource("1_ranged_monster")
 projectile_scene = ExtResource("2_enemy_projectile")
 max_health = 46.0

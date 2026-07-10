@@ -17,6 +17,8 @@ const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_form
 const STONE_BENEFICIAL_COLOR: String = "#70e889"
 ## 强化词条削弱颜色；默认亮红色，与悬停详情保持一致。
 const STONE_DETRIMENTAL_COLOR: String = "#ff7070"
+## 武器耐久条组件；用于仓库、展开背包和结算卡片统一显示武器剩余耐久。
+const WEAPON_DURABILITY_BAR_SCRIPT: Script = preload("res://scripts/ui/weapon_durability_bar.gd")
 
 ## 当前显示的物品资源；默认 null 表示尚未配置，配置后用于摘要、详情和拖拽身份校验。
 var _item_resource: Resource
@@ -35,6 +37,8 @@ var _stone_summary_label: RichTextLabel
 var _enhancement_target_highlight: bool = false
 ## 是否采用战斗武器槽视觉；默认 false 保持仓库宽卡布局，战斗背包开启后会同步深色背景、边框和三行排版。
 var _weapon_slot_visual_style_enabled: bool = false
+## 武器耐久条缓存；默认按需创建，资源卡片隐藏，武器卡片始终贴在 UI 最底部。
+var _durability_bar: Control
 
 
 func configure(item_resource: Resource, location: String, item_index: int, quick_action_enabled: bool, extraction_prefix: String = "", quantity: int = 1) -> void:
@@ -53,6 +57,8 @@ func configure(item_resource: Resource, location: String, item_index: int, quick
 		text = "%s%s · %s · 售价 %d" % [extraction_prefix, _get_item_display_name(), _get_weapon_type_label(), _get_sell_price()]
 		if _stone_summary_label != null:
 			_stone_summary_label.visible = false
+	_ensure_durability_bar()
+	_durability_bar.call("configure", _item_resource)
 	tooltip_text = ITEM_DETAIL_FORMATTER.call("build_plain_text", _item_resource, _quantity)
 	disabled = _item_resource == null
 	custom_minimum_size = Vector2(0.0, 48.0)
@@ -73,6 +79,13 @@ func set_weapon_slot_visual_style(enabled: bool) -> void:
 	_apply_weapon_slot_visual_style()
 	if _stone_summary_label != null and _is_enhancement_stone():
 		_stone_summary_label.text = _build_stone_card_bbcode("")
+
+
+func refresh_durability() -> void:
+	if _durability_bar != null:
+		_durability_bar.call("refresh")
+	if _is_weapon_resource():
+		text = "%s · %s · 售价 %d" % [_get_item_display_name(), _get_weapon_type_label(), _get_sell_price()]
 
 
 func _get_drag_data(_at_position: Vector2) -> Variant:
@@ -131,11 +144,7 @@ func _on_pressed() -> void:
 
 
 func _get_item_display_name() -> String:
-	if _item_resource == null:
-		return "未知物品"
-	# 物品显示名称；优先使用 display_name，空值时回退稳定 weapon_id。
-	var display_name: String = str(_item_resource.get("display_name"))
-	return str(_item_resource.get("weapon_id")) if display_name.is_empty() else display_name
+	return str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", _item_resource))
 
 
 func _get_weapon_type_label() -> String:
@@ -185,6 +194,13 @@ func _ensure_stone_summary_label() -> void:
 	_stone_summary_label.offset_bottom = -5.0
 	add_child(_stone_summary_label)
 	_apply_weapon_slot_visual_style()
+
+
+func _ensure_durability_bar() -> void:
+	if _durability_bar != null:
+		return
+	_durability_bar = WEAPON_DURABILITY_BAR_SCRIPT.new() as Control
+	add_child(_durability_bar)
 
 
 func _apply_weapon_slot_visual_style() -> void:

@@ -14,6 +14,8 @@ signal enhancement_drop_received(stone_resource: Resource, source_location: Stri
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
 ## 全局存储拖拽协议标识；与 StorageItemControl 一致，用于识别从背包拖入的强化石。
 const GLOBAL_STORAGE_DRAG_DATA_TYPE: String = "global_storage_item"
+## 武器耐久条组件；统一贴在槽位底部并只读取 WeaponData 耐久状态。
+const WEAPON_DURABILITY_BAR_SCRIPT: Script = preload("res://scripts/ui/weapon_durability_bar.gd")
 
 ## 槽位所属上下文；取值为 equipment 或 inventory，默认 equipment，修改会影响拖拽来源和投放规则。
 var slot_context: String = "equipment"
@@ -40,6 +42,8 @@ var _name_label: Label
 var _detail_label: Label
 ## 当前拖拽数据缓存；取值为拖拽字典或空字典，默认用于拖拽结束时判断是否需要丢弃到世界。
 var _active_drag_data: Dictionary = {}
+## 武器耐久条缓存；默认在 ready 创建，宽度跟随槽位并在武器耐久变化时单独刷新。
+var _durability_bar: Control
 
 
 func _ready() -> void:
@@ -47,6 +51,7 @@ func _ready() -> void:
 	if custom_minimum_size == Vector2.ZERO:
 		custom_minimum_size = Vector2(96.0, 76.0)
 	_build_content()
+	_build_durability_bar()
 	_refresh_text()
 	gui_input.connect(_on_gui_input)
 
@@ -57,6 +62,8 @@ func set_slot_data(new_context: String, new_kind: String, new_index: int, new_we
 	slot_index = new_index
 	weapon_data = new_weapon_data
 	is_selected = new_is_selected
+	if _durability_bar != null:
+		_durability_bar.call("configure", weapon_data)
 	_refresh_text()
 	queue_redraw()
 
@@ -79,6 +86,12 @@ func set_cooldown_ratio(new_cooldown_ratio: float) -> void:
 func set_enhancement_target_highlight(enabled: bool) -> void:
 	is_enhancement_target_highlight = enabled and weapon_data != null
 	queue_redraw()
+
+
+func refresh_durability() -> void:
+	if _durability_bar != null:
+		_durability_bar.call("refresh")
+	_refresh_text()
 
 
 func _draw() -> void:
@@ -214,6 +227,12 @@ func _build_content() -> void:
 	text_box.add_child(_detail_label)
 
 
+func _build_durability_bar() -> void:
+	_durability_bar = WEAPON_DURABILITY_BAR_SCRIPT.new() as Control
+	add_child(_durability_bar)
+	_durability_bar.call("configure", weapon_data)
+
+
 func _refresh_text() -> void:
 	if _title_label == null or _name_label == null or _detail_label == null:
 		return
@@ -257,8 +276,7 @@ func _get_weapon_display_name(target_weapon_data: Resource, fallback_name: Strin
 	var display_name: String = str(target_weapon_data.get("display_name"))
 	if display_name.is_empty():
 		return fallback_name
-
-	return display_name
+	return "%s（损坏）" % display_name if target_weapon_data.has_method("is_broken") and bool(target_weapon_data.call("is_broken")) else display_name
 
 
 func _get_weapon_detail_text() -> String:

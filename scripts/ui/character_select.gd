@@ -203,8 +203,17 @@ func _on_silver_wolf_button_pressed() -> void:
 
 func _on_confirm_button_pressed() -> void:
 	_set_session_selected_character(_selected_character_id)
-	get_tree().change_scene_to_file(game_scene_path)
+	_change_scene_with_transition(game_scene_path)
 
 
 func _on_back_button_pressed() -> void:
-	get_tree().change_scene_to_file(main_menu_scene_path)
+	_change_scene_with_transition(main_menu_scene_path)
+
+
+func _change_scene_with_transition(scene_path: String) -> void:
+	# 全局转场服务；默认执行 0.3 秒黑屏过渡，缺失时回退直接切换保证场景可单独测试。
+	var scene_transition: Node = get_tree().root.get_node_or_null("SceneTransition")
+	if scene_transition != null and scene_transition.has_method("change_scene_to_file"):
+		scene_transition.call("change_scene_to_file", scene_path)
+	else:
+		get_tree().change_scene_to_file(scene_path)

@@ -176,6 +176,12 @@ func get_melee_weapon() -> Resource:
 	return _melee_weapon
 
 
+func notify_weapon_runtime_state_changed(weapon_data: Resource) -> void:
+	if weapon_data == null or _global_inventory == null or not _global_inventory.has_method("notify_weapon_runtime_state_changed"):
+		return
+	_global_inventory.call("notify_weapon_runtime_state_changed", weapon_data)
+
+
 func _initialize_equipment_slots() -> void:
 	_ranged_weapons.clear()
 

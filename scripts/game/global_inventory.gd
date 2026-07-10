@@ -11,6 +11,10 @@ signal coins_changed
 
 ## 全局背包存档路径；默认写入用户目录，保存物品标识、获得时间、排序优先级和装备槽。
 const SAVE_PATH: String = "user://global_inventory.json"
+## 当前库存存档版本；默认 6，版本 6 起同时保存当前耐久和保存时最大耐久。
+const SAVE_VERSION: int = 6
+## 旧版耐久上限；固定 100.0，用于把版本 5 的当前耐久按比例迁移到新版上限。
+const LEGACY_DURABILITY_MAX: float = 100.0
 ## 默认远程槽数量；当前项目使用双远程武器，修改需要同步玩家输入可直接选择的槽位数量。
 const DEFAULT_RANGED_SLOT_COUNT: int = 2
 ## 默认武器资源路径表；键为稳定 weapon_id，值为可重新加载的项目资源路径。
@@ -1325,7 +1329,7 @@ func _save_inventory() -> void:
 
 	# 存档根字典；保存版本、排序计数、永久仓库、随身背包、装备和局外金币状态。
 	var save_data: Dictionary = {
-		"version": 5,
+		"version": SAVE_VERSION,
 		"acquisition_sequence": _acquisition_sequence,
 		"last_extraction_epoch": _last_extraction_epoch,
 		"current_ranged_slot": _current_ranged_slot,
@@ -1445,6 +1449,7 @@ func _serialize_record(record: Dictionary) -> Dictionary:
 	elif item_resource.has_method("get_enhancement_ratio"):
 		serialized_record["enhancement_modifiers"] = (item_resource.get("enhancement_modifiers") as Dictionary).duplicate(true)
 		serialized_record["current_durability"] = maxf(float(item_resource.get("current_durability")), 0.0)
+		serialized_record["max_durability"] = maxf(float(item_resource.get("max_durability")), 1.0)
 	return serialized_record
 
 
@@ -1477,7 +1482,14 @@ func _deserialize_record(serialized_record: Dictionary) -> Dictionary:
 		item_resource.set("enhancement_modifiers", (serialized_record.get("enhancement_modifiers") as Dictionary).duplicate(true))
 	if item_kind != "enhancement_stone":
 		# 恢复耐久；旧存档缺少字段时按模板最大耐久恢复满值，避免升级后全部旧武器意外损坏。
-		var restored_durability: float = float(serialized_record.get("current_durability", item_resource.get("max_durability")))
+		# 模板最大耐久；当前所有武器默认 1000.0，后续单独修改上限时仍作为本次加载的最终上限。
+		var template_max_durability: float = maxf(float(item_resource.get("max_durability")), 1.0)
+		# 存档最大耐久；版本 5 只保存当前耐久，缺失上限时按旧系统 100.0 推断并保持原耐久比例。
+		var saved_max_durability: float = maxf(float(serialized_record.get("max_durability", LEGACY_DURABILITY_MAX)), 1.0)
+		# 存档当前耐久；更旧存档完全缺失耐久时直接恢复为当前模板满耐久。
+		var saved_current_durability: float = float(serialized_record.get("current_durability", saved_max_durability))
+		# 恢复耐久；按旧存档比例映射到当前 1000.0 上限，避免原满耐久 100 被误判为仅剩 10%。
+		var restored_durability: float = template_max_durability * clampf(saved_current_durability / saved_max_durability, 0.0, 1.0)
 		if item_resource.has_method("set_current_durability"):
 			item_resource.call("set_current_durability", restored_durability)
 		else:

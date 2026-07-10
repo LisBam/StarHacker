@@ -10,6 +10,7 @@ display_name = "磁轨炮"
 description = "高伤害低射速测试武器，适合观察长冷却白色遮罩。"
 icon_text = "C"
 sell_price = 200
+durability_cost_per_use = 3.0
 energy_cost = 22.0
 projectile_scene = ExtResource("2_projectile")
 projectile_speed = 1450.0

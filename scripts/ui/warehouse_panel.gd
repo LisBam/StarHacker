@@ -27,11 +27,22 @@ const ITEM_ACTION_USE: int = 2
 const ITEM_ACTION_SELL_ALL: int = 3
 ## 操作菜单装备项编号；固定为 4，只对展开背包内的武器显示。
 const ITEM_ACTION_EQUIP: int = 4
+## 操作菜单装备到远程槽 1 的编号；固定为 5，只对展开背包内的远程武器显示。
+const ITEM_ACTION_EQUIP_RANGED_1: int = 5
+## 操作菜单装备到远程槽 2 的编号；固定为 6，只对展开背包内的远程武器显示。
+const ITEM_ACTION_EQUIP_RANGED_2: int = 6
+## 仓库区域最小占比；默认 0.10，保证拖条向上时仓库仍保留基础浏览空间。
+const STORAGE_SPLIT_MIN_RATIO: float = 0.10
+## 仓库区域最大占比；默认 0.90，允许玩家把随身背包缩小到仅保留必要操作入口。
+const STORAGE_SPLIT_MAX_RATIO: float = 0.90
+## 仓库菜单可选择的远程装备槽数量；默认 2，与当前双远程装备结构保持一致。
+const WAREHOUSE_RANGED_EQUIPMENT_SLOT_COUNT: int = 2
 
 ## 面板最小尺寸；默认 960x620，适配当前 1280x720 主菜单并保留边缘空间。
 @export var panel_minimum_size: Vector2 = Vector2(960.0, 620.0)
 ## 展开背包时永久仓库占可分配高度的比例；默认 0.38，可通过界面拖条在 0.20 至 0.75 间动态调整。
-@export_range(0.20, 0.75, 0.01) var warehouse_split_ratio: float = 0.38
+## 比例范围补充：当前可调范围已扩展为 0.10 至 0.90，并由背包滚动容器保证极限比例下仍可访问内容。
+@export_range(0.10, 0.90, 0.01) var warehouse_split_ratio: float = 0.38
 
 ## 全局背包服务；默认从自动加载 GlobalInventory 获取，缺失时面板显示不可用提示。
 var _global_inventory: Node
@@ -49,6 +60,8 @@ var _carried_item_list: GridContainer
 var _loadout_list: VBoxContainer
 ## 新版背包区域根容器；默认隐藏，切换显示模式后控制下半区整体可见性。
 var _backpack_section: VBoxContainer
+## 新版背包区域外层滚动容器；默认隐藏，允许背包缩小后通过滚动继续访问装备栏和物品列表。
+var _backpack_scroll: ScrollContainer
 ## 新版仓库滚动容器；默认填充纯仓库模式，展开背包后限制高度给下半区留出空间。
 var _warehouse_scroll: ScrollContainer
 ## 仓库与背包分隔拖条；默认运行时创建，仅展开背包时显示并允许调整上下区域占比。
@@ -256,10 +269,16 @@ func _build_storage_interface() -> void:
 	_storage_split_handle.connect("split_ratio_changed", Callable(self, "_on_storage_split_ratio_changed"))
 	content.add_child(_storage_split_handle)
 
+	_backpack_scroll = ScrollContainer.new()
+	_backpack_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_backpack_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_backpack_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	content.add_child(_backpack_scroll)
 	_backpack_section = VBoxContainer.new()
+	_backpack_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_backpack_section.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_backpack_section.add_theme_constant_override("separation", 6)
-	content.add_child(_backpack_section)
+	_backpack_scroll.add_child(_backpack_section)
 	# 随身区标题；默认强调下半区会进入战斗并参与失败损失结算。
 	var backpack_title: Label = Label.new()
 	backpack_title.text = "随身背包 · 会带入战斗，死亡或主动退出时随机保留约 20%"
@@ -507,7 +526,7 @@ func _get_storage_summary_text(warehouse_entries: Array, backpack_entries: Array
 
 
 func _apply_storage_display_mode() -> void:
-	_backpack_section.visible = _backpack_expanded
+	_backpack_scroll.visible = _backpack_expanded
 	if _storage_split_handle != null:
 		_storage_split_handle.visible = _backpack_expanded
 	_mode_toggle_button.text = "收起背包 E" if _backpack_expanded else "展开背包 E"
@@ -516,7 +535,7 @@ func _apply_storage_display_mode() -> void:
 		_carried_drop_area.custom_minimum_size = Vector2(0.0, 100.0 if _backpack_expanded else 215.0)
 	_warehouse_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_warehouse_scroll.size_flags_stretch_ratio = warehouse_split_ratio if _backpack_expanded else 1.0
-	_backpack_section.size_flags_stretch_ratio = 1.0 - warehouse_split_ratio
+	_backpack_scroll.size_flags_stretch_ratio = 1.0 - warehouse_split_ratio
 	if _cancel_stone_use_button != null:
 		_cancel_stone_use_button.visible = _pending_stone_resource != null
 
@@ -560,7 +579,11 @@ func _on_item_action_requested(item_resource: Resource, source_location: String)
 	if str(item_resource.get("item_kind")) == "enhancement_stone":
 		_item_action_menu.add_item("使用", ITEM_ACTION_USE)
 	elif source_location == "backpack" and str(item_resource.get("weapon_type")) in ["ranged", "melee"]:
-		_item_action_menu.add_item("装备", ITEM_ACTION_EQUIP)
+		if str(item_resource.get("weapon_type")) == "ranged":
+			_item_action_menu.add_item("装备1", ITEM_ACTION_EQUIP_RANGED_1)
+			_item_action_menu.add_item("装备2", ITEM_ACTION_EQUIP_RANGED_2)
+		else:
+			_item_action_menu.add_item("装备", ITEM_ACTION_EQUIP)
 	_item_action_menu.position = Vector2i(get_viewport().get_mouse_position())
 	_item_action_menu.popup()
 
@@ -594,6 +617,10 @@ func _on_item_action_menu_id_pressed(action_id: int) -> void:
 		_rebuild_storage_content()
 	elif action_id == ITEM_ACTION_EQUIP and _action_item_location == "backpack":
 		_equip_backpack_weapon(_action_item_resource)
+	elif action_id == ITEM_ACTION_EQUIP_RANGED_1 and _action_item_location == "backpack":
+		_equip_backpack_weapon(_action_item_resource, 0)
+	elif action_id == ITEM_ACTION_EQUIP_RANGED_2 and _action_item_location == "backpack":
+		_equip_backpack_weapon(_action_item_resource, 1)
 	_action_item_resource = null
 	_action_item_location = ""
 
@@ -660,24 +687,28 @@ func _on_sell_quantity_confirmed(quantity: int) -> void:
 	_quantity_sale_item_location = ""
 
 
-func _equip_backpack_weapon(weapon_resource: Resource) -> void:
+func _equip_backpack_weapon(weapon_resource: Resource, target_ranged_slot: int = -1) -> void:
 	if _global_inventory == null or weapon_resource == null:
 		return
 	# 武器类型；远程武器替换当前手持槽，近战武器替换唯一近战槽，与战斗背包点击装备逻辑一致。
+	# 远程槽选择补充：仓库背包菜单现在通过“装备1”“装备2”明确指定远程目标槽，不再隐式使用当前槽。
 	var weapon_type: String = str(weapon_resource.get("weapon_type"))
 	# 装备目标位置；远程目标由当前选中槽组成，近战目标使用稳定 melee 标识。
+	# 显式目标补充：远程分支使用菜单传入的槽位下标生成目标位置。
 	var target_location: String = "melee"
 	if weapon_type == "ranged":
 		# 当前远程槽；取值来自全局装备服务，默认 0 用于缺少接口时的安全兜底。
-		var current_ranged_slot: int = int(_global_inventory.call("get_current_ranged_slot")) if _global_inventory.has_method("get_current_ranged_slot") else 0
-		target_location = "ranged_%d" % current_ranged_slot
+		# 菜单目标补充：当前实现不再读取当前远程槽，而是校验用户选择的 0/1 下标。
+		if target_ranged_slot < 0 or target_ranged_slot >= WAREHOUSE_RANGED_EQUIPMENT_SLOT_COUNT:
+			return
+		target_location = "ranged_%d" % target_ranged_slot
 	elif weapon_type != "melee":
 		return
 	_global_inventory.call("transfer_storage_to_equipment", weapon_resource, "backpack", target_location)
 
 
 func _on_storage_split_ratio_changed(ratio: float) -> void:
-	warehouse_split_ratio = clampf(ratio, 0.20, 0.75)
+	warehouse_split_ratio = clampf(ratio, STORAGE_SPLIT_MIN_RATIO, STORAGE_SPLIT_MAX_RATIO)
 	_apply_storage_display_mode()
 
 

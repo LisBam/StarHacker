@@ -10,6 +10,14 @@ const POSITIVE_COLOR: String = "#70e889"
 const NEGATIVE_COLOR: String = "#ff7070"
 ## 中性数值颜色；默认浅色，用于尚未强化或与基础值相同的总值。
 const NEUTRAL_COLOR: String = "#d8e8ee"
+## 悬停信息背景颜色；默认深蓝黑且透明度为 0.68，比系统默认背景更通透。
+const TOOLTIP_BACKGROUND_COLOR: Color = Color(0.025, 0.04, 0.055, 0.68)
+## 悬停信息边框颜色；默认接近纯白，用于在半透明背景外形成清晰轮廓。
+const TOOLTIP_BORDER_COLOR: Color = Color(1.0, 1.0, 1.0, 0.92)
+## 悬停信息边框宽度；默认 2 像素，保证半透明背景在亮色场景中仍有清晰边界。
+const TOOLTIP_BORDER_WIDTH: int = 2
+## 悬停信息圆角半径；默认 6 像素，使详情框与现有游戏 UI 风格一致。
+const TOOLTIP_CORNER_RADIUS: int = 6
 
 
 static func is_weapon(item_resource: Resource) -> bool:
@@ -91,7 +99,17 @@ static func create_tooltip_control(item_resource: Resource, quantity: int = 1) -
 	margin.add_theme_constant_override("margin_right", 10)
 	margin.add_theme_constant_override("margin_bottom", 8)
 	margin.add_child(detail_label)
-	return margin
+	# 悬停背景框；使用较低透明度和一圈白色边框统一仓库、背包、装备栏与结算详情样式。
+	var tooltip_panel: PanelContainer = PanelContainer.new()
+	# 悬停背景样式；圆角和双像素边框提高半透明背景在不同场景亮度下的可辨识度。
+	var tooltip_style: StyleBoxFlat = StyleBoxFlat.new()
+	tooltip_style.bg_color = TOOLTIP_BACKGROUND_COLOR
+	tooltip_style.border_color = TOOLTIP_BORDER_COLOR
+	tooltip_style.set_border_width_all(TOOLTIP_BORDER_WIDTH)
+	tooltip_style.set_corner_radius_all(TOOLTIP_CORNER_RADIUS)
+	tooltip_panel.add_theme_stylebox_override("panel", tooltip_style)
+	tooltip_panel.add_child(margin)
+	return tooltip_panel
 
 
 static func _append_stone_lines(detail_lines: Array[String], item_resource: Resource) -> void:
@@ -124,7 +142,10 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 	var current_durability: float = maxf(float(item_resource.get("current_durability")), 0.0)
 	# 最大耐久；取值至少为 1，避免旧资源字段缺失造成无效比例。
 	var max_durability: float = maxf(float(item_resource.get("max_durability")), 1.0)
-	detail_lines.append("耐久：%d / %d" % [roundi(current_durability), roundi(max_durability)])
+	# 单次耐久消耗；每把武器独立配置，成功射击或近战使用时按该浮点数扣除。
+	var durability_cost_per_use: float = maxf(float(item_resource.get("durability_cost_per_use")), 0.0)
+	detail_lines.append("耐久：%.1f / %.1f" % [current_durability, max_durability])
+	detail_lines.append("耐久消耗：%.1f / 次" % durability_cost_per_use)
 	if item_resource.has_method("is_broken") and bool(item_resource.call("is_broken")):
 		detail_lines.append("[color=%s]状态：损坏，无法使用[/color]" % NEGATIVE_COLOR)
 	# 武器类型；决定伤害、冷却及远近战专属属性的基础字段映射。

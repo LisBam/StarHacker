@@ -21,10 +21,13 @@ class_name WeaponData
 ## 局外出售价格；取值大于等于 0，默认 0 表示不可出售，只在永久仓库出售时兑换为局外金币且运行时通常不修改。
 @export_range(0, 999999, 1) var sell_price: int = 0
 ## 武器最大耐久；取值大于 0，默认 100，运行时通常不修改，调整会影响耐久比例、读条与价格折损速度。
-@export_range(1.0, 999999.0, 1.0, "or_greater") var max_durability: float = 100.0
+## 耐久上限配置补充：当前默认值已统一提升为 1000.0，并保留 0.1 浮点精度供后续特殊武器扩展。
+@export_range(1.0, 999999.0, 0.1, "or_greater") var max_durability: float = 1000.0
 ## 武器当前耐久；取值会限制在 0 到最大耐久，默认 100，归零后武器保留但不可继续使用。
-@export_range(0.0, 999999.0, 1.0) var current_durability: float = 100.0
+## 当前耐久配置补充：新武器默认以 1000.0 满耐久创建，旧 100 上限存档会按比例迁移。
+@export_range(0.0, 999999.0, 0.1) var current_durability: float = 1000.0
 ## 每次成功使用消耗的耐久；取值大于等于 0，默认 1，远程射击和近战挥击成功后各扣除一次。
+## 独立消耗配置补充：默认参考值为 1.0，每把武器资源可覆盖为不同浮点消耗。
 @export_range(0.0, 999999.0, 0.1, "or_greater") var durability_cost_per_use: float = 1.0
 ## 每次成功使用武器消耗的能量；取值建议大于等于 0，默认 0 表示免费攻击，修改会影响玩家能量消耗节奏。
 @export_range(0.0, 9999.0, 0.1, "or_greater") var energy_cost: float = 0.0

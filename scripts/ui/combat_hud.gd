@@ -72,6 +72,8 @@ const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
 @export_range(80.0, 600.0, 1.0) var nearby_drop_expanded_height: float = 220.0
 ## 附近掉落物收起高度；默认 42 像素，只保留标题和紧贴标题的背景板。
 @export_range(24.0, 120.0, 1.0) var nearby_drop_collapsed_height: float = 42.0
+## 战斗开发者菜单半尺寸；默认 280x280，修改会影响暂停遮罩中调试面板的可用空间，运行时通常不动态修改。
+@export var combat_developer_menu_half_size: Vector2 = Vector2(280.0, 280.0)
 
 ## 玩家节点缓存；默认按 player_path 获取，允许为空但 HUD 不会显示有效状态，修改会影响所有组件绑定。
 var _player: Node
@@ -801,17 +803,18 @@ func _build_combat_developer_overlay() -> void:
 	developer_menu.anchor_top = 0.5
 	developer_menu.anchor_right = 0.5
 	developer_menu.anchor_bottom = 0.5
-	developer_menu.offset_left = -280.0
-	developer_menu.offset_top = -250.0
-	developer_menu.offset_right = 280.0
-	developer_menu.offset_bottom = 250.0
+	developer_menu.offset_left = -combat_developer_menu_half_size.x
+	developer_menu.offset_top = -combat_developer_menu_half_size.y
+	developer_menu.offset_right = combat_developer_menu_half_size.x
+	developer_menu.offset_bottom = combat_developer_menu_half_size.y
 	developer_menu.connect("closed", Callable(self, "_on_combat_developer_menu_closed"))
 	developer_menu.connect("infinite_health_toggled", Callable(self, "_on_developer_infinite_health_toggled"))
 	developer_menu.connect("infinite_energy_toggled", Callable(self, "_on_developer_infinite_energy_toggled"))
+	developer_menu.connect("weapon_durability_consumption_toggled", Callable(self, "_on_developer_weapon_durability_consumption_toggled"))
 	developer_menu.connect("training_settings_requested", Callable(self, "_on_developer_training_settings_requested"))
 	developer_overlay.add_child(developer_menu)
 	_combat_developer_menu = developer_menu
-	developer_menu.call("configure_combat_context", _is_infinite_health_enabled(), _is_infinite_energy_enabled())
+	developer_menu.call("configure_combat_context", _is_infinite_health_enabled(), _is_infinite_energy_enabled(), _is_weapon_durability_consumption_disabled_by_debug())
 
 
 func _refresh_nearby_drop_panel() -> void:
@@ -1521,7 +1524,7 @@ func _open_combat_developer_menu() -> void:
 	_pause_settings_panel.visible = false
 	_test_settings_panel.visible = false
 	_character_switch_panel.visible = false
-	_combat_developer_menu.call("sync_combat_states", _is_infinite_health_enabled(), _is_infinite_energy_enabled())
+	_combat_developer_menu.call("sync_combat_states", _is_infinite_health_enabled(), _is_infinite_energy_enabled(), _is_weapon_durability_consumption_disabled_by_debug())
 	_combat_developer_overlay.visible = true
 	_refresh_combat_input_state()
 
@@ -1532,6 +1535,10 @@ func _is_infinite_health_enabled() -> bool:
 
 func _is_infinite_energy_enabled() -> bool:
 	return _stats_component != null and bool(_stats_component.get("infinite_energy"))
+
+
+func _is_weapon_durability_consumption_disabled_by_debug() -> bool:
+	return _player != null and _player.has_method("is_weapon_durability_consumption_disabled_by_debug") and bool(_player.call("is_weapon_durability_consumption_disabled_by_debug"))
 
 
 func _close_top_interactive_panel() -> bool:
@@ -2452,6 +2459,11 @@ func _on_developer_infinite_health_toggled(enabled: bool) -> void:
 func _on_developer_infinite_energy_toggled(enabled: bool) -> void:
 	_set_infinite_energy_enabled(enabled)
 	_sync_test_settings_controls()
+
+
+func _on_developer_weapon_durability_consumption_toggled(disabled: bool) -> void:
+	if _player != null and _player.has_method("set_weapon_durability_consumption_disabled"):
+		_player.call("set_weapon_durability_consumption_disabled", disabled)
 
 
 func _on_developer_training_settings_requested() -> void:

@@ -10,6 +10,7 @@ display_name = "散射爆能枪"
 description = "中等射速测试武器，当前原型先以单发弹体验证装备切换。"
 icon_text = "G"
 sell_price = 140
+durability_cost_per_use = 2.0
 energy_cost = 13.0
 projectile_scene = ExtResource("2_projectile")
 projectile_speed = 760.0

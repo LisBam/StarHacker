@@ -12,6 +12,8 @@ signal enhancement_drop_requested(stone_resource: Resource, source_location: Str
 const DRAG_DATA_TYPE: String = "global_storage_item"
 ## 统一物品详情格式化器；装备槽悬停时显示武器基础值、强化差值和动态售价。
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
+## 武器耐久条组件；局外装备槽使用与战斗和仓库卡片相同的底部读条。
+const WEAPON_DURABILITY_BAR_SCRIPT: Script = preload("res://scripts/ui/weapon_durability_bar.gd")
 
 ## 当前装备资源；默认 null 表示空槽，空槽可以接收兼容武器但不能作为拖拽来源。
 var _item_resource: Resource
@@ -23,6 +25,8 @@ var _slot_label: String = "装备槽"
 var _accepted_weapon_type: String = "ranged"
 ## 是否将当前装备标记为强化目标；默认 false，使用强化石期间会点亮所有非空装备槽。
 var _enhancement_target_highlight: bool = false
+## 武器耐久条缓存；默认首次配置时创建，空槽隐藏，有武器时显示剩余耐久。
+var _durability_bar: Control
 
 
 func configure(slot_label: String, location: String, accepted_weapon_type: String, item_resource: Resource, detail_tooltip: String = "") -> void:
@@ -30,6 +34,8 @@ func configure(slot_label: String, location: String, accepted_weapon_type: Strin
 	_location = location
 	_accepted_weapon_type = accepted_weapon_type
 	_item_resource = item_resource
+	_ensure_durability_bar()
+	_durability_bar.call("configure", _item_resource)
 	text = "%s：%s" % [_slot_label, _get_item_display_name()]
 	tooltip_text = detail_tooltip if not detail_tooltip.is_empty() else ("拖入%s武器" % ("远程" if _accepted_weapon_type == "ranged" else "近战"))
 	disabled = false
@@ -42,6 +48,12 @@ func configure(slot_label: String, location: String, accepted_weapon_type: Strin
 func set_enhancement_target_highlight(enabled: bool) -> void:
 	_enhancement_target_highlight = enabled and _item_resource != null
 	_refresh_enhancement_target_highlight()
+
+
+func refresh_durability() -> void:
+	if _durability_bar != null:
+		_durability_bar.call("refresh")
+	text = "%s：%s" % [_slot_label, _get_item_display_name()]
 
 
 func _on_pressed() -> void:
@@ -95,9 +107,7 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 func _get_item_display_name() -> String:
 	if _item_resource == null:
 		return "空"
-	# 装备显示名称；优先读取 display_name，未配置时回退稳定 weapon_id。
-	var display_name: String = str(_item_resource.get("display_name"))
-	return str(_item_resource.get("weapon_id")) if display_name.is_empty() else display_name
+	return str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", _item_resource))
 
 
 func _make_custom_tooltip(_for_text: String) -> Object:
@@ -107,3 +117,10 @@ func _make_custom_tooltip(_for_text: String) -> Object:
 func _refresh_enhancement_target_highlight() -> void:
 	# 装备槽色调；浅绿色明确表示当前可作为强化目标，取消后恢复原主题。
 	self_modulate = Color(0.68, 1.0, 0.76, 1.0) if _enhancement_target_highlight else Color.WHITE
+
+
+func _ensure_durability_bar() -> void:
+	if _durability_bar != null:
+		return
+	_durability_bar = WEAPON_DURABILITY_BAR_SCRIPT.new() as Control
+	add_child(_durability_bar)

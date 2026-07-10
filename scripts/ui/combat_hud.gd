@@ -405,6 +405,8 @@ func _bind_player_components() -> void:
 	_player = get_node_or_null(player_path)
 	if _player == null:
 		return
+	if _player.has_signal("weapon_durability_changed"):
+		_player.connect("weapon_durability_changed", Callable(self, "_on_weapon_durability_changed"))
 
 	_stats_component = _player.get_node_or_null("StatsComponent")
 	_equipment_component = _player.get_node_or_null("EquipmentComponent")
@@ -2089,6 +2091,18 @@ func _on_equipment_changed() -> void:
 func _on_inventory_changed() -> void:
 	if _inventory_panel.visible:
 		_rebuild_inventory_slots()
+
+
+func _on_weapon_durability_changed(_weapon_data: Resource) -> void:
+	# 所有耐久显示控件；战斗底栏、背包装备栏和背包武器槽都复用独立刷新接口，避免每次射击重建完整背包。
+	var durability_controls: Array = _ranged_slot_controls + _inventory_slot_controls + _inventory_equipment_ranged_controls
+	if _melee_slot_control != null:
+		durability_controls.append(_melee_slot_control)
+	if _inventory_equipment_melee_control != null:
+		durability_controls.append(_inventory_equipment_melee_control)
+	for durability_control in durability_controls:
+		if durability_control != null and durability_control.has_method("refresh_durability"):
+			durability_control.call("refresh_durability")
 
 
 func _on_ranged_weapon_fired(_projectile: Node2D) -> void:

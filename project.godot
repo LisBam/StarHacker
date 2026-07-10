@@ -20,6 +20,7 @@ config/icon="res://icon.svg"
 SessionState="*res://scripts/game/session_state.gd"
 InputBindings="*res://scripts/game/input_bindings.gd"
 GlobalInventory="*res://scripts/game/global_inventory.gd"
+SceneTransition="*res://scripts/game/scene_transition.gd"
 
 [display]
 

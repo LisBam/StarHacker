@@ -25,7 +25,9 @@ static func get_item_display_name(item_resource: Resource) -> String:
 		return "未知物品"
 	# 显示名称；优先使用通用 display_name，武器旧资源缺失时回退稳定 weapon_id。
 	var display_name: String = str(item_resource.get("display_name"))
-	return str(item_resource.get("weapon_id")) if display_name.is_empty() else display_name
+	if display_name.is_empty():
+		display_name = str(item_resource.get("weapon_id"))
+	return "%s（损坏）" % display_name if is_weapon(item_resource) and item_resource.has_method("is_broken") and bool(item_resource.call("is_broken")) else display_name
 
 
 static func get_item_type_label(item_resource: Resource) -> String:
@@ -118,6 +120,13 @@ static func _append_stone_lines_by_benefit(detail_lines: Array[String], modifier
 
 
 static func _append_weapon_lines(detail_lines: Array[String], item_resource: Resource) -> void:
+	# 当前耐久；取值限制在 0 到最大耐久，用于详情显示与损坏状态说明。
+	var current_durability: float = maxf(float(item_resource.get("current_durability")), 0.0)
+	# 最大耐久；取值至少为 1，避免旧资源字段缺失造成无效比例。
+	var max_durability: float = maxf(float(item_resource.get("max_durability")), 1.0)
+	detail_lines.append("耐久：%d / %d" % [roundi(current_durability), roundi(max_durability)])
+	if item_resource.has_method("is_broken") and bool(item_resource.call("is_broken")):
+		detail_lines.append("[color=%s]状态：损坏，无法使用[/color]" % NEGATIVE_COLOR)
 	# 武器类型；决定伤害、冷却及远近战专属属性的基础字段映射。
 	var weapon_type: String = str(item_resource.get("weapon_type"))
 	_append_weapon_stat_line(detail_lines, item_resource, "damage", 1)

@@ -2064,7 +2064,8 @@ func _drop_inventory_source_weapon_to_world(drop_data: Dictionary, dragged_weapo
 	if not _spawn_dragged_weapon_or_restore_to_inventory(dragged_weapon, source_index):
 		return
 
-	_rebuild_inventory_slots()
+	if _shared_backpack_panel != null:
+		_shared_backpack_panel.refresh()
 	_refresh_nearby_drop_panel()
 
 
@@ -2085,7 +2086,8 @@ func _drop_equipment_source_weapon_to_world(drop_data: Dictionary, dragged_weapo
 		return
 
 	_refresh_equipment()
-	_rebuild_inventory_slots()
+	if _shared_backpack_panel != null:
+		_shared_backpack_panel.refresh()
 	_refresh_nearby_drop_panel()
 
 
@@ -2837,7 +2839,9 @@ func _discard_combat_inventory_item(item_resource: Resource, requested_quantity:
 	_combat_action_weapon_resource = null
 	_combat_action_weapon_source_index = -1
 	_combat_action_item_quantity = 1
-	_rebuild_inventory_slots()
+	# 共享背包接管局内物品列表后只刷新组件；旧列表查询控件未再构建，继续调用旧重建函数会访问空搜索框。
+	if _shared_backpack_panel != null:
+		_shared_backpack_panel.refresh()
 	_refresh_nearby_drop_panel()
 
 

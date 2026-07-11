@@ -8,6 +8,7 @@
 - `GlobalInventory` 是永久金币和股票持仓的所有者，并在版本 9 库存存档中保存每只股票的持仓数量与加权平均成本。股市服务只通过精确金币扣除、金币增加和无货币持仓增减接口协调两类资产；UI 不得直接修改金币、证券币或持仓字典。
 - `StockMarketPanel` 只读取服务快照、复用 `ItemCardView`、`SellQuantityDialog` 和 `CommonConfirmationDialog`，负责股票选择、行情展示、交易预览与持仓盈亏显示。
 - `StockChartControl` 只绘制传入的价格历史，不读取服务、存档、金币、事件或玩家行为。
+- `StockMarketService` 每次刷新完成后发送 `market_refreshed(refresh_source)`；矿场只监听 `settlement` 正式全量刷新，并使用骇客数字科技本轮 `last_change_ratio` 判断 10% 涨幅联动，其他外部模块不得直接修改行情状态。
 - 玩家、装备、宝箱、库存和战斗 HUD 只上报通用行为指标，不依赖股票名称和定价公式。
 
 ## 入口与界面

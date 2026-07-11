@@ -3302,6 +3302,10 @@ func _record_stock_extracted_values(global_inventory: Node) -> void:
 		return
 	# 随身价值摘要；成功撤离完成所有权结算前读取，覆盖开局携带与本局获得的全部物品。
 	var value_summary: Dictionary = global_inventory.call("get_combat_carried_value_summary") as Dictionary
+	# 矿场服务；成功撤离价值按每 1 金币增加 0.01% 产出并追加 30 分钟在线持续时间。
+	var mining_farm_service: Node = get_tree().root.get_node_or_null("MiningFarmService")
+	if mining_farm_service != null and mining_farm_service.has_method("apply_successful_extraction_buff"):
+		mining_farm_service.call("apply_successful_extraction_buff", int(value_summary.get("total_value", 0)))
 	# 股市统计服务；只在成功撤离路径调用，因此不会把失败前随身价值误记为带出价值。
 	var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")
 	if stock_market_service != null and stock_market_service.has_method("record_run_metric"):

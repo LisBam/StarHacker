@@ -14,6 +14,7 @@
 - `res://scripts/game/session_state.gd` 通过 `project.godot` 自动加载为 `SessionState`，负责保存本次进入的模式和角色，避免把入口参数写进场景路径。
 - `res://scripts/game/global_inventory.gd` 通过 `project.godot` 自动加载为 `GlobalInventory`，分别保存随身背包、永久仓库、装备槽、局外金币、获得时间、上次撤离优先级和战斗结算，并写入 `user://global_inventory.json`。
 - `res://scripts/game/stock_market_service.gd` 通过 `project.godot` 自动加载为 `StockMarketService`，独立保存五只股票行情、动态价值中枢、大盘周期、随机事件和对局行为连续性；持仓与金币仍由 `GlobalInventory` 统一拥有。
+- `res://scripts/game/mining_farm_service.gd` 通过 `project.godot` 自动加载为 `MiningFarmService`，跨全部场景维护整数算力币、永久算力资产、在线产出与临时增益，并独立写入 `user://mining_farm_state.json`。矿场面板关闭后仅停止 UI 动效，服务继续以 5 秒周期批量结算。
 - `res://scripts/game/scene_transition.gd` 通过 `project.godot` 自动加载为 `SceneTransition`，统一接管主菜单、角色选择与战斗场景切换。完整黑屏过渡固定为 0.30 秒：前 0.15 秒淡至黑色并切换场景，后 0.15 秒恢复画面；暂停状态下也继续执行。
 - `res://scenes/game/game_world.tscn` 是当前战斗承载场景，负责放置玩家、怪物、网格地图、随机墙体建筑和掉落物。它的脚本会在进入场景后生成大型网格地图，再随机摆放一批环境障碍和怪物。
 

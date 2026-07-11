@@ -6,6 +6,8 @@ extends Node
 
 signal market_changed
 signal event_announced(message: String)
+## 行情刷新完成信号；参数为刷新来源，供矿场等外部系统只在指定刷新类型上执行低耦合联动。
+signal market_refreshed(refresh_source: String)
 ## 证券币余额变化信号；充值、提现和股票成交成功后通知股市界面刷新独立账户余额。
 signal securities_balance_changed(balance: float)
 
@@ -444,6 +446,7 @@ func refresh_market(refresh_source: String = REFRESH_SETTLEMENT) -> void:
 	if not is_display_refresh:
 		_save_state()
 	market_changed.emit()
+	market_refreshed.emit(refresh_source)
 
 
 func trigger_random_event() -> Dictionary:

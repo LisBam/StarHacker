@@ -535,7 +535,8 @@ func _rebuild_equipment_items() -> void:
 		# 装备可选状态；与背包、仓库候选共用同一主锻造物品和牺牲品兼容规则。
 		var main_resource: Resource = _main_entry.get("resource") as Resource
 		var item_selectable: bool = _forge_service.can_use_as_main(item_resource) if main_resource == null else _forge_service.can_use_as_sacrifice(main_resource, item_resource)
-		item_control.call("set_weapon_target_selection_state", true, item_selectable)
+		# 锻造装备栏只灰显不可用物品；可用装备保持原色，不使用修复目标选择的绿色高亮。
+		item_control.call("set_weapon_target_selection_state", not item_selectable, false)
 		item_control.connect("item_selected", Callable(self, "_on_inventory_item_pressed").bind(equipment_location))
 		_equipment_grid.add_child(item_control)
 

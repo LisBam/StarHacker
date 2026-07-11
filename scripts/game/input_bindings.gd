@@ -75,6 +75,25 @@ func is_action_explicitly_unbound(action_name: StringName) -> bool:
 	return bool(_explicitly_unbound_actions.get(str(action_name), false))
 
 
+func is_action_using_default(action_name: StringName) -> bool:
+	# 显式未绑定一定不是默认状态，即使项目默认事件数组为空也显示恢复按钮。
+	if is_action_explicitly_unbound(action_name):
+		return false
+	# 默认事件数组；动作未进入启动缓存时视为非默认，避免错误隐藏按钮。
+	var action_name_string: String = str(action_name)
+	if not _default_events_by_action.has(action_name_string):
+		return false
+	# 当前事件和默认事件；按顺序逐项比较事件文本和物理属性。
+	var current_events: Array = InputMap.action_get_events(action_name) if InputMap.has_action(action_name) else []
+	var default_events: Array = _default_events_by_action[action_name_string]
+	if current_events.size() != default_events.size():
+		return false
+	for event_index in range(current_events.size()):
+		if not (current_events[event_index] as InputEvent).is_match(default_events[event_index] as InputEvent):
+			return false
+	return true
+
+
 func get_event_display_text(event: InputEvent) -> String:
 	if event is InputEventKey:
 		# 键盘事件；取值为 InputEventKey，默认优先使用物理键码显示，保证键盘布局变化时绑定稳定。

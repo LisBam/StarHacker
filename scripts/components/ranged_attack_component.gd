@@ -81,6 +81,8 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 		projectile.call("set_max_distance", selected_bullet_range)
 	if projectile.has_method("set_impact_force"):
 		projectile.call("set_impact_force", selected_impact_force)
+	if projectile.has_method("configure_combat_attributes"):
+		projectile.call("configure_combat_attributes", _get_owner_attack_power(), _get_weapon_float(weapon_data, "critical_chance", 0.0) + _get_stats_float("get_equipment_critical_chance", 0.0), _get_weapon_float(weapon_data, "critical_damage", 1.5) + _get_stats_float("get_equipment_critical_damage", 0.0))
 
 	projectile.global_position = spawn_position
 	projectile.global_rotation = resolved_direction.angle()
@@ -201,3 +203,15 @@ func _get_weapon_packed_scene(weapon_data: Resource, property_name: StringName, 
 		return property_value as PackedScene
 
 	return fallback_scene
+
+
+func _get_owner_attack_power() -> float:
+	# 玩家属性组件；缺失时使用 100 保持原始伤害。
+	var stats_component: Node = owner.get_node_or_null("StatsComponent") if owner != null else null
+	return float(stats_component.call("get_attack_power")) if stats_component != null and stats_component.has_method("get_attack_power") else 100.0
+
+
+func _get_stats_float(method_name: String, fallback_value: float) -> float:
+	# 玩家属性组件；用于读取装备提供的暴击附加值。
+	var stats_component: Node = owner.get_node_or_null("StatsComponent") if owner != null else null
+	return float(stats_component.call(method_name)) if stats_component != null and stats_component.has_method(method_name) else fallback_value

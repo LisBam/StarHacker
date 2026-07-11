@@ -32,6 +32,10 @@ static func is_repair_kit(item_resource: Resource) -> bool:
 	return item_resource != null and str(item_resource.get("item_kind")) == "repair_kit"
 
 
+static func is_equipment(item_resource: Resource) -> bool:
+	return item_resource != null and str(item_resource.get("item_kind")) == "equipment"
+
+
 static func get_item_display_name(item_resource: Resource) -> String:
 	if item_resource == null:
 		return "未知物品"
@@ -39,7 +43,7 @@ static func get_item_display_name(item_resource: Resource) -> String:
 	var display_name: String = str(item_resource.get("display_name"))
 	if display_name.is_empty():
 		display_name = str(item_resource.get("weapon_id"))
-	return "%s（损坏）" % display_name if is_weapon(item_resource) and item_resource.has_method("is_broken") and bool(item_resource.call("is_broken")) else display_name
+	return "%s（损坏）" % display_name if (is_weapon(item_resource) or is_equipment(item_resource)) and item_resource.has_method("is_broken") and bool(item_resource.call("is_broken")) else display_name
 
 
 static func get_item_type_label(item_resource: Resource) -> String:
@@ -47,6 +51,9 @@ static func get_item_type_label(item_resource: Resource) -> String:
 		return "资源 · 强化石"
 	if is_repair_kit(item_resource):
 		return "道具 · 修复包"
+	if is_equipment(item_resource):
+		var slot_labels: Dictionary = {"head": "头部", "body": "躯干", "legs": "腿部", "feet": "脚部"}
+		return "装备 · %s" % slot_labels.get(str(item_resource.get("equipment_slot")), "未知部位")
 	# 武器类型；ranged 与 melee 分别映射到仓库武器子分类。
 	var weapon_type: String = str(item_resource.get("weapon_type")) if item_resource != null else ""
 	return "武器 · 远程" if weapon_type == "ranged" else ("武器 · 近战" if weapon_type == "melee" else "未知")
@@ -91,7 +98,21 @@ static func build_bbcode(item_resource: Resource, quantity: int = 1, price_label
 		_append_repair_kit_lines(detail_lines, item_resource)
 	elif is_weapon(item_resource):
 		_append_weapon_lines(detail_lines, item_resource)
+	elif is_equipment(item_resource):
+		_append_equipment_lines(detail_lines, item_resource)
 	return "\n".join(detail_lines)
+
+
+static func _append_equipment_lines(detail_lines: Array[String], item_resource: Resource) -> void:
+	# 装备属性顺序；与强化规则和玩家属性聚合保持一致。
+	var stat_names: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance", "move_speed", "critical_chance", "critical_damage"]
+	detail_lines.append("[b]装备属性[/b]")
+	for stat_name in stat_names:
+		var value: float = float(item_resource.call("get_effective_stat", stat_name)) if item_resource.has_method("get_effective_stat") else float(item_resource.get(stat_name))
+		if value <= 0.0:
+			continue
+		var value_text: String = "%.0f%%" % (value * 100.0) if stat_name in ["dodge_chance", "critical_chance", "critical_damage"] else ("%.1f" % value)
+		detail_lines.append("%s：%s" % [EnhancementRules.get_stat_label(stat_name), value_text])
 
 
 static func create_tooltip_control(item_resource: Resource, quantity: int = 1, price_label: String = "出售价格", total_price_override: int = -1) -> Control:

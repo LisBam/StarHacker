@@ -14,7 +14,7 @@ signal combat_failure_losses_recorded(lost_entries: Array)
 ## 全局背包存档路径；默认写入用户目录，保存物品标识、获得时间、排序优先级和装备槽。
 const SAVE_PATH: String = "user://global_inventory.json"
 ## 当前库存存档版本；默认 7，版本 7 起支持可堆叠修复包的独立数据恢复。
-const SAVE_VERSION: int = 7
+const SAVE_VERSION: int = 8
 ## 旧版耐久上限；固定 100.0，用于把版本 5 的当前耐久按比例迁移到新版上限。
 const LEGACY_DURABILITY_MAX: float = 100.0
 ## 默认远程槽数量；当前项目使用双远程武器，修改需要同步玩家输入可直接选择的槽位数量。
@@ -34,6 +34,13 @@ const REPAIR_KIT_RESOURCE_PATHS: Dictionary = {
 	"repair_kit_basic": "res://data/items/repair_kit_basic.tres",
 	"repair_kit_medium": "res://data/items/repair_kit_medium.tres",
 	"repair_kit_advanced": "res://data/items/repair_kit_advanced.tres",
+}
+## 装备资源路径表；键为稳定 equipment_id，值用于存档恢复与开发者默认发放。
+const EQUIPMENT_RESOURCE_PATHS: Dictionary = {
+	"basic_headgear": "res://data/equipment/basic_headgear.tres",
+	"basic_body_armor": "res://data/equipment/basic_body_armor.tres",
+	"basic_leg_armor": "res://data/equipment/basic_leg_armor.tres",
+	"basic_boots": "res://data/equipment/basic_boots.tres",
 }
 ## 默认背包武器标识；首次建立存档时放入未装备武器，顺序会按获得时间默认排序。
 ## 永久仓库初始化补充：常量名称为旧存档兼容保留，当前首次存档会把这些未装备武器放入永久仓库。
@@ -58,6 +65,10 @@ const STORAGE_LOCATION_BACKPACK: String = "backpack"
 const EQUIPMENT_LOCATION_MELEE: String = "melee"
 ## 远程装备位置前缀；默认与槽位下标组合为 ranged_0、ranged_1 等稳定目标标识。
 const EQUIPMENT_LOCATION_RANGED_PREFIX: String = "ranged_"
+## 防具装备位置前缀；与 head、body、legs、feet 组合成稳定存档位置。
+const EQUIPMENT_LOCATION_ARMOR_PREFIX: String = "armor_"
+## 防具部位顺序；固定用于 UI、存档和属性聚合。
+const ARMOR_SLOT_IDS: Array[String] = ["head", "body", "legs", "feet"]
 ## 可堆叠资源单组上限；默认 99，所有仓库、背包、转移、读档和拾取逻辑共同遵守该限制。
 const MAX_STACK_QUANTITY: int = 99
 ## 开发者单次发放强化石数量；默认 10，对应隐藏开发者菜单的固定调试功能。
@@ -80,6 +91,8 @@ var _backpack_records: Array[Dictionary] = []
 var _ranged_equipment_records: Array = []
 ## 近战装备记录；默认空字典表示没有装备近战武器。
 var _melee_equipment_record: Dictionary = {}
+## 四部位防具记录；键为 head、body、legs、feet，值为空字典或装备记录。
+var _armor_equipment_records: Dictionary = {}
 ## 临时脱离容器的记录表；键为资源实例编号，值为记录，用于兼容 HUD 分步移除、装备和回滚流程。
 var _detached_records: Dictionary = {}
 ## 当前选中远程槽；取值为 0 到远程槽数量减一，默认 0 并跨场景保存。
@@ -716,7 +729,7 @@ func use_enhancement_stone_with_result(stone_resource: Resource, source_location
 		"beneficial_changes": [],
 		"detrimental_changes": [],
 	}
-	if not _is_enhancement_stone(stone_resource) or not _is_weapon_resource(weapon_resource):
+	if not _is_enhancement_stone(stone_resource) or not (_is_weapon_resource(weapon_resource) or _is_equipment_resource(weapon_resource)):
 		return failed_result
 	# 强化石来源索引；仅允许消费仓库或背包内仍由玩家持有的资源。
 	var stone_record_index: int = _find_storage_record_index(source_location, stone_resource)
@@ -775,7 +788,7 @@ func use_enhancement_stone_with_result(stone_resource: Resource, source_location
 func use_repair_kit_with_result(repair_kit_resource: Resource, source_location: String, weapon_resource: Resource) -> Dictionary:
 	# 默认失败结果；调用方可直接读取成功状态、修复前后耐久和实际恢复量。
 	var failed_result: Dictionary = {"success": false, "weapon": weapon_resource, "repair_kit": repair_kit_resource, "durability_before": 0.0, "durability_after": 0.0, "durability_restored": 0.0}
-	if not _is_repair_kit(repair_kit_resource) or not _is_weapon_resource(weapon_resource) or not _is_storage_location(source_location):
+	if not _is_repair_kit(repair_kit_resource) or not (_is_weapon_resource(weapon_resource) or _is_equipment_resource(weapon_resource)) or not _is_storage_location(source_location):
 		return failed_result
 	# 修复包记录下标；必须仍在原仓库或背包中，避免 UI 的过期引用消耗错误物品。
 	var repair_kit_record_index: int = _find_storage_record_index(source_location, repair_kit_resource)
@@ -884,9 +897,27 @@ func swap_equipment_locations(source_location: String, target_location: String) 
 func get_equipment_location_resource(location: String) -> Resource:
 	if location == EQUIPMENT_LOCATION_MELEE:
 		return get_melee_equipment_resource()
+	# 防具部位；位置使用 armor_ 前缀，与武器槽复用同一所有权接口。
+	var armor_slot: String = _get_armor_slot_from_location(location)
+	if not armor_slot.is_empty():
+		return get_armor_equipment_resource(armor_slot)
 	# 远程槽索引；取值为解析后的合法下标，-1 表示目标不是远程装备位置。
 	var ranged_slot_index: int = _get_ranged_slot_index_from_location(location)
 	return get_ranged_equipment_resource(ranged_slot_index) if ranged_slot_index >= 0 else null
+
+
+func get_armor_equipment_resource(armor_slot: String) -> Resource:
+	# 防具记录；异常部位或空槽统一返回 null。
+	var armor_record: Dictionary = _armor_equipment_records.get(armor_slot, {}) as Dictionary
+	return armor_record.get("resource") as Resource if not armor_record.is_empty() else null
+
+
+func get_armor_equipment_resources() -> Dictionary:
+	# 防具资源快照；保持固定四部位键，调用方不能直接修改所有权记录。
+	var result: Dictionary = {}
+	for armor_slot in ARMOR_SLOT_IDS:
+		result[armor_slot] = get_armor_equipment_resource(armor_slot)
+	return result
 
 
 func get_backpack_resources() -> Array[Resource]:
@@ -1167,6 +1198,9 @@ func _initialize_equipment_slots() -> void:
 	# 远程槽初始化索引；取值为 0 到默认槽数量减一，每项初始为空。
 	for _slot_index in range(DEFAULT_RANGED_SLOT_COUNT):
 		_ranged_equipment_records.append(null)
+	_armor_equipment_records.clear()
+	for armor_slot in ARMOR_SLOT_IDS:
+		_armor_equipment_records[armor_slot] = {}
 
 
 func _initialize_default_inventory() -> void:
@@ -1198,6 +1232,14 @@ func _initialize_default_inventory() -> void:
 	var melee_resource: Resource = _load_weapon_resource(DEFAULT_MELEE_WEAPON_ID)
 	if melee_resource != null:
 		_melee_equipment_record = _create_record(melee_resource)
+	# 默认防具；首次存档为四个部位各装备一件基础装备，便于直接体验完整属性链路。
+	for equipment_id in EQUIPMENT_RESOURCE_PATHS.keys():
+		var equipment_resource: Resource = _load_equipment_resource(str(equipment_id))
+		if equipment_resource == null:
+			continue
+		var armor_slot: String = str(equipment_resource.get("equipment_slot"))
+		if armor_slot in ARMOR_SLOT_IDS:
+			_armor_equipment_records[armor_slot] = _create_record(equipment_resource)
 	_sort_warehouse_default()
 
 
@@ -1279,6 +1321,10 @@ func _is_weapon_resource(item_resource: Resource) -> bool:
 	return item_resource != null and not _is_enhancement_stone(item_resource) and str(item_resource.get("weapon_type")) in ["ranged", "melee"]
 
 
+func _is_equipment_resource(item_resource: Resource) -> bool:
+	return item_resource != null and str(item_resource.get("item_kind")) == "equipment" and str(item_resource.get("equipment_slot")) in ARMOR_SLOT_IDS
+
+
 func _is_enhancement_stone(item_resource: Resource) -> bool:
 	return item_resource != null and str(item_resource.get("item_kind")) == "enhancement_stone"
 
@@ -1292,7 +1338,7 @@ func _is_stackable_resource(item_resource: Resource) -> bool:
 
 
 func _is_owned_weapon_resource(item_resource: Resource) -> bool:
-	if not _is_weapon_resource(item_resource):
+	if not (_is_weapon_resource(item_resource) or _is_equipment_resource(item_resource)):
 		return false
 	if _find_backpack_record_index(item_resource) >= 0 or _find_warehouse_record_index(item_resource) >= 0:
 		return true
@@ -1408,9 +1454,21 @@ func _get_ranged_slot_index_from_location(location: String) -> int:
 	return slot_index if slot_index >= 0 and slot_index < _ranged_equipment_records.size() else -1
 
 
+func _get_armor_slot_from_location(location: String) -> String:
+	if not location.begins_with(EQUIPMENT_LOCATION_ARMOR_PREFIX):
+		return ""
+	# 防具部位文本；只有固定四部位被视为有效装备位置。
+	var armor_slot: String = location.trim_prefix(EQUIPMENT_LOCATION_ARMOR_PREFIX)
+	return armor_slot if armor_slot in ARMOR_SLOT_IDS else ""
+
+
 func _does_resource_match_equipment_location(item_resource: Resource, location: String) -> bool:
 	if location == EQUIPMENT_LOCATION_MELEE:
 		return _is_weapon_type(item_resource, "melee")
+	# 防具目标；资源部位必须与目标槽完全一致，禁止跨部位装备。
+	var armor_slot: String = _get_armor_slot_from_location(location)
+	if not armor_slot.is_empty():
+		return _is_equipment_resource(item_resource) and str(item_resource.get("equipment_slot")) == armor_slot
 	return _get_ranged_slot_index_from_location(location) >= 0 and _is_weapon_type(item_resource, "ranged")
 
 
@@ -1422,6 +1480,12 @@ func _take_equipment_record(location: String) -> Dictionary:
 		var melee_record: Dictionary = _melee_equipment_record
 		_melee_equipment_record = {}
 		return melee_record
+	# 防具部位；取出后保留固定空字典键，方便属性聚合稳定遍历。
+	var armor_slot: String = _get_armor_slot_from_location(location)
+	if not armor_slot.is_empty():
+		var armor_record: Dictionary = _armor_equipment_records.get(armor_slot, {}) as Dictionary
+		_armor_equipment_records[armor_slot] = {}
+		return armor_record
 	# 远程槽下标；取值为合法槽位或 -1，异常位置不会修改装备数组。
 	var ranged_slot_index: int = _get_ranged_slot_index_from_location(location)
 	if ranged_slot_index < 0:
@@ -1445,6 +1509,11 @@ func _set_equipment_record(location: String, record: Dictionary) -> bool:
 		return false
 	if location == EQUIPMENT_LOCATION_MELEE:
 		_melee_equipment_record = record
+		return true
+	# 防具目标；通过前置类型校验后按固定部位写入。
+	var armor_slot: String = _get_armor_slot_from_location(location)
+	if not armor_slot.is_empty():
+		_armor_equipment_records[armor_slot] = record
 		return true
 	# 远程目标下标；已通过类型匹配校验，仍使用解析结果避免位置字符串与数组下标耦合。
 	var ranged_slot_index: int = _get_ranged_slot_index_from_location(location)
@@ -1516,7 +1585,12 @@ func _is_resource_equipped(item_resource: Resource) -> bool:
 	for slot_index in range(_ranged_equipment_records.size()):
 		if get_ranged_equipment_resource(slot_index) == item_resource:
 			return true
-	return get_melee_equipment_resource() == item_resource
+	if get_melee_equipment_resource() == item_resource:
+		return true
+	for armor_slot in ARMOR_SLOT_IDS:
+		if get_armor_equipment_resource(armor_slot) == item_resource:
+			return true
+	return false
 
 
 func _is_weapon_type(item_resource: Resource, weapon_type: String) -> bool:
@@ -1541,6 +1615,11 @@ func _get_all_owned_records() -> Array[Dictionary]:
 			result.append(raw_record)
 	if not _melee_equipment_record.is_empty():
 		result.append(_melee_equipment_record)
+	# 防具记录；四部位装备同样属于战斗携带物并参与成功保留与失败保护规则。
+	for armor_slot in ARMOR_SLOT_IDS:
+		var armor_record: Dictionary = _armor_equipment_records.get(armor_slot, {}) as Dictionary
+		if not armor_record.is_empty():
+			result.append(armor_record)
 	# 临时记录原始值；取值为分步操作中尚未安置的字典，存档时按所有物处理避免异常丢失。
 	for raw_record in _detached_records.values():
 		if raw_record is Dictionary and not (raw_record as Dictionary).is_empty():
@@ -1641,6 +1720,11 @@ func _save_inventory() -> void:
 	# 远程槽原始记录；取值为 Dictionary 或 null，逐项转换为 JSON 可写结构。
 	for raw_record in _ranged_equipment_records:
 		serialized_ranged.append(_serialize_record(raw_record as Dictionary) if raw_record is Dictionary else null)
+	# 存档防具槽；键保持固定部位，空槽写入 null。
+	var serialized_armor: Dictionary = {}
+	for armor_slot in ARMOR_SLOT_IDS:
+		var armor_record: Dictionary = _armor_equipment_records.get(armor_slot, {}) as Dictionary
+		serialized_armor[armor_slot] = _serialize_record(armor_record) if not armor_record.is_empty() else null
 
 	# 存档根字典；保存版本、排序计数、永久仓库、随身背包、装备和局外金币状态。
 	var save_data: Dictionary = {
@@ -1653,6 +1737,7 @@ func _save_inventory() -> void:
 		"backpack": serialized_backpack,
 		"ranged_equipment": serialized_ranged,
 		"melee_equipment": _serialize_record(_melee_equipment_record) if not _melee_equipment_record.is_empty() else null,
+		"armor_equipment": serialized_armor,
 	}
 	# 存档文件；取值为 user:// 下可写 FileAccess，打开失败时保留内存状态但不抛出运行时错误。
 	var save_file: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -1680,6 +1765,8 @@ func _load_inventory() -> bool:
 	_backpack_records.clear()
 	_detached_records.clear()
 	_melee_equipment_record = {}
+	for armor_slot in ARMOR_SLOT_IDS:
+		_armor_equipment_records[armor_slot] = {}
 	_acquisition_sequence = maxi(int(save_data.get("acquisition_sequence", 0)), 0)
 	_last_extraction_epoch = maxi(int(save_data.get("last_extraction_epoch", 0)), 0)
 	_current_ranged_slot = clampi(int(save_data.get("current_ranged_slot", 0)), 0, DEFAULT_RANGED_SLOT_COUNT - 1)
@@ -1729,6 +1816,24 @@ func _load_inventory() -> bool:
 	var raw_melee_equipment: Variant = save_data.get("melee_equipment")
 	if raw_melee_equipment is Dictionary:
 		_melee_equipment_record = _deserialize_record(raw_melee_equipment as Dictionary)
+	# 存档防具记录；版本 8 之前缺失时保持四个空槽。
+	var raw_armor_equipment: Variant = save_data.get("armor_equipment", {})
+	if raw_armor_equipment is Dictionary:
+		for armor_slot in ARMOR_SLOT_IDS:
+			var raw_armor_record: Variant = (raw_armor_equipment as Dictionary).get(armor_slot)
+			if raw_armor_record is Dictionary:
+				var restored_armor_record: Dictionary = _deserialize_record(raw_armor_record as Dictionary)
+				if not restored_armor_record.is_empty() and _does_resource_match_equipment_location(restored_armor_record.get("resource") as Resource, EQUIPMENT_LOCATION_ARMOR_PREFIX + armor_slot):
+					_armor_equipment_records[armor_slot] = restored_armor_record
+	# 旧存档迁移；版本 8 之前没有防具槽，为四个空部位发放并装备基础防具。
+	if int(save_data.get("version", 0)) < 8:
+		for equipment_id in EQUIPMENT_RESOURCE_PATHS.keys():
+			var migrated_equipment: Resource = _load_equipment_resource(str(equipment_id))
+			if migrated_equipment == null:
+				continue
+			var migrated_slot: String = str(migrated_equipment.get("equipment_slot"))
+			if migrated_slot in ARMOR_SLOT_IDS and (_armor_equipment_records.get(migrated_slot, {}) as Dictionary).is_empty():
+				_armor_equipment_records[migrated_slot] = _create_record(migrated_equipment)
 	if not has_separate_warehouse:
 		_sort_warehouse_default()
 	return true
@@ -1746,6 +1851,7 @@ func _serialize_record(record: Dictionary) -> Dictionary:
 		"record_id": str(record.get("record_id", "")),
 		"item_kind": str(item_resource.get("item_kind")),
 		"weapon_id": str(item_resource.get("weapon_id")),
+		"equipment_id": str(item_resource.get("equipment_id")),
 		"resource_path": _resolve_resource_path(item_resource),
 		"quantity": clampi(int(record.get("quantity", 1)), 1, MAX_STACK_QUANTITY),
 		"acquired_at": float(record.get("acquired_at", 0.0)),
@@ -1769,6 +1875,11 @@ func _serialize_record(record: Dictionary) -> Dictionary:
 		serialized_record["icon_text"] = str(item_resource.get("icon_text"))
 		serialized_record["sell_price"] = int(item_resource.get("sell_price"))
 		serialized_record["repair_amount"] = maxf(float(item_resource.get("repair_amount")), 0.0)
+	elif _is_equipment_resource(item_resource):
+		# 防具运行时字段；保存耐久和强化累计值，基础属性继续由项目模板提供。
+		serialized_record["enhancement_modifiers"] = (item_resource.get("enhancement_modifiers") as Dictionary).duplicate(true)
+		serialized_record["current_durability"] = maxf(float(item_resource.get("current_durability")), 0.0)
+		serialized_record["max_durability"] = maxf(float(item_resource.get("max_durability")), 1.0)
 	elif item_resource.has_method("get_enhancement_ratio"):
 		serialized_record["enhancement_modifiers"] = (item_resource.get("enhancement_modifiers") as Dictionary).duplicate(true)
 		serialized_record["current_durability"] = maxf(float(item_resource.get("current_durability")), 0.0)
@@ -1781,6 +1892,8 @@ func _deserialize_record(serialized_record: Dictionary) -> Dictionary:
 	var item_kind: String = str(serialized_record.get("item_kind", "weapon"))
 	# 武器标识；取值为稳定 weapon_id，资源路径失效时用于默认表兜底加载。
 	var weapon_id: String = str(serialized_record.get("weapon_id", ""))
+	# 装备标识；版本 8 起用于恢复四部位装备模板。
+	var equipment_id: String = str(serialized_record.get("equipment_id", ""))
 	# 资源路径；取值为项目内 tres 路径，默认优先使用以支持以后新增武器。
 	var resource_path: String = str(serialized_record.get("resource_path", ""))
 	# 恢复资源；取值为模板深拷贝，保证同类多件物品仍是独立实例。
@@ -1809,11 +1922,15 @@ func _deserialize_record(serialized_record: Dictionary) -> Dictionary:
 		repair_kit.sell_price = maxi(int(serialized_record.get("sell_price", repair_kit.sell_price)), 0)
 		repair_kit.repair_amount = maxf(float(serialized_record.get("repair_amount", repair_kit.repair_amount)), 1.0)
 		item_resource = repair_kit
+	elif item_kind == "equipment":
+		item_resource = _load_equipment_resource(equipment_id, resource_path)
 	else:
 		item_resource = _load_weapon_resource(weapon_id, resource_path)
 	if item_resource == null:
 		return {}
 	if _is_weapon_resource(item_resource) and serialized_record.get("enhancement_modifiers") is Dictionary:
+		item_resource.set("enhancement_modifiers", (serialized_record.get("enhancement_modifiers") as Dictionary).duplicate(true))
+	if _is_equipment_resource(item_resource) and serialized_record.get("enhancement_modifiers") is Dictionary:
 		item_resource.set("enhancement_modifiers", (serialized_record.get("enhancement_modifiers") as Dictionary).duplicate(true))
 	if _is_weapon_resource(item_resource):
 		# 恢复耐久；旧存档缺少字段时按模板最大耐久恢复满值，避免升级后全部旧武器意外损坏。
@@ -1829,6 +1946,12 @@ func _deserialize_record(serialized_record: Dictionary) -> Dictionary:
 			item_resource.call("set_current_durability", restored_durability)
 		else:
 			item_resource.set("current_durability", restored_durability)
+	if _is_equipment_resource(item_resource):
+		# 防具耐久恢复；使用与武器相同的按比例迁移规则。
+		var equipment_max_durability: float = maxf(float(item_resource.get("max_durability")), 1.0)
+		var saved_equipment_max_durability: float = maxf(float(serialized_record.get("max_durability", equipment_max_durability)), 1.0)
+		var saved_equipment_current_durability: float = float(serialized_record.get("current_durability", saved_equipment_max_durability))
+		item_resource.call("set_current_durability", equipment_max_durability * clampf(saved_equipment_current_durability / saved_equipment_max_durability, 0.0, 1.0))
 	# 恢复记录；保留编号和获得时间，序号缺失时使用当前递增值。
 	var record: Dictionary = _create_record(item_resource, float(serialized_record.get("acquired_at", 0.0)), str(serialized_record.get("record_id", "")))
 	record["acquisition_sequence"] = int(serialized_record.get("acquisition_sequence", record.get("acquisition_sequence", 0)))
@@ -1870,6 +1993,17 @@ func _load_repair_kit_resource(item_id: String, preferred_path: String = "") -> 
 	return duplicated_resource if duplicated_resource != null else repair_kit_template
 
 
+func _load_equipment_resource(equipment_id: String, preferred_path: String = "") -> Resource:
+	# 装备路径；优先使用存档资源路径，缺失时按稳定 ID 回退默认表。
+	var resolved_path: String = preferred_path if not preferred_path.is_empty() else str(EQUIPMENT_RESOURCE_PATHS.get(equipment_id, ""))
+	if resolved_path.is_empty() or not ResourceLoader.exists(resolved_path):
+		return null
+	# 装备模板；深拷贝保证同类多件装备的耐久和强化状态互不影响。
+	var equipment_template: Resource = load(resolved_path) as Resource
+	var duplicated_resource: Resource = equipment_template.duplicate(true) as Resource if equipment_template != null else null
+	return duplicated_resource if duplicated_resource != null else equipment_template
+
+
 func _resolve_resource_path(item_resource: Resource) -> String:
 	if item_resource == null:
 		return ""
@@ -1877,4 +2011,6 @@ func _resolve_resource_path(item_resource: Resource) -> String:
 		return item_resource.resource_path
 	if _is_repair_kit(item_resource):
 		return str(REPAIR_KIT_RESOURCE_PATHS.get(str(item_resource.get("item_id")), ""))
+	if _is_equipment_resource(item_resource):
+		return str(EQUIPMENT_RESOURCE_PATHS.get(str(item_resource.get("equipment_id")), ""))
 	return str(WEAPON_RESOURCE_PATHS.get(str(item_resource.get("weapon_id")), ""))

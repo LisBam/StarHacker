@@ -51,6 +51,10 @@ class_name WeaponData
 @export_range(0.0, 5000.0, 1.0, "or_greater") var impact_force: float = 0.0
 ## 近战伤害；取值建议大于等于 0，默认 35，修改会影响近战命中后的伤害值。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var melee_damage: float = 35.0
+## 武器暴击率；使用 0 到 1 小数，默认 0，每把武器资源可配置不同初始值并允许强化。
+@export_range(0.0, 1.0, 0.01) var critical_chance: float = 0.0
+## 武器暴击伤害倍率；默认 1.5 表示造成 150% 伤害，允许强化石永久调整。
+@export_range(1.0, 10.0, 0.05, "or_greater") var critical_damage: float = 1.5
 ## 近战冷却；取值应大于 0，默认 0.45 秒，修改会影响近战攻击节奏。
 @export_range(0.01, 5.0, 0.01) var melee_cooldown: float = 0.45
 ## 近战命中框激活时长；取值应大于 0，默认 0.12 秒，修改会影响近战判定窗口。
@@ -65,7 +69,7 @@ const MINIMUM_DURABILITY_SELL_PRICE_MULTIPLIER: float = 0.1
 ## 冷却和判定时长最小有效值；默认 0.01 秒，防止负强化导致除零或无限攻击。
 const MINIMUM_DURATION_VALUE: float = 0.01
 ## 可应用于所有武器的统一强化属性；新增通用战斗字段时应同步详情格式化器。
-const COMMON_ENHANCEMENT_STATS: Array[String] = ["damage", "cooldown", "energy_cost", "recoil_force", "front_recoil_force", "impact_force"]
+const COMMON_ENHANCEMENT_STATS: Array[String] = ["damage", "cooldown", "energy_cost", "recoil_force", "front_recoil_force", "impact_force", "critical_chance", "critical_damage"]
 ## 远程武器专属强化属性；只允许远程武器消费包含这些字段的强化石效果。
 const RANGED_ENHANCEMENT_STATS: Array[String] = ["projectile_speed", "bullet_range", "spread_degrees"]
 ## 近战武器专属强化属性；只允许近战武器消费包含这些字段的强化石效果。

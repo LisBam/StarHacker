@@ -21,10 +21,10 @@ const QUALITY_ORDER: Array[String] = [QUALITY_COMMON, QUALITY_MEDIUM, QUALITY_HI
 const QUALITY_WEIGHTS: Dictionary = {QUALITY_COMMON: 0.47, QUALITY_MEDIUM: 0.35, QUALITY_HIGH: 0.15, QUALITY_SUPREME: 0.03}
 ## 品质数值表；依次记录名称、生命、基础开启时间、掉落数量范围和最低高品质数量。
 const QUALITY_CONFIGS: Dictionary = {
-	QUALITY_COMMON: {"display_name": "普通宝箱", "health": 10.0, "hold_duration": 1.0, "drop_min": 2, "drop_max": 4, "minimum_high_quality_count": 0, "color": Color(0.48, 0.62, 0.70, 1.0)},
-	QUALITY_MEDIUM: {"display_name": "中级宝箱", "health": 20.0, "hold_duration": 2.0, "drop_min": 3, "drop_max": 6, "minimum_high_quality_count": 0, "color": Color(0.30, 0.72, 1.0, 1.0)},
-	QUALITY_HIGH: {"display_name": "高级宝箱", "health": 50.0, "hold_duration": 3.0, "drop_min": 4, "drop_max": 8, "minimum_high_quality_count": 0, "color": Color(0.72, 0.42, 1.0, 1.0)},
-	QUALITY_SUPREME: {"display_name": "极品宝箱", "health": 100.0, "hold_duration": 5.0, "drop_min": 5, "drop_max": 10, "minimum_high_quality_count": 5, "color": Color(1.0, 0.68, 0.18, 1.0)},
+	QUALITY_COMMON: {"display_name": "普通宝箱", "health": 20.0, "hold_duration": 1.0, "drop_min": 2, "drop_max": 4, "minimum_high_quality_count": 0, "color": Color(0.48, 0.62, 0.70, 1.0)},
+	QUALITY_MEDIUM: {"display_name": "中级宝箱", "health": 40.0, "hold_duration": 2.0, "drop_min": 3, "drop_max": 6, "minimum_high_quality_count": 0, "color": Color(0.30, 0.72, 1.0, 1.0)},
+	QUALITY_HIGH: {"display_name": "高级宝箱", "health": 100.0, "hold_duration": 3.0, "drop_min": 4, "drop_max": 8, "minimum_high_quality_count": 0, "color": Color(0.72, 0.42, 1.0, 1.0)},
+	QUALITY_SUPREME: {"display_name": "极品宝箱", "health": 200.0, "hold_duration": 5.0, "drop_min": 5, "drop_max": 10, "minimum_high_quality_count": 5, "color": Color(1.0, 0.68, 0.18, 1.0)},
 }
 
 ## 玩家可长按开启的交互距离；默认 104 像素，修改会影响 HUD 选择附近宝箱的范围。
@@ -35,9 +35,9 @@ const QUALITY_CONFIGS: Dictionary = {
 ## 当前品质标识；默认普通，生成后由 GameWorld 按品质权重配置。
 var _quality_id: String = QUALITY_COMMON
 ## 当前宝箱生命；默认 10，与普通宝箱配置一致，受到伤害后限制到 0 以上。
-var _current_health: float = 10.0
+var _current_health: float = 20.0
 ## 当前宝箱最大生命；默认 10，用于把受伤比例映射为长按时间缩减比例。
-var _maximum_health: float = 10.0
+var _maximum_health: float = 20.0
 ## 当前品质基础长按时间；默认 1 秒，实际需求会乘剩余生命比例。
 var _base_hold_duration: float = 1.0
 ## 当前长按累计时间；默认 0，松开交互、离开范围或切换目标时重置。

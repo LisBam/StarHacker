@@ -37,6 +37,12 @@ var _current_impact_force: float = 0.0
 var _current_attack_direction: Vector2 = Vector2.RIGHT
 ## 当前近战冷却总时长；取值大于等于 0，默认 0 表示无冷却基准，修改会影响 HUD 冷却覆盖比例。
 var _cooldown_duration: float = 0.0
+## 当前挥击攻击力；默认 100，命中时参与统一攻防公式。
+var _current_attack_power: float = 100.0
+## 当前挥击暴击率；默认 0，每个命中目标独立判定。
+var _current_critical_chance: float = 0.0
+## 当前挥击暴击伤害倍率；默认 1.5 表示 150%。
+var _current_critical_damage: float = 1.5
 
 ## 命中框碰撞形状缓存；默认按 collision_shape_path 获取，允许为空但无法碰撞，修改会影响近战判定开关。
 @onready var _collision_shape: CollisionShape2D = get_node_or_null(collision_shape_path) as CollisionShape2D
@@ -71,6 +77,10 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	var selected_active_duration: float = _get_weapon_float(weapon_data, "melee_active_duration", active_duration)
 	# 本次近战冲击力；取值来自武器数据，默认 0 表示只造成伤害不击退。
 	var selected_impact_force: float = _get_weapon_float(weapon_data, "impact_force", 0.0)
+	# 本次武器暴击率；默认 0，不同近战武器可配置不同初始值。
+	var selected_critical_chance: float = _get_weapon_float(weapon_data, "critical_chance", 0.0) + _get_stats_float("get_equipment_critical_chance", 0.0)
+	# 本次武器暴击伤害；默认 1.5 表示 150%。
+	var selected_critical_damage: float = _get_weapon_float(weapon_data, "critical_damage", 1.5) + _get_stats_float("get_equipment_critical_damage", 0.0)
 
 	if _cooldown_remaining > 0.0 or _active_remaining > 0.0 or direction.is_zero_approx():
 		return false
@@ -79,6 +89,9 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	_current_damage = selected_damage
 	_current_impact_force = selected_impact_force
 	_current_attack_direction = direction.normalized()
+	_current_attack_power = _get_owner_attack_power()
+	_current_critical_chance = selected_critical_chance
+	_current_critical_damage = selected_critical_damage
 	_hit_instances.clear()
 	_cooldown_remaining = selected_cooldown
 	_cooldown_duration = selected_cooldown
@@ -152,6 +165,18 @@ func get_knockback_direction() -> Vector2:
 	return _current_attack_direction
 
 
+func get_attack_power() -> float:
+	return _current_attack_power
+
+
+func get_critical_chance() -> float:
+	return _current_critical_chance
+
+
+func get_critical_damage_multiplier() -> float:
+	return _current_critical_damage
+
+
 func _get_weapon_float(weapon_data: Resource, property_name: StringName, fallback_value: float) -> float:
 	if weapon_data == null:
 		return fallback_value
@@ -164,3 +189,15 @@ func _get_weapon_float(weapon_data: Resource, property_name: StringName, fallbac
 		return fallback_value
 
 	return float(property_value)
+
+
+func _get_owner_attack_power() -> float:
+	# 玩家属性组件；缺失时使用 100 保持既有伤害。
+	var stats_component: Node = owner.get_node_or_null("StatsComponent") if owner != null else null
+	return float(stats_component.call("get_attack_power")) if stats_component != null and stats_component.has_method("get_attack_power") else 100.0
+
+
+func _get_stats_float(method_name: String, fallback_value: float) -> float:
+	# 玩家属性组件；用于读取装备提供的暴击附加值。
+	var stats_component: Node = owner.get_node_or_null("StatsComponent") if owner != null else null
+	return float(stats_component.call(method_name)) if stats_component != null and stats_component.has_method(method_name) else fallback_value

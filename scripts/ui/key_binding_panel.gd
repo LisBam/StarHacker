@@ -16,6 +16,8 @@ signal binding_capture_finished
 var _input_bindings: Node
 ## 绑定按钮缓存；键为动作名字符串，值为 Button，用于绑定变化后刷新按钮文本。
 var _binding_buttons: Dictionary = {}
+## 单项默认按钮缓存；键为动作名字符串，值为 Button，用于仅在绑定偏离默认值时显示。
+var _default_buttons: Dictionary = {}
 ## 当前等待绑定的动作名；默认空 StringName 表示未捕获输入。
 var _waiting_action: StringName = &""
 ## 当前等待绑定的按钮；默认 null，仅用于恢复按钮文案和焦点。
@@ -131,6 +133,7 @@ func _build_binding_rows() -> void:
 		default_button.custom_minimum_size = Vector2(72.0, 34.0)
 		default_button.pressed.connect(Callable(self, "_on_action_default_button_pressed").bind(StringName(action_name_string)))
 		row_container.add_child(default_button)
+		_default_buttons[action_name_string] = default_button
 
 
 func _refresh_binding_buttons() -> void:
@@ -145,6 +148,10 @@ func _refresh_binding_buttons() -> void:
 			continue
 
 		bind_button.text = str(_input_bindings.call("get_action_display_text", StringName(str(action_name_string))))
+		# 默认按钮；当前绑定未更改时隐藏，只有偏离项目默认值后才提供单项恢复入口。
+		var default_button: Button = _default_buttons.get(action_name_string) as Button
+		if default_button != null and _input_bindings.has_method("is_action_using_default"):
+			default_button.visible = not bool(_input_bindings.call("is_action_using_default", StringName(str(action_name_string))))
 
 
 func _begin_binding_capture(action_name: StringName, bind_button: Button) -> void:

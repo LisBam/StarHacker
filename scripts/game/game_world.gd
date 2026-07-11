@@ -141,9 +141,9 @@ const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, 
 ## 宝箱场景；默认由 game_world.tscn 指向 LootChest，必须实例化为静态 Node2D 建筑。
 @export var loot_chest_scene: PackedScene
 ## 单局最少宝箱数量；默认 20，与最大值组成进入地图时的等概率整数范围。
-@export_range(0, 100, 1) var loot_chest_spawn_count_min: int = 20
+@export_range(0, 100, 1) var loot_chest_spawn_count_min: int = 15
 ## 单局最多宝箱数量；默认 40，实际生成数量会先与最少值排序后随机抽取。
-@export_range(0, 100, 1) var loot_chest_spawn_count_max: int = 40
+@export_range(0, 100, 1) var loot_chest_spawn_count_max: int = 30
 ## 宝箱优先在建筑周围生成的概率；默认 0.72，其余候选在整张地图均匀抽取。
 @export_range(0.0, 1.0, 0.01) var loot_chest_near_building_chance: float = 0.72
 ## 封闭建筑在附近宝箱候选中的权重倍率；默认 3.0，使封闭建筑周边比普通环境结构更容易被选中。
@@ -1952,9 +1952,11 @@ func _on_monster_died(monster_node: Node) -> void:
 	if monster_node == null or not (monster_node is Node2D):
 		return
 
-	_try_spawn_monster_weapon_drop(monster_node as Node2D)
-	_try_spawn_enhancement_stone_drop(monster_node as Node2D)
-	_try_spawn_repair_kit_drop(monster_node as Node2D)
+	# 训练场只用于测试战斗，不生成任何怪物掉落，避免调试资源进入正式库存。
+	if not _is_training_mode:
+		_try_spawn_monster_weapon_drop(monster_node as Node2D)
+		_try_spawn_enhancement_stone_drop(monster_node as Node2D)
+		_try_spawn_repair_kit_drop(monster_node as Node2D)
 	if _monster_simulation_manager != null and _monster_simulation_manager.has_method("unregister_monster"):
 		_monster_simulation_manager.call("unregister_monster", monster_node)
 

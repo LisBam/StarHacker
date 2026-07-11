@@ -30,8 +30,10 @@ const DISPLAY_MODE_FULL: int = 1
 @export var minimap_border_color: Color = Color(0.55, 0.82, 0.92, 0.75)
 ## 小地图障碍颜色；默认浅蓝灰，修改会影响墙体和建筑可见度。
 @export var obstacle_color: Color = Color(0.54, 0.72, 0.78, 0.85)
-## 大地图迷雾颜色；默认半透明黑色滤镜，修改会影响未探索区域被遮挡的强度。
-@export var fog_overlay_color: Color = Color(0.0, 0.0, 0.0, 0.58)
+## 大小地图迷雾颜色；默认高透明度蓝黑滤镜，明确区分未探索区域与已探索底图。
+@export var fog_overlay_color: Color = Color(0.015, 0.025, 0.055, 0.86)
+## 迷雾网格线颜色；默认低亮度蓝灰色，为未知区域提供稳定纹理而不是纯色块。
+@export var fog_grid_line_color: Color = Color(0.18, 0.28, 0.38, 0.28)
 ## 小地图玩家颜色；默认亮青色，修改会影响玩家点可见度。
 @export var player_color: Color = Color(0.34, 0.93, 1.0, 1.0)
 ## 撤离点标记颜色；默认亮绿色，只有 GameWorld 标记撤离点后才绘制。
@@ -172,9 +174,6 @@ func _draw_explored_obstacle_rect(obstacle_rect: Rect2, world_view_rect: Rect2) 
 
 
 func _draw_fog(world_view_rect: Rect2) -> void:
-	if display_mode != DISPLAY_MODE_FULL:
-		return
-
 	# 探索格子尺寸；取值来自 GameWorld 或兜底值，默认用于把迷雾拆成稳定网格。
 	var cell_size: float = _get_exploration_cell_size()
 	# 已探索格查询表；键为 Vector2i，默认让大地图快速判断哪些格子不需要迷雾。
@@ -204,6 +203,8 @@ func _draw_fog(world_view_rect: Rect2) -> void:
 			# 当前迷雾本地矩形；取值为世界迷雾矩形映射到控件后的结果，默认用于绘制滤镜。
 			var minimap_fog_rect: Rect2 = _world_rect_to_minimap_rect(visible_fog_rect, world_view_rect)
 			draw_rect(minimap_fog_rect, fog_overlay_color, true)
+			# 迷雾纹理边界；大小地图共同绘制细网格，让未知区域与已探索区域保持明显视觉差异。
+			draw_rect(minimap_fog_rect, fog_grid_line_color, false, 1.0)
 
 
 func _draw_player_marker(world_view_rect: Rect2) -> void:

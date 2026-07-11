@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="EquipmentData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/equipment_data.gd" id="1_equipment"]
+
+[resource]
+script = ExtResource("1_equipment")
+equipment_id = "basic_body_armor"
+display_name = "量子复合护甲"
+equipment_slot = "body"
+description = "以防御和最大生命为主的躯干装备。"
+sell_price = 90
+defense_power = 16.0
+max_health = 28.0
+health_regeneration_per_five_seconds = 2.0

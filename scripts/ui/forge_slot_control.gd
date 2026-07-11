@@ -11,14 +11,14 @@ signal return_requested(slot_index: int)
 const STORAGE_DRAG_DATA_TYPE: String = "global_storage_item"
 ## 物品详情格式化器；槽位悬停继续显示完整武器或强化石信息。
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
-## 通用物品卡片视图；主槽和牺牲槽中的物品必须与背包、仓库和商店使用同一固定尺寸模板。
+## 通用物品卡片视图；主锻造槽和牺牲槽中的物品必须与背包、仓库和商店使用同一固定尺寸模板。
 const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
 ## 锻造槽允许的最小边长；默认 48 像素，用于保护外部调用传入异常小尺寸时的文字与投放区域可用性。
 const MINIMUM_SLOT_SIZE: float = 48.0
 
 ## 槽位下标；主锻造槽固定为 -1，周围牺牲槽使用 0 到 4。
 var _slot_index: int = -1
-## 是否为主锻造槽；主槽只接收武器，牺牲槽接收武器或强化石。
+## 是否为主锻造槽；主锻造槽接收武器、装备或可升阶强化石，牺牲槽接收兼容锻造物品。
 var _is_main_slot: bool = false
 ## 当前槽位条目；包含资源和来源位置，空字典表示尚未放入物品。
 var _entry: Dictionary = {}
@@ -38,13 +38,13 @@ var _item_card_view: Control
 func configure(slot_index: int, is_main_slot: bool, slot_size: float = 84.0) -> void:
 	_slot_index = slot_index
 	_is_main_slot = is_main_slot
-	# 槽位尺寸；由锻造面板统一配置，主槽和牺牲槽保持一致以维持环形布局的视觉平衡。
+	# 槽位尺寸；由锻造面板统一配置，主锻造槽和牺牲槽保持一致以维持环形布局的视觉平衡。
 	# 通用模板补充：参数仅为旧场景兼容入口，实际显示强制使用全项目统一物品卡片固定尺寸。
 	var resolved_slot_size: float = maxf(slot_size, MINIMUM_SLOT_SIZE)
 	custom_minimum_size = ITEM_CARD_VIEW_SCRIPT.get_standard_size()
 	size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	# 槽位基础样式；六个槽位统一正方形深色底与白色边框，主槽与牺牲槽仅通过位置区分职责。
+	# 槽位基础样式；六个槽位统一正方形深色底与白色边框，主锻造槽与牺牲槽仅通过位置区分职责。
 	# 通用模板补充：该宿主样式仅保留交互兼容，最终可见轮廓由 160×72 的 ItemCardView 覆盖绘制。
 	_normal_style = StyleBoxFlat.new()
 	_normal_style.bg_color = Color(0.06, 0.075, 0.09, 0.94)
@@ -76,7 +76,7 @@ func refresh(entry: Dictionary) -> void:
 		text = ""
 		tooltip_text = ""
 		self_modulate = Color.WHITE
-		_item_card_view.call("configure", null, 1, "主槽" if _is_main_slot else "材料槽 %d" % (_slot_index + 1), "", "空", "")
+		_item_card_view.call("configure", null, 1, "主锻造槽" if _is_main_slot else "牺牲槽 %d" % (_slot_index + 1), "", "空", "")
 	else:
 		# 物品名称；槽位保持简洁，仅展示已放入材料的名称，完整来源和属性仍可通过悬停查看。
 		text = ""
@@ -84,7 +84,7 @@ func refresh(entry: Dictionary) -> void:
 		self_modulate = Color.WHITE
 		# 锻造槽摘要；只提供物品类型，名称、固定尺寸和耐久条继续由通用模板处理。
 		var item_type: String = str(ITEM_DETAIL_FORMATTER.call("get_item_type_label", item_resource))
-		_item_card_view.call("configure", item_resource, maxi(int(_entry.get("quantity", 1)), 1), "主槽" if _is_main_slot else "材料槽 %d" % (_slot_index + 1), item_type, "空", "")
+		_item_card_view.call("configure", item_resource, maxi(int(_entry.get("quantity", 1)), 1), "主锻造槽" if _is_main_slot else "牺牲槽 %d" % (_slot_index + 1), item_type, "空", "")
 	_item_card_view.call("set_visual_state", _is_main_slot and item_resource != null, false)
 	_item_card_view.call("set_disabled_state", _is_invalid and item_resource != null)
 	if _is_invalid:
@@ -120,7 +120,7 @@ func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
 	var drag_data: Dictionary = data as Dictionary
 	if str(drag_data.get("type", "")) != STORAGE_DRAG_DATA_TYPE:
 		return false
-	# 拖拽物品；主槽允许武器、装备或强化石，牺牲槽先接受三类锻造物品，再由面板结合主物品做精确校验。
+	# 拖拽物品；主锻造槽允许武器、装备或强化石，牺牲槽先接受三类锻造物品，再由面板结合主物品做精确校验。
 	var item_resource: Resource = drag_data.get("resource") as Resource
 	if item_resource == null:
 		return false

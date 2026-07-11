@@ -55,6 +55,15 @@ func present(enhancement_result: Dictionary) -> void:
 	var detrimental_changes: Array = enhancement_result.get("detrimental_changes", []) as Array
 	_append_change_section(result_lines, "提升属性", beneficial_changes, "无")
 	_append_change_section(result_lines, "削弱属性", detrimental_changes, "无")
+	# 强化前耐久；锻造服务在结算前保存，用于明确展示牺牲品带来的实际耐久收益。
+	var durability_before: float = maxf(float(enhancement_result.get("durability_before", 0.0)), 0.0)
+	# 强化后耐久；已经限制在主物品最大耐久以内，耐久溢出部分不会写入或计费。
+	var durability_after: float = maxf(float(enhancement_result.get("durability_after", durability_before)), 0.0)
+	# 实际恢复耐久；只展示真正写入主物品的数值，纯强化石锻造时固定为 0。
+	var durability_restored: float = maxf(float(enhancement_result.get("durability_restored", durability_after - durability_before)), 0.0)
+	result_lines.append("")
+	result_lines.append("耐久变化")
+	result_lines.append("[color=%s]%s → %s（+%s）[/color]" % [BENEFICIAL_COLOR if durability_restored > 0.0 else NEUTRAL_COLOR, _format_number(durability_before), _format_number(durability_after), _format_number(durability_restored)])
 	# 强化前售价；由 GlobalInventory 在应用词条前读取，避免弹窗自行复算历史状态。
 	var sell_price_before: int = maxi(int(enhancement_result.get("sell_price_before", 0)), 0)
 	# 强化后售价；包含本次随机强化产生的全部价格影响。

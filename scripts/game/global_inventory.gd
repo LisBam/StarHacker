@@ -423,6 +423,17 @@ func has_storage_resource_quantity(item_resource: Resource, source_location: Str
 	return get_storage_resource_quantity(item_resource, source_location) >= requested_quantity
 
 
+func has_owned_resource_quantity(item_resource: Resource, source_location: String, requested_quantity: int = 1) -> bool:
+	# 请求数量；背包与仓库支持堆叠，装备栏固定只能持有一件物品，因此所有来源都要求正整数数量。
+	if item_resource == null or requested_quantity <= 0:
+		return false
+	# 存储来源；复用现有数量接口，确保强化石堆叠和普通物品数量规则保持一致。
+	if _is_storage_location(source_location):
+		return has_storage_resource_quantity(item_resource, source_location, requested_quantity)
+	# 装备栏来源；装备槽只能匹配当前资源实例并提供一件所有权。
+	return requested_quantity == 1 and get_equipment_location_resource(source_location) == item_resource
+
+
 func consume_storage_resource_quantity(item_resource: Resource, source_location: String, requested_quantity: int = 1) -> bool:
 	if item_resource == null or requested_quantity <= 0:
 		return false
@@ -444,6 +455,23 @@ func consume_storage_resource_quantity(item_resource: Resource, source_location:
 		source_records.remove_at(record_index)
 	_queue_save_inventory()
 	_emit_storage_changed(source_location)
+	return true
+
+
+func consume_owned_resource_quantity(item_resource: Resource, source_location: String, requested_quantity: int = 1) -> bool:
+	# 存储来源；仓库与背包继续通过堆叠安全接口扣除指定数量。
+	if _is_storage_location(source_location):
+		return consume_storage_resource_quantity(item_resource, source_location, requested_quantity)
+	# 装备栏来源；槽位始终只有一件物品，异常数量或资源已更换时拒绝消费。
+	if item_resource == null or requested_quantity != 1 or get_equipment_location_resource(source_location) != item_resource:
+		return false
+	# 装备记录；仅在全部校验通过后取出，避免锻造预览过期时误删其他装备。
+	var consumed_record: Dictionary = _take_equipment_record(source_location)
+	if consumed_record.is_empty():
+		return false
+	_refresh_current_ranged_slot_after_equipment_change()
+	_queue_save_inventory()
+	equipment_changed.emit()
 	return true
 
 

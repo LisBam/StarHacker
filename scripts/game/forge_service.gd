@@ -25,7 +25,7 @@ const STONE_QUALITY_COSTS: Dictionary = {
 const STONE_UPGRADE_SUCCESS_RATE_PER_SACRIFICE: float = 0.20
 ## 武器锻造模式标识；用于让 UI 区分耐久/词条预览与强化石升阶预览。
 const FORGE_MODE_WEAPON: String = "weapon"
-## 强化石升阶模式标识；主槽为可升阶强化石时启用，不收取金币。
+## 强化石升阶模式标识；主锻造槽为可升阶强化石时启用，不收取金币。
 const FORGE_MODE_STONE_UPGRADE: String = "stone_upgrade"
 
 ## 全局库存服务；负责校验来源数量、扣除金币、消费材料和应用随机强化倍率。
@@ -72,7 +72,8 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 			var offered_durability: float = maxf(float(sacrifice_resource.get("current_durability")), 0.0) * SACRIFICE_WEAPON_DURABILITY_RATIO
 			# 本槽实际恢复量；主武器即将满耐久时只计算剩余缺口。
 			var applied_durability: float = minf(offered_durability, remaining_durability_capacity)
-			if applied_durability > 0.0:
+			# 正耐久牺牲品；只要主物品在锻造开始时存在耐久缺口就属于合法材料，超过缺口的部分不恢复也不收费。
+			if offered_durability > 0.0 and maximum_durability > durability_before:
 				durability_restored += applied_durability
 				remaining_durability_capacity -= applied_durability
 				effective_material_count += 1
@@ -130,7 +131,7 @@ func execute_forge(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 	var main_weapon: Resource = main_entry.get("resource") as Resource
 	# 主武器来源；只接受 warehouse 或 backpack，与锻造下半区可选容器一致。
 	var main_location: String = str(main_entry.get("source_location", ""))
-	if not bool(_global_inventory.call("has_storage_resource_quantity", main_weapon, main_location, 1)):
+	if not bool(_global_inventory.call("has_owned_resource_quantity", main_weapon, main_location, 1)):
 		return {"success": false, "message": "主武器已不在原来源中"}
 	# 有效牺牲材料；预览已经排除零耐久、超出修复上限和不兼容的条目，执行时只消费这些材料。
 	var effective_sacrifice_entries: Array[Dictionary] = preview.get("effective_sacrifice_entries", []) as Array[Dictionary]
@@ -139,7 +140,7 @@ func execute_forge(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 	for material_key in required_materials.keys():
 		# 材料需求；包含资源实例、来源和所需数量，任一不足都在扣款前终止。
 		var requirement: Dictionary = required_materials[material_key] as Dictionary
-		if not bool(_global_inventory.call("has_storage_resource_quantity", requirement.get("resource") as Resource, str(requirement.get("source_location", "")), int(requirement.get("quantity", 1)))):
+		if not bool(_global_inventory.call("has_owned_resource_quantity", requirement.get("resource") as Resource, str(requirement.get("source_location", "")), int(requirement.get("quantity", 1)))):
 			return {"success": false, "message": "牺牲材料数量不足或已被移动"}
 	# 锻造费用；扣款前检查余额，失败时不消费任何材料或改变武器状态。
 	var forge_cost: int = int(preview.get("cost", 0))
@@ -171,7 +172,7 @@ func execute_forge(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 		# 当前来源；锻造结束后材料从其原仓库或背包位置扣除。
 		var source_location: String = str(sacrifice_entry.get("source_location", ""))
 		if _is_weapon(sacrifice_resource):
-			_global_inventory.call("consume_storage_resource_quantity", sacrifice_resource, source_location, 1)
+			_global_inventory.call("consume_owned_resource_quantity", sacrifice_resource, source_location, 1)
 		elif _is_enhancement_stone(sacrifice_resource) and bool(sacrifice_resource.call("can_apply_to_weapon", main_weapon)):
 			# 单颗强化结果；具体倍率只在此时随机，预览阶段不会提前泄露。
 			var stone_result: Dictionary = _global_inventory.call("use_enhancement_stone_with_result", sacrifice_resource, source_location, main_weapon) as Dictionary
@@ -185,7 +186,7 @@ func execute_forge(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 
 
 func can_use_as_main(item_resource: Resource) -> bool:
-	# 主槽允许武器、装备或仍有下一品质的强化石；极品强化石不能作为升阶主石，但仍可作为对应物品的强化材料。
+	# 主锻造槽允许武器、装备或仍有下一品质的强化石；极品强化石不能作为升阶主石，但仍可作为对应物品的强化材料。
 	if _is_weapon(item_resource):
 		return true
 	if not _is_enhancement_stone(item_resource):
@@ -209,7 +210,7 @@ func can_use_as_sacrifice(main_resource: Resource, candidate_resource: Resource)
 
 
 func _build_stone_upgrade_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary]) -> Dictionary:
-	# 主强化石；主槽中的资源实例在失败时保留，成功时仅替换其中一颗为下一品质。
+	# 主强化石；主锻造槽中的资源实例在失败时保留，成功时仅替换其中一颗为下一品质。
 	var main_stone: Resource = main_entry.get("resource") as Resource
 	# 主石品质；升阶路径只允许初级、中级和高级。
 	var main_quality_id: String = _get_stone_quality_id(main_stone)
@@ -252,16 +253,16 @@ func _execute_stone_upgrade(main_entry: Dictionary, sacrifice_entries: Array[Dic
 	var main_stone: Resource = main_entry.get("resource") as Resource
 	# 主石来源；取值为 backpack 或 warehouse，升阶成功后新品质资源写回该容器。
 	var main_location: String = str(main_entry.get("source_location", ""))
-	# 全部需求；执行前把主石与牺牲石合并校验，支持同一堆叠同时占据主槽和多个牺牲槽。
+	# 全部需求；执行前把主石与牺牲石合并校验，支持同一堆叠同时占据主锻造槽和多个牺牲槽。
 	var all_required_entries: Array[Dictionary] = []
 	all_required_entries.append(main_entry.duplicate())
 	all_required_entries.append_array(sacrifice_entries)
-	# 合并需求表；同一堆叠同时占据主槽和牺牲槽时按总数量一次校验。
+	# 合并需求表；同一堆叠同时占据主锻造槽和牺牲槽时按总数量一次校验。
 	var all_required_materials: Dictionary = _build_required_material_counts(all_required_entries)
 	for material_key in all_required_materials.keys():
-		# 单项需求；包含资源实例、来源位置和主槽加牺牲槽的合计数量。
+		# 单项需求；包含资源实例、来源位置和主锻造槽加牺牲槽的合计数量。
 		var requirement: Dictionary = all_required_materials[material_key] as Dictionary
-		if not bool(_global_inventory.call("has_storage_resource_quantity", requirement.get("resource") as Resource, str(requirement.get("source_location", "")), int(requirement.get("quantity", 1)))):
+		if not bool(_global_inventory.call("has_owned_resource_quantity", requirement.get("resource") as Resource, str(requirement.get("source_location", "")), int(requirement.get("quantity", 1)))):
 			return {"success": false, "message": "强化石数量不足或已被移动"}
 	# 升阶资源；在消费任何材料前先完成复制校验，避免异常资源导致牺牲石已经扣除却无法生成结果。
 	var upgraded_stone: Resource = main_stone.call("create_upgraded_copy") as Resource if main_stone != null and main_stone.has_method("create_upgraded_copy") else null
@@ -271,7 +272,7 @@ func _execute_stone_upgrade(main_entry: Dictionary, sacrifice_entries: Array[Dic
 	var upgrade_succeeded: bool = _random.randf() < clampf(float(preview.get("success_rate", 0.0)), 0.0, 1.0)
 	# 牺牲材料始终全部消耗；预检已经保证逐项扣除不会在中途失败。
 	for sacrifice_entry in sacrifice_entries:
-		_global_inventory.call("consume_storage_resource_quantity", sacrifice_entry.get("resource") as Resource, str(sacrifice_entry.get("source_location", "")), 1)
+		_global_inventory.call("consume_owned_resource_quantity", sacrifice_entry.get("resource") as Resource, str(sacrifice_entry.get("source_location", "")), 1)
 	if not upgrade_succeeded:
 		return {
 			"success": true,
@@ -281,7 +282,7 @@ func _execute_stone_upgrade(main_entry: Dictionary, sacrifice_entries: Array[Dic
 			"result_main_entry": main_entry.duplicate(),
 			"success_rate": float(preview.get("success_rate", 0.0)),
 		}
-	_global_inventory.call("consume_storage_resource_quantity", main_stone, main_location, 1)
+	_global_inventory.call("consume_owned_resource_quantity", main_stone, main_location, 1)
 	if not bool(_global_inventory.call("add_storage_resource", upgraded_stone, main_location, 1)):
 		return {"success": false, "message": "升阶物品写入原来源失败"}
 	return {

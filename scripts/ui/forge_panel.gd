@@ -6,7 +6,7 @@ class_name ForgePanel
 
 signal closed
 
-## 锻造槽脚本；主槽与牺牲槽共用拖拽、悬停和单击归还协议。
+## 锻造槽脚本；主锻造槽与牺牲槽共用拖拽、悬停和单击归还协议。
 const FORGE_SLOT_CONTROL_SCRIPT: Script = preload("res://scripts/ui/forge_slot_control.gd")
 ## 仓库物品卡片脚本；下半区复用仓库同款摘要、拖拽数据和完整详情。
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
@@ -48,13 +48,13 @@ var _subcategory: String = InventoryQuery.SUBCATEGORY_ALL
 var _stone_attribute_filter: Array[String] = []
 ## 当前排序模式；默认获得时间从新到旧，与背包仓库一致。
 var _sort_mode: String = InventoryQuery.SORT_ACQUIRED_TIME
-## 主锻造条目；包含资源与原来源，空字典表示主槽未放入武器。
+## 主锻造条目；包含资源与原来源，空字典表示主锻造槽未放入物品。
 var _main_entry: Dictionary = {}
 ## 五个牺牲条目；每项为空字典或包含资源与原来源，数组下标对应环形槽位。
 var _sacrifice_entries: Array[Dictionary] = []
 ## 主锻造槽控件；固定显示在锻造区中央。
 var _main_slot: Button
-## 牺牲槽控件数组；元素按 0 到 4 顺时针围绕主槽排列。
+## 牺牲槽控件数组；元素按 0 到 4 顺时针围绕主锻造槽排列。
 var _sacrifice_slots: Array[Button] = []
 ## 锻造板容器；承载六个槽位和融合动画临时控件。
 var _forge_board: Control
@@ -88,6 +88,10 @@ var _subcategory_buttons: Dictionary = {}
 var _subcategory_bar: HBoxContainer
 ## 下半区物品网格；每次槽位、来源或查询变化后重建。
 var _item_grid: HFlowContainer
+## 背包装备栏标题；仅选择背包来源时显示，用于区分已装备物品与普通背包物品。
+var _equipment_title: Label
+## 背包装备栏物品网格；展示远程、近战与四部位装备，并允许直接作为主锻造物品或牺牲品。
+var _equipment_grid: HFlowContainer
 ## 锻造结果弹窗；完成动画和实际结算后展示属性与耐久变化。
 var _result_dialog: AcceptDialog
 ## 当前是否正在播放锻造并执行结算；为 true 时阻止关闭、换槽和重复点击。
@@ -152,7 +156,7 @@ func _build_interface() -> void:
 	close_button.custom_minimum_size = Vector2(116.0, 36.0)
 	close_button.pressed.connect(_on_close_pressed)
 	header.add_child(close_button)
-	# 上方锻造区；固定高度容纳环形五槽、中央主槽和右侧预览操作。
+	# 上方锻造区；固定高度容纳环形五槽、中央主锻造槽和右侧预览操作。
 	var forge_section: HBoxContainer = HBoxContainer.new()
 	forge_section.custom_minimum_size = Vector2(0.0, 275.0)
 	forge_section.add_theme_constant_override("separation", 12)
@@ -205,7 +209,7 @@ func _build_interface() -> void:
 	content.add_child(inventory_header)
 	# 下半区标题；占据剩余宽度并提示支持拖动或单击放入。
 	var inventory_title: Label = Label.new()
-	inventory_title.text = "材料选择 · 可拖动到槽位，单击则按主槽→牺牲槽优先放入"
+	inventory_title.text = "牺牲品选择 · 可拖动到槽位，单击则按主锻造槽→牺牲槽优先放入"
 	inventory_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	inventory_header.add_child(inventory_title)
 	_backpack_source_button = Button.new()
@@ -273,6 +277,20 @@ func _build_interface() -> void:
 	_subcategory_bar.add_theme_constant_override("separation", 6)
 	category_columns.add_child(_subcategory_bar)
 	_rebuild_subcategory_buttons()
+	# 背包装备栏标题；选择背包来源时与装备卡片共同显示，仓库来源不展示角色当前装备。
+	_equipment_title = Label.new()
+	_equipment_title.text = "装备栏"
+	_equipment_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_equipment_title.add_theme_font_size_override("font_size", 16)
+	content.add_child(_equipment_title)
+	# 背包装备栏网格；复用标准物品卡片，保持锻造来源区域视觉和交互协议一致。
+	_equipment_grid = HFlowContainer.new()
+	_equipment_grid.alignment = FlowContainer.ALIGNMENT_CENTER
+	_equipment_grid.last_wrap_alignment = FlowContainer.LAST_WRAP_ALIGNMENT_CENTER
+	_equipment_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_equipment_grid.add_theme_constant_override("h_separation", 8)
+	_equipment_grid.add_theme_constant_override("v_separation", 6)
+	content.add_child(_equipment_grid)
 	# 下半区物品滚动网格；双列卡片与仓库保持一致，已选武器隐藏，强化石按剩余可选数量显示。
 	# 流式布局补充：当前按可用宽度自动换行并逐行居中，不再限制双列。
 	var inventory_scroll: ScrollContainer = ScrollContainer.new()
@@ -297,7 +315,7 @@ func _build_interface() -> void:
 
 func _build_forge_slots() -> void:
 	# 槽位半边长；所有锚点偏移共用该值，保证检查器调整槽位大小后仍以中心准确对齐。
-	# 槽位固定尺寸；主槽与牺牲槽强制读取全项目通用物品卡片规格，检查器旧参数不再造成样式分化。
+	# 槽位固定尺寸；主锻造槽与牺牲槽强制读取全项目通用物品卡片规格，检查器旧参数不再造成样式分化。
 	var slot_size: Vector2 = ITEM_CARD_VIEW_SCRIPT.get_standard_size()
 	# 槽位半宽；用于以锚点中心计算固定卡片左右偏移。
 	var slot_half_width: float = slot_size.x * 0.5
@@ -331,11 +349,11 @@ func _build_forge_slots() -> void:
 		sacrifice_slot.offset_right = slot_half_width
 		sacrifice_slot.offset_bottom = slot_half_height
 		if slot_index == 0:
-			# 顶部槽额外上移；保持环形结构不变，仅增加它与中央主槽之间的可读间隔。
+			# 顶部槽额外上移；保持环形结构不变，仅增加它与中央主锻造槽之间的可读间隔。
 			sacrifice_slot.offset_top -= top_sacrifice_slot_upward_offset
 			sacrifice_slot.offset_bottom -= top_sacrifice_slot_upward_offset
 		if slot_index in [2, 3]:
-			# 下方材料槽偏移；右下与左下两个槽同步下移，保持环形对称并与主槽留出清晰间隔。
+			# 下方牺牲槽偏移；右下与左下两个槽同步下移，保持环形对称并与主锻造槽留出清晰间隔。
 			sacrifice_slot.offset_top += bottom_sacrifice_slot_downward_offset
 			sacrifice_slot.offset_bottom += bottom_sacrifice_slot_downward_offset
 		sacrifice_slot.connect("item_requested", Callable(self, "_on_slot_item_requested"))
@@ -349,6 +367,7 @@ func _connect_inventory_signals() -> void:
 		return
 	_global_inventory.connect("inventory_changed", Callable(self, "_on_inventory_state_changed"))
 	_global_inventory.connect("warehouse_changed", Callable(self, "_on_inventory_state_changed"))
+	_global_inventory.connect("equipment_changed", Callable(self, "_on_inventory_state_changed"))
 	_global_inventory.connect("coins_changed", Callable(self, "_on_inventory_state_changed"))
 
 
@@ -361,7 +380,7 @@ func _refresh_all() -> void:
 
 func _refresh_slots() -> void:
 	_main_slot.call("refresh", _main_entry)
-	# 主槽有效性；极品强化石不能继续升阶，放入后会标红并阻止执行，但仍可单击归还。
+	# 主锻造槽有效性；极品强化石不能继续升阶，放入后会标灰并阻止执行，但仍可单击归还。
 	var main_resource: Resource = _main_entry.get("resource") as Resource
 	_main_slot.call("set_invalid_state", main_resource != null and not _forge_service.can_use_as_main(main_resource))
 	# 当前预览；用于识别顺序计算后没有任何实际效果的牺牲材料。
@@ -421,6 +440,7 @@ func _refresh_preview() -> void:
 
 func _rebuild_inventory_items() -> void:
 	_clear_container(_item_grid)
+	_rebuild_equipment_items()
 	if _global_inventory == null:
 		_status_label.text = "全局库存服务不可用"
 		return
@@ -442,20 +462,53 @@ func _rebuild_inventory_items() -> void:
 		var item_resource: Resource = entry.get("resource") as Resource
 		if item_resource == null:
 			continue
-		# 锻造材料卡片；单击发出放入请求，拖拽数据可投放到指定主槽或牺牲槽。
+		# 锻造候选卡片；单击发出放入请求，拖拽数据可投放到指定主锻造槽或牺牲槽。
 		var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
 		item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		item_control.call("configure", item_resource, _current_source, int(entry.get("source_index", -1)), false, "", int(entry.get("quantity", 1)))
 		# 武器与装备统一使用深色宽卡排版和底部耐久条。
 		# 通用模板补充：当前所有锻造来源物品均复用固定尺寸卡片，不再按物品类型切换视觉风格。
 		item_control.call("set_weapon_slot_visual_style", true)
-		# 材料可选状态；主槽为空时只允许合法主物品，主槽已有物品时只允许符合其牺牲规则的候选材料。
+		# 候选可选状态；主锻造槽为空时只允许合法主物品，主锻造槽已有物品时只允许符合其牺牲规则的候选物品。
 		var main_resource: Resource = _main_entry.get("resource") as Resource
 		# 当前卡片是否可选；不可选物品显示灰色滤镜并阻止点击与拖拽。
 		var item_selectable: bool = _forge_service.can_use_as_main(item_resource) if main_resource == null else _forge_service.can_use_as_sacrifice(main_resource, item_resource)
 		item_control.call("set_item_selection_state", true, item_selectable, false)
 		item_control.connect("item_action_requested", Callable(self, "_on_inventory_item_pressed").bind(_current_source))
 		_item_grid.add_child(item_control)
+
+
+func _rebuild_equipment_items() -> void:
+	# 装备栏可见性；角色装备属于随身配置，因此只在玩家选择背包来源时与背包物品共同展示。
+	var should_show_equipment: bool = _current_source == SOURCE_BACKPACK
+	_equipment_title.visible = should_show_equipment
+	_equipment_grid.visible = should_show_equipment
+	_clear_container(_equipment_grid)
+	if not should_show_equipment or _global_inventory == null:
+		return
+	# 装备位置与显示顺序；远程槽数量读取全局库存，随后固定追加近战和四个防具部位。
+	var equipment_locations: Array[String] = []
+	for slot_index in range(int(_global_inventory.call("get_ranged_slot_count"))):
+		equipment_locations.append("ranged_%d" % slot_index)
+	equipment_locations.append("melee")
+	for armor_slot in ["head", "body", "legs", "feet"]:
+		equipment_locations.append("armor_" + armor_slot)
+	for equipment_location in equipment_locations:
+		# 已装备资源；空装备槽不创建物品卡片，但装备栏标题仍保留以明确当前区域职责。
+		var item_resource: Resource = _global_inventory.call("get_equipment_location_resource", equipment_location) as Resource
+		if item_resource == null or _count_selected_resource(item_resource, equipment_location) > 0:
+			continue
+		# 装备物品卡片；来源位置使用稳定装备槽标识，锻造执行时可校验并在作为牺牲品时原位消费。
+		var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
+		item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		item_control.call("configure", item_resource, equipment_location, -1, false, "", 1)
+		item_control.call("set_weapon_slot_visual_style", true)
+		# 装备可选状态；与背包、仓库候选共用同一主锻造物品和牺牲品兼容规则。
+		var main_resource: Resource = _main_entry.get("resource") as Resource
+		var item_selectable: bool = _forge_service.can_use_as_main(item_resource) if main_resource == null else _forge_service.can_use_as_sacrifice(main_resource, item_resource)
+		item_control.call("set_item_selection_state", true, item_selectable, false)
+		item_control.connect("item_action_requested", Callable(self, "_on_inventory_item_pressed").bind(equipment_location))
+		_equipment_grid.add_child(item_control)
 
 
 func _build_available_entries(source_entries: Array) -> Array[Dictionary]:
@@ -483,7 +536,7 @@ func _build_available_entries(source_entries: Array) -> Array[Dictionary]:
 
 
 func _count_selected_resource(item_resource: Resource, source_location: String) -> int:
-	# 已选数量；主槽与五个牺牲槽都按资源实例和来源精确匹配。
+	# 已选数量；主锻造槽与五个牺牲槽都按资源实例和来源精确匹配。
 	var selected_quantity: int = 0
 	if _entry_matches(_main_entry, item_resource, source_location):
 		selected_quantity += 1
@@ -529,7 +582,7 @@ func _on_slot_item_requested(slot_index: int, drag_data: Dictionary) -> void:
 	if item_resource == null or source_location not in [SOURCE_BACKPACK, SOURCE_WAREHOUSE]:
 		return
 	# 当前库存数量；同堆强化石允许按剩余数量放入多个牺牲槽。
-	var stored_quantity: int = int(_global_inventory.call("get_storage_resource_quantity", item_resource, source_location))
+	var stored_quantity: int = int(_global_inventory.call("get_storage_resource_quantity", item_resource, source_location)) if source_location in [SOURCE_BACKPACK, SOURCE_WAREHOUSE] else (1 if _global_inventory.call("get_equipment_location_resource", source_location) == item_resource else 0)
 	if _count_selected_resource(item_resource, source_location) >= stored_quantity:
 		_status_label.text = "该物品已全部放入锻造槽"
 		return
@@ -593,7 +646,7 @@ func _on_forge_pressed() -> void:
 		return
 	_initialize_sacrifice_entries()
 	if str(forge_result.get("forge_mode", ForgeService.FORGE_MODE_WEAPON)) == ForgeService.FORGE_MODE_STONE_UPGRADE:
-		# 升阶失败保留原主石，成功后主槽引用新品质资源；两种结果都已正常消费全部牺牲石。
+		# 升阶失败保留原主石，成功后主锻造槽引用新品质资源；两种结果都已正常消费全部牺牲石。
 		_main_entry = (forge_result.get("result_main_entry", _main_entry) as Dictionary).duplicate()
 		_status_label.text = str(forge_result.get("message", "强化石升阶已完成"))
 		_refresh_all()
@@ -606,7 +659,7 @@ func _on_forge_pressed() -> void:
 func _play_forge_animation() -> void:
 	_animation_ghosts.clear()
 	_animation_start_offsets.clear()
-	# 主槽中心；所有牺牲品围绕该点旋转并最终融合。
+	# 主锻造槽中心；所有牺牲品围绕该点旋转并最终融合。
 	var main_center: Vector2 = _main_slot.position + _main_slot.size * 0.5
 	for slot_index in range(_sacrifice_entries.size()):
 		if _sacrifice_entries[slot_index].is_empty():
@@ -623,7 +676,7 @@ func _play_forge_animation() -> void:
 		ghost.custom_minimum_size = Vector2(112.0, 42.0)
 		ghost.size = Vector2(112.0, 42.0)
 		ghost.pivot_offset = ghost.size * 0.5
-		# 槽位中心；相对主槽中心的偏移用于旋转和半径衰减。
+		# 槽位中心；相对主锻造槽中心的偏移用于旋转和半径衰减。
 		var slot_center: Vector2 = _sacrifice_slots[slot_index].position + _sacrifice_slots[slot_index].size * 0.5
 		ghost.position = slot_center - ghost.size * 0.5
 		_forge_board.add_child(ghost)
@@ -644,7 +697,7 @@ func _play_forge_animation() -> void:
 
 
 func _update_forge_animation(progress: float) -> void:
-	# 主槽中心；布局在动画期间保持不变，所有幽灵以此为融合终点。
+	# 主锻造槽中心；布局在动画期间保持不变，所有幽灵以此为融合终点。
 	var main_center: Vector2 = _main_slot.position + _main_slot.size * 0.5
 	# 旋转角度；默认一圈半，进度为 1 时半径收敛到 0。
 	var rotation_angle: float = progress * TAU * FORGE_ANIMATION_ROTATIONS
@@ -832,7 +885,7 @@ func _validate_selected_entries() -> void:
 func _is_entry_still_owned(entry: Dictionary, required_quantity: int) -> bool:
 	if _global_inventory == null:
 		return false
-	return bool(_global_inventory.call("has_storage_resource_quantity", entry.get("resource") as Resource, str(entry.get("source_location", "")), required_quantity))
+	return bool(_global_inventory.call("has_owned_resource_quantity", entry.get("resource") as Resource, str(entry.get("source_location", "")), required_quantity))
 
 
 func _on_close_pressed() -> void:

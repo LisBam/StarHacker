@@ -25,6 +25,8 @@ const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quant
 const ITEM_ACTION_POPUP_SCRIPT: Script = preload("res://scripts/ui/item_action_popup.gd")
 ## 通用信息确认弹窗脚本；正式战斗逃跑确认复用全项目白边信息确认样式。
 const COMMON_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/common_confirmation_dialog.gd")
+## 通用背包面板脚本；局内与局外共享分类、搜索、排序、装备、修复和拖放交互，仅丢弃策略由上下文区分。
+const SHARED_BACKPACK_PANEL_SCRIPT: Script = preload("res://scripts/ui/main_menu_backpack_panel.gd")
 ## 物资撤离面板脚本；玩家在物资撤离点驻留 3 秒后按闪避打开，面板期间暂停游戏。
 const SUPPLY_EXTRACTION_PANEL_SCRIPT: Script = preload("res://scripts/ui/supply_extraction_panel.gd")
 ## 战斗开发者模式解锁序列；默认六个英文字母，输入错误时按首字母重新开始匹配。
@@ -188,6 +190,8 @@ var _combat_action_item_quantity: int = 1
 var _pending_discard_resource: Resource
 ## 局内数量选择弹窗；默认运行时创建一次，部分丢弃时切换为丢弃模式。
 var _combat_quantity_dialog: ConfirmationDialog
+## 通用局内背包面板；运行时替代场景中的旧背包实现，CombatHud 只管理显示、输入锁定和地面丢弃。
+var _shared_backpack_panel: SharedBackpackPanel
 ## 局内取消使用按钮；默认隐藏，进入强化目标选择后显示。
 var _inventory_cancel_stone_use_button: Button
 ## 局内强化结果弹窗；默认运行时创建一次并在每次成功强化时复用。
@@ -380,9 +384,7 @@ func _ready() -> void:
 	_master_bus_index = AudioServer.get_bus_index("Master")
 	_bind_game_world()
 	_bind_player_components()
-	_bind_inventory_filter_buttons()
-	_build_inventory_item_action_menu()
-	_bind_inventory_drop_area()
+	_build_shared_backpack_panel()
 	_bind_pause_menu()
 	_build_escape_confirmation_dialog()
 	_build_combat_status_panel()
@@ -507,8 +509,44 @@ func _refresh_all() -> void:
 	_refresh_stats()
 	_rebuild_equipment_slots()
 	_refresh_equipment()
-	_rebuild_inventory_slots()
+	if _shared_backpack_panel != null:
+		_shared_backpack_panel.refresh()
 	_refresh_cooldown_overlays()
+
+
+func _build_shared_backpack_panel() -> void:
+	# 旧场景面板只作为迁移期占位并永久隐藏；实际功能全部由共享组件提供。
+	_inventory_panel.visible = false
+	var shared_panel: SharedBackpackPanel = SHARED_BACKPACK_PANEL_SCRIPT.new() as SharedBackpackPanel
+	if shared_panel == null:
+		return
+	shared_panel.configure_context(SharedBackpackPanel.CONTEXT_COMBAT)
+	shared_panel.anchor_left = 0.5
+	shared_panel.anchor_top = 0.5
+	shared_panel.anchor_right = 0.5
+	shared_panel.anchor_bottom = 0.5
+	shared_panel.offset_left = -480.0
+	shared_panel.offset_top = -310.0
+	shared_panel.offset_right = 480.0
+	shared_panel.offset_bottom = 310.0
+	shared_panel.visible = false
+	shared_panel.closed.connect(func() -> void: _set_inventory_visible(false))
+	shared_panel.combat_discard_requested.connect(_on_shared_backpack_discard_requested)
+	_root_control.add_child(shared_panel)
+	_shared_backpack_panel = shared_panel
+
+
+func _on_shared_backpack_discard_requested(item_resource: Resource, quantity: int) -> void:
+	# 武器地面丢弃仍需要真实背包下标；按资源实例定位可避免排序和筛选改变显示位置后丢错物品。
+	_combat_action_weapon_source_index = -1
+	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+	if global_inventory != null and global_inventory.has_method("get_backpack_entries"):
+		var entries: Array = global_inventory.call("get_backpack_entries")
+		for entry_index in range(entries.size()):
+			if (entries[entry_index] as Dictionary).get("resource") == item_resource:
+				_combat_action_weapon_source_index = entry_index
+				break
+	_discard_combat_inventory_item(item_resource, quantity)
 
 
 func _refresh_stats() -> void:
@@ -1218,16 +1256,23 @@ func _get_nearby_drop_signature(drop_nodes: Array[Node2D]) -> Array[String]:
 
 
 func _toggle_inventory() -> void:
-	_set_inventory_visible(not _inventory_panel.visible)
+	_set_inventory_visible(not _is_shared_inventory_visible())
+
+
+func _is_shared_inventory_visible() -> bool:
+	## 背包显示状态统一入口；避免战斗逻辑继续依赖已经停用的旧场景节点。
+	return _shared_backpack_panel != null and _shared_backpack_panel.visible
 
 
 func _set_inventory_visible(visible: bool) -> void:
 	if visible and _large_map_overlay.visible:
 		_large_map_overlay.visible = false
 
-	_inventory_panel.visible = visible
+	_inventory_panel.visible = false
+	if _shared_backpack_panel != null:
+		_shared_backpack_panel.visible = visible
 	if visible:
-		_rebuild_inventory_slots()
+		_shared_backpack_panel.refresh()
 	else:
 		_pending_combat_stone_resource = null
 		_combat_stone_return_view_pending = false
@@ -1246,8 +1291,8 @@ func _toggle_large_map() -> void:
 
 
 func _set_large_map_visible(visible: bool) -> void:
-	if visible and _inventory_panel.visible:
-		_inventory_panel.visible = false
+	if visible and _is_shared_inventory_visible():
+		_set_inventory_visible(false)
 
 	_large_map_overlay.visible = visible
 	_refresh_combat_input_state()
@@ -1255,7 +1300,7 @@ func _set_large_map_visible(visible: bool) -> void:
 
 func _refresh_combat_input_state() -> void:
 	# 战斗输入启用状态；取值由背包、大地图、暂停菜单和掉落物 UI 共同决定，默认任意交互界面打开都会禁用战斗输入。
-	var combat_input_enabled: bool = not _inventory_panel.visible and not _large_map_overlay.visible and not _pause_overlay.visible and not _death_overlay.visible and (_supply_extraction_overlay == null or not _supply_extraction_overlay.visible) and not _is_player_dead and not _should_drop_ui_block_combat_input()
+	var combat_input_enabled: bool = not _is_shared_inventory_visible() and not _large_map_overlay.visible and not _pause_overlay.visible and not _death_overlay.visible and (_supply_extraction_overlay == null or not _supply_extraction_overlay.visible) and not _is_player_dead and not _should_drop_ui_block_combat_input()
 	if _has_combat_input_enabled_state and _last_combat_input_enabled == combat_input_enabled:
 		return
 

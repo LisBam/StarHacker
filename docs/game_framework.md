@@ -285,6 +285,12 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 
 ## 扩展约定
 
+### 共享背包组件
+
+局内背包与主菜单局外背包统一由 `SharedBackpackPanel` 提供界面和物品交互。组件独立负责左侧装备栏、右侧随身物品、一级与二级分类、关键词搜索、获得时间/物品价值/耐久排序、强化词条筛选、点击装备、点击卸下、双向拖放、装备槽替换及修复包点击或拖动使用。宿主不得再复制上述查询或控件构建逻辑。
+
+组件通过上下文配置隔离唯一有意保留的规则差异：主菜单上下文丢弃会从永久随身背包直接删除；战斗上下文只发出丢弃请求，由 `CombatHud` 扣除真实背包记录并在玩家附近生成可重新拾取的地面物品。`MainMenu` 仅负责全屏遮罩与入口，`CombatHud` 仅负责背包显隐、战斗输入锁定和地面掉落衔接。
+
 - 敌人、可破坏物或训练靶如果需要接收伤害，应实现 `apply_damage(damage: float, source: Node)`。需要支持击退时，可从 `source.get_impact_force()` 和 `source.get_knockback_direction()` 读取冲击力与方向。
 - 可被玩家近战清除的敌方弹体应实现 `destroy_by_melee(source: Node)`，并放在 `EnemyProjectile` 物理层上。
 - 新武器优先复用 `RangedAttackComponent` 或 `MeleeAttackComponent`，通过替换弹体场景、枪口节点和参数形成差异。

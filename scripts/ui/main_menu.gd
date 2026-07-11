@@ -244,6 +244,7 @@ func _build_backpack_overlay() -> void:
 	if backpack_panel == null:
 		backpack_overlay.visible = false
 		return
+	backpack_panel.call("configure_context", SharedBackpackPanel.CONTEXT_MAIN_MENU)
 	backpack_panel.anchor_left = 0.5
 	backpack_panel.anchor_top = 0.5
 	backpack_panel.anchor_right = 0.5

@@ -37,7 +37,7 @@ func configure(entry: Dictionary, is_gray_market: bool) -> void:
 	# 商品类型；武器显示近战或远程，强化石显示资源类型。
 	var item_type: String = str(ITEM_DETAIL_FORMATTER.call("get_item_type_label", _item_resource)) if _item_resource != null else "未知"
 	# 是否为武器；用于决定卡片是否展示当前耐久值。
-	var is_weapon: bool = _item_resource != null and str(_item_resource.get("weapon_type")) in ["ranged", "melee"]
+	var is_weapon: bool = _item_resource != null and (str(_item_resource.get("weapon_type")) in ["ranged", "melee"] or str(_item_resource.get("item_kind")) == "equipment")
 	# 是否为二手商品；普通商店二手枪械仅在枪械名称前增加简短标识，不显示历史强化细节。
 	var _is_second_hand: bool = bool(entry.get("second_hand", false))
 	if _is_second_hand:

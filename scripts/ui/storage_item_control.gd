@@ -283,6 +283,9 @@ func _on_mouse_entered() -> void:
 		return
 	if _enhancement_target_highlight or _item_selection_highlight:
 		_play_selection_hover_animation(SELECTABLE_TARGET_HOVER_SCALE)
+	elif _item_resource != null:
+		# 普通物品悬停；武器、装备和道具统一轻微放大。
+		_play_selection_hover_animation(1.03)
 
 
 func _on_mouse_exited() -> void:
@@ -290,6 +293,8 @@ func _on_mouse_exited() -> void:
 		_stop_selection_hover_animation(true)
 		return
 	if _enhancement_target_highlight or _item_selection_highlight:
+		_play_selection_hover_animation(1.0)
+	elif _item_resource != null:
 		_play_selection_hover_animation(1.0)
 
 

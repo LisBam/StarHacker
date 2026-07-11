@@ -369,13 +369,14 @@ func _on_gui_input(event: InputEvent) -> void:
 
 
 func _on_mouse_entered() -> void:
-	if weapon_data == null or _weapon_target_selection_blocked or not is_enhancement_target_highlight:
+	if weapon_data == null or _weapon_target_selection_blocked:
 		return
-	_play_target_hover_animation(TARGET_HOVER_SCALE)
+	# 普通悬停与目标悬停统一使用卡片轻微放大反馈，使武器和道具卡片交互感一致。
+	_play_target_hover_animation(TARGET_HOVER_SCALE if is_enhancement_target_highlight else 1.03)
 
 
 func _on_mouse_exited() -> void:
-	if is_enhancement_target_highlight:
+	if weapon_data != null:
 		_play_target_hover_animation(1.0)
 	else:
 		_restore_target_hover_visual()

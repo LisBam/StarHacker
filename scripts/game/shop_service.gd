@@ -24,6 +24,8 @@ const STONE_DETRIMENTAL_CHANCE: float = 0.28
 @export_range(60.0, 86400.0, 1.0) var automatic_refresh_interval_seconds: float = 600.0
 ## 普通商店每次刷新的武器商品数量；默认 6 件，修改会影响武器分类的库存密度。
 @export_range(1, 30, 1) var weapon_stock_count: int = 6
+## 普通商店每次刷新的装备商品数量；默认 4 件，四个部位等概率抽取并允许重复。
+@export_range(1, 30, 1) var equipment_stock_count: int = 4
 ## 普通商店每次刷新的资源商品数量；默认 6 件，当前资源为随机品质强化石。
 @export_range(1, 30, 1) var resource_stock_count: int = 6
 ## 普通商品最低原价倍率；默认 1.5 倍，与设计规则下限一致。
@@ -59,6 +61,13 @@ const STONE_DETRIMENTAL_CHANCE: float = 0.28
 	"res://data/weapons/rail_cannon.tres",
 	"res://data/weapons/phase_blade.tres",
 	"res://data/weapons/quantum_dagger.tres",
+])
+## 可刷新装备资源路径；每次刷新从四部位基础装备中等概率复制独立商品。
+@export var equipment_resource_paths: PackedStringArray = PackedStringArray([
+	"res://data/equipment/basic_headgear.tres",
+	"res://data/equipment/basic_body_armor.tres",
+	"res://data/equipment/basic_leg_armor.tres",
+	"res://data/equipment/basic_boots.tres",
 ])
 
 ## 全局库存服务缓存；负责金币扣除、商品入仓库和资源快照序列化。
@@ -205,6 +214,11 @@ func _refresh_normal_stock(reset_manual_refresh_count: bool) -> void:
 		var weapon_resource: Resource = _create_random_weapon()
 		if weapon_resource != null:
 			_shop_stock.append(_create_normal_stock_entry(weapon_resource))
+	for _equipment_index in range(maxi(equipment_stock_count, 1)):
+		# 随机装备商品；四部位等概率刷新，资源深拷贝后拥有独立耐久与强化状态。
+		var equipment_resource: Resource = _create_random_equipment()
+		if equipment_resource != null:
+			_shop_stock.append(_create_normal_stock_entry(equipment_resource))
 	for _resource_index in range(maxi(resource_stock_count, 1)):
 		# 随机资源商品；当前使用与怪物掉落相同的品质强化石生成器。
 		var enhancement_stone: EnhancementStoneData = EnhancementStoneData.create_random(_random, STONE_MINIMUM_MODIFIER_COUNT, STONE_MAXIMUM_MODIFIER_COUNT, STONE_DETRIMENTAL_CHANCE, STONE_BASE_SELL_PRICE)
@@ -233,6 +247,18 @@ func _create_random_weapon() -> Resource:
 	if str(weapon_resource.get("weapon_type")) == "ranged" and _random.randf() < second_hand_firearm_chance:
 		_apply_second_hand_state(weapon_resource)
 	return weapon_resource
+
+
+func _create_random_equipment() -> Resource:
+	if equipment_resource_paths.is_empty():
+		return null
+	# 装备路径；允许同一轮出现同部位或同类装备。
+	var resource_path: String = equipment_resource_paths[_random.randi_range(0, equipment_resource_paths.size() - 1)]
+	if not ResourceLoader.exists(resource_path):
+		return null
+	# 装备商品；深拷贝保证购买后的耐久和强化不会污染模板或其他商品。
+	var equipment_template: Resource = load(resource_path) as Resource
+	return equipment_template.duplicate(true) as Resource if equipment_template != null else null
 
 
 func _apply_second_hand_state(weapon_resource: Resource) -> void:

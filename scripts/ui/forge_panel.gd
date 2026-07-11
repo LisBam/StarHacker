@@ -430,6 +430,9 @@ func _rebuild_inventory_items() -> void:
 		var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
 		item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		item_control.call("configure", item_resource, _current_source, int(entry.get("source_index", -1)), false, "", int(entry.get("quantity", 1)))
+		# 武器与装备统一使用深色宽卡排版和底部耐久条。
+		if str(item_resource.get("weapon_type")) in ["ranged", "melee"] or str(item_resource.get("item_kind")) == "equipment":
+			item_control.call("set_weapon_slot_visual_style", true)
 		# 材料可选状态；主槽为空时只允许合法主物品，主槽已有物品时只允许符合其牺牲规则的候选材料。
 		var main_resource: Resource = _main_entry.get("resource") as Resource
 		# 当前卡片是否可选；不可选物品显示灰色滤镜并阻止点击与拖拽。

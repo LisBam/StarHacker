@@ -20,6 +20,8 @@ const MARKET_SIDEWAYS: String = "sideways"
 const REFRESH_SETTLEMENT: String = "settlement"
 ## 局外运行刷新来源标识；只使用半幅情绪、低概率中枢漂移和半幅均值回归。
 const REFRESH_RUNTIME: String = "runtime"
+## 股市面板微行情刷新来源标识；面板打开时每秒产生可见小幅波动，不推进玩法周期或事件次数。
+const REFRESH_DISPLAY: String = "display"
 ## 股票稳定顺序；UI、存档迁移、行为统计和事件目标统一使用该顺序。
 const STOCK_IDS: Array[String] = ["quantum_arms", "astral_defense", "hacker_tech", "frontline_supply", "relic_exploration"]
 ## 股票静态目录；初始价仅用于首次初始化和极端软上下限，不作为长期强制回归锚点。
@@ -49,6 +51,10 @@ const EVENT_DEFINITIONS: Array[Dictionary] = [
 
 ## 局外运行刷新间隔；默认 60 秒，只在非战斗场景累计，运行时通常不动态修改。
 @export_range(10.0, 600.0, 1.0) var runtime_refresh_interval_seconds: float = 60.0
+## 面板微行情刷新间隔；默认 1 秒，股市界面打开期间玩家每秒都能看到价格与折线变化。
+@export_range(0.2, 10.0, 0.1) var display_refresh_interval_seconds: float = 1.0
+## 面板微行情波动尺度；默认使用标准波动的 18%，让两位小数价格持续变化且不破坏长期经济平衡。
+@export_range(0.01, 0.50, 0.01) var display_fluctuation_scale: float = 0.18
 ## 大盘正式结算切换周期；默认 8 局，低于 5 会明显削弱趋势感。
 @export_range(5, 30, 1) var market_cycle_settlement_count: int = 8
 ## 涨跌停累计周期；默认每 5 次正式结算重置单股累计涨跌幅。
@@ -61,6 +67,8 @@ const EVENT_DEFINITIONS: Array[Dictionary] = [
 @export_range(0.01, 0.50, 0.01) var settlement_change_limit: float = 0.15
 ## 单次局外运行涨跌幅上限；默认 7.5%，等于正式结算上限的一半。
 @export_range(0.005, 0.25, 0.005) var runtime_change_limit: float = 0.075
+## 单次面板微行情涨跌幅上限；默认 1%，只限制每秒可见波动，不影响正式和 60 秒刷新上限。
+@export_range(0.001, 0.05, 0.001) var display_change_limit: float = 0.01
 ## 周期累计涨跌幅上限；默认正负 30%，达到后剩余正式刷新被限制在周期边界内。
 @export_range(0.05, 1.0, 0.01) var cycle_change_limit: float = 0.30
 
@@ -78,6 +86,10 @@ var _settlements_until_event: int = 0
 var _active_event: Dictionary = {}
 ## 非战斗场景累计运行秒数；达到 60 秒后扣除一个周期并触发一次小幅刷新。
 var _runtime_accumulated_seconds: float = 0.0
+## 股市面板微行情累计秒数；仅面板打开且不在战斗中时累计，达到 1 秒后触发可见波动。
+var _display_accumulated_seconds: float = 0.0
+## 股市面板是否正在显示；默认 false，由 StockMarketPanel 打开和关闭时通过公开接口同步。
+var _market_panel_open: bool = false
 ## 本局行为原始统计；键为通用指标名，值为累计数量或价值，用于正式结算时计算五只股票影响。
 var _run_metrics: Dictionary = {}
 ## 上一帧正式对局活动状态；用于从 GlobalInventory 的无参数状态信号识别开始与完成边界。
@@ -111,6 +123,29 @@ func _process(delta: float) -> void:
 	while _runtime_accumulated_seconds >= interval:
 		_runtime_accumulated_seconds -= interval
 		refresh_market(REFRESH_RUNTIME)
+	if not _market_panel_open:
+		return
+	_display_accumulated_seconds += maxf(delta, 0.0)
+	# 有效面板刷新间隔；至少 0.1 秒，默认每 1 秒触发一次真实微行情。
+	var display_interval: float = maxf(display_refresh_interval_seconds, 0.1)
+	while _display_accumulated_seconds >= display_interval:
+		_display_accumulated_seconds -= display_interval
+		refresh_market(REFRESH_DISPLAY)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_save_state()
+
+
+func set_market_panel_open(open: bool) -> void:
+	if _market_panel_open == open:
+		return
+	_market_panel_open = open
+	_display_accumulated_seconds = 0.0
+	if not open:
+		# 面板关闭时统一保存每秒微行情最终价格，避免打开期间每秒写盘造成频繁磁盘操作。
+		_save_state()
 
 
 func get_stock_definitions() -> Dictionary:
@@ -172,11 +207,12 @@ func get_maximum_buy_quantity(stock_id: String) -> int:
 	return estimated_quantity
 
 
-func request_buy(stock_id: String, quantity: int) -> Dictionary:
+func request_buy(stock_id: String, quantity: int, quoted_price: int = -1) -> Dictionary:
 	if not stock_id in STOCK_IDS or quantity <= 0 or _global_inventory == null or not _global_inventory.has_method("buy_stock_holding"):
 		return {"success": false, "message": "无法执行买入"}
 	# 当前成交单价；确认时重新读取，避免数量选择期间行情变化后使用旧价格。
-	var price: int = get_current_price(stock_id)
+	# 报价锁定补充；UI 传入正整数 quoted_price 时使用弹窗打开瞬间的锁定价格，未传入时读取实时价格。
+	var price: int = quoted_price if quoted_price > 0 else get_current_price(stock_id)
 	# 买入成交额；数量乘当前价，不包含手续费。
 	var gross: int = price * quantity
 	# 买入手续费；成交额 0.5% 向上取整且最低 1 金币。
@@ -188,11 +224,12 @@ func request_buy(stock_id: String, quantity: int) -> Dictionary:
 	return {"success": success, "message": "买入成功" if success else "金币不足或持仓服务不可用", "quantity": quantity, "price": price, "fee": fee, "total": total_cost}
 
 
-func request_sell(stock_id: String, quantity: int) -> Dictionary:
+func request_sell(stock_id: String, quantity: int, quoted_price: int = -1) -> Dictionary:
 	if not stock_id in STOCK_IDS or quantity <= 0 or _global_inventory == null or not _global_inventory.has_method("sell_stock_holding"):
 		return {"success": false, "message": "无法执行卖出"}
 	# 当前成交单价；确认时重新读取，确保即时交易使用实时报价。
-	var price: int = get_current_price(stock_id)
+	# 报价锁定补充；UI 传入正整数 quoted_price 时使用弹窗打开瞬间的锁定价格，未传入时读取实时价格。
+	var price: int = quoted_price if quoted_price > 0 else get_current_price(stock_id)
 	# 卖出成交额；数量乘当前价，不包含手续费。
 	var gross: int = price * quantity
 	# 卖出手续费；用于确认框明示，实际所得按乘 0.995 后向下取整。
@@ -207,6 +244,8 @@ func request_sell(stock_id: String, quantity: int) -> Dictionary:
 func refresh_market(refresh_source: String = REFRESH_SETTLEMENT) -> void:
 	# 是否为正式结算刷新；决定完整波动、玩家行为、周期和事件计数是否生效。
 	var is_settlement: bool = refresh_source == REFRESH_SETTLEMENT
+	# 是否为面板微行情刷新；该来源只更新价格、涨跌幅和历史，不推进玩法计数。
+	var is_display_refresh: bool = refresh_source == REFRESH_DISPLAY
 	# 五只股票行为影响；局外刷新使用空字典并视为零影响。
 	var behavior_impacts: Dictionary = _calculate_behavior_impacts() if is_settlement else {}
 	if is_settlement:
@@ -214,14 +253,16 @@ func refresh_market(refresh_source: String = REFRESH_SETTLEMENT) -> void:
 		_update_market_cycles_before_refresh()
 	for stock_id in STOCK_IDS:
 		_refresh_stock(stock_id, refresh_source, float(behavior_impacts.get(stock_id, 0.0)))
-	_consume_event_duration(is_settlement)
+	if not is_display_refresh:
+		_consume_event_duration(is_settlement)
 	if is_settlement:
 		_update_behavior_streaks(behavior_impacts)
 		_settlements_until_event -= 1
 		if _settlements_until_event <= 0:
 			trigger_random_event()
 		_run_metrics.clear()
-	_save_state()
+	if not is_display_refresh:
+		_save_state()
 	market_changed.emit()
 
 
@@ -293,14 +334,24 @@ func _refresh_stock(stock_id: String, refresh_source: String, player_impact: flo
 	var center: float = maxf(float(state.get("center", old_price)), 1.0)
 	# 是否正式结算刷新；决定波动倍率、中枢概率和玩家行为是否启用。
 	var is_settlement: bool = refresh_source == REFRESH_SETTLEMENT
+	# 是否面板微行情刷新；启用时禁用中枢漂移并把全部短期变化缩放为稳定的每秒波动。
+	var is_display_refresh: bool = refresh_source == REFRESH_DISPLAY
 	# 小幅刷新尺度；局外运行时为 0.5，正式结算为 1.0。
 	var scale: float = 1.0 if is_settlement else 0.5
+	if is_display_refresh:
+		scale = clampf(display_fluctuation_scale, 0.01, 0.50)
+	# 本次定价使用的大盘状态；微行情只读取长期大盘，避免重复放大全局事件的临时状态。
+	var pricing_market_state: String = _market_state if is_display_refresh else _get_effective_market_state()
 	# 大盘方向分数；牛市为 1、熊市为 -1、震荡为 0。
-	var market_direction: float = _get_market_direction(_get_effective_market_state())
+	var market_direction: float = _get_market_direction(pricing_market_state)
 	# 当前事件方向；目标不匹配或事件无有效次数时为 0。
 	var event_direction: float = _get_event_direction_for_stock(stock_id, is_settlement)
+	if is_display_refresh:
+		event_direction = 0.0
 	# 本次中枢漂移概率；正式基础 25%、局外基础 10%，连续行为和事件会覆盖。
 	var drift_probability: float = 0.25 if is_settlement else 0.10
+	if is_display_refresh:
+		drift_probability = 0.0
 	# 上一轮连续同向行为局数；达到 2 时增强下一局中枢传导。
 	var same_direction_count: int = int(state.get("behavior_streak", 0))
 	if is_settlement and same_direction_count >= 2 and not is_zero_approx(player_impact):
@@ -328,17 +379,22 @@ func _refresh_stock(stock_id: String, refresh_source: String, player_impact: flo
 	var reversion: float = _calculate_mean_reversion(deviation_ratio) * scale
 	# 本次情绪基础波动率；来自股票类型并受刷新源、大盘和事件倍率调整。
 	var volatility: float = float(definition.get("volatility", 0.03)) * scale
-	if _get_effective_market_state() == MARKET_SIDEWAYS:
+	if pricing_market_state == MARKET_SIDEWAYS:
 		volatility *= 1.2
-	volatility *= _get_event_volatility_multiplier()
+	if not is_display_refresh:
+		volatility *= _get_event_volatility_multiplier()
 	# 情绪方向偏置；大盘提供较弱倾斜，目标事件提供更强倾斜。
 	var sentiment_bias: float = market_direction * volatility * 0.28 + event_direction * volatility * 0.55
 	# 短期市场情绪；每次刷新必定抽取随机波动并叠加方向偏置。
 	var sentiment: float = _random.randf_range(-volatility, volatility) + sentiment_bias
+	# 中枢层刷新尺度；面板微行情按微波动尺度缩小，其他刷新保持原有中枢权重。
+	var center_refresh_scale: float = scale if is_display_refresh else 1.0
 	# 三层定价与回归合成变化；中枢、情绪、行为权重分别为 50%、35%、15%。
-	var weighted_change: float = ((center / old_price) - 1.0) * 0.50 + sentiment * 0.35 + clampf(player_impact, -0.02, 0.02) * 0.15 + reversion
+	var weighted_change: float = ((center / old_price) - 1.0) * 0.50 * center_refresh_scale + sentiment * 0.35 + clampf(player_impact, -0.02, 0.02) * 0.15 + reversion
 	# 单次涨跌上限；正式为 15%，局外为 7.5%。
 	var single_limit: float = settlement_change_limit if is_settlement else runtime_change_limit
+	if is_display_refresh:
+		single_limit = display_change_limit
 	weighted_change = clampf(weighted_change, -single_limit, single_limit)
 	# 限制后的新价格；后续继续应用软边界和正式周期累计边界。
 	var new_price: float = old_price * (1.0 + weighted_change)
@@ -346,17 +402,28 @@ func _refresh_stock(stock_id: String, refresh_source: String, player_impact: flo
 	# 当前涨跌周期起始价；每 5 次正式结算重置，周期内正式与局外刷新共同遵守 ±30% 边界。
 	var cycle_start_price: float = maxf(float(state.get("cycle_start_price", old_price)), 1.0)
 	new_price = clampf(new_price, cycle_start_price * (1.0 - cycle_change_limit), cycle_start_price * (1.0 + cycle_change_limit))
+	if is_display_refresh and is_equal_approx(snappedf(new_price, 0.01), snappedf(old_price, 0.01)):
+		# 微行情可见步长；当随机结果不足 0.01 金币时强制移动一分钱，确保每秒刷新肉眼可见。
+		var visible_step: float = 0.01 if sentiment >= 0.0 else -0.01
+		# 微行情有效最低价；同时遵守初始价软下限和当前涨跌周期下限。
+		var visible_minimum_price: float = maxf(base_price * 0.5, cycle_start_price * (1.0 - cycle_change_limit))
+		# 微行情有效最高价；同时遵守初始价软上限和当前涨跌周期上限。
+		var visible_maximum_price: float = minf(base_price * 3.0, cycle_start_price * (1.0 + cycle_change_limit))
+		new_price = clampf(old_price + visible_step, visible_minimum_price, visible_maximum_price)
+		if is_equal_approx(snappedf(new_price, 0.01), snappedf(old_price, 0.01)):
+			new_price = clampf(old_price - visible_step, visible_minimum_price, visible_maximum_price)
 	state["center"] = center
 	state["price"] = maxf(new_price, 1.0)
 	state["last_change_ratio"] = (new_price - old_price) / old_price
-	state["last_player_impact"] = player_impact if is_settlement else 0.0
-	# 玩家行为贡献占比；行为层加权变化占最终实际涨跌幅的绝对比例，最终持平时按 0 处理。
-	var actual_change_ratio: float = float(state.get("last_change_ratio", 0.0))
-	state["last_player_contribution_ratio"] = clampf(absf(player_impact * 0.15) / absf(actual_change_ratio), 0.0, 1.0) if is_settlement and not is_zero_approx(actual_change_ratio) else 0.0
-	state["next_drift_probability"] = drift_probability
-	# 最近价格历史；追加新整数价格并只保留最近 30 次刷新。
+	if not is_display_refresh:
+		state["last_player_impact"] = player_impact if is_settlement else 0.0
+		# 玩家行为贡献占比；行为层加权变化占最终实际涨跌幅的绝对比例，最终持平时按 0 处理。
+		var actual_change_ratio: float = float(state.get("last_change_ratio", 0.0))
+		state["last_player_contribution_ratio"] = clampf(absf(player_impact * 0.15) / absf(actual_change_ratio), 0.0, 1.0) if is_settlement and not is_zero_approx(actual_change_ratio) else 0.0
+		state["next_drift_probability"] = drift_probability
+	# 最近价格历史；保留两位小数后追加并只保留最近 30 次刷新，使每秒微行情能在折线中清晰呈现。
 	var history: Array = state.get("history", []) as Array
-	history.append(maxi(roundi(new_price), 1))
+	history.append(maxf(snappedf(new_price, 0.01), 0.01))
 	while history.size() > 30:
 		history.remove_at(0)
 	state["history"] = history

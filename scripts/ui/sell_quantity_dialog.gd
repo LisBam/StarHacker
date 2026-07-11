@@ -40,6 +40,12 @@ var _shipping_fee_ratio: float = 0.20
 var _item_display_name: String = "物品"
 ## 当前展示模式；默认出售模式，移动模式下不计算金币并改为显示本次将移动的数量。
 var _display_mode: String = DISPLAY_MODE_SALE
+## 股票交易方向；默认 false 表示卖出，仅股票交易模式用于决定余额校验和摘要文案。
+var _stock_trade_is_buying: bool = false
+## 股票交易当前可执行数量上限；默认 0，买入时随实时价格和金币变化，卖出时随持仓变化。
+var _stock_trade_executable_maximum: int = 0
+## 股票交易当前可用金币；默认 0，仅买入模式用于提示实时总花费是否超出余额。
+var _stock_trade_available_coins: int = 0
 ## 数量滑条；默认运行时创建，取值范围与数字输入框保持双向同步。
 var _quantity_slider: HSlider
 ## 数量数字输入框；默认运行时创建，玩家可键盘直接输入精确数量。
@@ -108,16 +114,45 @@ func present_shipping(item_display_name: String, maximum_quantity: int, unit_ite
 	_present_current_configuration()
 
 
-func present_stock_trade(stock_display_name: String, maximum_quantity: int, unit_price: int, is_buying: bool) -> void:
+func present_stock_trade(stock_display_name: String, maximum_quantity: int, unit_price: int, is_buying: bool, available_coins: int = 0) -> void:
 	_ensure_interface_initialized()
 	_display_mode = DISPLAY_MODE_STOCK_TRADE
 	_item_display_name = stock_display_name if not stock_display_name.is_empty() else "股票"
 	_maximum_quantity = maxi(maximum_quantity, 1)
 	_unit_sell_price = maxi(unit_price, 1)
+	_stock_trade_is_buying = is_buying
+	_stock_trade_executable_maximum = maxi(maximum_quantity, 0)
+	_stock_trade_available_coins = maxi(available_coins, 0)
 	title = "选择买入数量" if is_buying else "选择卖出数量"
 	get_ok_button().text = "下一步"
-	_description_label.text = "%s · 当前单价 %d 金币 · 最多 %d 股" % [_item_display_name, _unit_sell_price, _maximum_quantity]
+	_update_stock_trade_description()
 	_present_current_configuration()
+
+
+func update_stock_trade(unit_price: int, maximum_quantity: int, available_coins: int = 0) -> void:
+	## 刷新已打开股票数量弹窗的实时报价；保留玩家当前选择，并在可买上限下降时安全收紧数量。
+	if _display_mode != DISPLAY_MODE_STOCK_TRADE:
+		return
+	_unit_sell_price = maxi(unit_price, 1)
+	_stock_trade_executable_maximum = maxi(maximum_quantity, 0)
+	_stock_trade_available_coins = maxi(available_coins, 0)
+	# 控件数量上限；零股可交易时仍保留数值控件的最小合法范围 1，并通过禁用按钮阻止进入下一步。
+	var control_maximum: int = maxi(_stock_trade_executable_maximum, 1)
+	_maximum_quantity = control_maximum
+	_quantity_slider.max_value = float(control_maximum)
+	_quantity_spin_box.max_value = float(control_maximum)
+	# 当前选择数量；价格上涨使上限降低时自动下调，避免玩家带着已失效数量进入二次确认。
+	var resolved_quantity: int = clampi(roundi(_quantity_spin_box.value), 1, control_maximum)
+	_quantity_slider.set_value_no_signal(float(resolved_quantity))
+	_quantity_spin_box.set_value_no_signal(float(resolved_quantity))
+	_update_stock_trade_description()
+	_refresh_total_price(resolved_quantity)
+
+
+func _update_stock_trade_description() -> void:
+	## 更新股票交易说明；明确单价和上限均为持续波动中的实时数据，不暗示锁价。
+	var maximum_text: String = "%d 股" % _stock_trade_executable_maximum if _stock_trade_executable_maximum > 0 else "0 股"
+	_description_label.text = "%s · 实时单价 %d 金币 · 当前最多 %s" % [_item_display_name, _unit_sell_price, maximum_text]
 
 
 func _ensure_interface_initialized() -> void:
@@ -237,7 +272,20 @@ func _refresh_total_price(quantity: int) -> void:
 		get_ok_button().disabled = shipping_value > _shipping_remaining_value
 		return
 	if _display_mode == DISPLAY_MODE_STOCK_TRADE:
-		_total_price_label.text = "%d 股 · 价格小计 %d 金币" % [resolved_quantity, _unit_sell_price * resolved_quantity]
+		# 股票成交额；按当前实时整数单价计算，行情刷新时会由宿主再次调用本函数更新。
+		var stock_gross: int = _unit_sell_price * resolved_quantity
+		# 股票手续费；成交额的 0.5% 向上取整且最低 1 金币，与股市服务最终成交公式一致。
+		var stock_fee: int = maxi(ceili(float(stock_gross) * 0.005), 1)
+		# 股票最终金额；买入为成交额加手续费，卖出为扣费后向下取整且最低 1 金币。
+		var stock_total: int = stock_gross + stock_fee if _stock_trade_is_buying else maxi(int(floor(float(stock_gross) * 0.995)), 1)
+		# 股票当前数量是否可执行；买入同时检查实时可买上限和金币，卖出只检查持仓上限。
+		var stock_trade_executable: bool = _stock_trade_executable_maximum >= resolved_quantity and (not _stock_trade_is_buying or _stock_trade_available_coins >= stock_total)
+		_total_price_label.text = "%d 股 · 手续费 %d · %s %d 金币" % [resolved_quantity, stock_fee, "需支付" if _stock_trade_is_buying else "可获得", stock_total]
+		if _stock_trade_is_buying and not stock_trade_executable:
+			_total_price_label.text += " · 当前金币不足"
+		elif not _stock_trade_is_buying and not stock_trade_executable:
+			_total_price_label.text += " · 当前持仓不足"
+		get_ok_button().disabled = not stock_trade_executable
 		return
 	get_ok_button().disabled = false
 	# 出售总价；单价乘当前数量，用于确认前即时预览金币收益。

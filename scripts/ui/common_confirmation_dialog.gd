@@ -24,9 +24,17 @@ func present(dialog_title: String, message: String, confirm_text: String = "确�
 	title = dialog_title
 	dialog_text = message
 	get_ok_button().text = confirm_text
+	# 确认按钮初始状态；复用弹窗时清除上一次动态校验留下的禁用状态，再由调用方按当前报价覆盖。
+	get_ok_button().disabled = false
 	get_cancel_button().text = cancel_text
 	get_cancel_button().visible = true
 	popup_centered(Vector2i(requested_width if requested_width > 0 else dialog_width, 0))
+
+
+func update_confirmation_message(message: String, confirmation_enabled: bool = true) -> void:
+	## 更新已打开确认窗口的正文与确认可用性；不会重新弹出窗口、改变焦点或重置取消按钮。
+	dialog_text = message
+	get_ok_button().disabled = not confirmation_enabled
 
 
 func present_information(dialog_title: String, message: String, confirm_text: String = "确定", requested_width: int = -1, requested_height: int = 0) -> void:

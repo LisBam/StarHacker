@@ -102,6 +102,8 @@ func _build_interface() -> void:
 	content.add_theme_constant_override("separation", 8)
 	content_margin.add_child(content)
 	_description_label = Label.new()
+	# 自动换行基准宽度；动态 Window 首次布局前没有可用父级宽度，显式提供宽度可避免文字按 1 像素宽逐字换行并撑高窗口。
+	_description_label.custom_minimum_size = Vector2(float(dialog_width - 48), 0.0)
 	_description_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(_description_label)

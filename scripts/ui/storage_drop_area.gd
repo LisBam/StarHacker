@@ -12,7 +12,8 @@ const DRAG_DATA_TYPE: String = "global_storage_item"
 ## 当前区域容器标识；取值为 warehouse 或 backpack，默认空字符串表示尚未配置。
 var _location: String = ""
 ## 区域内部网格容器；默认两列显示物品卡片，供上层添加物品和空状态控件。
-var _content_container: GridContainer
+## 流式布局补充：当前容器会按可用宽度自动换行并逐行居中，不再固定两列或把剩余空间留在右侧。
+var _content_container: HFlowContainer
 
 
 func configure(location: String, column_count: int = 2) -> void:
@@ -29,8 +30,9 @@ func configure(location: String, column_count: int = 2) -> void:
 	margin.mouse_filter = Control.MOUSE_FILTER_PASS
 	add_child(margin)
 
-	_content_container = GridContainer.new()
-	_content_container.columns = maxi(column_count, 1)
+	_content_container = HFlowContainer.new()
+	_content_container.alignment = FlowContainer.ALIGNMENT_CENTER
+	_content_container.last_wrap_alignment = FlowContainer.LAST_WRAP_ALIGNMENT_CENTER
 	_content_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_content_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_content_container.add_theme_constant_override("h_separation", 8)
@@ -39,7 +41,7 @@ func configure(location: String, column_count: int = 2) -> void:
 	margin.add_child(_content_container)
 
 
-func get_content_container() -> GridContainer:
+func get_content_container() -> HFlowContainer:
 	return _content_container
 
 

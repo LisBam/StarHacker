@@ -55,7 +55,7 @@ var _subcategory_buttons: Dictionary = {}
 ## 二级分类按钮栏；武器显示全部/近战/远程，资源显示全部/强化石。
 var _subcategory_bar: HBoxContainer
 ## 商品网格；每次筛选、刷新或购买后重建可见商品卡片。
-var _item_grid: GridContainer
+var _item_grid: HFlowContainer
 ## 商品滚动区；商品数量超过当前高度时允许垂直滚动。
 var _item_scroll: ScrollContainer
 ## 购买确认弹窗；确认前显示物品名称和金币价格，避免误购。
@@ -193,12 +193,14 @@ func _build_interface() -> void:
 	content.add_child(_subcategory_bar)
 	_rebuild_subcategory_buttons()
 	# 商品滚动区；网格使用双列宽卡片，与仓库分类浏览密度一致。
+	# 流式布局补充：当前按可用宽度自动换行并逐行居中，不再限制双列。
 	_item_scroll = ScrollContainer.new()
 	_item_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_item_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	content.add_child(_item_scroll)
-	_item_grid = GridContainer.new()
-	_item_grid.columns = 2
+	_item_grid = HFlowContainer.new()
+	_item_grid.alignment = FlowContainer.ALIGNMENT_CENTER
+	_item_grid.last_wrap_alignment = FlowContainer.LAST_WRAP_ALIGNMENT_CENTER
 	_item_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_item_grid.add_theme_constant_override("h_separation", 8)
 	_item_grid.add_theme_constant_override("v_separation", 8)
@@ -285,6 +287,7 @@ func _rebuild_content() -> void:
 	var visible_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(source_entries, _primary_category, _subcategory, _search_edit.text, _stone_attribute_filter, _sort_mode)
 	if visible_entries.is_empty():
 		# 空状态；占满双列宽度需要添加两个控件中的第一个提示，当前文本已足够明确通道与分类。
+		# 流式布局补充：空状态由居中容器承载，不再依赖双列占位规则。
 		var empty_label: Label = Label.new()
 		empty_label.text = "当前分类暂无商品" if _current_channel == CHANNEL_NORMAL else "最近五次失败中没有可购回的此类遗失物"
 		empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

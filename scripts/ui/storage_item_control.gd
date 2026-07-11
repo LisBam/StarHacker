@@ -14,6 +14,8 @@ signal repair_kit_drop_requested(repair_kit_resource: Resource, source_location:
 const DRAG_DATA_TYPE: String = "global_storage_item"
 ## 统一物品详情格式化器；默认生成基础值、强化值、资源词条和动态售价信息。
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
+## 通用物品卡片视图；仓库、背包、锻造来源、物资撤离与结算必须统一复用该固定尺寸模板。
+const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
 ## 强化词条增强颜色；默认亮绿色，与悬停详情保持一致。
 const STONE_BENEFICIAL_COLOR: String = "#70e889"
 ## 强化词条削弱颜色；默认亮红色，与悬停详情保持一致。
@@ -25,6 +27,7 @@ const SELECTABLE_TARGET_HOVER_SCALE: float = 1.03
 ## 可选目标悬停动画时长；默认 0.12 秒，用于平滑进入和退出目标反馈。
 const SELECTABLE_TARGET_HOVER_DURATION: float = 0.12
 ## 武器耐久条组件；用于仓库、展开背包和结算卡片统一显示武器剩余耐久。
+## 通用耐久补充：当前实际显示由 ItemCardView 内部按耐久属性决定，不再限定武器类型。
 const WEAPON_DURABILITY_BAR_SCRIPT: Script = preload("res://scripts/ui/weapon_durability_bar.gd")
 
 ## 当前显示的物品资源；默认 null 表示尚未配置，配置后用于摘要、详情和拖拽身份校验。
@@ -39,6 +42,7 @@ var _quick_action_enabled: bool = false
 var _quantity: int = 1
 ## 强化石卡片富文本；默认运行时按需创建，用于在方形资源格内直接区分绿色增强与红色削弱词条。
 ## 宽卡布局补充；强化石已与武器统一为宽卡片，该富文本仅负责品质、百分比和利弊颜色。
+## 通用模板补充：该标签仅保留旧接口兼容，当前强化石摘要由 _item_card_view 统一显示。
 var _stone_summary_label: RichTextLabel
 ## 是否将当前武器标记为强化目标；默认 false，选择强化武器期间会临时点亮所有武器卡片。
 var _enhancement_target_highlight: bool = false
@@ -57,6 +61,7 @@ var _drag_enabled: bool = true
 ## 是否采用战斗武器槽视觉；默认 false 保持仓库宽卡布局，战斗背包开启后会同步深色背景、边框和三行排版。
 var _weapon_slot_visual_style_enabled: bool = false
 ## 武器耐久条缓存；默认按需创建，资源卡片隐藏，武器卡片始终贴在 UI 最底部。
+## 通用模板补充：该缓存仅保留旧接口兼容，当前耐久组件由 _item_card_view 按属性控制。
 var _durability_bar: Control
 ## 当前绿色目标悬停补间；默认 null，新悬停状态会终止旧补间以避免缩放叠加。
 var _selection_hover_tween: Tween
@@ -66,6 +71,12 @@ var _price_label: String = "售价"
 var _displayed_price_override: int = -1
 ## 不可选目标灰色覆盖层；默认隐藏，选择状态阻止当前物品时完整覆盖按钮、富文本与耐久条。
 var _target_filter_overlay: ColorRect
+## 通用物品卡片视图缓存；默认首次配置时创建，承担全部物品名称、类型、摘要、尺寸与耐久显示。
+var _item_card_view: Control
+## 当前卡片名称前缀；默认空字符串，上次撤离等长期状态会在耐久刷新后继续保留。
+var _extraction_prefix: String = ""
+## 当前卡片是否正在作为拖拽来源；默认 false，拖拽结束时用于统一恢复缩放与透明度。
+var _is_drag_source_active: bool = false
 
 
 func configure(item_resource: Resource, location: String, item_index: int, quick_action_enabled: bool, extraction_prefix: String = "", quantity: int = 1, price_label: String = "售价", displayed_price_override: int = -1) -> void:
@@ -76,22 +87,20 @@ func configure(item_resource: Resource, location: String, item_index: int, quick
 	_quantity = clampi(quantity, 1, 99)
 	_price_label = price_label if not price_label.is_empty() else "售价"
 	_displayed_price_override = displayed_price_override
+	_extraction_prefix = extraction_prefix
 	# 物品摘要；强化石和修复包共用紧凑富文本资源卡，武器保持两列宽卡片显示分类和动态售价。
-	if _is_enhancement_stone() or _is_repair_kit():
-		text = ""
-		_ensure_stone_summary_label()
-		_stone_summary_label.visible = true
-		_stone_summary_label.text = _build_stone_card_bbcode(extraction_prefix) if _is_enhancement_stone() else _build_repair_kit_card_bbcode(extraction_prefix)
-	else:
-		text = "%s%s · %s · %s %d" % [extraction_prefix, _get_item_display_name(), _get_weapon_type_label(), _price_label, _get_displayed_price()]
-		if _stone_summary_label != null:
-			_stone_summary_label.visible = false
-	_ensure_durability_bar()
-	_durability_bar.call("configure", _item_resource)
-	_ensure_target_filter_overlay()
+	# 通用模板补充：当前所有物品使用相同固定卡片，类型差异只影响摘要内容，不影响布局结构。
+	text = ""
+	if _stone_summary_label != null:
+		_stone_summary_label.visible = false
+	_ensure_item_card_view()
+	_refresh_item_card_view()
 	tooltip_text = ITEM_DETAIL_FORMATTER.call("build_plain_text", _item_resource, _quantity, _get_tooltip_price_label(), _get_tooltip_price_override())
 	disabled = _item_resource == null
-	custom_minimum_size = Vector2(0.0, 48.0)
+	custom_minimum_size = ITEM_CARD_VIEW_SCRIPT.get_standard_size()
+	size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	flat = true
 	# 鼠标指针形态；可操作容器使用手型，结算只读条目使用普通箭头。
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if not _location.is_empty() and _item_index >= 0 else Control.CURSOR_ARROW
 	if not pressed.is_connected(_on_pressed):
@@ -136,13 +145,13 @@ func set_weapon_slot_visual_style(enabled: bool) -> void:
 	_apply_weapon_slot_visual_style()
 	if _stone_summary_label != null and (_is_enhancement_stone() or _is_repair_kit()):
 		_stone_summary_label.text = _build_stone_card_bbcode("") if _is_enhancement_stone() else _build_repair_kit_card_bbcode("")
+	_refresh_item_card_view()
 
 
 func refresh_durability() -> void:
-	if _durability_bar != null:
-		_durability_bar.call("refresh")
-	if _is_weapon_resource():
-		text = "%s · %s · %s %d" % [_get_item_display_name(), _get_weapon_type_label(), _price_label, _get_displayed_price()]
+	if _item_card_view != null:
+		_item_card_view.call("refresh_durability")
+	_refresh_item_card_view()
 
 
 func _get_drag_data(_at_position: Vector2) -> Variant:
@@ -150,10 +159,12 @@ func _get_drag_data(_at_position: Vector2) -> Variant:
 		return null
 
 	# 拖拽预览标签；显示物品名称并跟随鼠标，避免复制完整交互控件造成信号副作用。
-	var preview_label: Label = Label.new()
-	preview_label.text = _get_item_display_name()
-	preview_label.add_theme_font_size_override("font_size", 16)
-	set_drag_preview(preview_label)
+	# 通用交互补充：当前使用完整标准物品卡片预览，并统一播放来源淡化与预览呼吸摆动。
+	var preview_control: Control = _item_card_view.call("create_drag_preview") as Control
+	set_drag_preview(preview_control)
+	_item_card_view.call("play_drag_source", self, true)
+	_item_card_view.call("play_drag_preview", preview_control)
+	_is_drag_source_active = true
 	return {
 		"type": DRAG_DATA_TYPE,
 		"resource": _item_resource,
@@ -190,6 +201,15 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 		repair_kit_drop_requested.emit(dragged_resource, str(drag_data.get("source_location", "")), _item_resource)
 		return
 	item_drop_requested.emit(drag_data, _location, _item_index)
+
+
+func _notification(what: int) -> void:
+	if what != NOTIFICATION_DRAG_END or not _is_drag_source_active:
+		return
+	# 拖拽结束恢复；无论投放成功或取消，都使用通用卡片动画恢复来源外观。
+	_is_drag_source_active = false
+	if _item_card_view != null:
+		_item_card_view.call("play_drag_source", self, false)
 
 
 func _on_pressed() -> void:
@@ -259,11 +279,15 @@ func _refresh_enhancement_target_highlight() -> void:
 	var selection_blocked: bool = _weapon_target_selection_blocked or _item_selection_blocked
 	if selection_blocked:
 		modulate = Color.WHITE
-		_stop_selection_hover_animation(true)
 	else:
-		modulate = Color(0.68, 1.0, 0.76, 1.0) if _enhancement_target_highlight or _item_selection_highlight else Color.WHITE
+		modulate = Color.WHITE
 	if _target_filter_overlay != null:
-		_target_filter_overlay.visible = selection_blocked
+		_target_filter_overlay.visible = false
+	if _item_card_view != null:
+		_item_card_view.call("set_visual_state", false, not selection_blocked and (_enhancement_target_highlight or _item_selection_highlight))
+		_item_card_view.call("set_disabled_state", selection_blocked)
+		if selection_blocked:
+			_item_card_view.call("play_hover", self, false)
 	_refresh_interaction_theme(selection_blocked)
 	mouse_default_cursor_shape = Control.CURSOR_ARROW if selection_blocked else (Control.CURSOR_POINTING_HAND if not _location.is_empty() and _item_index >= 0 else Control.CURSOR_ARROW)
 
@@ -279,23 +303,13 @@ func _refresh_interaction_theme(selection_blocked: bool) -> void:
 
 
 func _on_mouse_entered() -> void:
-	if _weapon_target_selection_blocked or _item_selection_blocked:
-		return
-	if _enhancement_target_highlight or _item_selection_highlight:
-		_play_selection_hover_animation(SELECTABLE_TARGET_HOVER_SCALE)
-	elif _item_resource != null:
-		# 普通物品悬停；武器、装备和道具统一轻微放大。
-		_play_selection_hover_animation(1.03)
+	if _item_card_view != null and _item_resource != null:
+		_item_card_view.call("play_hover", self, true)
 
 
 func _on_mouse_exited() -> void:
-	if _weapon_target_selection_blocked or _item_selection_blocked:
-		_stop_selection_hover_animation(true)
-		return
-	if _enhancement_target_highlight or _item_selection_highlight:
-		_play_selection_hover_animation(1.0)
-	elif _item_resource != null:
-		_play_selection_hover_animation(1.0)
+	if _item_card_view != null:
+		_item_card_view.call("play_hover", self, false)
 
 
 func _play_selection_hover_animation(target_scale: float) -> void:
@@ -337,6 +351,44 @@ func _ensure_durability_bar() -> void:
 		return
 	_durability_bar = WEAPON_DURABILITY_BAR_SCRIPT.new() as Control
 	add_child(_durability_bar)
+
+
+func _ensure_item_card_view() -> void:
+	if _item_card_view != null:
+		return
+	# 单一通用视图；交互按钮只作为点击与拖拽宿主，视觉内容完全交由固定尺寸模板绘制。
+	_item_card_view = ITEM_CARD_VIEW_SCRIPT.new() as Control
+	_item_card_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_item_card_view)
+
+
+func _refresh_item_card_view() -> void:
+	if _item_card_view == null:
+		return
+	# 名称文本；上次撤离等前缀与标准物品名组合后交给通用模板统一截断和居中。
+	var display_name: String = "%s%s" % [_extraction_prefix, _get_item_display_name()]
+	# 底部摘要；不同物品只提供数据文本，字号、位置、颜色承载与耐久组件均由通用模板控制。
+	var detail_bbcode: String = _build_common_detail_bbcode()
+	_item_card_view.call("configure", _item_resource, _quantity, _get_weapon_type_label(), detail_bbcode, "空", display_name)
+	_item_card_view.call("set_visual_state", false, _enhancement_target_highlight or _item_selection_highlight)
+
+
+func _build_common_detail_bbcode() -> String:
+	if _is_enhancement_stone():
+		# 强化石方向摘要；保留绿色增益与红色减益，但不再创建独立资源卡片布局。
+		var modifiers: Dictionary = EnhancementRules.normalize_modifiers(_item_resource.get("modifiers") as Dictionary)
+		# 彩色方向词条；顺序继续遵循强化规则目录，保证堆叠资源显示稳定。
+		var colored_tokens: PackedStringArray = PackedStringArray()
+		_append_colored_stone_tokens(colored_tokens, modifiers, true)
+		_append_colored_stone_tokens(colored_tokens, modifiers, false)
+		var stone_text: String = " ".join(colored_tokens) if not colored_tokens.is_empty() else "无词条"
+		return "%s · %s %d" % [stone_text, _price_label, _get_displayed_price()] if not _weapon_slot_visual_style_enabled else stone_text
+	if _is_repair_kit():
+		# 修复包摘要；恢复值继续使用绿色，名称与数量统一由通用模板上方两行显示。
+		var repair_amount: float = maxf(float(_item_resource.get("repair_amount")), 0.0)
+		var repair_text: String = "[color=%s]耐久+%.0f[/color]" % [STONE_BENEFICIAL_COLOR, repair_amount]
+		return "%s · %s %d" % [repair_text, _price_label, _get_displayed_price()] if not _weapon_slot_visual_style_enabled else repair_text
+	return "%s %d" % [_price_label, _get_displayed_price()]
 
 
 func _ensure_target_filter_overlay() -> void:

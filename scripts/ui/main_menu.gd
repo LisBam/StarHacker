@@ -257,7 +257,7 @@ func _build_forge_overlay() -> void:
 	add_child(forge_overlay)
 	_forge_overlay = forge_overlay
 
-	# 锻造背景遮罩；使用半透明黑色突出环形材料槽和锻造预览。
+	# 锻造背景遮罩；使用半透明黑色突出环形牺牲槽和锻造预览。
 	var forge_dim: ColorRect = ColorRect.new()
 	forge_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	forge_dim.color = Color(0.0, 0.0, 0.0, 0.68)

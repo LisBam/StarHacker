@@ -12,7 +12,7 @@ signal training_settings_requested
 signal map_vision_requested
 
 ## 菜单最小尺寸；默认 520x580，适合在主菜单中央显示资源操作和调试信息开关。
-@export var panel_minimum_size: Vector2 = Vector2(520.0, 580.0)
+@export var panel_minimum_size: Vector2 = Vector2(520.0, 640.0)
 ## 战斗调试上下文面板高度；默认 580 像素，用于容纳无限属性、地图视野和训练设置入口，运行时通常不动态修改。
 @export_range(360.0, 720.0, 1.0) var combat_panel_height: float = 580.0
 ## 单次金币调整数量；默认 1000，对应增加和减少按钮的固定测试步长。
@@ -28,6 +28,8 @@ var _coins_label: Label
 var _status_label: Label
 ## 获取全部武器按钮；默认运行时创建，服务不可用时禁用。
 var _grant_weapons_button: Button
+## 获取全部装备按钮；点击后向永久仓库发放所有已知四部位装备。
+var _grant_equipment_button: Button
 ## 随机强化石按钮；默认运行时创建，点击后向永久仓库发放 10 颗随机强化石。
 var _grant_stones_button: Button
 ## 获取全部道具按钮；默认运行时创建，点击后向永久仓库各发放一件已知修复包。
@@ -140,6 +142,12 @@ func _build_interface() -> void:
 	_grant_weapons_button.pressed.connect(_on_grant_weapons_pressed)
 	content.add_child(_grant_weapons_button)
 	_economy_controls.append(_grant_weapons_button)
+	_grant_equipment_button = Button.new()
+	_grant_equipment_button.custom_minimum_size = Vector2(0.0, 46.0)
+	_grant_equipment_button.text = "一键获取所有装备"
+	_grant_equipment_button.pressed.connect(_on_grant_equipment_pressed)
+	content.add_child(_grant_equipment_button)
+	_economy_controls.append(_grant_equipment_button)
 	_grant_stones_button = Button.new()
 	_grant_stones_button.custom_minimum_size = Vector2(0.0, 46.0)
 	_grant_stones_button.text = "随机获得%d颗强化石" % enhancement_stone_grant_count
@@ -234,6 +242,7 @@ func _refresh_availability() -> void:
 	# 服务是否可用；取值决定所有会修改局外存档的开发者按钮是否可点击。
 	var service_available: bool = _global_inventory != null
 	_grant_weapons_button.disabled = not service_available
+	_grant_equipment_button.disabled = not service_available
 	_grant_stones_button.disabled = not service_available
 	_grant_all_items_button.disabled = not service_available
 	_add_coins_button.disabled = not service_available
@@ -291,6 +300,14 @@ func _on_grant_weapons_pressed() -> void:
 	# 发放武器数量；取值为本次成功加入永久仓库的已知武器种类数。
 	var granted_count: int = int(_global_inventory.call("grant_all_known_weapons_to_warehouse"))
 	_status_label.text = "已向永久仓库发放 %d 件武器" % granted_count
+
+
+func _on_grant_equipment_pressed() -> void:
+	if _global_inventory == null or not _global_inventory.has_method("grant_all_known_equipment_to_warehouse"):
+		return
+	# 发放装备数量；当前为四种基础装备各一件。
+	var granted_count: int = int(_global_inventory.call("grant_all_known_equipment_to_warehouse"))
+	_status_label.text = "已向永久仓库发放 %d 件装备" % granted_count
 
 
 func _on_grant_stones_pressed() -> void:

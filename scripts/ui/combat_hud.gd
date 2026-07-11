@@ -11,6 +11,8 @@ const WEAPON_SLOT_CONTROL_SCRIPT: Script = preload("res://scripts/ui/weapon_slot
 const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_panel.gd")
 ## 结算物品控件脚本；默认复用仓库的双列物品摘要与完整悬停详情，但结算列表不启用点击和拖拽。
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
+## 统一装备槽控件；四部位装备复用仓库武器槽的排版、耐久条、拖拽视觉与悬浮窗。
+const EQUIPMENT_STORAGE_SLOT_SCRIPT: Script = preload("res://scripts/ui/equipment_storage_slot_control.gd")
 ## 隐藏开发者菜单脚本；默认在暂停界面输入 LISBAM 后以战斗调试上下文显示。
 const DEVELOPER_MENU_SCRIPT: Script = preload("res://scripts/ui/developer_menu.gd")
 ## 强化结果弹窗脚本；用于局内使用或拖动强化石后展示完整属性变化。
@@ -125,6 +127,8 @@ var _inventory_primary_category: String = InventoryQuery.PRIMARY_ALL
 var _inventory_primary_all_button: Button
 ## 背包武器主分类按钮；默认运行时创建，点击后显示全部/近战/远程二级页。
 var _inventory_primary_weapons_button: Button
+## 背包装备一级分类按钮；显示四部位装备物品。
+var _inventory_primary_equipment_button: Button
 ## 背包资源主分类按钮；默认运行时创建，点击后显示全部/强化石二级页。
 var _inventory_primary_resources_button: Button
 ## 背包强化石筛选按钮；默认运行时追加到现有筛选栏，点击后显示正方形强化石格子。
@@ -661,11 +665,11 @@ func _build_inventory_armor_slots() -> void:
 	_inventory_equipment_melee_host.add_child(armor_title)
 	for armor_slot in ["head", "body", "legs", "feet"]:
 		# 防具槽按钮；点击已装备物品时卸回战斗背包，空槽不响应。
-		var armor_button: Button = Button.new()
-		armor_button.custom_minimum_size = inventory_slot_minimum_size
-		armor_button.pressed.connect(Callable(self, "_on_inventory_armor_slot_pressed").bind(armor_slot))
-		_inventory_equipment_melee_host.add_child(armor_button)
-		_inventory_armor_slot_buttons[armor_slot] = armor_button
+		var armor_control: Control = EQUIPMENT_STORAGE_SLOT_SCRIPT.new() as Control
+		armor_control.custom_minimum_size = inventory_slot_minimum_size
+		armor_control.connect("item_selected", Callable(self, "_on_inventory_armor_item_selected").bind(armor_slot))
+		_inventory_equipment_melee_host.add_child(armor_control)
+		_inventory_armor_slot_buttons[armor_slot] = armor_control
 
 
 func _refresh_inventory_equipment_slots() -> void:
@@ -695,15 +699,13 @@ func _refresh_inventory_armor_slots() -> void:
 	# 部位中文名；固定用于槽位空状态和装备名称前缀。
 	var slot_labels: Dictionary = {"head": "头部", "body": "躯干", "legs": "腿部", "feet": "脚部"}
 	for armor_slot in _inventory_armor_slot_buttons.keys():
-		var armor_button: Button = _inventory_armor_slot_buttons[armor_slot] as Button
+		var armor_button: Control = _inventory_armor_slot_buttons[armor_slot] as Control
 		var equipment_resource: Resource = _equipment_component.call("get_armor_equipment", armor_slot) as Resource if _equipment_component != null and _equipment_component.has_method("get_armor_equipment") else null
-		armor_button.text = "%s\n%s" % [slot_labels.get(armor_slot, armor_slot), str(equipment_resource.get("display_name")) if equipment_resource != null else "空"]
+		armor_button.call("configure", str(slot_labels.get(armor_slot, armor_slot)), "armor_" + str(armor_slot), str(armor_slot), equipment_resource, ItemDetailFormatter.build_plain_text(equipment_resource) if equipment_resource != null else "")
 		# 修复目标状态；满耐久装备覆盖灰色并不可点击，有耐久缺口时保持可选。
 		var repair_selection_active: bool = _pending_combat_stone_resource != null and str(_pending_combat_stone_resource.get("item_kind")) == "repair_kit"
 		var repair_selectable: bool = equipment_resource != null and _can_pending_combat_repair_target(equipment_resource)
-		armor_button.disabled = equipment_resource == null or (repair_selection_active and not repair_selectable)
-		armor_button.modulate = Color(0.42, 0.42, 0.42, 0.72) if repair_selection_active and not repair_selectable and equipment_resource != null else Color.WHITE
-		armor_button.tooltip_text = ItemDetailFormatter.build_plain_text(equipment_resource) if equipment_resource != null else ""
+		armor_button.call("set_weapon_target_selection_state", repair_selection_active, repair_selectable)
 
 
 func _on_inventory_armor_slot_pressed(armor_slot: String) -> void:
@@ -720,6 +722,10 @@ func _on_inventory_armor_slot_pressed(armor_slot: String) -> void:
 	if bool(global_inventory.call("transfer_equipment_to_storage", "armor_" + armor_slot, "backpack")):
 		_refresh_equipment()
 		_rebuild_inventory_slots()
+
+
+func _on_inventory_armor_item_selected(_item_resource: Resource, armor_slot: String) -> void:
+	_on_inventory_armor_slot_pressed(armor_slot)
 
 
 func _refresh_cooldown_overlays() -> void:
@@ -1489,6 +1495,12 @@ func _bind_inventory_filter_buttons() -> void:
 			_inventory_primary_weapons_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			_inventory_primary_weapons_button.pressed.connect(Callable(self, "_on_inventory_primary_category_pressed").bind(InventoryQuery.PRIMARY_WEAPONS))
 			primary_bar.add_child(_inventory_primary_weapons_button)
+			_inventory_primary_equipment_button = Button.new()
+			_inventory_primary_equipment_button.text = "装备"
+			_inventory_primary_equipment_button.toggle_mode = true
+			_inventory_primary_equipment_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			_inventory_primary_equipment_button.pressed.connect(Callable(self, "_on_inventory_primary_category_pressed").bind(InventoryQuery.PRIMARY_EQUIPMENT))
+			primary_bar.add_child(_inventory_primary_equipment_button)
 			_inventory_primary_resources_button = Button.new()
 			_inventory_primary_resources_button.text = "资源"
 			_inventory_primary_resources_button.toggle_mode = true
@@ -1679,6 +1691,8 @@ func _refresh_inventory_filter_buttons() -> void:
 		_inventory_primary_all_button.set_pressed_no_signal(_inventory_primary_category == InventoryQuery.PRIMARY_ALL)
 	if _inventory_primary_weapons_button != null:
 		_inventory_primary_weapons_button.set_pressed_no_signal(_inventory_primary_category == InventoryQuery.PRIMARY_WEAPONS)
+	if _inventory_primary_equipment_button != null:
+		_inventory_primary_equipment_button.set_pressed_no_signal(_inventory_primary_category == InventoryQuery.PRIMARY_EQUIPMENT)
 	if _inventory_primary_resources_button != null:
 		_inventory_primary_resources_button.set_pressed_no_signal(_inventory_primary_category == InventoryQuery.PRIMARY_RESOURCES)
 	_inventory_filter_all_button.set_pressed_no_signal(_inventory_filter == INVENTORY_FILTER_ALL)
@@ -1716,6 +1730,8 @@ func _get_inventory_filter_label() -> String:
 		return "资源 · 道具"
 	if _inventory_primary_category == InventoryQuery.PRIMARY_RESOURCES:
 		return "资源 · 全部"
+	if _inventory_primary_category == InventoryQuery.PRIMARY_EQUIPMENT:
+		return "装备 · 全部"
 	if _inventory_primary_category == InventoryQuery.PRIMARY_ALL:
 		return "全部物品"
 
@@ -2435,8 +2451,22 @@ func _on_ranged_weapon_fired(_projectile: Node2D) -> void:
 func _on_player_died() -> void:
 	_is_player_dead = true
 	if _is_training_mode:
+		# 训练场不进入正式结算；下一空闲帧恢复玩家生命并重新开放输入，避免死亡标记永久锁死 HUD。
+		call_deferred("_revive_training_player")
 		return
 	_show_failure_settlement("角色死亡")
+
+
+func _revive_training_player() -> void:
+	if not _is_training_mode or _stats_component == null:
+		return
+	# 最大生命；训练场复活直接恢复满血，不修改角色或装备提供的生命上限。
+	var maximum_health: float = maxf(float(_stats_component.get("max_health")), 1.0)
+	if _stats_component.has_method("set_health"):
+		_stats_component.call("set_health", maximum_health)
+	_is_player_dead = false
+	_set_death_overlay_visible(false)
+	_refresh_combat_input_state()
 
 
 func _on_inventory_filter_all_pressed() -> void:

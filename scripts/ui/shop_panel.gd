@@ -185,6 +185,7 @@ func _build_interface() -> void:
 	content.add_child(primary_bar)
 	_create_category_button(primary_bar, "全部", InventoryQuery.PRIMARY_ALL, true)
 	_create_category_button(primary_bar, "武器", InventoryQuery.PRIMARY_WEAPONS, true)
+	_create_category_button(primary_bar, "装备", InventoryQuery.PRIMARY_EQUIPMENT, true)
 	_create_category_button(primary_bar, "资源", InventoryQuery.PRIMARY_RESOURCES, true)
 	_subcategory_bar = HBoxContainer.new()
 	_subcategory_bar.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -248,6 +249,11 @@ func _rebuild_subcategory_buttons() -> void:
 	if _primary_category == InventoryQuery.PRIMARY_WEAPONS:
 		_create_category_button(_subcategory_bar, "近战", InventoryQuery.SUBCATEGORY_MELEE, false)
 		_create_category_button(_subcategory_bar, "远程", InventoryQuery.SUBCATEGORY_RANGED, false)
+	elif _primary_category == InventoryQuery.PRIMARY_EQUIPMENT:
+		_create_category_button(_subcategory_bar, "头部", "head", false)
+		_create_category_button(_subcategory_bar, "躯干", "body", false)
+		_create_category_button(_subcategory_bar, "腿部", "legs", false)
+		_create_category_button(_subcategory_bar, "脚部", "feet", false)
 	elif _primary_category == InventoryQuery.PRIMARY_RESOURCES:
 		_create_category_button(_subcategory_bar, "强化石", InventoryQuery.SUBCATEGORY_ENHANCEMENT_STONES, false)
 		_create_category_button(_subcategory_bar, "道具", InventoryQuery.SUBCATEGORY_ITEMS, false)

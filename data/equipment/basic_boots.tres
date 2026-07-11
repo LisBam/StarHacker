@@ -11,4 +11,4 @@ description = "提供移速、闪避与少量攻击力的脚部装备。"
 sell_price = 70
 attack_power = 4.0
 dodge_chance = 0.04
-move_speed = 18.0
+move_speed = 0.06

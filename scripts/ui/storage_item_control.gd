@@ -249,7 +249,8 @@ func _is_repair_kit() -> bool:
 
 
 func _is_weapon_resource() -> bool:
-	return _item_resource != null and str(_item_resource.get("weapon_type")) in ["ranged", "melee"]
+	# 武器式物品；四部位装备复用武器卡片排版、耐久条、灰色滤镜和拖拽反馈。
+	return _item_resource != null and (str(_item_resource.get("weapon_type")) in ["ranged", "melee"] or str(_item_resource.get("item_kind")) == "equipment")
 
 
 func _refresh_enhancement_target_highlight() -> void:

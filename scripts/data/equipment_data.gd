@@ -32,8 +32,8 @@ class_name EquipmentData
 @export_range(0.0, 99999.0, 0.1, "or_greater") var health_regeneration_per_five_seconds: float = 0.0
 ## 闪避率；使用 0 到 1 小数，默认 0，受到攻击时独立判定。
 @export_range(0.0, 1.0, 0.01) var dodge_chance: float = 0.0
-## 移速加成；默认 0，仅脚部装备支持，装备有效时加到玩家移动速度。
-@export_range(0.0, 9999.0, 1.0, "or_greater") var move_speed: float = 0.0
+## 移速加成比例；使用 0 到 1 小数，默认 0，仅脚部装备支持，0.06 表示提高 6%。
+@export_range(0.0, 10.0, 0.01, "or_greater") var move_speed: float = 0.0
 ## 暴击率加成；使用 0 到 1 小数，默认 0，装备有效时与武器暴击率相加。
 @export_range(0.0, 1.0, 0.01) var critical_chance: float = 0.0
 ## 暴击伤害倍率增量；默认 0，0.1 表示在基础 150% 上增加 10 个百分点。

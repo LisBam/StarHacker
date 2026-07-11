@@ -18,8 +18,8 @@ const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_form
 const STONE_BENEFICIAL_COLOR: String = "#70e889"
 ## 强化词条削弱颜色；默认亮红色，与悬停详情保持一致。
 const STONE_DETRIMENTAL_COLOR: String = "#ff7070"
-## 不可选武器灰色滤镜；默认降低亮度和饱和度，用于修复包目标选择期间明确区分满耐久武器。
-const UNAVAILABLE_TARGET_FILTER_COLOR: Color = Color(0.42, 0.42, 0.42, 0.78)
+## 不可选物品灰色覆盖颜色；与战斗武器栏完全一致，完整覆盖卡片但保留名称与耐久信息可辨认。
+const UNAVAILABLE_TARGET_FILTER_COLOR: Color = Color(0.16, 0.16, 0.16, 0.72)
 ## 可选目标悬停缩放；默认 1.03，仅在绿色高亮目标上播放。
 const SELECTABLE_TARGET_HOVER_SCALE: float = 1.03
 ## 可选目标悬停动画时长；默认 0.12 秒，用于平滑进入和退出目标反馈。
@@ -64,6 +64,8 @@ var _selection_hover_tween: Tween
 var _price_label: String = "售价"
 ## 当前卡片价格覆盖值；默认 -1 使用物品有效售价，物资撤离面板传入实际运费。
 var _displayed_price_override: int = -1
+## 不可选目标灰色覆盖层；默认隐藏，选择状态阻止当前物品时完整覆盖按钮、富文本与耐久条。
+var _target_filter_overlay: ColorRect
 
 
 func configure(item_resource: Resource, location: String, item_index: int, quick_action_enabled: bool, extraction_prefix: String = "", quantity: int = 1, price_label: String = "售价", displayed_price_override: int = -1) -> void:
@@ -86,7 +88,8 @@ func configure(item_resource: Resource, location: String, item_index: int, quick
 			_stone_summary_label.visible = false
 	_ensure_durability_bar()
 	_durability_bar.call("configure", _item_resource)
-	tooltip_text = ITEM_DETAIL_FORMATTER.call("build_plain_text", _item_resource, _quantity, _price_label if _price_label != "售价" else "出售价格", _displayed_price_override)
+	_ensure_target_filter_overlay()
+	tooltip_text = ITEM_DETAIL_FORMATTER.call("build_plain_text", _item_resource, _quantity, _get_tooltip_price_label(), _get_tooltip_price_override())
 	disabled = _item_resource == null
 	custom_minimum_size = Vector2(0.0, 48.0)
 	# 鼠标指针形态；可操作容器使用手型，结算只读条目使用普通箭头。
@@ -224,7 +227,17 @@ func _build_item_details() -> String:
 
 
 func _make_custom_tooltip(_for_text: String) -> Object:
-	return ITEM_DETAIL_FORMATTER.call("create_tooltip_control", _item_resource, _quantity, _price_label if _price_label != "售价" else "出售价格", _displayed_price_override)
+	return ITEM_DETAIL_FORMATTER.call("create_tooltip_control", _item_resource, _quantity, _get_tooltip_price_label(), _get_tooltip_price_override())
+
+
+func _get_tooltip_price_label() -> String:
+	# 撤离卡片表面显示实际收费，悬停详情仍展示物品自身出售价格，便于玩家判断价值与运费关系。
+	return "出售价格" if _price_label in ["售价", "撤离收费"] else _price_label
+
+
+func _get_tooltip_price_override() -> int:
+	# 撤离收费覆盖值只属于卡片摘要，详情回退资源自身售价；其他自定义价格继续按调用方覆盖显示。
+	return -1 if _price_label == "撤离收费" else _displayed_price_override
 
 
 func _is_enhancement_stone() -> bool:
@@ -244,11 +257,12 @@ func _refresh_enhancement_target_highlight() -> void:
 	# 修复目标补充；当前不可选武器会优先使用灰色滤镜，可选武器继续使用浅绿色。
 	var selection_blocked: bool = _weapon_target_selection_blocked or _item_selection_blocked
 	if selection_blocked:
-		# modulate 会同时影响按钮和子级富文本，确保背包资源卡也完整呈现灰色滤镜。
-		modulate = UNAVAILABLE_TARGET_FILTER_COLOR
+		modulate = Color.WHITE
 		_stop_selection_hover_animation(true)
 	else:
 		modulate = Color(0.68, 1.0, 0.76, 1.0) if _enhancement_target_highlight or _item_selection_highlight else Color.WHITE
+	if _target_filter_overlay != null:
+		_target_filter_overlay.visible = selection_blocked
 	_refresh_interaction_theme(selection_blocked)
 	mouse_default_cursor_shape = Control.CURSOR_ARROW if selection_blocked else (Control.CURSOR_POINTING_HAND if not _location.is_empty() and _item_index >= 0 else Control.CURSOR_ARROW)
 
@@ -317,6 +331,18 @@ func _ensure_durability_bar() -> void:
 		return
 	_durability_bar = WEAPON_DURABILITY_BAR_SCRIPT.new() as Control
 	add_child(_durability_bar)
+
+
+func _ensure_target_filter_overlay() -> void:
+	if _target_filter_overlay != null:
+		return
+	# 完整灰色覆盖层；放在卡片全部内容之后并忽略鼠标，使底层按钮继续统一处理阻止逻辑与悬停详情。
+	_target_filter_overlay = ColorRect.new()
+	_target_filter_overlay.color = UNAVAILABLE_TARGET_FILTER_COLOR
+	_target_filter_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_target_filter_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_target_filter_overlay.visible = false
+	add_child(_target_filter_overlay)
 
 
 func _apply_weapon_slot_visual_style() -> void:

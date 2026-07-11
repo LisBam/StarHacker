@@ -125,6 +125,13 @@ func _build_binding_rows() -> void:
 		row_container.add_child(bind_button)
 		_binding_buttons[action_name_string] = bind_button
 
+		# 单项默认按钮；只恢复当前操作的项目默认绑定，不覆盖玩家对其他操作的自定义设置。
+		var default_button: Button = Button.new()
+		default_button.text = "默认"
+		default_button.custom_minimum_size = Vector2(72.0, 34.0)
+		default_button.pressed.connect(Callable(self, "_on_action_default_button_pressed").bind(StringName(action_name_string)))
+		row_container.add_child(default_button)
+
 
 func _refresh_binding_buttons() -> void:
 	if _input_bindings == null or not _input_bindings.has_method("get_action_display_text"):
@@ -189,6 +196,12 @@ func _apply_captured_event(event: InputEvent) -> void:
 
 func _on_bind_button_pressed(action_name: StringName, bind_button: Button) -> void:
 	_begin_binding_capture(action_name, bind_button)
+
+
+func _on_action_default_button_pressed(action_name: StringName) -> void:
+	_cancel_binding_capture()
+	if _input_bindings != null and _input_bindings.has_method("reset_action_to_default"):
+		_input_bindings.call("reset_action_to_default", action_name)
 
 
 func _on_reset_button_pressed() -> void:

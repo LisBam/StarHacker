@@ -50,6 +50,8 @@ var _interaction_player: Node2D
 var _opened: bool = false
 ## 宝箱随机数生成器；默认启动时随机化，用于在品质数量范围内抽取实际掉落数量。
 var _random: RandomNumberGenerator = RandomNumberGenerator.new()
+## 调试设置服务；默认从 AutoLoad 获取，决定品质标签是否附加当前与最大生命值。
+var _debug_settings: Node
 
 ## 宝箱主体视觉；默认绑定 BodyVisual，用于按品质统一着色。
 @onready var _body_visual: Polygon2D = get_node_or_null("BodyVisual") as Polygon2D
@@ -63,6 +65,9 @@ var _random: RandomNumberGenerator = RandomNumberGenerator.new()
 
 func _ready() -> void:
 	_random.randomize()
+	_debug_settings = get_tree().root.get_node_or_null("DebugSettings")
+	if _debug_settings != null and _debug_settings.has_signal("debug_information_visibility_changed"):
+		_debug_settings.connect("debug_information_visibility_changed", Callable(self, "_on_debug_information_visibility_changed"))
 	add_to_group("loot_chests")
 	add_to_group("environment_obstacles")
 	_refresh_quality_state()
@@ -198,4 +203,10 @@ func _refresh_quality_state() -> void:
 	if _body_visual != null:
 		_body_visual.color = quality_config.get("color", Color.WHITE)
 	if _quality_label != null:
-		_quality_label.text = "%s  %d/%d" % [get_chest_display_name(), ceili(_current_health), ceili(_maximum_health)]
+		# 调试信息可见状态；正式显示只保留宝箱品质，开启开发者调试后才附加生命数值。
+		var show_debug_information: bool = _debug_settings != null and _debug_settings.has_method("is_debug_information_visible") and bool(_debug_settings.call("is_debug_information_visible"))
+		_quality_label.text = "%s  %d/%d" % [get_chest_display_name(), ceili(_current_health), ceili(_maximum_health)] if show_debug_information else get_chest_display_name()
+
+
+func _on_debug_information_visibility_changed(_visible: bool) -> void:
+	_refresh_quality_state()

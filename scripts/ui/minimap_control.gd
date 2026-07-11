@@ -5,7 +5,7 @@ extends Control
 
 ## 局部小地图模式；默认用于右上角 HUD，只显示玩家周围一段范围。
 const DISPLAY_MODE_LOCAL: int = 0
-## 完整大地图模式；默认用于 M 键地图，显示整张地图并叠加探索迷雾。
+## 完整大地图模式；默认用于 Q 键地图，显示整张地图并叠加探索迷雾。
 const DISPLAY_MODE_FULL: int = 1
 
 ## 游戏世界节点路径；默认从 BattleHUD/Root/MiniMap 回到 GameWorld，修改会影响地图边界和障碍数据来源。
@@ -55,7 +55,7 @@ const DISPLAY_MODE_FULL: int = 1
 @export_range(2.0, 32.0, 0.5) var navigation_marker_radius: float = 7.0
 ## 大地图点击已有标点的取消半径；默认 16 像素，左键点中标点时清除而不是重新设置。
 @export_range(2.0, 64.0, 1.0) var navigation_marker_cancel_radius: float = 16.0
-## 是否允许鼠标设置导航标点；默认 true，M 键大地图开启，暂停菜单地图可在场景中关闭。
+## 是否允许鼠标设置导航标点；默认 true，Q 键大地图开启，暂停菜单地图可在场景中关闭。
 @export var allow_navigation_marker_input: bool = true
 
 ## 小地图重绘剩余时间；取值大于等于 0，默认 0 表示下一帧可根据状态触发重绘。
@@ -140,9 +140,35 @@ func _draw_obstacles(world_view_rect: Rect2) -> void:
 
 		# 局部可见障碍矩形；取值为障碍和当前视野的交集，默认避免绘制范围外结构。
 		var visible_obstacle_rect: Rect2 = obstacle_rect.intersection(world_view_rect)
-		# 小地图矩形；取值为障碍世界矩形映射后的本地 Rect2，默认用于绘制墙体和建筑。
-		var minimap_obstacle_rect: Rect2 = _world_rect_to_minimap_rect(visible_obstacle_rect, world_view_rect)
-		draw_rect(minimap_obstacle_rect, obstacle_color, true)
+		_draw_explored_obstacle_rect(visible_obstacle_rect, world_view_rect)
+
+
+func _draw_explored_obstacle_rect(obstacle_rect: Rect2, world_view_rect: Rect2) -> void:
+	# 探索格尺寸；墙体与建筑按格裁剪，未进入玩家摄像机视野的部分不会在大小地图提前泄露。
+	var cell_size: float = _get_exploration_cell_size()
+	# 已探索格查询表；开发者解锁全图后同一缓存会立即允许绘制全部地图结构。
+	var explored_lookup: Dictionary = _get_explored_cell_lookup()
+	# 障碍覆盖起始格；向下取整包含左上边缘接触的探索格。
+	var start_cell: Vector2i = Vector2i(floori(obstacle_rect.position.x / cell_size), floori(obstacle_rect.position.y / cell_size))
+	# 障碍覆盖结束格；向上取整后减一包含右下边缘覆盖的最后一格。
+	var end_cell: Vector2i = Vector2i(ceili(obstacle_rect.end.x / cell_size) - 1, ceili(obstacle_rect.end.y / cell_size) - 1)
+	# 障碍 X 格遍历；逐列检查当前障碍覆盖的探索格。
+	for cell_x in range(start_cell.x, end_cell.x + 1):
+		# 障碍 Y 格遍历；与当前 X 坐标组合并裁剪已探索障碍片段。
+		for cell_y in range(start_cell.y, end_cell.y + 1):
+			# 当前障碍探索格；未探索时整段跳过，不依赖半透明迷雾遮盖。
+			var exploration_cell: Vector2i = Vector2i(cell_x, cell_y)
+			if not explored_lookup.has(exploration_cell):
+				continue
+			# 当前探索格世界矩形；与障碍求交后只绘制真正进入视野的墙体部分。
+			var cell_world_rect: Rect2 = Rect2(Vector2(float(cell_x) * cell_size, float(cell_y) * cell_size), Vector2.ONE * cell_size)
+			# 已探索障碍片段；空交集不会生成地图矩形。
+			var explored_obstacle_rect: Rect2 = obstacle_rect.intersection(cell_world_rect)
+			if explored_obstacle_rect.size.x <= 0.0 or explored_obstacle_rect.size.y <= 0.0:
+				continue
+			# 小地图矩形；取值为已探索障碍片段映射后的本地 Rect2，用于绘制墙体和建筑。
+			var minimap_obstacle_rect: Rect2 = _world_rect_to_minimap_rect(explored_obstacle_rect, world_view_rect)
+			draw_rect(minimap_obstacle_rect, obstacle_color, true)
 
 
 func _draw_fog(world_view_rect: Rect2) -> void:
@@ -195,6 +221,8 @@ func _draw_extraction_marker(world_view_rect: Rect2) -> void:
 
 	# 撤离点世界坐标；取值来自 GameWorld，默认只在地图标记时间到达后使用。
 	var extraction_position: Vector2 = _get_extraction_marker_position()
+	if not _is_world_position_discovered(extraction_position):
+		return
 	if not world_view_rect.has_point(extraction_position):
 		return
 
@@ -345,7 +373,8 @@ func _refresh_obstacle_cache_if_needed() -> bool:
 		return false
 
 	# 原始障碍列表；取值来自 GameWorld 动态调用，默认只在版本变化时整理为强类型缓存。
-	var raw_rects: Array = _game_world.call("get_minimap_obstacle_rects")
+	# 原始障碍列表；局部小地图明确排除宝箱，完整大地图仍可在探索后显示其建筑占位。
+	var raw_rects: Array = _game_world.call("get_minimap_obstacle_rects", display_mode == DISPLAY_MODE_FULL)
 	_cached_obstacle_rects.clear()
 	# 原始障碍遍历项；取值可能为任意 Variant，默认只接收 Rect2。
 	for raw_rect in raw_rects:

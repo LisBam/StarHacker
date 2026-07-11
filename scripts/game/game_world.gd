@@ -35,7 +35,7 @@ const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, 
 @export var grid_color: Color = Color(0.18, 0.25, 0.30, 0.34)
 ## 探索迷雾格子尺寸；取值应大于 0，默认 256 像素，修改会影响大地图迷雾精度和探索记录数量。
 @export_range(16.0, 2048.0, 1.0, "or_greater") var exploration_cell_size: float = 256.0
-## 玩家探索半径；取值应大于等于 0，默认 760 像素，修改会影响玩家走过后大地图可见区域大小。
+## 玩家探索半径；取值应大于等于 0，默认 760 像素，仅在玩家摄像机缺失时作为探索范围回退值。
 @export_range(0.0, 6000.0, 1.0) var exploration_radius: float = 760.0
 ## 探索格更新间隔；取值建议 0.1 到 0.5 秒，默认 0.2 秒，修改会影响大地图迷雾刷新频率和每帧 CPU 开销。
 @export_range(0.02, 5.0, 0.01) var exploration_update_interval: float = 0.2
@@ -47,6 +47,8 @@ const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, 
 @export var boundary_wall_color: Color = Color(0.10, 0.15, 0.18, 1.0)
 ## 玩家节点路径；默认指向当前场景 Player，必须解析到 Node2D，修改会影响怪物索敌目标。
 @export var player_path: NodePath = ^"Player"
+## 玩家摄像机路径；默认指向 Player/Camera2D，探索系统读取其实际屏幕范围，运行时缩放或窗口变化会同步改变可发现区域。
+@export var player_camera_path: NodePath = ^"Player/Camera2D"
 ## 环境物父节点路径；默认指向 Environment 容器，允许为空并回退到 GameWorld，修改会影响随机墙体和建筑层级。
 @export var environment_parent_path: NodePath = ^"Environment"
 ## 随机环境预制体列表；默认由场景指定墙体和建筑，元素必须能实例化为 Node2D，修改会影响地图障碍类型池。
@@ -128,12 +130,20 @@ const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, 
 @export_range(0.0, 1.0, 0.001) var repair_kit_drop_chance: float = 0.05
 ## 修复包掉落随机池；元素为 RepairKitData 资源，怪物死亡后会深拷贝其中一项形成独立掉落物。
 @export var repair_kit_drop_table: Array[Resource] = []
+## 怪物掉落抛物线动画最短时长；默认 0.36 秒，每件击杀掉落独立随机，运行时通常无需动态修改。
+@export_range(0.05, 2.0, 0.01) var monster_drop_launch_duration_min: float = 0.36
+## 怪物掉落抛物线动画最长时长；默认 0.56 秒，修改会影响击杀后物品落地等待时间。
+@export_range(0.05, 2.0, 0.01) var monster_drop_launch_duration_max: float = 0.56
+## 怪物掉落抛物线最小弧高；默认 36 像素，使近距离散落仍具有清晰上抛反馈。
+@export_range(0.0, 300.0, 1.0) var monster_drop_launch_arc_height_min: float = 36.0
+## 怪物掉落抛物线最大弧高；默认 64 像素，为同次多物品掉落提供自然高度差。
+@export_range(0.0, 400.0, 1.0) var monster_drop_launch_arc_height_max: float = 64.0
 ## 宝箱场景；默认由 game_world.tscn 指向 LootChest，必须实例化为静态 Node2D 建筑。
 @export var loot_chest_scene: PackedScene
-## 单局最少宝箱数量；默认 10，与最大值组成进入地图时的等概率整数范围。
-@export_range(0, 100, 1) var loot_chest_spawn_count_min: int = 10
-## 单局最多宝箱数量；默认 20，实际生成数量会先与最少值排序后随机抽取。
-@export_range(0, 100, 1) var loot_chest_spawn_count_max: int = 20
+## 单局最少宝箱数量；默认 20，与最大值组成进入地图时的等概率整数范围。
+@export_range(0, 100, 1) var loot_chest_spawn_count_min: int = 20
+## 单局最多宝箱数量；默认 40，实际生成数量会先与最少值排序后随机抽取。
+@export_range(0, 100, 1) var loot_chest_spawn_count_max: int = 40
 ## 宝箱优先在建筑周围生成的概率；默认 0.72，其余候选在整张地图均匀抽取。
 @export_range(0.0, 1.0, 0.01) var loot_chest_near_building_chance: float = 0.72
 ## 封闭建筑在附近宝箱候选中的权重倍率；默认 3.0，使封闭建筑周边比普通环境结构更容易被选中。
@@ -154,13 +164,13 @@ const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, 
 @export_range(0.0, 600.0, 1.0) var loot_chest_broken_drop_radius_min: float = 105.0
 ## 击破宝箱掉落最大飞散半径；默认 190 像素，使不同掉落物形成明显放射分布。
 @export_range(0.0, 900.0, 1.0) var loot_chest_broken_drop_radius_max: float = 190.0
-## 击破宝箱飞出动画最短时长；默认 0.48 秒，每件物品会在范围内独立随机。
+## 宝箱掉落飞出动画最短时长；默认 0.48 秒，手动开启和击破都会在范围内独立随机。
 @export_range(0.05, 2.0, 0.01) var loot_chest_launch_duration_min: float = 0.48
-## 击破宝箱飞出动画最长时长；默认 0.72 秒，距离较远时仍保持清晰可见。
+## 宝箱掉落飞出动画最长时长；默认 0.72 秒，距离较远时仍保持清晰可见。
 @export_range(0.05, 2.0, 0.01) var loot_chest_launch_duration_max: float = 0.72
-## 击破宝箱飞出动画最小弧高；默认 54 像素，控制掉落物视觉上抛高度。
+## 宝箱掉落飞出动画最小弧高；默认 54 像素，控制手动开启和击破掉落物的视觉上抛高度。
 @export_range(0.0, 300.0, 1.0) var loot_chest_launch_arc_height_min: float = 54.0
-## 击破宝箱飞出动画最大弧高；默认 92 像素，为多件掉落提供轻微高度差。
+## 宝箱掉落飞出动画最大弧高；默认 92 像素，为多件掉落提供轻微高度差。
 @export_range(0.0, 400.0, 1.0) var loot_chest_launch_arc_height_max: float = 92.0
 ## 玩家丢弃武器散落半径；取值建议大于玩家半径，默认 52 像素，修改会影响拖出背包时武器落点距离。
 @export_range(0.0, 400.0, 1.0) var dropped_weapon_scatter_radius: float = 52.0
@@ -245,6 +255,10 @@ var _exploration_update_remaining: float = 0.0
 var _last_exploration_update_position: Vector2 = Vector2.ZERO
 ## 是否已有上次探索刷新位置；取值为 true/false，默认 false 用于首次强制刷新探索格。
 var _has_last_exploration_update_position: bool = false
+## 上次探索使用的摄像机世界视野矩形；默认空矩形，用于相机缩放或窗口尺寸变化后立即刷新探索范围。
+var _last_exploration_view_rect: Rect2 = Rect2()
+## 是否已有上次摄像机探索矩形；默认 false，首次进入地图时强制记录当前真实视野。
+var _has_last_exploration_view_rect: bool = false
 ## 当前是否为训练场模式；默认 false 表示正式骇入，修改会影响 HUD 是否显示训练场设置。
 var _is_training_mode: bool = false
 ## 当前选择角色标识；取值为 stelle、caelus 或 silver_wolf，默认 stelle，用于角色切换和属性随机。
@@ -284,6 +298,8 @@ var _has_navigation_marker: bool = false
 
 ## 玩家节点缓存；默认按 player_path 获取，允许为空并以世界原点作为生成中心。
 @onready var _player: Node2D = get_node_or_null(player_path) as Node2D
+## 玩家摄像机缓存；默认按 player_camera_path 获取，缺失时探索系统回退 exploration_radius 圆形范围。
+@onready var _player_camera: Camera2D = get_node_or_null(player_camera_path) as Camera2D
 ## 环境物父节点缓存；默认按 environment_parent_path 获取，允许为空并回退到当前 GameWorld。
 @onready var _environment_parent: Node = get_node_or_null(environment_parent_path)
 ## 怪物父节点缓存；默认按 monster_parent_path 获取，允许为空并回退到当前 GameWorld。
@@ -379,11 +395,13 @@ func get_map_half_size() -> float:
 	return grid_size * float(grid_extent)
 
 
-func get_minimap_obstacle_rects() -> Array[Rect2]:
-	# 障碍矩形副本；取值为当前环境碰撞矩形列表，默认用于小地图绘制，修改返回方式会影响外部是否能误改缓存。
+func get_minimap_obstacle_rects(include_loot_chests: bool = true) -> Array[Rect2]:
+	# 障碍矩形副本；局部小地图可排除宝箱，完整地图仍可按已探索规则显示其建筑占位。
 	var result: Array[Rect2] = []
 	# 障碍矩形遍历项；取值为世界坐标 Rect2，默认逐项复制到返回数组。
 	for obstacle_rect in _environment_obstacle_rects:
+		if not include_loot_chests and obstacle_rect in _loot_chest_obstacle_rects.values():
+			continue
 		result.append(obstacle_rect)
 
 	return result
@@ -415,6 +433,32 @@ func get_exploration_cell_size() -> float:
 func is_world_position_explored(world_position: Vector2) -> bool:
 	# 世界位置探索状态；地图标记通过同一迷雾格查询，未进入玩家探索范围的撤离点不会提前泄露。
 	return _explored_cells.has(_world_position_to_exploration_cell(world_position))
+
+
+func unlock_full_map_vision() -> int:
+	# 有效探索格尺寸；用于把完整地图边界稳定拆分为与常规探索相同的缓存键。
+	var cell_size: float = get_exploration_cell_size()
+	# 地图半边长；完整解锁只覆盖实际战斗地图，不在边界外创建无意义探索格。
+	var half_size: float = get_map_half_size()
+	# 最小探索格坐标；向下取整确保包含地图负方向边缘。
+	var minimum_cell: Vector2i = Vector2i(floori(-half_size / cell_size), floori(-half_size / cell_size))
+	# 最大探索格坐标；向上取整后减一，确保包含地图正方向边缘且不多出整格。
+	var maximum_cell: Vector2i = Vector2i(ceili(half_size / cell_size) - 1, ceili(half_size / cell_size) - 1)
+	# 新增探索格数量；用于开发者界面反馈，已解锁格不会重复计数。
+	var unlocked_cell_count: int = 0
+	# 完整地图 X 格遍历；覆盖最小到最大探索格的全部横向坐标。
+	for cell_x in range(minimum_cell.x, maximum_cell.x + 1):
+		# 完整地图 Y 格遍历；与当前 X 坐标组合形成每个地图探索格。
+		for cell_y in range(minimum_cell.y, maximum_cell.y + 1):
+			# 当前完整地图探索格；写入后大小地图会在下一次缓存刷新时显示对应墙体和标记。
+			var explored_cell: Vector2i = Vector2i(cell_x, cell_y)
+			if _explored_cells.has(explored_cell):
+				continue
+			_explored_cells[explored_cell] = true
+			unlocked_cell_count += 1
+	if unlocked_cell_count > 0:
+		_explored_cells_version += 1
+	return unlocked_cell_count
 
 
 func get_survival_time_seconds() -> float:
@@ -1106,6 +1150,11 @@ func _should_update_explored_cells() -> bool:
 	if _exploration_update_remaining <= 0.0:
 		return true
 
+	# 当前摄像机世界视野；相机缩放或窗口尺寸改变会改变矩形大小，因此不等待玩家移动阈值即可刷新探索。
+	var current_view_rect: Rect2 = _get_player_camera_world_view_rect()
+	if not _has_last_exploration_view_rect or current_view_rect.size != _last_exploration_view_rect.size:
+		return true
+
 	# 本次探索刷新距离阈值；取值至少为 0，默认让玩家快速移动时不等待固定计时器。
 	var update_distance: float = maxf(exploration_update_distance, 0.0)
 	if update_distance <= 0.0:
@@ -1124,8 +1173,17 @@ func _update_explored_cells(force_update: bool) -> void:
 	_last_exploration_update_position = _player.global_position
 	_has_last_exploration_update_position = true
 	_exploration_update_remaining = maxf(exploration_update_interval, 0.02)
+	# 本次摄像机世界视野；有效玩家相机存在时，探索严格按屏幕实际可见矩形写入并随缩放变化。
+	var current_view_rect: Rect2 = _get_player_camera_world_view_rect()
+	_last_exploration_view_rect = current_view_rect
+	_has_last_exploration_view_rect = true
 	# 是否新增探索格；取值为 true/false，默认只在实际扩展迷雾缓存时递增版本号。
 	var explored_cells_changed: bool = false
+	if _player_camera != null and is_instance_valid(_player_camera):
+		explored_cells_changed = _mark_explored_cells_in_world_rect(current_view_rect)
+		if explored_cells_changed:
+			_explored_cells_version += 1
+		return
 	# 有效探索格子尺寸；取值至少 1，默认防止配置错误导致除零。
 	var cell_size: float = get_exploration_cell_size()
 	# 玩家所在探索格；取值为玩家当前全局坐标转换后的格子坐标。
@@ -1151,6 +1209,55 @@ func _update_explored_cells(force_update: bool) -> void:
 
 	if explored_cells_changed:
 		_explored_cells_version += 1
+
+
+func _get_player_camera_world_view_rect() -> Rect2:
+	if _player_camera != null and is_instance_valid(_player_camera):
+		# 当前视口；其可见尺寸与相机缩放共同决定玩家屏幕实际覆盖的世界范围。
+		var current_viewport: Viewport = _player_camera.get_viewport()
+		if current_viewport != null:
+			# 视口像素尺寸；窗口或拉伸模式变化后会即时反映到下一次探索刷新。
+			var viewport_size: Vector2 = current_viewport.get_visible_rect().size
+			# 安全相机缩放；每轴至少 0.001，避免异常配置导致除零或无限视野。
+			var camera_zoom: Vector2 = Vector2(maxf(absf(_player_camera.zoom.x), 0.001), maxf(absf(_player_camera.zoom.y), 0.001))
+			# 世界视野尺寸；相机放大时范围缩小，相机缩小时范围扩大。
+			var world_view_size: Vector2 = viewport_size / camera_zoom
+			# 相机屏幕中心；使用 Camera2D 最终中心位置，使跟随、偏移和缩放后的探索边界保持一致。
+			var camera_center: Vector2 = _player_camera.get_screen_center_position()
+			return Rect2(camera_center - world_view_size * 0.5, world_view_size)
+
+	# 玩家探索半径；取值应大于等于 0，默认 760 像素，修改会影响摄像机缺失时的回退探索范围。
+	# 摄像机缺失回退：保留原有 exploration_radius 配置，使独立测试场景仍能建立探索记录。
+	var fallback_radius: float = maxf(exploration_radius, 0.0)
+	return Rect2(_player.global_position - Vector2.ONE * fallback_radius, Vector2.ONE * fallback_radius * 2.0)
+
+
+func _mark_explored_cells_in_world_rect(world_view_rect: Rect2) -> bool:
+	# 有效探索格尺寸；与大地图迷雾和墙体裁剪共用同一网格。
+	var cell_size: float = get_exploration_cell_size()
+	# 实际地图矩形；摄像机视野只在战斗边界内形成探索记录。
+	var half_size: float = get_map_half_size()
+	# 裁剪后摄像机矩形；视野超出边界时不会在地图外生成缓存键。
+	var clipped_view_rect: Rect2 = world_view_rect.intersection(Rect2(Vector2(-half_size, -half_size), Vector2.ONE * half_size * 2.0))
+	if clipped_view_rect.size.x <= 0.0 or clipped_view_rect.size.y <= 0.0:
+		return false
+	# 起始探索格；向下取整以包含视野左上边缘接触的格子。
+	var start_cell: Vector2i = Vector2i(floori(clipped_view_rect.position.x / cell_size), floori(clipped_view_rect.position.y / cell_size))
+	# 结束探索格；向上取整后减一以包含视野右下边缘覆盖的最后一格。
+	var end_cell: Vector2i = Vector2i(ceili(clipped_view_rect.end.x / cell_size) - 1, ceili(clipped_view_rect.end.y / cell_size) - 1)
+	# 是否新增探索格；调用方据此只在地图信息变化时递增版本号。
+	var explored_cells_changed: bool = false
+	# 摄像机视野 X 格遍历；覆盖当前裁剪视野的全部横向探索格。
+	for cell_x in range(start_cell.x, end_cell.x + 1):
+		# 摄像机视野 Y 格遍历；与当前 X 坐标组合形成实际进入屏幕的探索格。
+		for cell_y in range(start_cell.y, end_cell.y + 1):
+			# 当前摄像机覆盖格；格子一旦进入实际屏幕范围就永久视为已探索。
+			var explored_cell: Vector2i = Vector2i(cell_x, cell_y)
+			if _explored_cells.has(explored_cell):
+				continue
+			_explored_cells[explored_cell] = true
+			explored_cells_changed = true
+	return explored_cells_changed
 
 
 func _world_position_to_exploration_cell(world_position: Vector2) -> Vector2i:
@@ -1456,7 +1563,7 @@ func _get_rects_bounds(rects: Array[Rect2]) -> Rect2:
 func _spawn_loot_chests() -> void:
 	if loot_chest_scene == null:
 		return
-	# 宝箱数量范围；先排序检查器最小和最大值，再在闭区间内等概率抽取 10 至 20 的默认数量。
+	# 宝箱数量范围；先排序检查器最小和最大值，再在闭区间内等概率抽取 20 至 40 的默认数量。
 	var minimum_count: int = maxi(mini(loot_chest_spawn_count_min, loot_chest_spawn_count_max), 0)
 	# 宝箱数量上限；异常反向配置会自动与最小值交换解释。
 	var maximum_count: int = maxi(maxi(loot_chest_spawn_count_min, loot_chest_spawn_count_max), minimum_count)
@@ -1566,14 +1673,12 @@ func _on_loot_chest_released(chest_position: Vector2, quality_id: String, drop_c
 		if item_resource != null:
 			# 掉落目标；手动开启使用紧凑扩散，击破使用更大的放射半径并播放飞出动画。
 			var drop_target: Vector2 = _get_loot_chest_drop_position(chest_position, drop_index, drop_count, broken_open)
-			if broken_open:
-				# 飞出时长；在配置范围内独立随机，避免所有物品完全同步落地。
-				var launch_duration: float = _random.randf_range(minf(loot_chest_launch_duration_min, loot_chest_launch_duration_max), maxf(loot_chest_launch_duration_min, loot_chest_launch_duration_max))
-				# 飞出弧高；在配置范围内独立随机，为多件物品提供自然高度差。
-				var launch_arc_height: float = _random.randf_range(minf(loot_chest_launch_arc_height_min, loot_chest_launch_arc_height_max), maxf(loot_chest_launch_arc_height_min, loot_chest_launch_arc_height_max))
-				spawn_item_drop(item_resource, drop_target, chest_position, launch_duration, launch_arc_height)
-			else:
-				spawn_item_drop(item_resource, drop_target)
+			# 飞出时长；在配置范围内独立随机，避免所有物品完全同步落地。
+			var launch_duration: float = _random.randf_range(minf(loot_chest_launch_duration_min, loot_chest_launch_duration_max), maxf(loot_chest_launch_duration_min, loot_chest_launch_duration_max))
+			# 飞出弧高；在配置范围内独立随机，为多件物品提供自然高度差。
+			var launch_arc_height: float = _random.randf_range(minf(loot_chest_launch_arc_height_min, loot_chest_launch_arc_height_max), maxf(loot_chest_launch_arc_height_min, loot_chest_launch_arc_height_max))
+			# 开启方式只改变最终扩散半径；手动开启和击破统一从箱体中心播放同款抛物线动画。
+			spawn_item_drop(item_resource, drop_target, chest_position, launch_duration, launch_arc_height)
 
 
 func _get_loot_chest_drop_position(center_position: Vector2, drop_index: int, drop_count: int, broken_open: bool) -> Vector2:
@@ -1869,7 +1974,7 @@ func _try_spawn_monster_weapon_drop(monster_node: Node2D) -> void:
 	if dropped_weapon == null:
 		return
 
-	spawn_weapon_drop(dropped_weapon, _get_scattered_drop_position(monster_node.global_position))
+	_spawn_monster_drop_with_animation(dropped_weapon, monster_node.global_position)
 
 
 func _get_monster_weapon_drop_chance(monster_node: Node) -> float:
@@ -1909,7 +2014,7 @@ func _try_spawn_enhancement_stone_drop(monster_node: Node2D) -> void:
 	# 随机强化石；每次击杀独立创建资源实例，拾取后可按词条签名与库存已有堆叠合并。
 	var enhancement_stone: EnhancementStoneData = _create_random_enhancement_stone()
 	if enhancement_stone != null:
-		spawn_item_drop(enhancement_stone, _get_scattered_drop_position(monster_node.global_position))
+		_spawn_monster_drop_with_animation(enhancement_stone, monster_node.global_position)
 
 
 func _try_spawn_repair_kit_drop(monster_node: Node2D) -> void:
@@ -1925,7 +2030,19 @@ func _try_spawn_repair_kit_drop(monster_node: Node2D) -> void:
 		return
 	# 独立修复包；复制后保留该品质的固定耐久恢复量与售价，避免共享资源状态。
 	var repair_kit: Resource = repair_kit_template.duplicate(true) as Resource
-	spawn_item_drop(repair_kit if repair_kit != null else repair_kit_template, _get_scattered_drop_position(monster_node.global_position))
+	_spawn_monster_drop_with_animation(repair_kit if repair_kit != null else repair_kit_template, monster_node.global_position)
+
+
+func _spawn_monster_drop_with_animation(item_data: Resource, monster_position: Vector2) -> bool:
+	if item_data == null:
+		return false
+	# 怪物掉落最终位置；复用通用散落与墙体避让规则，保证动画结束后物品可正常拾取。
+	var drop_target: Vector2 = _get_scattered_drop_position(monster_position)
+	# 怪物掉落飞出时长；每件物品独立随机，避免同一次击杀的多类掉落完全同步。
+	var launch_duration: float = _random.randf_range(minf(monster_drop_launch_duration_min, monster_drop_launch_duration_max), maxf(monster_drop_launch_duration_min, monster_drop_launch_duration_max))
+	# 怪物掉落飞出弧高；在配置范围内独立随机形成轻微层次差。
+	var launch_arc_height: float = _random.randf_range(minf(monster_drop_launch_arc_height_min, monster_drop_launch_arc_height_max), maxf(monster_drop_launch_arc_height_min, monster_drop_launch_arc_height_max))
+	return spawn_item_drop(item_data, drop_target, monster_position, launch_duration, launch_arc_height)
 
 
 func _create_random_enhancement_stone() -> EnhancementStoneData:

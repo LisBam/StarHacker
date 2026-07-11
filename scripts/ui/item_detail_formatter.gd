@@ -111,15 +111,30 @@ static func _append_equipment_lines(detail_lines: Array[String], item_resource: 
 	detail_lines.append("耐久：%.1f / %.1f" % [current_durability, max_durability])
 	if item_resource.has_method("is_broken") and bool(item_resource.call("is_broken")):
 		detail_lines.append("[color=%s]状态：损坏，全部装备属性失效[/color]" % NEGATIVE_COLOR)
-	# 装备属性顺序；耐久已在摘要中显示，后续只列出实际战斗属性，避免最大耐久重复出现两次。
-	var stat_names: Array[String] = ["attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance", "move_speed", "vision_range", "critical_chance", "critical_damage"]
+	# 装备属性规格；每项依次保存属性名、小数位、单位后缀和显示倍率，百分比字段统一乘 100 后追加 %。
+	var stat_specs: Array[Array] = [
+		["max_durability", 1, "", 1.0],
+		["attack_power", 1, "", 1.0],
+		["defense_power", 1, "", 1.0],
+		["max_health", 1, "", 1.0],
+		["health_regeneration_per_five_seconds", 1, "", 1.0],
+		["dodge_chance", 0, "%", 100.0],
+		["move_speed", 0, "%", 100.0],
+		["vision_range", 0, "%", 100.0],
+		["critical_chance", 0, "%", 100.0],
+		["critical_damage", 0, "%", 100.0],
+	]
 	detail_lines.append("[b]装备属性[/b]")
-	for stat_name in stat_names:
-		var value: float = float(item_resource.call("get_effective_stat", stat_name)) if item_resource.has_method("get_effective_stat") else float(item_resource.get(stat_name))
-		if value <= 0.0:
-			continue
-		var value_text: String = "%.0f%%" % (value * 100.0) if stat_name in ["dodge_chance", "move_speed", "vision_range", "critical_chance", "critical_damage"] else ("%.1f" % value)
-		detail_lines.append("%s：%s" % [EnhancementRules.get_stat_label(stat_name), value_text])
+	for stat_spec in stat_specs:
+		# 属性规格字段；统一交给武器同款格式化函数生成颜色、基础值和强化差值括号。
+		var stat_name: String = str(stat_spec[0])
+		# 属性小数位；普通装备数值保留 1 位，百分比属性显示整数百分比。
+		var decimals: int = int(stat_spec[1])
+		# 属性单位；百分比字段为 %，普通数值为空字符串。
+		var suffix: String = str(stat_spec[2])
+		# 显示倍率；底层百分比小数乘 100 后再进入统一文本格式化流程。
+		var display_multiplier: float = float(stat_spec[3])
+		_append_weapon_stat_line(detail_lines, item_resource, stat_name, decimals, suffix, display_multiplier, true)
 
 
 static func create_tooltip_control(item_resource: Resource, quantity: int = 1, price_label: String = "出售价格", total_price_override: int = -1) -> Control:
@@ -201,11 +216,9 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 	_append_weapon_stat_line(detail_lines, item_resource, "damage", 1)
 	_append_weapon_stat_line(detail_lines, item_resource, "cooldown", 2, " 秒")
 	_append_weapon_stat_line(detail_lines, item_resource, "energy_cost", 1)
-	# 暴击属性；资源以小数倍率保存，悬浮窗统一转换为百分比显示。
-	var effective_critical_chance: float = float(item_resource.call("get_effective_stat", "critical_chance")) if item_resource.has_method("get_effective_stat") else float(item_resource.get("critical_chance"))
-	var effective_critical_damage: float = float(item_resource.call("get_effective_stat", "critical_damage")) if item_resource.has_method("get_effective_stat") else float(item_resource.get("critical_damage"))
-	detail_lines.append("暴击率：%.0f%%" % (effective_critical_chance * 100.0))
-	detail_lines.append("暴击伤害：%.0f%%" % (effective_critical_damage * 100.0))
+	# 暴击属性；与其他武器、装备属性共用统一颜色和括号变化明细，底层小数乘 100 后显示百分比。
+	_append_weapon_stat_line(detail_lines, item_resource, "critical_chance", 0, "%", 100.0)
+	_append_weapon_stat_line(detail_lines, item_resource, "critical_damage", 0, "%", 100.0)
 	if weapon_type == "ranged":
 		_append_weapon_stat_line(detail_lines, item_resource, "bullet_range", 1)
 		_append_weapon_stat_line(detail_lines, item_resource, "projectile_speed", 1)
@@ -217,13 +230,16 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 	_append_weapon_stat_line(detail_lines, item_resource, "impact_force", 1)
 
 
-static func _append_weapon_stat_line(detail_lines: Array[String], item_resource: Resource, stat_name: String, decimals: int, suffix: String = "") -> void:
+static func _append_weapon_stat_line(detail_lines: Array[String], item_resource: Resource, stat_name: String, decimals: int, suffix: String = "", display_multiplier: float = 1.0, skip_zero_unmodified: bool = false) -> void:
 	# 基础值；优先调用 WeaponData 统一接口，旧资源回退直接字段读取。
 	var base_value: float = float(item_resource.call("get_base_stat", stat_name)) if item_resource.has_method("get_base_stat") else 0.0
 	# 有效值；包含累计强化比例，所有战斗组件与详情都读取同一结果。
 	var effective_value: float = float(item_resource.call("get_effective_stat", stat_name)) if item_resource.has_method("get_effective_stat") else base_value
 	# 强化差值；只用于展示，不覆盖武器基础资源字段。
 	var enhancement_value: float = effective_value - base_value
+	# 空属性跳过规则；装备只显示基础值、最终值或强化差值至少一项非零的有效属性，武器保持完整固定属性表。
+	if skip_zero_unmodified and is_zero_approx(base_value) and is_zero_approx(effective_value) and is_zero_approx(enhancement_value):
+		return
 	# 强化是否为玩法增益；数值降低不等于减益，冷却、能耗、扩散和后坐力降低均按规则目录判定为增益。
 	var enhancement_is_beneficial: bool = not is_zero_approx(enhancement_value) and EnhancementRules.is_direction_beneficial(stat_name, enhancement_value)
 	# 总值颜色；存在强化时按玩法收益显示绿色或红色，未变化时使用中性色。
@@ -232,18 +248,24 @@ static func _append_weapon_stat_line(detail_lines: Array[String], item_resource:
 	var delta_color: String = total_color
 	# 数值格式；按属性精度生成 0.0 或 0.00 等稳定格式。
 	var value_format: String = "%%.%df" % decimals
+	# 显示基础值；百分比字段乘 100，普通数值保持原始单位。
+	var displayed_base_value: float = base_value * display_multiplier
+	# 显示有效值；与基础值使用相同倍率，保证括号内外单位一致。
+	var displayed_effective_value: float = effective_value * display_multiplier
+	# 显示强化差值；由有效值减基础值得到，并使用相同倍率保留真实本次累计变化量。
+	var displayed_enhancement_value: float = enhancement_value * display_multiplier
 	# 总值文本；示例为“伤害：1200（1000+200）”，强化差值始终显式带正负号。
 	if is_zero_approx(enhancement_value):
-		detail_lines.append("%s：[color=%s]%s[/color]%s" % [EnhancementRules.get_stat_label(stat_name), total_color, value_format % effective_value, suffix])
+		detail_lines.append("%s：[color=%s]%s[/color]%s" % [EnhancementRules.get_stat_label(stat_name), total_color, value_format % displayed_effective_value, suffix])
 		return
 	# 有强化变化时才显示括号中的基础值和强化差值，避免出现“（100+0.0）”无效信息。
 	detail_lines.append("%s：[color=%s]%s[/color]（%s[color=%s]%s[/color]）%s" % [
 		EnhancementRules.get_stat_label(stat_name),
 		total_color,
-		value_format % effective_value,
-		value_format % base_value,
+		value_format % displayed_effective_value,
+		value_format % displayed_base_value,
 		delta_color,
-		("+" if enhancement_value >= 0.0 else "") + (value_format % enhancement_value),
+		("+" if displayed_enhancement_value >= 0.0 else "") + (value_format % displayed_enhancement_value),
 		suffix,
 	])
 

@@ -46,6 +46,8 @@ const STONE_DETRIMENTAL_CHANCE: float = 0.28
 @export_range(0, 999999, 1) var manual_refresh_base_cost: int = 10
 ## 连续手动刷新费用倍率；默认每次乘 1.5，直到下一次自动刷新重置。
 @export_range(1.0, 10.0, 0.05) var manual_refresh_cost_growth: float = 1.5
+## 手动刷新金币费用上限；默认 100 金币，指数费用达到该值后保持不变，自动刷新仍会把费用恢复为基础值。
+@export_range(0, 999999, 1) var manual_refresh_maximum_cost: int = 100
 ## 灰市最低满耐久价值倍率；默认 4 倍，用于最近失败遗失物的回购价格。
 @export_range(1.0, 50.0, 0.05) var gray_market_price_multiplier_minimum: float = 4.0
 ## 灰市最高满耐久价值倍率；默认 8 倍，用于最近失败遗失物的回购价格。
@@ -132,8 +134,11 @@ func get_seconds_until_automatic_refresh() -> int:
 
 
 func get_manual_refresh_cost() -> int:
-	# 连续刷新费用；每次按 1.5 指数增长并向上取整，自动刷新后次数归零。
-	return ceili(float(manual_refresh_base_cost) * pow(manual_refresh_cost_growth, float(_manual_refresh_count)))
+	# 指数刷新费用；每次按配置倍率增长并向上取整，自动刷新后次数归零。
+	var growing_cost: int = ceili(float(manual_refresh_base_cost) * pow(manual_refresh_cost_growth, float(_manual_refresh_count)))
+	# 费用上限；上限不得低于基础费用，避免检查器误配置导致首次刷新价格被向下截断。
+	var resolved_maximum_cost: int = maxi(manual_refresh_maximum_cost, manual_refresh_base_cost)
+	return mini(growing_cost, resolved_maximum_cost)
 
 
 func ensure_automatic_refresh() -> bool:

@@ -2,16 +2,20 @@ extends Node
 
 ## 股市服务独立维护行情、动态价值中枢、大盘周期、随机事件和对局行为统计。
 ## UI 只读取公开快照并请求交易；金币与持仓所有权由 GlobalInventory 统一结算和持久化。
+## 证券币职责补充；StockMarketService 独立持有证券币余额并结算股票，GlobalInventory 只持有永久金币与股票数量。
 
 signal market_changed
 signal event_announced(message: String)
+## 证券币余额变化信号；充值、提现和股票成交成功后通知股市界面刷新独立账户余额。
+signal securities_balance_changed(balance: float)
 
 ## 股市全局状态存档路径；与商店状态同级独立保存，避免行情字段污染库存物品序列化结构。
 const SAVE_PATH: String = "user://stock_market_state.json"
 ## 股市状态存档版本；版本 1 保存五只股票的行情、周期、事件、行为连续性和局外运行累计值。
 ## 版本 2 补充；新增大盘、涨跌周期和随机事件的非战斗在线时长双触发进度。
 ## 版本 3 补充；在线触发阈值统一扩大 3 倍，并按原进度比例迁移版本 2 的累计时长与事件目标。
-const SAVE_VERSION: int = 3
+## 版本 4 补充；新增支持两位小数的证券币余额，旧存档默认从 0.00 证券币开始。
+const SAVE_VERSION: int = 4
 ## 牛市状态标识；价值中枢和短期情绪默认向正方向倾斜。
 const MARKET_BULL: String = "bull"
 ## 熊市状态标识；价值中枢和短期情绪默认向负方向倾斜。
@@ -85,6 +89,10 @@ const EVENT_DEFINITIONS: Array[Dictionary] = [
 @export_range(0.001, 0.05, 0.001) var display_change_limit: float = 0.01
 ## 周期累计涨跌幅上限；默认正负 30%，达到后剩余正式刷新被限制在周期边界内。
 @export_range(0.05, 1.0, 0.01) var cycle_change_limit: float = 0.30
+## 股票买卖手续费比例；默认成交额的 0.5%，手续费最低 0.01 证券币，运行时无需动态修改。
+@export_range(0.0, 0.20, 0.001) var stock_trade_fee_ratio: float = 0.005
+## 证券币提现手续费比例；默认提现额的 0.5%，扣费后只把整数部分转为永久金币，运行时无需动态修改。
+@export_range(0.0, 0.20, 0.001) var securities_withdrawal_fee_ratio: float = 0.005
 
 ## 全局库存服务；负责金币、持仓和正式对局活动状态，缺失时行情仍可独立运行和调试。
 var _global_inventory: Node
@@ -119,6 +127,8 @@ var _runtime_accumulated_seconds: float = 0.0
 var _display_accumulated_seconds: float = 0.0
 ## 股市面板是否正在显示；默认 false，由 StockMarketPanel 打开和关闭时通过公开接口同步。
 var _market_panel_open: bool = false
+## 当前证券币余额；默认 0.00，只归股市服务所有，充值、提现和股票成交均保留两位小数。
+var _securities_balance: float = 0.0
 ## 本局行为原始统计；键为通用指标名，值为累计数量或价值，用于正式结算时计算五只股票影响。
 var _run_metrics: Dictionary = {}
 ## 上一帧正式对局活动状态；用于从 GlobalInventory 的无参数状态信号识别开始与完成边界。
@@ -211,29 +221,97 @@ func get_stock_snapshot(stock_id: String) -> Dictionary:
 	return result
 
 
-func get_current_price(stock_id: String) -> int:
+func get_current_price(stock_id: String) -> float:
 	# 单股运行时状态；内部价格使用浮点平滑计算，成交时四舍五入为正整数金币。
+	# 证券币成交规则；旧整数说明仅保留历史注释兼容，当前返回与玩家界面一致的两位小数证券币价格，不再转换为整数。
 	var state: Dictionary = _stock_states.get(stock_id, {}) as Dictionary
-	return maxi(roundi(float(state.get("price", 0.0))), 1)
+	return maxf(snappedf(float(state.get("price", 0.0)), 0.01), 0.01)
+
+
+func get_securities_balance() -> float:
+	## 返回证券币账户余额；统一标准化为非负两位小数，外部只能通过股市服务公开接口修改。
+	return _normalize_securities_amount(_securities_balance)
+
+
+func get_withdrawal_fee_ratio() -> float:
+	## 返回当前证券币提现手续费比例；UI 只读取该值进行预览，最终费用仍由服务重新计算。
+	return clampf(securities_withdrawal_fee_ratio, 0.0, 1.0)
+
+
+func get_minimum_withdrawal_amount() -> int:
+	## 返回扣除当前手续费后至少到账 1 金币所需的最小整数证券币；异常高费率无法到账时返回 0。
+	for securities_amount in range(1, 101):
+		# 当前候选手续费；复用最终提现公式，确保按钮门槛和服务执行结果一致。
+		var fee: float = _calculate_securities_fee(float(securities_amount), securities_withdrawal_fee_ratio)
+		if floori(float(securities_amount) - fee) >= 1:
+			return securities_amount
+	return 0
+
+
+func get_stock_trade_fee_ratio() -> float:
+	## 返回当前股票买卖手续费比例；数量弹窗只用于实时预览，最终手续费仍由服务重新计算。
+	return clampf(stock_trade_fee_ratio, 0.0, 1.0)
+
+
+func request_securities_deposit(coin_amount: int) -> Dictionary:
+	## 按 1:1 把整数永久金币充值为证券币；金币扣除失败时证券币余额保持不变。
+	if coin_amount <= 0 or _global_inventory == null or not _global_inventory.has_method("spend_coins"):
+		return {"success": false, "message": "无法执行充值"}
+	# 金币扣款结果；库存服务会在同一调用中再次复核实时金币余额，防止弹窗额度过期。
+	var coins_spent: bool = bool(_global_inventory.call("spend_coins", coin_amount))
+	if not coins_spent:
+		return {"success": false, "message": "金币不足，充值未执行"}
+	_securities_balance = _normalize_securities_amount(_securities_balance + float(coin_amount))
+	# 金币立即保存；与证券币状态在同一次成功兑换路径落盘，缩短两份资产存档的不一致窗口。
+	if _global_inventory.has_method("flush_stock_holdings_save"):
+		_global_inventory.call("flush_stock_holdings_save")
+	_save_state()
+	securities_balance_changed.emit(_securities_balance)
+	return {"success": true, "message": "已充值 %d.00 证券币" % coin_amount, "coins": coin_amount, "securities": float(coin_amount)}
+
+
+func request_securities_withdrawal(securities_amount: int) -> Dictionary:
+	## 把整数证券币提现为永久金币；手续费从提现额中扣除，到账金币取扣费后金额的整数部分。
+	if securities_amount <= 0 or _global_inventory == null or not _global_inventory.has_method("adjust_coins"):
+		return {"success": false, "message": "无法执行提现"}
+	# 当前提现额；接口只接受整数，仍转为浮点用于证券币两位小数结算。
+	var requested_amount: float = float(securities_amount)
+	if _securities_balance + 0.0001 < requested_amount:
+		return {"success": false, "message": "证券币不足，提现未执行"}
+	# 提现手续费；按配置比例计算并向上保留到 0.01 证券币，正额提现最低收取 0.01。
+	var fee: float = _calculate_securities_fee(requested_amount, securities_withdrawal_fee_ratio)
+	# 扣费后可兑换额；外部金币只支持整数，因此只发放向下取整的整数部分。
+	var received_coins: int = floori(maxf(requested_amount - fee, 0.0))
+	if received_coins <= 0:
+		return {"success": false, "message": "扣除手续费后不足 1 金币"}
+	_global_inventory.call("adjust_coins", received_coins)
+	_securities_balance = _normalize_securities_amount(_securities_balance - requested_amount)
+	# 金币立即保存；与证券币状态在同一次成功兑换路径落盘，缩短两份资产存档的不一致窗口。
+	if _global_inventory.has_method("flush_stock_holdings_save"):
+		_global_inventory.call("flush_stock_holdings_save")
+	_save_state()
+	securities_balance_changed.emit(_securities_balance)
+	return {"success": true, "message": "提现成功，到账 %d 金币" % received_coins, "securities": requested_amount, "fee": fee, "coins": received_coins}
 
 
 func get_maximum_buy_quantity(stock_id: String) -> int:
-	if _global_inventory == null or not _global_inventory.has_method("get_coins"):
-		return 0
 	# 当前整数成交价；必须大于 0 才可计算可买数量。
-	var price: int = get_current_price(stock_id)
+	# 证券币成交规则；旧整数说明仅保留历史注释兼容，当前价格为两位小数证券币。
+	var price: float = get_current_price(stock_id)
 	# 当前永久金币；由 GlobalInventory 作为唯一所有者提供。
-	var coins: int = int(_global_inventory.call("get_coins"))
-	if price <= 0 or coins <= 0:
+	# 证券币余额规则；旧金币说明仅保留历史注释兼容，股票买入只使用股市服务独立证券币余额。
+	var coins: float = get_securities_balance()
+	if price <= 0.0 or coins <= 0.0:
 		return 0
 	# 初始数量估算；先按不含手续费的整股数量计算，再向下校验含费实际花费。
-	var estimated_quantity: int = maxi(floori(float(coins) / float(price)), 0)
+	var estimated_quantity: int = maxi(floori(coins / price), 0)
 	while estimated_quantity > 0:
 		# 估算总额；手续费按总成交额 0.5% 向上取整且最低 1 金币。
-		var estimated_gross: int = price * estimated_quantity
+		# 证券币手续费规则；旧整数说明仅保留历史注释兼容，手续费向上保留至 0.01 证券币且最低 0.01。
+		var estimated_gross: float = _normalize_securities_amount(price * estimated_quantity)
 		# 估算手续费；与最终买入请求使用同一公式，防止数量弹窗出现无法成交的上限。
-		var estimated_fee: int = maxi(ceili(float(estimated_gross) * 0.005), 1)
-		if estimated_gross + estimated_fee <= coins:
+		var estimated_fee: float = _calculate_securities_fee(estimated_gross, stock_trade_fee_ratio)
+		if _normalize_securities_amount(estimated_gross + estimated_fee) <= coins + 0.0001:
 			break
 		estimated_quantity -= 1
 	return estimated_quantity
@@ -245,23 +323,28 @@ func get_trade_quote(stock_id: String, quantity: int, trade_type: String) -> Dic
 	if not stock_id in STOCK_IDS or quantity <= 0 or not trade_type in ["buy", "sell"]:
 		return {"valid": false, "executable": false, "message": "交易参数无效"}
 	# 当前整数成交价；每次调用都读取当秒行情，交易流程中的旧报价不会参与计算。
-	var price: int = get_current_price(stock_id)
+	# 证券币成交规则；旧整数说明仅保留历史注释兼容，当前报价保留两位小数且不进行整数四舍五入。
+	var price: float = get_current_price(stock_id)
 	# 实时成交额；数量乘当前整数单价，不包含手续费。
-	var gross: int = price * quantity
+	# 证券币成交规则；旧整数说明仅保留历史注释兼容，成交额按两位小数证券币结算。
+	var gross: float = _normalize_securities_amount(price * quantity)
 	# 实时手续费；买卖均按成交额 0.5% 向上取整且最低 1 金币。
-	var fee: int = maxi(ceili(float(gross) * 0.005), 1)
+	# 证券币手续费规则；旧整数说明仅保留历史注释兼容，手续费向上保留至 0.01 且最低 0.01 证券币。
+	var fee: float = _calculate_securities_fee(gross, stock_trade_fee_ratio)
 	# 当前可用金币；库存服务不可用时按 0 处理并令买入报价不可执行。
-	var available_coins: int = int(_global_inventory.call("get_coins")) if _global_inventory != null and _global_inventory.has_method("get_coins") else 0
+	# 证券币余额规则；旧金币说明仅保留历史注释兼容，买入可用余额来自股市独立账户。
+	var available_coins: float = get_securities_balance()
 	# 当前持仓数量；库存服务不可用或没有持仓时按 0 处理并令卖出报价不可执行。
 	var available_quantity: int = int((_global_inventory.call("get_stock_holding", stock_id) as Dictionary).get("quantity", 0)) if _global_inventory != null and _global_inventory.has_method("get_stock_holding") else 0
 	# 最终结算金额；买入为成交额加手续费，卖出为扣除 0.5% 后向下取整且最低 1 金币。
-	var total: int = gross + fee if trade_type == "buy" else maxi(int(floor(float(gross) * 0.995)), 1)
+	# 证券币最终金额；买入加手续费，卖出扣手续费，全部保留两位小数且卖出最低为 0.01 证券币。
+	var total: float = _normalize_securities_amount(gross + fee) if trade_type == "buy" else maxf(_normalize_securities_amount(gross - fee), 0.01)
 	# 当前报价是否可执行；买入复核金币，卖出复核持仓，防止弹窗展示期间资产或价格变化造成非法成交。
-	var executable: bool = available_coins >= total if trade_type == "buy" else available_quantity >= quantity
+	var executable: bool = available_coins + 0.0001 >= total if trade_type == "buy" else available_quantity >= quantity
 	# 不可执行原因；用于二次确认窗口明确提示玩家需要等待价格回落、减少数量或检查持仓。
 	var message: String = "可以成交"
 	if not executable:
-		message = "金币不足，需要 %d 金币，当前仅有 %d 金币" % [total, available_coins] if trade_type == "buy" else "持仓不足，当前仅有 %d 股" % available_quantity
+		message = "证券币不足，需要 %.2f，当前仅有 %.2f" % [total, available_coins] if trade_type == "buy" else "持仓不足，当前仅有 %d 股" % available_quantity
 	return {
 		"valid": true,
 		"executable": executable,
@@ -277,40 +360,62 @@ func get_trade_quote(stock_id: String, quantity: int, trade_type: String) -> Dic
 
 
 func request_buy(stock_id: String, quantity: int, quoted_price: int = -1) -> Dictionary:
-	if not stock_id in STOCK_IDS or quantity <= 0 or _global_inventory == null or not _global_inventory.has_method("buy_stock_holding"):
+	if not stock_id in STOCK_IDS or quantity <= 0 or _global_inventory == null or not _global_inventory.has_method("add_stock_holding_without_currency"):
 		return {"success": false, "message": "无法执行买入"}
 	# 当前成交单价；确认时重新读取，避免数量选择期间行情变化后使用旧价格。
 	# 报价锁定补充；UI 传入正整数 quoted_price 时使用弹窗打开瞬间的锁定价格，未传入时读取实时价格。
 	# 实时成交规则；旧锁价说明仅保留历史注释兼容，quoted_price 参数只维持调用兼容，任何传入值都不会覆盖点击确认瞬间的实时行情。
-	var price: int = get_current_price(stock_id)
+	var price: float = get_current_price(stock_id)
 	# 买入成交额；数量乘当前价，不包含手续费。
-	var gross: int = price * quantity
+	var gross: float = _normalize_securities_amount(price * quantity)
 	# 买入手续费；成交额 0.5% 向上取整且最低 1 金币。
-	var fee: int = maxi(ceili(float(gross) * 0.005), 1)
+	var fee: float = _calculate_securities_fee(gross, stock_trade_fee_ratio)
 	# 买入总花费；成交额与手续费相加后交给库存原子扣款。
-	var total_cost: int = gross + fee
+	var total_cost: float = _normalize_securities_amount(gross + fee)
 	# 买入结果；库存服务会再次校验金币并更新加权成本。
-	var success: bool = bool(_global_inventory.call("buy_stock_holding", stock_id, quantity, price, total_cost))
+	# 证券币原子校验；旧金币说明仅保留历史注释兼容，先复核股市余额，再写入不处理货币的持仓接口。
+	if _securities_balance + 0.0001 < total_cost:
+		return {"success": false, "message": "证券币不足，需要 %.2f，当前仅有 %.2f" % [total_cost, _securities_balance], "quantity": quantity, "price": price, "fee": fee, "total": total_cost}
+	# 本次含费单位成本；持仓加权成本使用证券币实际支出，不丢弃小数部分。
+	var transaction_unit_cost: float = total_cost / float(quantity)
+	var success: bool = bool(_global_inventory.call("add_stock_holding_without_currency", stock_id, quantity, transaction_unit_cost))
+	if success:
+		_securities_balance = _normalize_securities_amount(_securities_balance - total_cost)
+		# 持仓立即保存；与下方证券币状态同一次成功路径落盘，缩短跨文件交易状态的不一致窗口。
+		if _global_inventory.has_method("flush_stock_holdings_save"):
+			_global_inventory.call("flush_stock_holdings_save")
+		_save_state()
+		securities_balance_changed.emit(_securities_balance)
 	# 买入失败说明；库存原子扣款失败时返回点击瞬间所需金额与余额，避免旧弹窗价格造成原因不明。
-	var failure_message: String = "金币不足，需要 %d 金币，当前仅有 %d 金币" % [total_cost, int(_global_inventory.call("get_coins"))] if _global_inventory.has_method("get_coins") else "金币不足或持仓服务不可用"
+	# 证券币失败说明；旧金币说明仅保留历史注释兼容，持仓接口失败时不会扣除证券币。
+	var failure_message: String = "持仓服务不可用，证券币未扣除"
 	return {"success": success, "message": "买入成功" if success else failure_message, "quantity": quantity, "price": price, "fee": fee, "total": total_cost}
 
 
 func request_sell(stock_id: String, quantity: int, quoted_price: int = -1) -> Dictionary:
-	if not stock_id in STOCK_IDS or quantity <= 0 or _global_inventory == null or not _global_inventory.has_method("sell_stock_holding"):
+	if not stock_id in STOCK_IDS or quantity <= 0 or _global_inventory == null or not _global_inventory.has_method("remove_stock_holding_without_currency"):
 		return {"success": false, "message": "无法执行卖出"}
 	# 当前成交单价；确认时重新读取，确保即时交易使用实时报价。
 	# 报价锁定补充；UI 传入正整数 quoted_price 时使用弹窗打开瞬间的锁定价格，未传入时读取实时价格。
 	# 实时成交规则；旧锁价说明仅保留历史注释兼容，quoted_price 参数只维持调用兼容，任何传入值都不会覆盖点击确认瞬间的实时行情。
-	var price: int = get_current_price(stock_id)
+	var price: float = get_current_price(stock_id)
 	# 卖出成交额；数量乘当前价，不包含手续费。
-	var gross: int = price * quantity
+	var gross: float = _normalize_securities_amount(price * quantity)
 	# 卖出手续费；用于确认框明示，实际所得按乘 0.995 后向下取整。
-	var fee: int = maxi(ceili(float(gross) * 0.005), 1)
+	var fee: float = _calculate_securities_fee(gross, stock_trade_fee_ratio)
 	# 卖出实际所得；向下取整且最低 1 金币。
-	var proceeds: int = maxi(int(floor(float(gross) * 0.995)), 1)
+	# 证券币卖出所得；旧整数说明仅保留历史注释兼容，成交额扣除两位小数手续费后最低为 0.01 证券币。
+	var proceeds: float = maxf(_normalize_securities_amount(gross - fee), 0.01)
 	# 卖出结果；库存服务会再次校验持仓数量并实时增加永久金币。
-	var success: bool = bool(_global_inventory.call("sell_stock_holding", stock_id, quantity, proceeds))
+	# 证券币结算规则；旧金币说明仅保留历史注释兼容，持仓扣除成功后才增加股市独立账户余额。
+	var success: bool = bool(_global_inventory.call("remove_stock_holding_without_currency", stock_id, quantity))
+	if success:
+		_securities_balance = _normalize_securities_amount(_securities_balance + proceeds)
+		# 持仓立即保存；与下方证券币状态同一次成功路径落盘，缩短跨文件交易状态的不一致窗口。
+		if _global_inventory.has_method("flush_stock_holdings_save"):
+			_global_inventory.call("flush_stock_holdings_save")
+		_save_state()
+		securities_balance_changed.emit(_securities_balance)
 	return {"success": success, "message": "卖出成功" if success else "持仓数量不足", "quantity": quantity, "price": price, "fee": fee, "total": proceeds}
 
 
@@ -783,6 +888,20 @@ func _initialize_default_states() -> void:
 		}
 
 
+func _normalize_securities_amount(amount: float) -> float:
+	## 把证券币金额标准化为非负两位小数；统一消除浮点尾差并确保账户不会出现负数。
+	return maxf(snappedf(amount, 0.01), 0.0)
+
+
+func _calculate_securities_fee(gross: float, fee_ratio: float) -> float:
+	## 计算证券币手续费；正成交额按比例向上保留到 0.01，最低收取 0.01 证券币。
+	if gross <= 0.0:
+		return 0.0
+	# 原始手续费分值；乘 100 后向上取整，微小容差避免已是整分的浮点数被错误多收 0.01。
+	var fee_in_cents: int = ceili(maxf(gross * clampf(fee_ratio, 0.0, 1.0) * 100.0 - 0.000001, 0.0))
+	return maxf(float(fee_in_cents) / 100.0, 0.01)
+
+
 func _save_state() -> void:
 	# 股市存档根字典；保存全部长期行情状态，不包含玩家持仓和金币。
 	var save_data: Dictionary = {
@@ -798,6 +917,7 @@ func _save_state() -> void:
 		"event_online_target_seconds": _event_online_target_seconds,
 		"active_event": _active_event,
 		"runtime_accumulated_seconds": _runtime_accumulated_seconds,
+		"securities_balance": _normalize_securities_amount(_securities_balance),
 		"stock_states": _stock_states,
 	}
 	# 股市存档文件；打开失败时保留内存状态并等待下一次刷新重试。
@@ -821,6 +941,8 @@ func _load_state() -> bool:
 	var save_data: Dictionary = parsed as Dictionary
 	# 已保存股市版本；版本 3 之前使用原在线阈值，读取后需要按 3 倍比例迁移。
 	var saved_version: int = maxi(int(save_data.get("version", 1)), 1)
+	# 证券币余额；版本 3 及更旧存档没有该字段，升级时从 0.00 开始且不自动搬运永久金币。
+	_securities_balance = _normalize_securities_amount(float(save_data.get("securities_balance", 0.0)))
 	_market_state = str(save_data.get("market_state", MARKET_SIDEWAYS))
 	if not _market_state in [MARKET_BULL, MARKET_BEAR, MARKET_SIDEWAYS]:
 		_market_state = MARKET_SIDEWAYS

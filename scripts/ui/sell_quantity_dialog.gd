@@ -29,7 +29,8 @@ const DISPLAY_MODE_STOCK_TRADE: String = "stock_trade"
 ## 当前最大可出售数量；取值至少为 1，默认 1 用于弹窗尚未配置时的安全范围。
 var _maximum_quantity: int = 1
 ## 当前单件售价；取值大于等于 0，默认 0 用于即时计算出售总价。
-var _unit_sell_price: int = 0
+## 股票交易价格精度补充；股票模式下该变量使用两位小数证券币，其他物品模式仍传入整数金币。
+var _unit_sell_price: float = 0.0
 ## 当前单件物品价值；默认 0，仅物资送回模式用于计算价值、运费和额度。
 var _unit_item_value: int = 0
 ## 当前可用送回价值；默认 0，仅物资送回模式用于提示选择数量是否会超过单局上限。
@@ -45,7 +46,10 @@ var _stock_trade_is_buying: bool = false
 ## 股票交易当前可执行数量上限；默认 0，买入时随实时价格和金币变化，卖出时随持仓变化。
 var _stock_trade_executable_maximum: int = 0
 ## 股票交易当前可用金币；默认 0，仅买入模式用于提示实时总花费是否超出余额。
-var _stock_trade_available_coins: int = 0
+## 证券币余额补充；股票模式下该变量表示可带小数的证券币余额，旧名称仅为兼容既有结构保留。
+var _stock_trade_available_coins: float = 0.0
+## 股票买卖手续费比例；默认 0.005 即 0.5%，仅股票模式用于实时计算两位小数证券币手续费。
+var _stock_trade_fee_ratio: float = 0.005
 ## 数量滑条；默认运行时创建，取值范围与数字输入框保持双向同步。
 var _quantity_slider: HSlider
 ## 数量数字输入框；默认运行时创建，玩家可键盘直接输入精确数量。
@@ -68,7 +72,7 @@ func present(item_display_name: String, maximum_quantity: int, unit_sell_price: 
 	_display_mode = DISPLAY_MODE_SALE
 	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
 	_maximum_quantity = maxi(maximum_quantity, 1)
-	_unit_sell_price = maxi(unit_sell_price, 0)
+	_unit_sell_price = float(maxi(unit_sell_price, 0))
 	title = "选择出售数量"
 	get_ok_button().text = "出售"
 	_description_label.text = "%s · 最多可出售 %d 个" % [_item_display_name, _maximum_quantity]
@@ -80,7 +84,7 @@ func present_transfer(item_display_name: String, maximum_quantity: int, source_d
 	_display_mode = DISPLAY_MODE_TRANSFER
 	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
 	_maximum_quantity = maxi(maximum_quantity, 1)
-	_unit_sell_price = 0
+	_unit_sell_price = 0.0
 	title = "选择移动数量"
 	get_ok_button().text = "移动"
 	_description_label.text = "%s · %s → %s · 最多 %d 个" % [_item_display_name, source_display_name, target_display_name, _maximum_quantity]
@@ -92,7 +96,7 @@ func present_discard(item_display_name: String, maximum_quantity: int) -> void:
 	_display_mode = DISPLAY_MODE_DISCARD
 	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
 	_maximum_quantity = maxi(maximum_quantity, 1)
-	_unit_sell_price = 0
+	_unit_sell_price = 0.0
 	title = "选择丢弃数量"
 	get_ok_button().text = "丢弃"
 	_description_label.text = "%s · 最多可丢弃 %d 个" % [_item_display_name, _maximum_quantity]
@@ -104,7 +108,7 @@ func present_shipping(item_display_name: String, maximum_quantity: int, unit_ite
 	_display_mode = DISPLAY_MODE_SHIPPING
 	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
 	_maximum_quantity = maxi(maximum_quantity, 1)
-	_unit_sell_price = 0
+	_unit_sell_price = 0.0
 	_unit_item_value = maxi(unit_item_value, 0)
 	_shipping_remaining_value = maxi(shipping_remaining_value, 0)
 	_shipping_fee_ratio = clampf(shipping_fee_ratio, 0.0, 1.0)
@@ -114,28 +118,29 @@ func present_shipping(item_display_name: String, maximum_quantity: int, unit_ite
 	_present_current_configuration()
 
 
-func present_stock_trade(stock_display_name: String, maximum_quantity: int, unit_price: int, is_buying: bool, available_coins: int = 0) -> void:
+func present_stock_trade(stock_display_name: String, maximum_quantity: int, unit_price: float, is_buying: bool, available_coins: float = 0.0, fee_ratio: float = 0.005) -> void:
 	_ensure_interface_initialized()
 	_display_mode = DISPLAY_MODE_STOCK_TRADE
 	_item_display_name = stock_display_name if not stock_display_name.is_empty() else "股票"
 	_maximum_quantity = maxi(maximum_quantity, 1)
-	_unit_sell_price = maxi(unit_price, 1)
+	_unit_sell_price = maxf(snappedf(unit_price, 0.01), 0.01)
 	_stock_trade_is_buying = is_buying
 	_stock_trade_executable_maximum = maxi(maximum_quantity, 0)
-	_stock_trade_available_coins = maxi(available_coins, 0)
+	_stock_trade_available_coins = maxf(snappedf(available_coins, 0.01), 0.0)
+	_stock_trade_fee_ratio = clampf(fee_ratio, 0.0, 1.0)
 	title = "选择买入数量" if is_buying else "选择卖出数量"
 	get_ok_button().text = "下一步"
 	_update_stock_trade_description()
 	_present_current_configuration()
 
 
-func update_stock_trade(unit_price: int, maximum_quantity: int, available_coins: int = 0) -> void:
+func update_stock_trade(unit_price: float, maximum_quantity: int, available_coins: float = 0.0) -> void:
 	## 刷新已打开股票数量弹窗的实时报价；保留玩家当前选择，并在可买上限下降时安全收紧数量。
 	if _display_mode != DISPLAY_MODE_STOCK_TRADE:
 		return
-	_unit_sell_price = maxi(unit_price, 1)
+	_unit_sell_price = maxf(snappedf(unit_price, 0.01), 0.01)
 	_stock_trade_executable_maximum = maxi(maximum_quantity, 0)
-	_stock_trade_available_coins = maxi(available_coins, 0)
+	_stock_trade_available_coins = maxf(snappedf(available_coins, 0.01), 0.0)
 	# 控件数量上限；零股可交易时仍保留数值控件的最小合法范围 1，并通过禁用按钮阻止进入下一步。
 	var control_maximum: int = maxi(_stock_trade_executable_maximum, 1)
 	_maximum_quantity = control_maximum
@@ -152,7 +157,7 @@ func update_stock_trade(unit_price: int, maximum_quantity: int, available_coins:
 func _update_stock_trade_description() -> void:
 	## 更新股票交易说明；明确单价和上限均为持续波动中的实时数据，不暗示锁价。
 	var maximum_text: String = "%d 股" % _stock_trade_executable_maximum if _stock_trade_executable_maximum > 0 else "0 股"
-	_description_label.text = "%s · 实时单价 %d 金币 · 当前最多 %s" % [_item_display_name, _unit_sell_price, maximum_text]
+	_description_label.text = "%s · 实时单价 %.2f 证券币 · 当前最多 %s" % [_item_display_name, _unit_sell_price, maximum_text]
 
 
 func _ensure_interface_initialized() -> void:
@@ -273,23 +278,26 @@ func _refresh_total_price(quantity: int) -> void:
 		return
 	if _display_mode == DISPLAY_MODE_STOCK_TRADE:
 		# 股票成交额；按当前实时整数单价计算，行情刷新时会由宿主再次调用本函数更新。
-		var stock_gross: int = _unit_sell_price * resolved_quantity
+		# 证券币成交规则；旧整数说明仅保留历史注释兼容，成交额保留两位小数证券币。
+		var stock_gross: float = snappedf(_unit_sell_price * resolved_quantity, 0.01)
 		# 股票手续费；成交额的 0.5% 向上取整且最低 1 金币，与股市服务最终成交公式一致。
-		var stock_fee: int = maxi(ceili(float(stock_gross) * 0.005), 1)
+		# 证券币手续费规则；旧整数说明仅保留历史注释兼容，手续费向上保留到 0.01 且最低 0.01 证券币。
+		var stock_fee: float = maxf(float(ceili(maxf(stock_gross * _stock_trade_fee_ratio * 100.0 - 0.000001, 0.0))) / 100.0, 0.01)
 		# 股票最终金额；买入为成交额加手续费，卖出为扣费后向下取整且最低 1 金币。
-		var stock_total: int = stock_gross + stock_fee if _stock_trade_is_buying else maxi(int(floor(float(stock_gross) * 0.995)), 1)
+		# 证券币最终金额；旧整数说明仅保留历史注释兼容，买入加费、卖出扣费并统一保留两位小数。
+		var stock_total: float = snappedf(stock_gross + stock_fee, 0.01) if _stock_trade_is_buying else maxf(snappedf(stock_gross - stock_fee, 0.01), 0.01)
 		# 股票当前数量是否可执行；买入同时检查实时可买上限和金币，卖出只检查持仓上限。
-		var stock_trade_executable: bool = _stock_trade_executable_maximum >= resolved_quantity and (not _stock_trade_is_buying or _stock_trade_available_coins >= stock_total)
-		_total_price_label.text = "%d 股 · 手续费 %d · %s %d 金币" % [resolved_quantity, stock_fee, "需支付" if _stock_trade_is_buying else "可获得", stock_total]
+		var stock_trade_executable: bool = _stock_trade_executable_maximum >= resolved_quantity and (not _stock_trade_is_buying or _stock_trade_available_coins + 0.0001 >= stock_total)
+		_total_price_label.text = "%d 股 · 手续费 %.2f · %s %.2f 证券币" % [resolved_quantity, stock_fee, "需支付" if _stock_trade_is_buying else "可获得", stock_total]
 		if _stock_trade_is_buying and not stock_trade_executable:
-			_total_price_label.text += " · 当前金币不足"
+			_total_price_label.text += " · 当前证券币不足"
 		elif not _stock_trade_is_buying and not stock_trade_executable:
 			_total_price_label.text += " · 当前持仓不足"
 		get_ok_button().disabled = not stock_trade_executable
 		return
 	get_ok_button().disabled = false
 	# 出售总价；单价乘当前数量，用于确认前即时预览金币收益。
-	var total_sell_price: int = _unit_sell_price * resolved_quantity
+	var total_sell_price: int = int(_unit_sell_price) * resolved_quantity
 	_total_price_label.text = "可获得 %d 金币" % total_sell_price
 
 

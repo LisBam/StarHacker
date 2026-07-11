@@ -309,6 +309,58 @@ func get_stock_holding(stock_id: String) -> Dictionary:
 	return holding.duplicate(true)
 
 
+func spend_coins(amount: int) -> bool:
+	## 精确扣除指定整数金币；余额不足时保持原值并返回 false，供跨系统兑换执行原子付款校验。
+	if amount <= 0 or _coins < amount:
+		return false
+	_coins -= amount
+	_queue_save_inventory()
+	coins_changed.emit()
+	return true
+
+
+func add_stock_holding_without_currency(stock_id: String, quantity: int, transaction_unit_cost: float) -> bool:
+	## 增加股票持仓但不处理任何货币；调用方必须先完成自身资产扣款，并传入本次含费每股成本。
+	if stock_id.is_empty() or quantity <= 0 or transaction_unit_cost <= 0.0:
+		return false
+	# 原持仓；缺失时按零数量、零成本初始化，股票标识合法性由股市服务负责校验。
+	var holding: Dictionary = _stock_holdings.get(stock_id, {"quantity": 0, "average_cost": 0.0}) as Dictionary
+	# 原持仓数量；异常负数在合并前归零，防止损坏存档影响新交易。
+	var old_quantity: int = maxi(int(holding.get("quantity", 0)), 0)
+	# 原持仓成本；单位为每股证券币，异常负值在合并前归零。
+	var old_average_cost: float = maxf(float(holding.get("average_cost", 0.0)), 0.0)
+	# 新持仓数量；股票不受普通物品单组 99 个的堆叠上限影响。
+	var new_quantity: int = old_quantity + quantity
+	# 新加权平均成本；按旧持仓总成本和本次含费支出合并，保留证券币小数精度。
+	var new_average_cost: float = (old_average_cost * old_quantity + transaction_unit_cost * quantity) / float(new_quantity)
+	_stock_holdings[stock_id] = {"quantity": new_quantity, "average_cost": new_average_cost}
+	_queue_stock_trade_save()
+	stock_holdings_changed.emit()
+	return true
+
+
+func remove_stock_holding_without_currency(stock_id: String, quantity: int) -> bool:
+	## 减少股票持仓但不发放任何货币；持仓不足时保持原值并返回 false，供股市服务原子结算。
+	if stock_id.is_empty() or quantity <= 0:
+		return false
+	# 当前持仓；必须仍有足量股票，防止弹窗展示期间的连续操作造成超额卖出。
+	var holding: Dictionary = _stock_holdings.get(stock_id, {}) as Dictionary
+	# 当前持仓数量；异常负数按零处理，不允许参与卖出。
+	var current_quantity: int = maxi(int(holding.get("quantity", 0)), 0)
+	if current_quantity < quantity:
+		return false
+	# 剩余持仓数量；全部卖出时移除记录，部分卖出继续保留原加权平均成本。
+	var remaining_quantity: int = current_quantity - quantity
+	if remaining_quantity <= 0:
+		_stock_holdings.erase(stock_id)
+	else:
+		holding["quantity"] = remaining_quantity
+		_stock_holdings[stock_id] = holding
+	_queue_stock_trade_save()
+	stock_holdings_changed.emit()
+	return true
+
+
 func buy_stock_holding(stock_id: String, quantity: int, unit_price: int, total_cost: int) -> bool:
 	if stock_id.is_empty() or quantity <= 0 or unit_price <= 0 or total_cost <= 0 or _coins < total_cost:
 		return false
@@ -379,6 +431,13 @@ func _queue_stock_trade_save() -> void:
 func _flush_queued_stock_trade_save() -> void:
 	_stock_trade_save_queued = false
 	_queue_save_inventory()
+
+
+func flush_stock_holdings_save() -> void:
+	## 立即保存包含股票持仓的完整库存；用于跨股市存档交易完成后缩短两份资产状态的不一致窗口。
+	_stock_trade_save_queued = false
+	_save_queued = false
+	_save_inventory()
 
 
 func get_combat_shipped_value() -> int:

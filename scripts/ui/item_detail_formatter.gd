@@ -113,7 +113,6 @@ static func _append_equipment_lines(detail_lines: Array[String], item_resource: 
 		detail_lines.append("[color=%s]状态：损坏，全部装备属性失效[/color]" % NEGATIVE_COLOR)
 	# 装备属性规格；每项依次保存属性名、小数位、单位后缀和显示倍率，百分比字段统一乘 100 后追加 %。
 	var stat_specs: Array[Array] = [
-		["max_durability", 1, "", 1.0],
 		["attack_power", 1, "", 1.0],
 		["defense_power", 1, "", 1.0],
 		["max_health", 1, "", 1.0],

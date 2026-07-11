@@ -3,6 +3,7 @@ class_name CommonConfirmationDialog
 
 ## 通用信息确认弹窗统一承载购买、离开、清空等“说明文本 + 确认/取消”交互。
 ## 数量选择、强化结果等包含专用控件或单按钮结果展示的弹窗不使用本组件。
+## 信息结果补充：单按钮结果弹窗可继承本组件并调用 present_information()，统一复用背景、边框、圆角和确认按钮规格。
 
 ## 默认弹窗宽度；默认 460 像素，可容纳两行中文说明且不会大面积遮挡背景。
 @export_range(280, 760, 1) var dialog_width: int = 460
@@ -24,7 +25,21 @@ func present(dialog_title: String, message: String, confirm_text: String = "确�
 	dialog_text = message
 	get_ok_button().text = confirm_text
 	get_cancel_button().text = cancel_text
+	get_cancel_button().visible = true
 	popup_centered(Vector2i(requested_width if requested_width > 0 else dialog_width, 0))
+
+
+func present_information(dialog_title: String, message: String, confirm_text: String = "确定", requested_width: int = -1, requested_height: int = 0) -> void:
+	# 信息弹窗标题；与双按钮确认模式共用窗口标题配置，不创建第二套弹窗样式。
+	title = dialog_title
+	# 信息正文；允许子类隐藏系统标签并使用自定义富文本控件，空字符串不会额外占用正文内容。
+	dialog_text = message
+	get_ok_button().text = confirm_text
+	# 取消按钮；信息结果只需要单个确认出口，每次普通 present() 都会重新恢复显示。
+	get_cancel_button().visible = false
+	# 弹窗尺寸；宽度回退通用默认值，高度为 0 时继续由系统按纯文本内容自动计算。
+	var popup_size: Vector2i = Vector2i(requested_width if requested_width > 0 else dialog_width, maxi(requested_height, 0))
+	popup_centered(popup_size)
 
 
 func _apply_standard_style() -> void:

@@ -818,8 +818,8 @@ func _on_cancel_stone_use_pressed() -> void:
 
 
 func _present_enhancement_result(enhancement_result: Dictionary) -> void:
-	if _enhancement_result_dialog != null and _enhancement_result_dialog.has_method("present"):
-		_enhancement_result_dialog.call("present", enhancement_result)
+	if _enhancement_result_dialog != null and _enhancement_result_dialog.has_method("present_result"):
+		_enhancement_result_dialog.call("present_result", enhancement_result)
 
 
 func _open_sell_quantity_dialog(item_resource: Resource, source_location: String, maximum_quantity: int) -> void:

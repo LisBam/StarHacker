@@ -20,10 +20,10 @@ class_name EquipmentData
 @export var icon_text: String = "◇"
 ## 装备出售价格；默认 0，强化和耐久会共同影响实际售价。
 @export_range(0, 999999, 1) var sell_price: int = 0
-## 最大耐久值；默认 1000，归零后装备属性失效但物品不会消失。
-@export_range(1.0, 999999.0, 0.1, "or_greater") var max_durability: float = 1000.0
-## 当前耐久值；默认 1000，受到玩家伤害时由装备组件统一消耗。
-@export_range(0.0, 999999.0, 0.1) var current_durability: float = 1000.0
+## 最大耐久值；默认 500.0，归零后装备属性失效但物品不会消失，已存档装备按原耐久比例迁移。
+@export_range(1.0, 999999.0, 0.1, "or_greater") var max_durability: float = 500.0
+## 当前耐久值；默认 500.0 表示新装备以满耐久创建，受到玩家伤害时由装备组件统一动态消耗。
+@export_range(0.0, 999999.0, 0.1) var current_durability: float = 500.0
 ## 攻击力加成；默认 0，装备有效时加到玩家基础攻击力。
 @export_range(0.0, 99999.0, 1.0, "or_greater") var attack_power: float = 0.0
 ## 防御力加成；默认 0，装备有效时加到玩家基础防御力。

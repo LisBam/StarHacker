@@ -156,6 +156,7 @@ func begin_combat_run() -> void:
 	_combat_shipped_value = 0
 	_run_seen_resource_instance_ids.clear()
 	_run_gained_resources.clear()
+	_reset_run_gained_quantities()
 	# 开局物品记录；取值为背包和装备中的全部有效记录，用于建立战斗内已见资源身份集合。
 	for record in _get_all_owned_records():
 		# 开局物品资源；加入已见实例集合后，玩家把它扔到地面再捡回时不会误算为本局战利品。
@@ -209,10 +210,6 @@ func complete_combat_run_failure(reason: String = "战斗失败", retained_ratio
 	var resolved_retained_ratio: float = clampf(retained_ratio, 0.0, 1.0)
 	# 结算后背包记录；武器整件保留或丢失，强化石堆叠按单颗随机后保留剩余数量。
 	var retained_records: Array[Dictionary] = []
-	# 本局获得物品条目；失败结算同样展示本局真正首次拾取的战利品，不因最终是否保留而改变获得事实。
-	var gained_entries: Array[Dictionary] = _build_run_gained_entries()
-	# 本局获得物品名称；保留为兼容字段，列表式结算使用 gained_entries 提供悬停详情。
-	var gained_items: Array[String] = _get_outcome_entry_names(gained_entries)
 	# 丢失物品条目；每项携带 Resource 与显示名，结算列表可直接复用仓库物品详情。
 	var lost_entries: Array[Dictionary] = []
 	# 丢失物品名称；元素为显示名，用于死亡或主动退出结算界面。
@@ -221,15 +218,22 @@ func complete_combat_run_failure(reason: String = "战斗失败", retained_ratio
 	for record in _backpack_records:
 		# 原始数量；武器默认 1，堆叠资源限制在 1 到 99。
 		var original_quantity: int = clampi(int(record.get("quantity", 1)), 1, MAX_STACK_QUANTITY)
+		# 原始本局来源数量；同一堆叠中排在前面的逻辑单位视为本局所得，仅用于分别统计实际保留数量。
+		var original_run_gained_quantity: int = clampi(int(record.get("run_gained_quantity", 0)), 0, original_quantity)
 		# 实际保留数量；每个单位独立随机判定，武器数量固定为 1。
 		var retained_quantity: int = 0
-		for _unit_index in range(original_quantity):
+		# 实际保留的本局来源数量；决定失败界面“本局获得”中仍可展示的数量。
+		var retained_run_gained_quantity: int = 0
+		for unit_index in range(original_quantity):
 			if _random.randf() < resolved_retained_ratio:
 				retained_quantity += 1
+				if unit_index < original_run_gained_quantity:
+					retained_run_gained_quantity += 1
 		# 丢失数量；用于结算列表在一个条目上显示 xN。
 		var lost_quantity: int = original_quantity - retained_quantity
 		if retained_quantity > 0:
 			record["quantity"] = retained_quantity
+			record["run_gained_quantity"] = retained_run_gained_quantity
 			retained_records.append(record)
 		if lost_quantity > 0:
 			lost_entries.append(_build_outcome_entry(record.get("resource") as Resource, lost_quantity))
@@ -237,6 +241,10 @@ func complete_combat_run_failure(reason: String = "战斗失败", retained_ratio
 
 	_backpack_records = retained_records
 	_detached_records.clear()
+	# 本局获得物品条目；只读取结算后仍由玩家持有的本局来源数量，因此本局获得后又丢失的单位不会重复出现在收益区。
+	var gained_entries: Array[Dictionary] = _build_retained_run_gained_entries()
+	# 本局获得物品名称；保留为兼容字段，列表式结算使用 gained_entries 提供悬停详情。
+	var gained_items: Array[String] = _get_outcome_entry_names(gained_entries)
 	_run_active = false
 	_run_seen_resource_instance_ids.clear()
 	_run_gained_resources.clear()
@@ -247,6 +255,8 @@ func complete_combat_run_failure(reason: String = "战斗失败", retained_ratio
 		"lost_entries": lost_entries,
 		"gained_items": gained_items,
 		"lost_items": lost_items,
+		"retained_ratio": resolved_retained_ratio,
+		"lost_ratio": 1.0 - resolved_retained_ratio,
 	}
 	# 灰市遗失快照；在背包所有权完成结算后发送，监听方只能读取资源与数量，不会重新取得库存记录。
 	combat_failure_losses_recorded.emit(lost_entries.duplicate(true))
@@ -532,6 +542,10 @@ func ship_combat_resource_to_warehouse(item_resource: Resource, source_location:
 			moving_record = _create_record(moving_resource, float(source_record.get("acquired_at", -1.0)))
 			moving_record["last_extraction_epoch"] = int(source_record.get("last_extraction_epoch", 0))
 			moving_record["quantity"] = shipping_quantity
+			# 本局来源移动数量；相同堆叠单位无属性差异，部分送回时优先把本局来源单位计入安全仓库。
+			var shipped_run_gained_quantity: int = mini(int(source_record.get("run_gained_quantity", 0)), shipping_quantity)
+			moving_record["run_gained_quantity"] = shipped_run_gained_quantity
+			source_record["run_gained_quantity"] = maxi(int(source_record.get("run_gained_quantity", 0)) - shipped_run_gained_quantity, 0)
 			source_record["quantity"] = stored_quantity - shipping_quantity
 	else:
 		moving_record = _take_equipment_record(source_location)
@@ -632,6 +646,9 @@ func consume_storage_resource_quantity(item_resource: Resource, source_location:
 	var remaining_quantity: int = stored_quantity - requested_quantity
 	if remaining_quantity > 0:
 		source_records[record_index]["quantity"] = remaining_quantity
+		# 剩余本局来源数量；同类堆叠不可区分具体单位，消费时优先扣除本局来源并限制到剩余总量。
+		var remaining_run_gained_quantity: int = maxi(int(source_records[record_index].get("run_gained_quantity", 0)) - requested_quantity, 0)
+		source_records[record_index]["run_gained_quantity"] = mini(remaining_run_gained_quantity, remaining_quantity)
 	else:
 		source_records.remove_at(record_index)
 	_queue_save_inventory()
@@ -836,6 +853,10 @@ func transfer_storage_resource_quantity(item_resource: Resource, source_location
 	var moving_record: Dictionary = _create_record(moving_resource, float(source_record.get("acquired_at", -1.0)))
 	moving_record["last_extraction_epoch"] = int(source_record.get("last_extraction_epoch", 0))
 	moving_record["quantity"] = transfer_quantity
+	# 本局来源移动数量；跨背包与仓库拆分时随记录转移，避免安全送回后结算遗漏本局所得。
+	var transferred_run_gained_quantity: int = mini(int(source_record.get("run_gained_quantity", 0)), transfer_quantity)
+	moving_record["run_gained_quantity"] = transferred_run_gained_quantity
+	source_record["run_gained_quantity"] = maxi(int(source_record.get("run_gained_quantity", 0)) - transferred_run_gained_quantity, 0)
 	source_record["quantity"] = stored_quantity - transfer_quantity
 	# 目标记录数组；插入时会优先合并相同签名堆叠，超过单组上限的剩余数量自动形成新记录。
 	var target_records: Array[Dictionary] = _get_storage_records(target_location)
@@ -1202,7 +1223,10 @@ func add_backpack_resource(item_resource: Resource, target_index: int = -1) -> b
 	var is_new_acquisition: bool = record.is_empty()
 	if is_new_acquisition:
 		record = _create_record(item_resource)
-		_track_combat_acquisition(item_resource)
+		# 是否为本局首次获得；自己丢弃后重新捡回会返回 false，避免堆叠来源数量被重复累计。
+		var is_run_acquisition: bool = _track_combat_acquisition(item_resource)
+		# 本局来源数量；首次战场拾取资源代表一个独立单位，堆叠合并时由库存记录继续累计与转移。
+		record["run_gained_quantity"] = 1 if is_run_acquisition else 0
 
 	if _is_stackable_resource(item_resource):
 		_insert_record_with_stack_merge(_backpack_records, record, target_index)
@@ -1489,6 +1513,8 @@ func _create_record(item_resource: Resource, acquired_at: float = -1.0, record_i
 		"acquisition_sequence": _acquisition_sequence,
 		"last_extraction_epoch": 0,
 		"quantity": 1,
+		# 本局来源数量；仅在正式战斗内存中使用，不写入永久存档，取值始终限制在 0 到记录总数量。
+		"run_gained_quantity": 0,
 	}
 
 
@@ -1614,6 +1640,8 @@ func _insert_record_with_stack_merge(target_records: Array[Dictionary], record: 
 
 	# 剩余待放数量；合法记录限制在 1 到 99，跨容器移动时会优先填充相同词条堆叠。
 	var remaining_quantity: int = clampi(int(record.get("quantity", 1)), 1, MAX_STACK_QUANTITY)
+	# 剩余本局来源数量；随可堆叠记录共同合并，确保同一签名中开局携带与本局拾取的数量仍可分别结算。
+	var remaining_run_gained_quantity: int = clampi(int(record.get("run_gained_quantity", 0)), 0, remaining_quantity)
 	# 待插入签名；强化石按品质词条方向、修复包按 item_id 合并。
 	var stack_signature: String = _get_stack_signature(item_resource)
 	for existing_record in target_records:
@@ -1628,12 +1656,17 @@ func _insert_record_with_stack_merge(target_records: Array[Dictionary], record: 
 		# 可合并数量；不超过当前堆叠空余和待插入剩余数量。
 		var merged_quantity: int = mini(MAX_STACK_QUANTITY - existing_quantity, remaining_quantity)
 		existing_record["quantity"] = existing_quantity + merged_quantity
+		# 合并的本局来源数量；优先随本次插入单位进入目标堆叠，并保持不超过目标总数量。
+		var merged_run_gained_quantity: int = mini(remaining_run_gained_quantity, merged_quantity)
+		existing_record["run_gained_quantity"] = clampi(int(existing_record.get("run_gained_quantity", 0)) + merged_run_gained_quantity, 0, existing_quantity + merged_quantity)
+		remaining_run_gained_quantity -= merged_run_gained_quantity
 		remaining_quantity -= merged_quantity
 		if remaining_quantity <= 0:
 			return
 
 	# 溢出记录；原记录资源继续代表新堆叠，数量不会超过 99。
 	record["quantity"] = mini(remaining_quantity, MAX_STACK_QUANTITY)
+	record["run_gained_quantity"] = mini(remaining_run_gained_quantity, int(record["quantity"]))
 	# 资源插入下标；负数追加，拖拽到具体位置时保持目标附近布局。
 	var resource_insert_index: int = target_records.size() if target_index < 0 else clampi(target_index, 0, target_records.size())
 	target_records.insert(resource_insert_index, record)
@@ -1875,19 +1908,20 @@ func _get_record_display_name(record: Dictionary) -> String:
 	return str(item_resource.get("weapon_id")) if display_name.is_empty() else display_name
 
 
-func _track_combat_acquisition(item_resource: Resource) -> void:
+func _track_combat_acquisition(item_resource: Resource) -> bool:
 	if not _run_active or item_resource == null:
-		return
+		return false
 	# 资源实例编号；当前战斗内保持稳定，用于区分首次战场拾取与自己丢弃后的重新捡回。
 	var resource_instance_id: int = item_resource.get_instance_id()
 	if _run_seen_resource_instance_ids.has(resource_instance_id):
-		return
+		return false
 	_run_seen_resource_instance_ids[resource_instance_id] = true
 	_run_gained_resources.append(item_resource)
 	# 股市统计服务；只在首次战场获得时上报，自己丢弃后重新拾取不会重复影响行情。
 	var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")
 	if stock_market_service != null and stock_market_service.has_method("record_resource_obtained"):
 		stock_market_service.call("record_resource_obtained", item_resource, 1)
+	return true
 
 
 func _build_run_gained_entries() -> Array[Dictionary]:
@@ -1898,6 +1932,25 @@ func _build_run_gained_entries() -> Array[Dictionary]:
 		if item_resource != null:
 			gained_entries.append(_build_outcome_entry(item_resource))
 	return gained_entries
+
+
+func _build_retained_run_gained_entries() -> Array[Dictionary]:
+	# 结算后本局收益条目；覆盖背包保留、装备栏保留和已送回仓库的本局来源单位，不包含实际遗失单位。
+	var gained_entries: Array[Dictionary] = []
+	# 当前全部所有权记录；本局来源数量只在战斗期间非零，因此开局仓库和携带物不会误入收益区。
+	for record in _get_all_owned_records():
+		# 仍保留的本局来源数量；堆叠资源可能大于 1，武器与装备固定为 1。
+		var retained_run_gained_quantity: int = clampi(int(record.get("run_gained_quantity", 0)), 0, maxi(int(record.get("quantity", 1)), 1))
+		if retained_run_gained_quantity <= 0:
+			continue
+		gained_entries.append(_build_outcome_entry(record.get("resource") as Resource, retained_run_gained_quantity))
+	return gained_entries
+
+
+func _reset_run_gained_quantities() -> void:
+	# 全部现有所有权记录；新战斗开始时清除上一局的临时来源标记，永久库存和资源本身不受影响。
+	for record in _get_all_owned_records():
+		record["run_gained_quantity"] = 0
 
 
 func _build_outcome_entry(item_resource: Resource, quantity: int = 1) -> Dictionary:
@@ -2197,13 +2250,13 @@ func _deserialize_record(serialized_record: Dictionary) -> Dictionary:
 		_restore_enhancement_modifiers(item_resource, serialized_record)
 	if _is_weapon_resource(item_resource):
 		# 恢复耐久；旧存档缺少字段时按模板最大耐久恢复满值，避免升级后全部旧武器意外损坏。
-		# 模板最大耐久；当前所有武器默认 1000.0，后续单独修改上限时仍作为本次加载的最终上限。
+		# 模板最大耐久；当前所有武器默认 500.0，后续单独修改上限时仍作为本次加载的最终上限。
 		var template_max_durability: float = _get_resource_maximum_durability(item_resource)
 		# 存档最大耐久；版本 5 只保存当前耐久，缺失上限时按旧系统 100.0 推断并保持原耐久比例。
 		var saved_max_durability: float = maxf(float(serialized_record.get("max_durability", LEGACY_DURABILITY_MAX)), 1.0)
 		# 存档当前耐久；更旧存档完全缺失耐久时直接恢复为当前模板满耐久。
 		var saved_current_durability: float = float(serialized_record.get("current_durability", saved_max_durability))
-		# 恢复耐久；按旧存档比例映射到当前 1000.0 上限，避免原满耐久 100 被误判为仅剩 10%。
+		# 恢复耐久；按保存时上限比例映射到当前 500.0 基础上限，避免历史满耐久物品被误判为残损状态。
 		var restored_durability: float = template_max_durability * clampf(saved_current_durability / saved_max_durability, 0.0, 1.0)
 		if item_resource.has_method("set_current_durability"):
 			item_resource.call("set_current_durability", restored_durability)

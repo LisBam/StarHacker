@@ -9,7 +9,7 @@ class_name CombatHud
 const WEAPON_SLOT_CONTROL_SCRIPT: Script = preload("res://scripts/ui/weapon_slot_control.gd")
 ## 按键绑定面板脚本；默认用于暂停设置中动态创建可重绑定操作列表。
 const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_panel.gd")
-## 结算物品控件脚本；默认复用仓库的双列物品摘要与完整悬停详情，但结算列表不启用点击和拖拽。
+## 结算物品控件脚本；默认复用仓库的标准物品摘要与完整悬停详情，但结算列表不启用点击和拖拽。
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
 ## 通用物品卡片视图；战斗装备栏、背包与结算列表统一读取其固定尺寸，禁止场景内单独覆盖。
 const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
@@ -105,6 +105,10 @@ const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
 @export_range(24.0, 120.0, 1.0) var nearby_drop_collapsed_height: float = 42.0
 ## 战斗开发者菜单半尺寸；默认 280x310，修改会影响暂停遮罩中调试面板的可用空间，运行时通常不动态修改。
 @export var combat_developer_menu_half_size: Vector2 = Vector2(280.0, 310.0)
+## 短时逃跑判定时长；默认 30.0 秒，玩家在该时间内主动逃跑时应用较低损失比例，运行时通常不动态修改。
+@export_range(0.0, 600.0, 0.1) var early_escape_duration_seconds: float = 30.0
+## 短时逃跑物品损失比例；默认 0.20 表示背包每个物品单位独立保留 80%，只影响主动逃跑且不影响死亡结算。
+@export_range(0.0, 1.0, 0.01) var early_escape_loss_ratio: float = 0.20
 ## 远程冷却遮罩最短显示时长；默认 0.12 秒，更短或相等的高射速冷却不显示遮罩以避免持续闪烁。
 @export_range(0.0, 1.0, 0.01) var ranged_cooldown_overlay_minimum_duration: float = 0.12
 
@@ -375,7 +379,7 @@ var _settlement_subcategory: String = InventoryQuery.SUBCATEGORY_ALL
 @onready var _death_return_main_menu_button: Button = %DeathReturnMainMenuButton
 ## 结算标题缓存；默认绑定 DeathTitle，成功撤离、死亡和主动退出会显示不同标题。
 @onready var _death_title_label: Label = %DeathTitle
-## 结算物品列表缓存；默认绑定 DeathSettlementList，以仓库式双列列表展示本局获得和实际丢失物品。
+## 结算物品列表缓存；默认绑定 DeathSettlementList，以每行四个的居中网格展示本局获得和实际丢失物品。
 @onready var _death_settlement_list: VBoxContainer = %DeathSettlementList
 
 
@@ -3131,15 +3135,23 @@ func _on_return_main_menu_button_pressed() -> void:
 		return
 	if _escape_confirmation_dialog == null:
 		return
-	# 逃跑警告；正式模式明确说明背包损失规则，训练场已在入口处直接离开而不会打开二次确认。
-	_escape_confirmation_dialog.present("确认逃跑", "确认逃跑并返回主菜单吗？\n正式战斗中，背包物品约 50% 会被保留、约 50% 会丢失；已装备物品不参与损失。", "确认逃跑", "取消", 520)
+	# 当前逃跑损失比例；进入游戏 30 秒内为 20%，超过该时长后恢复默认 50%。
+	var loss_ratio: float = _get_current_escape_loss_ratio()
+	# 逃跑警告；根据当前存活时间显示本次实际概率，训练场已在入口处直接离开而不会打开二次确认。
+	_escape_confirmation_dialog.present("确认逃跑", "确认逃跑并返回主菜单吗？\n正式战斗中，背包物品约 %d%% 会被保留、约 %d%% 会丢失；已装备物品不参与损失。" % [roundi((1.0 - loss_ratio) * 100.0), roundi(loss_ratio * 100.0)], "确认逃跑", "取消", 520)
 
 
 func _on_escape_confirmed() -> void:
 	if _is_training_mode:
 		_return_to_main_menu()
 		return
-	_show_failure_settlement("逃跑")
+	_show_failure_settlement("逃跑", 1.0 - _get_current_escape_loss_ratio())
+
+
+func _get_current_escape_loss_ratio() -> float:
+	# 是否处于短时保护期；边界包含第 30 秒，超过后由失败结算默认规则丢失 50%。
+	var is_early_escape: bool = _get_survival_time_seconds() <= maxf(early_escape_duration_seconds, 0.0)
+	return clampf(early_escape_loss_ratio, 0.0, 1.0) if is_early_escape else 0.5
 
 
 func _on_death_return_main_menu_button_pressed() -> void:
@@ -3259,12 +3271,12 @@ func _show_success_settlement() -> void:
 	_present_run_outcome(outcome)
 
 
-func _show_failure_settlement(reason: String) -> void:
+func _show_failure_settlement(reason: String, retained_ratio: float = -1.0) -> void:
 	if _run_outcome_resolved:
 		_set_death_overlay_visible(true)
 		return
 
-	# 全局背包服务；正式战斗失败时随机保留约 50% 背包物品并移除其余物品。
+	# 全局背包服务；正式战斗失败时按死亡或主动逃跑的当前规则随机结算背包物品。
 	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
 	if global_inventory == null or not global_inventory.has_method("is_combat_run_active") or not bool(global_inventory.call("is_combat_run_active")):
 		_run_outcome_resolved = true
@@ -3272,9 +3284,9 @@ func _show_failure_settlement(reason: String) -> void:
 		return
 
 	_run_outcome_resolved = true
-	# 失败结算；包含完整丢失与随机保留物品名称，直接用于结算界面。
+	# 失败结算；主动逃跑可传入短时保护保留率，死亡等默认路径继续使用全局库存的 50% 规则。
 	_record_stock_survival_time()
-	var outcome: Dictionary = global_inventory.call("complete_combat_run_failure", reason)
+	var outcome: Dictionary = global_inventory.call("complete_combat_run_failure", reason, retained_ratio) if retained_ratio >= 0.0 else global_inventory.call("complete_combat_run_failure", reason)
 	_present_run_outcome(outcome)
 
 
@@ -3317,9 +3329,11 @@ func _rebuild_settlement_list() -> void:
 	_clear_container(_death_settlement_list)
 	# 结算结果类型；success 使用撤离说明，失败只说明损失规则，不展示随机保留物品列表。
 	var result_type: String = str(_settlement_outcome.get("result", "failure"))
-	# 结算说明；明确列表统计口径，避免把自己丢弃后重新捡回的开局物品误认为战利品。
+	# 失败损失比例；优先读取本次实际规则，兼容旧结果时回退 50%。
+	var failure_loss_ratio: float = clampf(float(_settlement_outcome.get("lost_ratio", 0.5)), 0.0, 1.0)
+	# 结算说明；明确列表统计口径，本局获得区不会重复展示本次已经遗失的战利品。
 	var summary_label: Label = Label.new()
-	summary_label.text = "已保留本次撤离携带的全部物品，物品仍在随身背包中，可返回仓库后手动存放。下方仅统计本局首次获得的战利品。" if result_type == "success" else "背包物品按规则随机保留约 50%、丢失约 50%，已装备物品不参与损失。下方仅展示本局首次获得与实际丢失的物品。"
+	summary_label.text = "已保留本次撤离携带的全部物品，物品仍在随身背包中，可返回仓库后手动存放。下方仅统计本局首次获得的战利品。" if result_type == "success" else "背包物品按规则随机保留约 %d%%、丢失约 %d%%，已装备物品不参与损失。下方“本局获得”不含本次已丢失物品，“丢失物品”包含全部实际损失。" % [roundi((1.0 - failure_loss_ratio) * 100.0), roundi(failure_loss_ratio * 100.0)]
 	summary_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	summary_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_death_settlement_list.add_child(summary_label)
@@ -3336,7 +3350,7 @@ func _rebuild_settlement_list() -> void:
 		"",
 		InventoryQuery.SORT_ACQUIRED_TIME
 	)
-	# 实际丢失条目；失败结算展示被移出背包的约 50% 物品，成功结算保持空数组。
+	# 实际丢失条目；失败结算展示按本次概率从背包移除的全部物品，成功结算保持空数组。
 	var lost_entries: Array = _settlement_outcome.get("lost_entries", [])
 	_build_settlement_section("本局获得", filtered_gained_entries, "当前分类没有获得物品", Color(0.35, 1.0, 0.72, 1.0))
 	if result_type != "success":
@@ -3423,13 +3437,17 @@ func _build_settlement_section(section_name: String, entries: Array, empty_text:
 		_death_settlement_list.add_child(empty_label)
 		return
 
-	# 仓库式双列网格；每行显示两个物品，结算条目只读且支持鼠标悬停详情。
+	# 居中容器；网格按内容宽度收缩后整体居中，避免行尾空位被拉伸成视觉留白。
+	var grid_center: CenterContainer = CenterContainer.new()
+	grid_center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_death_settlement_list.add_child(grid_center)
+	# 仓库式四列网格；每行固定显示四个标准卡片，结算条目只读且支持鼠标悬停详情。
 	var item_grid: GridContainer = GridContainer.new()
-	item_grid.columns = 2
-	item_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	item_grid.columns = 4
+	item_grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	item_grid.add_theme_constant_override("h_separation", 8)
 	item_grid.add_theme_constant_override("v_separation", 6)
-	_death_settlement_list.add_child(item_grid)
+	grid_center.add_child(item_grid)
 	# 结算条目遍历项；每项应包含 resource 与 display_name，异常数据会回退为普通文本。
 	for raw_entry in entries:
 		if not (raw_entry is Dictionary):
@@ -3443,7 +3461,7 @@ func _build_settlement_section(section_name: String, entries: Array, empty_text:
 			var quantity: int = clampi(int(entry.get("quantity", 1)), 1, 99)
 			var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
 			item_control.custom_minimum_size = ITEM_CARD_VIEW_SCRIPT.get_standard_size()
-			item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			item_control.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 			item_control.call("configure", item_resource, "", -1, false, "", quantity)
 			item_grid.add_child(item_control)
 		else:

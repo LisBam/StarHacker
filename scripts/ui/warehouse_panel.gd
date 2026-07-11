@@ -325,7 +325,7 @@ func _build_storage_interface() -> void:
 	_backpack_scroll.add_child(_backpack_section)
 	# 随身区标题；默认强调下半区会进入战斗并参与失败损失结算。
 	var backpack_title: Label = Label.new()
-	backpack_title.text = "随身背包 · 会带入战斗，死亡或主动退出时随机保留约 50%"
+	backpack_title.text = "随身背包 · 会带入战斗；死亡通常保留约 50%，进入战斗 30 秒内逃跑保留约 80%"
 	backpack_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	backpack_title.add_theme_font_size_override("font_size", 17)
 	_backpack_section.add_child(backpack_title)

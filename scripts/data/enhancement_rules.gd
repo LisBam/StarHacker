@@ -13,11 +13,11 @@ const ENHANCEMENT_STEP_RATIO: float = 0.10
 const CALCULATION_MULTIPLICATIVE_RATIO: String = "multiplicative_ratio"
 ## 加算百分点公式标识；对应“基础值 + 累计百分点”，用于暴击率、暴击伤害与闪避率。
 const CALCULATION_ADDITIVE_POINTS: String = "additive_points"
-## 一级乘算属性组标识；用于伤害、攻击力、最大生命值、视野和冷却的独立幅度配置。
+## 一级乘算属性组标识；用于伤害、攻击力、防御力、最大生命值、视野和冷却的独立幅度配置。
 const MAGNITUDE_GROUP_PRIMARY: String = "primary"
-## 二级乘算属性组标识；用于防御力、能量消耗、扩散、坐力、冲击力和回血的独立幅度配置。
+## 二级乘算属性组标识；用于移速、能量消耗、扩散、坐力、冲击力和回血的独立幅度配置。
 const MAGNITUDE_GROUP_SECONDARY: String = "secondary"
-## 三级乘算属性组标识；用于弹体速度、射程、判定时长、移速和耐久值的独立幅度配置。
+## 三级乘算属性组标识；用于弹体速度、射程、判定时长和耐久值的独立幅度配置。
 ## 属性名称补充：max_durability 的现行玩家可见名称统一为“耐久”，含义是改变武器或装备耐久上限。
 const MAGNITUDE_GROUP_TERTIARY: String = "tertiary"
 ## 低级强化石稳定标识；用于随机权重、存档和堆叠签名，不应在运行时修改。
@@ -65,17 +65,17 @@ const MULTIPLICATIVE_STAT_GROUPS: Dictionary = {
 	"max_health": MAGNITUDE_GROUP_PRIMARY,
 	"vision_range": MAGNITUDE_GROUP_PRIMARY,
 	"cooldown": MAGNITUDE_GROUP_PRIMARY,
-	"defense_power": MAGNITUDE_GROUP_SECONDARY,
+	"defense_power": MAGNITUDE_GROUP_PRIMARY,
 	"energy_cost": MAGNITUDE_GROUP_SECONDARY,
 	"spread_degrees": MAGNITUDE_GROUP_SECONDARY,
 	"recoil_force": MAGNITUDE_GROUP_SECONDARY,
 	"front_recoil_force": MAGNITUDE_GROUP_SECONDARY,
 	"impact_force": MAGNITUDE_GROUP_SECONDARY,
 	"health_regeneration_per_five_seconds": MAGNITUDE_GROUP_SECONDARY,
+	"move_speed": MAGNITUDE_GROUP_SECONDARY,
 	"projectile_speed": MAGNITUDE_GROUP_TERTIARY,
 	"bullet_range": MAGNITUDE_GROUP_TERTIARY,
 	"melee_active_duration": MAGNITUDE_GROUP_TERTIARY,
-	"move_speed": MAGNITUDE_GROUP_TERTIARY,
 	"max_durability": MAGNITUDE_GROUP_TERTIARY,
 }
 ## 加算百分点属性目录；字典值固定为公式标识，供数据资源、结果 UI 和存档迁移共用同一分类。
@@ -87,22 +87,22 @@ const ADDITIVE_POINT_STATS: Dictionary = {
 ## 乘算属性分组幅度；所有数值使用小数比例，增强与削弱按品质分别维护闭区间。
 const MULTIPLICATIVE_MAGNITUDE_RANGES: Dictionary = {
 	MAGNITUDE_GROUP_PRIMARY: {
-		QUALITY_LOW: {"beneficial_min": 0.05, "beneficial_max": 0.12, "detrimental_min": 0.05, "detrimental_max": 0.12},
-		QUALITY_MEDIUM: {"beneficial_min": 0.10, "beneficial_max": 0.20, "detrimental_min": 0.03, "detrimental_max": 0.10},
-		QUALITY_HIGH: {"beneficial_min": 0.18, "beneficial_max": 0.30, "detrimental_min": 0.03, "detrimental_max": 0.08},
-		QUALITY_SUPREME: {"beneficial_min": 0.25, "beneficial_max": 0.40, "detrimental_min": 0.0, "detrimental_max": 0.0},
+		QUALITY_LOW: {"beneficial_min": 0.005, "beneficial_max": 0.012, "detrimental_min": 0.005, "detrimental_max": 0.012},
+		QUALITY_MEDIUM: {"beneficial_min": 0.010, "beneficial_max": 0.020, "detrimental_min": 0.003, "detrimental_max": 0.010},
+		QUALITY_HIGH: {"beneficial_min": 0.018, "beneficial_max": 0.030, "detrimental_min": 0.003, "detrimental_max": 0.008},
+		QUALITY_SUPREME: {"beneficial_min": 0.025, "beneficial_max": 0.040, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
 	MAGNITUDE_GROUP_SECONDARY: {
-		QUALITY_LOW: {"beneficial_min": 0.08, "beneficial_max": 0.18, "detrimental_min": 0.08, "detrimental_max": 0.18},
-		QUALITY_MEDIUM: {"beneficial_min": 0.15, "beneficial_max": 0.30, "detrimental_min": 0.05, "detrimental_max": 0.15},
-		QUALITY_HIGH: {"beneficial_min": 0.25, "beneficial_max": 0.40, "detrimental_min": 0.05, "detrimental_max": 0.10},
-		QUALITY_SUPREME: {"beneficial_min": 0.35, "beneficial_max": 0.50, "detrimental_min": 0.0, "detrimental_max": 0.0},
+		QUALITY_LOW: {"beneficial_min": 0.024, "beneficial_max": 0.054, "detrimental_min": 0.024, "detrimental_max": 0.054},
+		QUALITY_MEDIUM: {"beneficial_min": 0.045, "beneficial_max": 0.090, "detrimental_min": 0.015, "detrimental_max": 0.045},
+		QUALITY_HIGH: {"beneficial_min": 0.075, "beneficial_max": 0.120, "detrimental_min": 0.015, "detrimental_max": 0.030},
+		QUALITY_SUPREME: {"beneficial_min": 0.105, "beneficial_max": 0.150, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
 	MAGNITUDE_GROUP_TERTIARY: {
-		QUALITY_LOW: {"beneficial_min": 0.10, "beneficial_max": 0.22, "detrimental_min": 0.10, "detrimental_max": 0.22},
-		QUALITY_MEDIUM: {"beneficial_min": 0.20, "beneficial_max": 0.35, "detrimental_min": 0.08, "detrimental_max": 0.18},
-		QUALITY_HIGH: {"beneficial_min": 0.30, "beneficial_max": 0.45, "detrimental_min": 0.08, "detrimental_max": 0.12},
-		QUALITY_SUPREME: {"beneficial_min": 0.40, "beneficial_max": 0.55, "detrimental_min": 0.0, "detrimental_max": 0.0},
+		QUALITY_LOW: {"beneficial_min": 0.050, "beneficial_max": 0.110, "detrimental_min": 0.050, "detrimental_max": 0.110},
+		QUALITY_MEDIUM: {"beneficial_min": 0.100, "beneficial_max": 0.175, "detrimental_min": 0.040, "detrimental_max": 0.090},
+		QUALITY_HIGH: {"beneficial_min": 0.150, "beneficial_max": 0.225, "detrimental_min": 0.040, "detrimental_max": 0.060},
+		QUALITY_SUPREME: {"beneficial_min": 0.200, "beneficial_max": 0.275, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
 }
 ## 加算属性独立幅度；数值仍以 0 到 1 小数保存，0.005 表示直接增加 0.5 个百分点。
@@ -128,8 +128,8 @@ const ADDITIVE_POINT_MAGNITUDE_RANGES: Dictionary = {
 }
 ## 强化数值保存精度；0.001 对应 0.1 个百分点，可完整保存闪避率等小数区间。
 const MODIFIER_VALUE_PRECISION: float = 0.001
-## 乘算幅度随机步长；0.01 对应 1%，保证一级、二级和三级属性按整数百分比抽取。
-const MULTIPLICATIVE_ROLL_STEP: float = 0.01
+## 乘算幅度随机步长；0.001 对应 0.1%，保证缩放后的一级、二级和三级区间端点均可准确抽取。
+const MULTIPLICATIVE_ROLL_STEP: float = 0.001
 ## 加算幅度随机步长；0.001 对应 0.1 个百分点，覆盖 0.3%、0.5% 等区间端点。
 const ADDITIVE_POINT_ROLL_STEP: float = 0.001
 ## 暴击率最终上限；1.0 表示 100%，武器与装备的有效属性统一应用该限制。
@@ -306,8 +306,8 @@ static func build_modifier_token(stat_name: String, direction: Variant, include_
 	var direction_text: String = "%s%s" % [get_stat_label(stat_name), get_direction_symbol(normalize_direction(modifier_ratio))]
 	if not include_percentage:
 		return direction_text
-	# 可见幅度；加算属性保留 0.1 个百分点，乘算属性按整数百分比显示。
-	return "%s%.1f 个百分点" % [direction_text, absf(modifier_ratio) * 100.0] if is_additive_point_stat(stat_name) else "%s%d%%" % [direction_text, roundi(absf(modifier_ratio) * 100.0)]
+	# 可见幅度；加算属性与乘算属性都保留 0.1 精度，避免一级属性的小数百分比被显示为 0%。
+	return "%s%.1f 个百分点" % [direction_text, absf(modifier_ratio) * 100.0] if is_additive_point_stat(stat_name) else "%s%.1f%%" % [direction_text, absf(modifier_ratio) * 100.0]
 
 
 static func roll_quality_modifier_ratio(random_source: RandomNumberGenerator, quality_id: String, stat_name: String, direction: Variant) -> float:
@@ -325,7 +325,7 @@ static func roll_quality_modifier_ratio(random_source: RandomNumberGenerator, qu
 	var maximum_ratio: float = float(quality_config.get("beneficial_max" if beneficial else "detrimental_max", 0.0))
 	if maximum_ratio <= 0.0:
 		return 0.0
-	# 随机步长；乘算属性使用 1%，加算属性使用 0.1 个百分点。
+	# 随机步长；乘算属性和加算属性都使用 0.1% 精度，分别按比例与百分点语义结算。
 	var roll_step: float = ADDITIVE_POINT_ROLL_STEP if is_additive_point_stat(stat_name) else MULTIPLICATIVE_ROLL_STEP
 	# 最小随机单位；将浮点区间换算为整数单位，避免 randf 产生不可追踪精度。
 	var minimum_step: int = roundi(minf(minimum_ratio, maximum_ratio) / roll_step)

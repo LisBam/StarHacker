@@ -21,6 +21,8 @@ const DEVELOPER_MENU_SCRIPT: Script = preload("res://scripts/ui/developer_menu.g
 const ENHANCEMENT_RESULT_DIALOG_SCRIPT: Script = preload("res://scripts/ui/enhancement_result_dialog.gd")
 ## 数量选择弹窗脚本；局内部分丢弃和物资送回仓库复用仓库已有滑条与数字输入 UI。
 const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
+## 标准物品操作弹窗脚本；战斗背包的装备、使用与丢弃按钮复用局外物品操作视觉资源。
+const ITEM_ACTION_POPUP_SCRIPT: Script = preload("res://scripts/ui/item_action_popup.gd")
 ## 物资撤离面板脚本；玩家在物资撤离点驻留 3 秒后按闪避打开，面板期间暂停游戏。
 const SUPPLY_EXTRACTION_PANEL_SCRIPT: Script = preload("res://scripts/ui/supply_extraction_panel.gd")
 ## 战斗开发者模式解锁序列；默认六个英文字母，输入错误时按首字母重新开始匹配。
@@ -168,8 +170,8 @@ var _inventory_stone_attribute_clear_button: Button
 var _inventory_stone_attribute_filter: Array[String] = []
 ## 背包当前排序模式；默认 acquired_time，只改变显示顺序。
 var _inventory_sort_mode: String = InventoryQuery.SORT_ACQUIRED_TIME
-## 局内资源操作菜单；点击强化石后显示“使用”选项，不在战斗内提供金币出售。
-var _inventory_item_action_menu: PopupMenu
+## 标准局内物品操作弹窗；点击物品后显示装备、使用与丢弃功能按钮，不在战斗内提供金币出售。
+var _inventory_item_action_menu: ItemActionPopup
 ## 当前局内待使用强化石；非空时下一次点击背包或装备栏武器会尝试强化。
 var _pending_combat_stone_resource: Resource
 ## 当前局内操作菜单指向的强化石；只有玩家确认“使用”后才复制到待选择状态，关闭菜单不会误消费。
@@ -1488,6 +1490,8 @@ func _bind_inventory_filter_buttons() -> void:
 			_inventory_sort_option.set_item_metadata(0, InventoryQuery.SORT_ACQUIRED_TIME)
 			_inventory_sort_option.add_item("物品价值")
 			_inventory_sort_option.set_item_metadata(1, InventoryQuery.SORT_ITEM_VALUE)
+			_inventory_sort_option.add_item("耐久")
+			_inventory_sort_option.set_item_metadata(2, InventoryQuery.SORT_DURABILITY)
 			_inventory_sort_option.item_selected.connect(_on_inventory_sort_selected)
 			query_bar.add_child(_inventory_sort_option)
 			_inventory_stone_attribute_option = OptionButton.new()
@@ -1561,8 +1565,8 @@ func _create_inventory_subcategory_button(button_text: String, filter_name: Stri
 
 
 func _build_inventory_item_action_menu() -> void:
-	_inventory_item_action_menu = PopupMenu.new()
-	_inventory_item_action_menu.id_pressed.connect(_on_inventory_item_action_menu_id_pressed)
+	_inventory_item_action_menu = ITEM_ACTION_POPUP_SCRIPT.new() as ItemActionPopup
+	_inventory_item_action_menu.action_pressed.connect(_on_inventory_item_action_menu_id_pressed)
 	_root_control.add_child(_inventory_item_action_menu)
 	# 取消使用按钮；插入背包标题下方，仅强化目标选择期间占用布局高度。
 	_inventory_cancel_stone_use_button = Button.new()
@@ -2577,7 +2581,7 @@ func _on_inventory_search_changed(_new_text: String) -> void:
 func _on_inventory_sort_selected(item_index: int) -> void:
 	# 排序元数据；异常选项回退获得时间。
 	var selected_sort_mode: String = str(_inventory_sort_option.get_item_metadata(item_index))
-	_inventory_sort_mode = selected_sort_mode if selected_sort_mode in [InventoryQuery.SORT_ACQUIRED_TIME, InventoryQuery.SORT_ITEM_VALUE] else InventoryQuery.SORT_ACQUIRED_TIME
+	_inventory_sort_mode = selected_sort_mode if selected_sort_mode in [InventoryQuery.SORT_ACQUIRED_TIME, InventoryQuery.SORT_ITEM_VALUE, InventoryQuery.SORT_DURABILITY] else InventoryQuery.SORT_ACQUIRED_TIME
 	if _inventory_panel.visible:
 		_rebuild_inventory_slots()
 
@@ -2642,11 +2646,10 @@ func _on_combat_resource_action_requested(item_resource: Resource) -> void:
 		_combat_action_weapon_source_index = -1
 		var equipment_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
 		_combat_action_item_quantity = 1
-		_inventory_item_action_menu.clear()
-		_inventory_item_action_menu.add_item("装备", INVENTORY_ITEM_ACTION_EQUIP)
+		_inventory_item_action_menu.clear_actions()
+		_inventory_item_action_menu.add_action("装备", INVENTORY_ITEM_ACTION_EQUIP)
 		_add_inventory_discard_actions(1)
-		_inventory_item_action_menu.position = Vector2i(get_viewport().get_mouse_position())
-		_inventory_item_action_menu.popup()
+		_inventory_item_action_menu.popup_at(get_viewport().get_mouse_position())
 		return
 	_combat_action_stone_resource = item_resource
 	_combat_action_weapon_resource = null
@@ -2654,12 +2657,11 @@ func _on_combat_resource_action_requested(item_resource: Resource) -> void:
 	# 全局库存服务；用于读取当前资源真实堆叠数量并决定丢弃菜单结构。
 	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
 	_combat_action_item_quantity = int(global_inventory.call("get_storage_resource_quantity", item_resource, "backpack")) if global_inventory != null and global_inventory.has_method("get_storage_resource_quantity") else 1
-	_inventory_item_action_menu.clear()
+	_inventory_item_action_menu.clear_actions()
 	if str(item_resource.get("item_kind")) == "repair_kit":
-		_inventory_item_action_menu.add_item("使用", INVENTORY_ITEM_ACTION_USE)
+		_inventory_item_action_menu.add_action("使用", INVENTORY_ITEM_ACTION_USE)
 	_add_inventory_discard_actions(_combat_action_item_quantity)
-	_inventory_item_action_menu.position = Vector2i(get_viewport().get_mouse_position())
-	_inventory_item_action_menu.popup()
+	_inventory_item_action_menu.popup_at(get_viewport().get_mouse_position())
 
 
 func _on_inventory_item_action_menu_id_pressed(action_id: int) -> void:
@@ -2732,20 +2734,19 @@ func _on_combat_weapon_selected(weapon_resource: Resource, selected_context: Str
 	_combat_action_weapon_source_index = selected_index
 	_combat_action_stone_resource = null
 	_combat_action_item_quantity = 1
-	_inventory_item_action_menu.clear()
-	_inventory_item_action_menu.add_item("装备", INVENTORY_ITEM_ACTION_EQUIP)
+	_inventory_item_action_menu.clear_actions()
+	_inventory_item_action_menu.add_action("装备", INVENTORY_ITEM_ACTION_EQUIP)
 	_add_inventory_discard_actions(1)
-	_inventory_item_action_menu.position = Vector2i(get_viewport().get_mouse_position())
-	_inventory_item_action_menu.popup()
+	_inventory_item_action_menu.popup_at(get_viewport().get_mouse_position())
 
 
 func _add_inventory_discard_actions(item_quantity: int) -> void:
 	# 丢弃菜单；单件显示“丢弃”，堆叠资源显示“全部丢弃”和“部分丢弃”。
 	if item_quantity > 1:
-		_inventory_item_action_menu.add_item("全部丢弃", INVENTORY_ITEM_ACTION_DISCARD_ALL)
-		_inventory_item_action_menu.add_item("部分丢弃", INVENTORY_ITEM_ACTION_DISCARD_PARTIAL)
+		_inventory_item_action_menu.add_action("全部丢弃", INVENTORY_ITEM_ACTION_DISCARD_ALL, false, true)
+		_inventory_item_action_menu.add_action("部分丢弃", INVENTORY_ITEM_ACTION_DISCARD_PARTIAL, false, true)
 	else:
-		_inventory_item_action_menu.add_item("丢弃", INVENTORY_ITEM_ACTION_DISCARD_ALL)
+		_inventory_item_action_menu.add_action("丢弃", INVENTORY_ITEM_ACTION_DISCARD_ALL, false, true)
 
 
 func _on_combat_quantity_confirmed(quantity: int) -> void:

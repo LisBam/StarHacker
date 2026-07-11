@@ -10,6 +10,8 @@ signal closed
 const FORGE_SLOT_CONTROL_SCRIPT: Script = preload("res://scripts/ui/forge_slot_control.gd")
 ## 仓库物品卡片脚本；下半区复用仓库同款摘要、拖拽数据和完整详情。
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
+## 装备槽物品卡片脚本；背包来源左侧装备栏必须使用真实装备槽交互协议，不能伪装成带列表下标的仓库卡片。
+const EQUIPMENT_STORAGE_SLOT_SCRIPT: Script = preload("res://scripts/ui/equipment_storage_slot_control.gd")
 ## 通用物品卡片视图；锻造槽位布局读取其固定尺寸，禁止再使用独立正方形槽位规格。
 const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
 ## 锻造结果弹窗脚本；展示强化前后属性、价格与额外耐久恢复。
@@ -90,8 +92,12 @@ var _subcategory_bar: HBoxContainer
 var _item_grid: HFlowContainer
 ## 背包装备栏标题；仅选择背包来源时显示，用于区分已装备物品与普通背包物品。
 var _equipment_title: Label
-## 背包装备栏物品网格；展示远程、近战与四部位装备，并允许直接作为主锻造物品或牺牲品。
+## 背包装备栏物品网格；固定显示在来源区左侧，展示远程、近战与四部位装备并支持真实装备槽拖拽。
 var _equipment_grid: HFlowContainer
+## 锻造来源左右分栏；背包来源时左侧显示装备栏、右侧显示背包物品，仓库来源时右侧独占全部宽度。
+var _inventory_split: HSplitContainer
+## 装备栏左侧面板；仓库来源时整体隐藏，避免装备物品与仓库候选混合。
+var _equipment_panel: PanelContainer
 ## 锻造结果弹窗；完成动画和实际结算后展示属性与耐久变化。
 var _result_dialog: AcceptDialog
 ## 当前是否正在播放锻造并执行结算；为 true 时阻止关闭、换槽和重复点击。
@@ -237,6 +243,8 @@ func _build_interface() -> void:
 	_sort_option.set_item_metadata(0, InventoryQuery.SORT_ACQUIRED_TIME)
 	_sort_option.add_item("物品价值")
 	_sort_option.set_item_metadata(1, InventoryQuery.SORT_ITEM_VALUE)
+	_sort_option.add_item("耐久")
+	_sort_option.set_item_metadata(2, InventoryQuery.SORT_DURABILITY)
 	_sort_option.item_selected.connect(_on_sort_selected)
 	query_bar.add_child(_sort_option)
 	_stone_attribute_option = OptionButton.new()
@@ -277,27 +285,47 @@ func _build_interface() -> void:
 	_subcategory_bar.add_theme_constant_override("separation", 6)
 	category_columns.add_child(_subcategory_bar)
 	_rebuild_subcategory_buttons()
+	# 来源左右分栏；装备栏和背包物品拥有独立区域与滚动，不再纵向顶置或混入同一物品流。
+	_inventory_split = HSplitContainer.new()
+	_inventory_split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_inventory_split.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_inventory_split.split_offset = 205
+	content.add_child(_inventory_split)
+	# 装备栏左侧面板；固定最小宽度容纳一张 160×72 标准卡片和滚动条。
+	_equipment_panel = PanelContainer.new()
+	_equipment_panel.custom_minimum_size = Vector2(196.0, 135.0)
+	_inventory_split.add_child(_equipment_panel)
+	# 装备栏内容；标题固定在顶部，装备卡片在独立滚动区内纵向排列。
+	var equipment_columns: VBoxContainer = VBoxContainer.new()
+	equipment_columns.add_theme_constant_override("separation", 6)
+	_equipment_panel.add_child(equipment_columns)
 	# 背包装备栏标题；选择背包来源时与装备卡片共同显示，仓库来源不展示角色当前装备。
 	_equipment_title = Label.new()
 	_equipment_title.text = "装备栏"
 	_equipment_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_equipment_title.add_theme_font_size_override("font_size", 16)
-	content.add_child(_equipment_title)
-	# 背包装备栏网格；复用标准物品卡片，保持锻造来源区域视觉和交互协议一致。
+	equipment_columns.add_child(_equipment_title)
+	# 装备栏滚动区；装备数量超过当前可见高度时仅滚动左栏，不影响右侧背包浏览位置。
+	var equipment_scroll: ScrollContainer = ScrollContainer.new()
+	equipment_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	equipment_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	equipment_columns.add_child(equipment_scroll)
+	# 背包装备栏网格；一列展示真实装备槽控件，保持装备来源和交互语义清晰。
 	_equipment_grid = HFlowContainer.new()
 	_equipment_grid.alignment = FlowContainer.ALIGNMENT_CENTER
 	_equipment_grid.last_wrap_alignment = FlowContainer.LAST_WRAP_ALIGNMENT_CENTER
 	_equipment_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_equipment_grid.add_theme_constant_override("h_separation", 8)
 	_equipment_grid.add_theme_constant_override("v_separation", 6)
-	content.add_child(_equipment_grid)
-	# 下半区物品滚动网格；双列卡片与仓库保持一致，已选武器隐藏，强化石按剩余可选数量显示。
+	equipment_scroll.add_child(_equipment_grid)
+	# 右侧物品滚动网格；背包或仓库候选始终在独立区域展示，已选武器隐藏，强化石按剩余数量显示。
 	# 流式布局补充：当前按可用宽度自动换行并逐行居中，不再限制双列。
 	var inventory_scroll: ScrollContainer = ScrollContainer.new()
 	inventory_scroll.custom_minimum_size = Vector2(0.0, 135.0)
+	inventory_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	inventory_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	inventory_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	content.add_child(inventory_scroll)
+	_inventory_split.add_child(inventory_scroll)
 	_item_grid = HFlowContainer.new()
 	_item_grid.alignment = FlowContainer.ALIGNMENT_CENTER
 	_item_grid.last_wrap_alignment = FlowContainer.LAST_WRAP_ALIGNMENT_CENTER
@@ -481,8 +509,7 @@ func _rebuild_inventory_items() -> void:
 func _rebuild_equipment_items() -> void:
 	# 装备栏可见性；角色装备属于随身配置，因此只在玩家选择背包来源时与背包物品共同展示。
 	var should_show_equipment: bool = _current_source == SOURCE_BACKPACK
-	_equipment_title.visible = should_show_equipment
-	_equipment_grid.visible = should_show_equipment
+	_equipment_panel.visible = should_show_equipment
 	_clear_container(_equipment_grid)
 	if not should_show_equipment or _global_inventory == null:
 		return
@@ -498,17 +525,37 @@ func _rebuild_equipment_items() -> void:
 		var item_resource: Resource = _global_inventory.call("get_equipment_location_resource", equipment_location) as Resource
 		if item_resource == null or _count_selected_resource(item_resource, equipment_location) > 0:
 			continue
-		# 装备物品卡片；来源位置使用稳定装备槽标识，锻造执行时可校验并在作为牺牲品时原位消费。
-		var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
-		item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		item_control.call("configure", item_resource, equipment_location, -1, false, "", 1)
-		item_control.call("set_weapon_slot_visual_style", true)
+		# 装备物品卡片；使用真实装备槽控件生成点击与拖拽协议，避免仓库卡片因列表下标为 -1 阻断交互。
+		var item_control: Button = EQUIPMENT_STORAGE_SLOT_SCRIPT.new() as Button
+		# 装备槽显示名称；与局外仓库装备栏一致，使玩家能够辨认每件物品的原始装备位置。
+		var slot_label: String = _get_equipment_location_label(equipment_location)
+		# 装备槽接收类型；只用于控件摘要和拖拽协议，锻造兼容性仍由 ForgeService 统一判断。
+		var accepted_type: String = _get_equipment_location_type(equipment_location)
+		item_control.call("configure", slot_label, equipment_location, accepted_type, item_resource)
 		# 装备可选状态；与背包、仓库候选共用同一主锻造物品和牺牲品兼容规则。
 		var main_resource: Resource = _main_entry.get("resource") as Resource
 		var item_selectable: bool = _forge_service.can_use_as_main(item_resource) if main_resource == null else _forge_service.can_use_as_sacrifice(main_resource, item_resource)
-		item_control.call("set_item_selection_state", true, item_selectable, false)
-		item_control.connect("item_action_requested", Callable(self, "_on_inventory_item_pressed").bind(equipment_location))
+		item_control.call("set_weapon_target_selection_state", true, item_selectable)
+		item_control.connect("item_selected", Callable(self, "_on_inventory_item_pressed").bind(equipment_location))
 		_equipment_grid.add_child(item_control)
+
+
+func _get_equipment_location_label(equipment_location: String) -> String:
+	# 装备槽中文名称；稳定位置标识与玩家可见文本分离，后续修改显示文字不会影响所有权逻辑。
+	if equipment_location == "melee":
+		return "近战"
+	if equipment_location.begins_with("ranged_"):
+		return "远程 %d" % (int(equipment_location.trim_prefix("ranged_")) + 1)
+	return {"armor_head": "头部", "armor_body": "躯干", "armor_legs": "腿部", "armor_feet": "脚部"}.get(equipment_location, "装备槽")
+
+
+func _get_equipment_location_type(equipment_location: String) -> String:
+	# 装备槽类型；武器返回 ranged 或 melee，防具位置移除 armor_ 前缀后返回固定部位标识。
+	if equipment_location == "melee":
+		return "melee"
+	if equipment_location.begins_with("ranged_"):
+		return "ranged"
+	return equipment_location.trim_prefix("armor_")
 
 
 func _build_available_entries(source_entries: Array) -> Array[Dictionary]:
@@ -804,7 +851,7 @@ func _on_search_changed(_new_text: String) -> void:
 func _on_sort_selected(item_index: int) -> void:
 	# 排序元数据；异常值回退获得时间，避免空元数据导致查询顺序不稳定。
 	var selected_sort_mode: String = str(_sort_option.get_item_metadata(item_index))
-	_sort_mode = selected_sort_mode if selected_sort_mode in [InventoryQuery.SORT_ACQUIRED_TIME, InventoryQuery.SORT_ITEM_VALUE] else InventoryQuery.SORT_ACQUIRED_TIME
+	_sort_mode = selected_sort_mode if selected_sort_mode in [InventoryQuery.SORT_ACQUIRED_TIME, InventoryQuery.SORT_ITEM_VALUE, InventoryQuery.SORT_DURABILITY] else InventoryQuery.SORT_ACQUIRED_TIME
 	_rebuild_inventory_items()
 
 

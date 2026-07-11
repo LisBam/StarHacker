@@ -24,6 +24,8 @@ var _stock_id: String = ""
 var _failure_group_id: String = ""
 ## 当前商品数量；武器固定为一，资源允许显示堆叠数量。
 var _quantity: int = 1
+## 当前商品购买价格；配置时从商店条目读取，用于卡片与悬停详情统一显示“价格”。
+var _purchase_price: int = 0
 ## 武器耐久条缓存；默认按需创建，资源商品保持隐藏，武器商品固定贴在卡片底部。
 ## 通用模板补充：该缓存仅保留旧接口兼容，当前商品耐久显示由 _item_card_view 统一承担。
 var _durability_bar: Control
@@ -38,6 +40,7 @@ func configure(entry: Dictionary, is_gray_market: bool) -> void:
 	_quantity = maxi(int(entry.get("quantity", 1)), 1)
 	# 商品价格；刷新时已经固定倍率，卡片只展示最终购买金币。
 	var purchase_price: int = maxi(int(entry.get("price", 0)), 0)
+	_purchase_price = purchase_price
 	# 价格倍率；保留两位小数用于说明普通商店 1.5 至 3 倍或灰市 4 至 8 倍来源。
 	var price_multiplier: float = float(entry.get("price_multiplier", 1.0))
 	# 商品名称；空资源回退通用文本并禁用交互。
@@ -52,13 +55,15 @@ func configure(entry: Dictionary, is_gray_market: bool) -> void:
 		item_name = "【二手】%s" % item_name
 	# 价格显示文本；默认仅显示最终金币，开发者开启调试信息后才公开原价倍率。
 	var price_text: String = _build_price_text(purchase_price, price_multiplier)
-	# 商品顶部摘要；强化石直接显示全部属性方向，其他商品继续显示标准物品类型。
-	var context_text: String = _build_stone_attribute_text() if _is_enhancement_stone() else item_type
+	# 商品顶部摘要；强化石与仓库卡片一致显示资源类型，属性方向和价格统一放在底部摘要。
+	var context_text: String = item_type
+	# 商品底部摘要；强化石复用仓库的彩色方向词条结构，仅把“售价”替换为“价格”和实际购买金币。
+	var detail_text: String = _build_stone_shop_detail_text(purchase_price) if _is_enhancement_stone() else price_text
 	text = ""
 	_ensure_item_card_view()
-	_item_card_view.call("configure", _item_resource, _quantity, context_text, price_text, "无效商品", item_name)
+	_item_card_view.call("configure", _item_resource, _quantity, context_text, detail_text, "无效商品", item_name)
 	_item_card_view.call("set_visual_state", false, false)
-	tooltip_text = ITEM_DETAIL_FORMATTER.call("build_plain_text", _item_resource, _quantity) if _item_resource != null else ""
+	tooltip_text = ITEM_DETAIL_FORMATTER.call("build_plain_text", _item_resource, _quantity, "价格", _purchase_price) if _item_resource != null else ""
 	disabled = _item_resource == null or _stock_id.is_empty()
 	_item_card_view.call("set_disabled_state", disabled)
 	custom_minimum_size = ITEM_CARD_VIEW_SCRIPT.get_standard_size()
@@ -91,7 +96,7 @@ func _on_mouse_exited() -> void:
 
 
 func _make_custom_tooltip(_for_text: String) -> Object:
-	return ITEM_DETAIL_FORMATTER.call("create_tooltip_control", _item_resource, _quantity)
+	return ITEM_DETAIL_FORMATTER.call("create_tooltip_control", _item_resource, _quantity, "价格", _purchase_price)
 
 
 func _build_price_text(purchase_price: int, price_multiplier: float) -> String:
@@ -118,6 +123,22 @@ func _build_stone_attribute_text() -> String:
 		if modifiers.has(stat_name):
 			attribute_tokens.append(EnhancementRules.build_modifier_token(stat_name, modifiers.get(stat_name), false))
 	return " ".join(attribute_tokens) if not attribute_tokens.is_empty() else "无属性"
+
+
+func _build_stone_shop_detail_text(purchase_price: int) -> String:
+	# 强化石词条；按仓库卡片相同顺序先显示增强、再显示削弱，并按玩法利弊分别着色。
+	var modifiers: Dictionary = EnhancementRules.normalize_modifiers(_item_resource.get("modifiers") as Dictionary)
+	# 彩色词条；每项包含独立 BBCode，通用物品卡片直接负责渲染。
+	var colored_tokens: PackedStringArray = PackedStringArray()
+	for beneficial in [true, false]:
+		for stat_name in EnhancementRules.STAT_KEYS:
+			if not modifiers.has(stat_name) or EnhancementRules.is_direction_beneficial(stat_name, modifiers.get(stat_name)) != beneficial:
+				continue
+			# 词条颜色；与仓库强化石卡片保持一致，增强为绿色、削弱为红色。
+			var color_code: String = "#70e889" if beneficial else "#ff7070"
+			colored_tokens.append("[color=%s]%s[/color]" % [color_code, EnhancementRules.build_modifier_token(stat_name, modifiers.get(stat_name), false)])
+	# 价格文本；区别于仓库“售价”，商店统一显示“价格 xxx金币”。
+	return "%s · [color=%s]价格 %d金币[/color]" % [" ".join(colored_tokens) if not colored_tokens.is_empty() else "无词条", COIN_TEXT_COLOR, purchase_price]
 
 
 func _ensure_durability_bar() -> void:

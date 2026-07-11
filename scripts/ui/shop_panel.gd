@@ -59,7 +59,7 @@ var _item_grid: HFlowContainer
 ## 商品滚动区；商品数量超过当前高度时允许垂直滚动。
 var _item_scroll: ScrollContainer
 ## 购买确认弹窗；确认前显示物品名称和金币价格，避免误购。
-var _purchase_dialog: ConfirmationDialog
+var _purchase_dialog: CommonConfirmationDialog
 ## 待购买商品编号；弹窗确认时交给 ShopService，默认空字符串表示无待处理商品。
 var _pending_stock_id: String = ""
 ## 待购买灰市批次编号；普通商店为空，灰市用于精确定位失败批次。
@@ -210,10 +210,7 @@ func _build_interface() -> void:
 	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(_status_label)
-	_purchase_dialog = ConfirmationDialog.new()
-	_purchase_dialog.title = "确认购买"
-	_purchase_dialog.get_ok_button().text = "购买"
-	_purchase_dialog.get_cancel_button().text = "取消"
+	_purchase_dialog = COMMON_CONFIRMATION_DIALOG_SCRIPT.new() as CommonConfirmationDialog
 	_purchase_dialog.confirmed.connect(_on_purchase_confirmed)
 	add_child(_purchase_dialog)
 
@@ -377,8 +374,7 @@ func _on_purchase_requested(stock_id: String, failure_group_id: String) -> void:
 		var item_resource: Resource = (raw_entry as Dictionary).get("resource") as Resource
 		_pending_stock_id = stock_id
 		_pending_failure_group_id = failure_group_id
-		_purchase_dialog.dialog_text = "确认花费 %d 金币购买“%s”吗？\n购买后物品将直接存入永久仓库。" % [int((raw_entry as Dictionary).get("price", 0)), str(item_resource.get("display_name")) if item_resource != null else "未知物品"]
-		_purchase_dialog.popup_centered(Vector2i(500, 0))
+		_purchase_dialog.present("确认购买", "确认花费 %d 金币购买“%s”吗？\n购买后物品将直接存入永久仓库。" % [int((raw_entry as Dictionary).get("price", 0)), str(item_resource.get("display_name")) if item_resource != null else "未知物品"], "购买", "取消", 500)
 		return
 	_show_status("该商品已售出或已经刷新")
 
@@ -444,3 +440,5 @@ func _clear_container(container: Node) -> void:
 		return
 	for child in container.get_children():
 		child.queue_free()
+## 通用信息确认弹窗脚本；购买确认与其他纯信息确认统一使用物品悬浮窗风格和白色边框。
+const COMMON_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/common_confirmation_dialog.gd")

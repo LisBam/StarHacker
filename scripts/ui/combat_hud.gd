@@ -23,6 +23,8 @@ const ENHANCEMENT_RESULT_DIALOG_SCRIPT: Script = preload("res://scripts/ui/enhan
 const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
 ## 标准物品操作弹窗脚本；战斗背包的装备、使用与丢弃按钮复用局外物品操作视觉资源。
 const ITEM_ACTION_POPUP_SCRIPT: Script = preload("res://scripts/ui/item_action_popup.gd")
+## 通用信息确认弹窗脚本；正式战斗逃跑确认复用全项目白边信息确认样式。
+const COMMON_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/common_confirmation_dialog.gd")
 ## 物资撤离面板脚本；玩家在物资撤离点驻留 3 秒后按闪避打开，面板期间暂停游戏。
 const SUPPLY_EXTRACTION_PANEL_SCRIPT: Script = preload("res://scripts/ui/supply_extraction_panel.gd")
 ## 战斗开发者模式解锁序列；默认六个英文字母，输入错误时按首字母重新开始匹配。
@@ -269,7 +271,7 @@ var _developer_sequence_index: int = 0
 ## 是否已解锁正式模式训练工具；默认 false，完成 LISBAM 后允许打开训练场设置和切换角色。
 var _developer_training_access_unlocked: bool = false
 ## 逃跑二次确认弹窗；默认运行时创建并在暂停状态处理输入，确认后才执行正式战斗损失结算。
-var _escape_confirmation_dialog: ConfirmationDialog
+var _escape_confirmation_dialog: CommonConfirmationDialog
 ## 当前结算结构化结果；默认空字典，结算弹窗打开后缓存获得与丢失条目供分类按钮重复重建。
 var _settlement_outcome: Dictionary = {}
 ## 结算获得物品主分类；取值为 all、weapons 或 resources，默认全部与战斗背包分类入口一致。
@@ -1621,10 +1623,7 @@ func _bind_pause_menu() -> void:
 func _build_escape_confirmation_dialog() -> void:
 	if _escape_confirmation_dialog != null:
 		return
-	_escape_confirmation_dialog = ConfirmationDialog.new()
-	_escape_confirmation_dialog.title = "确认逃跑"
-	_escape_confirmation_dialog.ok_button_text = "确认逃跑"
-	_escape_confirmation_dialog.cancel_button_text = "取消"
+	_escape_confirmation_dialog = COMMON_CONFIRMATION_DIALOG_SCRIPT.new() as CommonConfirmationDialog
 	_escape_confirmation_dialog.process_mode = Node.PROCESS_MODE_ALWAYS
 	_escape_confirmation_dialog.confirmed.connect(_on_escape_confirmed)
 	_root_control.add_child(_escape_confirmation_dialog)
@@ -3084,8 +3083,7 @@ func _on_return_main_menu_button_pressed() -> void:
 	if _escape_confirmation_dialog == null:
 		return
 	# 逃跑警告；正式模式明确说明背包损失规则，训练场已在入口处直接离开而不会打开二次确认。
-	_escape_confirmation_dialog.dialog_text = "确认逃跑并返回主菜单吗？\n正式战斗中，背包物品约 50% 会被保留、约 50% 会丢失；已装备物品不参与损失。"
-	_escape_confirmation_dialog.popup_centered(Vector2i(520, 0))
+	_escape_confirmation_dialog.present("确认逃跑", "确认逃跑并返回主菜单吗？\n正式战斗中，背包物品约 50% 会被保留、约 50% 会丢失；已装备物品不参与损失。", "确认逃跑", "取消", 520)
 
 
 func _on_escape_confirmed() -> void:

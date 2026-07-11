@@ -12,6 +12,8 @@ const GAME_MODE_TRAINING: String = "training"
 const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_panel.gd")
 ## 局外仓库面板脚本；默认在主菜单点击仓库按钮后动态创建并读取全局背包服务。
 const WAREHOUSE_PANEL_SCRIPT: Script = preload("res://scripts/ui/warehouse_panel.gd")
+## 主菜单背包面板脚本；复用游戏内背包装备结构，局外丢弃会直接永久移除物品。
+const MAIN_MENU_BACKPACK_PANEL_SCRIPT: Script = preload("res://scripts/ui/main_menu_backpack_panel.gd")
 ## 局外商店面板脚本；默认在主菜单点击商店按钮后动态创建并读取全局商店服务。
 const SHOP_PANEL_SCRIPT: Script = preload("res://scripts/ui/shop_panel.gd")
 ## 局外锻造面板脚本；默认在主菜单点击锻造按钮后动态创建并组合库存与锻造服务。
@@ -33,6 +35,8 @@ const DEVELOPER_UNLOCK_SEQUENCE: String = "LISBAM"
 @onready var _quit_button: Button = %QuitButton
 ## 仓库按钮缓存；默认固定在主菜单左下角，点击后打开全局背包与装备调整界面。
 @onready var _warehouse_button: Button = %WarehouseButton
+## 背包按钮缓存；默认位于主菜单左下角首位，点击后打开游戏内同款装备栏与随身物品界面。
+@onready var _backpack_button: Button = %BackpackButton
 ## 商店按钮缓存；默认位于仓库按钮右侧，点击后打开普通商店与灰市界面。
 @onready var _shop_button: Button = %ShopButton
 ## 锻造按钮缓存；默认位于商店按钮右侧，点击后打开主武器修复与强化界面。
@@ -70,6 +74,10 @@ var _settings_home_controls: Array[Control] = []
 var _warehouse_overlay: Control
 ## 仓库面板实例；默认由 WarehousePanel 脚本创建，关闭后复用而不重复构建服务数据。
 var _warehouse_panel: Control
+## 背包全屏遮罩；默认运行时创建并隐藏，打开时阻止主菜单其他按钮接收输入。
+var _backpack_overlay: Control
+## 主菜单背包面板实例；关闭后复用并通过全局库存信号实时刷新。
+var _backpack_panel: Control
 ## 商店全屏遮罩；默认运行时创建并隐藏，打开时阻止主菜单其他按钮接收鼠标输入。
 var _shop_overlay: Control
 ## 商店面板实例；默认由 ShopPanel 脚本创建，关闭后复用并保留当前查询条件。
@@ -93,12 +101,14 @@ func _ready() -> void:
 	_settings_button.pressed.connect(_on_settings_button_pressed)
 	_quit_button.pressed.connect(_on_quit_button_pressed)
 	_warehouse_button.pressed.connect(_on_warehouse_button_pressed)
+	_backpack_button.pressed.connect(_on_backpack_button_pressed)
 	_shop_button.pressed.connect(_on_shop_button_pressed)
 	_forge_button.pressed.connect(_on_forge_button_pressed)
 	_master_volume_slider.value_changed.connect(_on_master_volume_slider_value_changed)
 	_settings_back_button.pressed.connect(_on_settings_back_button_pressed)
 	_build_key_binding_navigation()
 	_build_warehouse_overlay()
+	_build_backpack_overlay()
 	_build_shop_overlay()
 	_build_forge_overlay()
 	_build_developer_overlay()
@@ -155,6 +165,13 @@ func _on_warehouse_button_pressed() -> void:
 	_warehouse_overlay.visible = true
 
 
+func _on_backpack_button_pressed() -> void:
+	if _backpack_overlay == null:
+		return
+	_settings_panel.visible = false
+	_backpack_overlay.visible = true
+
+
 func _on_shop_button_pressed() -> void:
 	if _shop_overlay == null:
 		return
@@ -205,6 +222,40 @@ func _build_warehouse_overlay() -> void:
 	warehouse_overlay.add_child(warehouse_panel)
 	_warehouse_panel = warehouse_panel
 	warehouse_overlay.visible = false
+
+
+func _build_backpack_overlay() -> void:
+	if _backpack_overlay != null:
+		return
+	# 背包遮罩；覆盖完整主菜单并拦截输入，视觉透明度与仓库遮罩一致。
+	var backpack_overlay: Control = Control.new()
+	backpack_overlay.name = "BackpackOverlay"
+	backpack_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backpack_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(backpack_overlay)
+	_backpack_overlay = backpack_overlay
+	var backpack_dim: ColorRect = ColorRect.new()
+	backpack_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backpack_dim.color = Color(0.0, 0.0, 0.0, 0.62)
+	backpack_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	backpack_overlay.add_child(backpack_dim)
+	# 背包面板；居中显示并保持与游戏内背包接近的 960×620 尺寸。
+	var backpack_panel: Control = MAIN_MENU_BACKPACK_PANEL_SCRIPT.new() as Control
+	if backpack_panel == null:
+		backpack_overlay.visible = false
+		return
+	backpack_panel.anchor_left = 0.5
+	backpack_panel.anchor_top = 0.5
+	backpack_panel.anchor_right = 0.5
+	backpack_panel.anchor_bottom = 0.5
+	backpack_panel.offset_left = -480.0
+	backpack_panel.offset_top = -310.0
+	backpack_panel.offset_right = 480.0
+	backpack_panel.offset_bottom = 310.0
+	backpack_panel.connect("closed", Callable(self, "_on_backpack_closed"))
+	backpack_overlay.add_child(backpack_panel)
+	_backpack_panel = backpack_panel
+	backpack_overlay.visible = false
 
 
 func _build_shop_overlay() -> void:
@@ -338,6 +389,12 @@ func _on_warehouse_closed() -> void:
 	if _warehouse_overlay != null:
 		_warehouse_overlay.visible = false
 	_warehouse_button.grab_focus()
+
+
+func _on_backpack_closed() -> void:
+	if _backpack_overlay != null:
+		_backpack_overlay.visible = false
+	_backpack_button.grab_focus()
 
 
 func _on_shop_closed() -> void:

@@ -67,7 +67,7 @@ var _configured_infinite_energy: bool = false
 ## 待同步不消耗武器耐久状态；默认 false，允许在控件 ready 前先配置战斗调试状态。
 var _configured_weapon_durability_disabled: bool = false
 ## 清空仓库确认框；默认运行时创建，防止开发者调试时误触不可逆的永久仓库清理。
-var _clear_warehouse_confirmation: ConfirmationDialog
+var _clear_warehouse_confirmation: CommonConfirmationDialog
 
 
 func _ready() -> void:
@@ -182,11 +182,7 @@ func _build_interface() -> void:
 	_clear_warehouse_button.pressed.connect(_on_clear_warehouse_pressed)
 	content.add_child(_clear_warehouse_button)
 	_economy_controls.append(_clear_warehouse_button)
-	_clear_warehouse_confirmation = ConfirmationDialog.new()
-	_clear_warehouse_confirmation.title = "确认清空仓库"
-	_clear_warehouse_confirmation.dialog_text = "将永久删除仓库中的全部物品，随身背包和装备不会受影响。"
-	_clear_warehouse_confirmation.get_ok_button().text = "确认清空"
-	_clear_warehouse_confirmation.get_cancel_button().text = "取消"
+	_clear_warehouse_confirmation = COMMON_CONFIRMATION_DIALOG_SCRIPT.new() as CommonConfirmationDialog
 	_clear_warehouse_confirmation.confirmed.connect(_on_clear_warehouse_confirmed)
 	add_child(_clear_warehouse_confirmation)
 
@@ -341,7 +337,7 @@ func _on_remove_coins_pressed() -> void:
 func _on_clear_warehouse_pressed() -> void:
 	if _clear_warehouse_confirmation == null:
 		return
-	_clear_warehouse_confirmation.popup_centered(Vector2i(520, 0))
+	_clear_warehouse_confirmation.present("确认清空仓库", "将永久删除仓库中的全部物品，随身背包和装备不会受影响。", "确认清空", "取消", 520)
 
 
 func _on_clear_warehouse_confirmed() -> void:
@@ -402,3 +398,5 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		if key_event.pressed and not key_event.echo and (key_event.keycode == KEY_ESCAPE or key_event.physical_keycode == KEY_ESCAPE):
 			closed.emit()
 			get_viewport().set_input_as_handled()
+## 通用信息确认弹窗脚本；清空仓库等不可逆调试操作统一使用白边信息确认样式。
+const COMMON_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/common_confirmation_dialog.gd")

@@ -25,6 +25,8 @@ var _age: float = 0.0
 var _start_position: Vector2
 ## 是否已经完成命中或销毁流程；默认 false，命中后置为 true，避免扫线检测和 body_entered 在同一帧重复结算伤害与击退。
 var _has_hit: bool = false
+## 弹体携带的敌方攻击力；默认 100，命中玩家时参与统一攻防公式。
+var _attack_power: float = 100.0
 
 
 func _ready() -> void:
@@ -62,6 +64,22 @@ func configure_projectile(new_damage: float, new_impact_force: float, new_max_di
 	damage = maxf(new_damage, 0.0)
 	impact_force = maxf(new_impact_force, 0.0)
 	max_distance = maxf(new_max_distance, 1.0)
+
+
+func set_attack_power(value: float) -> void:
+	_attack_power = maxf(value, 0.0)
+
+
+func get_attack_power() -> float:
+	return _attack_power
+
+
+func get_critical_chance() -> float:
+	return 0.0
+
+
+func get_critical_damage_multiplier() -> float:
+	return 1.5
 
 
 func destroy_by_melee(_source: Node) -> void:

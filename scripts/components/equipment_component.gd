@@ -8,6 +8,7 @@ class_name EquipmentComponent
 signal equipment_changed
 signal ranged_weapon_changed(slot_index: int, weapon_data: Resource)
 signal melee_weapon_changed(weapon_data: Resource)
+signal armor_equipment_changed(armor_slot: String, equipment_data: Resource)
 
 ## 背包组件路径；默认指向同级 InventoryComponent，可为空，修改会影响装备物品是否自动登记到背包。
 @export var inventory_component_path: NodePath = ^"../InventoryComponent"
@@ -17,6 +18,8 @@ signal melee_weapon_changed(weapon_data: Resource)
 @export var starting_ranged_weapons: Array[Resource] = []
 ## 开局近战武器；默认空表示未装备，修改会影响玩家初始右键近战武器。
 @export var starting_melee_weapon: Resource
+## 每次玩家实际受到伤害时所有已装备防具消耗的耐久；默认 1，运行时通常不动态修改。
+@export_range(0.0, 9999.0, 0.1, "or_greater") var armor_durability_cost_per_hit: float = 1.0
 
 ## 远程武器槽运行时数组；元素为 Resource 或 null，默认按 ranged_slot_count 创建，使用普通 Array 以稳定支持空槽，修改会影响可切换远程武器。
 var _ranged_weapons: Array = []
@@ -24,6 +27,14 @@ var _ranged_weapons: Array = []
 var _current_ranged_slot: int = 0
 ## 当前近战武器资源；取值为 Resource 或 null，默认来自 starting_melee_weapon，修改会影响右键近战参数。
 var _melee_weapon: Resource
+## 四部位防具缓存；键为 head、body、legs、feet，值为 Resource 或 null。
+var _armor_equipment: Dictionary = {}
+## 玩家属性组件缓存；装备变化时写入聚合后的战斗属性。
+var _stats_component: Node
+## 玩家移动组件缓存；脚部装备变化时更新最大移速。
+var _movement_component: Node
+## 不含装备的基础移速；默认 320，首次同步时从移动组件读取。
+var _base_move_speed: float = 320.0
 
 ## 背包组件缓存；默认按 inventory_component_path 获取，允许为空，修改会影响装备初始化时的背包登记。
 @onready var _inventory_component = get_node_or_null(inventory_component_path)
@@ -32,11 +43,16 @@ var _global_inventory: Node
 
 
 func _ready() -> void:
+	_stats_component = owner.get_node_or_null("StatsComponent") if owner != null else get_node_or_null("../StatsComponent")
+	_movement_component = owner.get_node_or_null("MovementComponent") if owner != null else get_node_or_null("../MovementComponent")
+	if _movement_component != null and _movement_component.has_method("get_max_speed"):
+		_base_move_speed = float(_movement_component.call("get_max_speed"))
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
 	if _global_inventory != null and _global_inventory.has_method("get_ranged_equipment_resources"):
 		if _global_inventory.has_signal("equipment_changed"):
 			_global_inventory.connect("equipment_changed", Callable(self, "_on_global_equipment_changed"))
 		_sync_from_global_inventory()
+		_apply_armor_attributes()
 		call_deferred("_emit_full_equipment_changed")
 		return
 
@@ -176,10 +192,39 @@ func get_melee_weapon() -> Resource:
 	return _melee_weapon
 
 
+func get_armor_equipment(armor_slot: String) -> Resource:
+	if _global_inventory != null and _global_inventory.has_method("get_armor_equipment_resource"):
+		return _global_inventory.call("get_armor_equipment_resource", armor_slot) as Resource
+	return _armor_equipment.get(armor_slot) as Resource
+
+
+func get_armor_equipment_resources() -> Dictionary:
+	if _global_inventory != null and _global_inventory.has_method("get_armor_equipment_resources"):
+		return _global_inventory.call("get_armor_equipment_resources") as Dictionary
+	return _armor_equipment.duplicate()
+
+
 func notify_weapon_runtime_state_changed(weapon_data: Resource) -> void:
 	if weapon_data == null or _global_inventory == null or not _global_inventory.has_method("notify_weapon_runtime_state_changed"):
 		return
 	_global_inventory.call("notify_weapon_runtime_state_changed", weapon_data)
+
+
+func consume_armor_durability_on_hit() -> void:
+	# 是否有耐久变化；只在实际变化后刷新属性和排队存档。
+	var changed: bool = false
+	for armor_slot in ["head", "body", "legs", "feet"]:
+		var equipment_data: Resource = get_armor_equipment(armor_slot)
+		if equipment_data == null or armor_durability_cost_per_hit <= 0.0:
+			continue
+		var durability_before: float = maxf(float(equipment_data.get("current_durability")), 0.0)
+		equipment_data.call("set_current_durability", durability_before - armor_durability_cost_per_hit)
+		changed = changed or not is_equal_approx(durability_before, float(equipment_data.get("current_durability")))
+		if _global_inventory != null and _global_inventory.has_method("notify_weapon_runtime_state_changed"):
+			_global_inventory.call("notify_weapon_runtime_state_changed", equipment_data)
+	if changed:
+		_apply_armor_attributes()
+		equipment_changed.emit()
 
 
 func _initialize_equipment_slots() -> void:
@@ -247,6 +292,9 @@ func _is_melee_weapon(weapon_data: Resource) -> bool:
 func _emit_full_equipment_changed() -> void:
 	ranged_weapon_changed.emit(_current_ranged_slot, get_current_ranged_weapon())
 	melee_weapon_changed.emit(_melee_weapon)
+	for armor_slot in ["head", "body", "legs", "feet"]:
+		armor_equipment_changed.emit(armor_slot, get_armor_equipment(armor_slot))
+	_apply_armor_attributes()
 	equipment_changed.emit()
 
 
@@ -259,6 +307,23 @@ func _sync_from_global_inventory() -> void:
 	_ranged_weapons = raw_ranged_weapons.duplicate()
 	_current_ranged_slot = int(_global_inventory.call("get_current_ranged_slot"))
 	_melee_weapon = _global_inventory.call("get_melee_equipment_resource") as Resource
+	_armor_equipment = _global_inventory.call("get_armor_equipment_resources") as Dictionary if _global_inventory.has_method("get_armor_equipment_resources") else {}
+
+
+func _apply_armor_attributes() -> void:
+	# 聚合属性；损坏装备不提供任何加成，避免零耐久仍持续生效。
+	var attributes: Dictionary = {"attack_power": 0.0, "defense_power": 0.0, "max_health": 0.0, "health_regeneration_per_five_seconds": 0.0, "dodge_chance": 0.0, "move_speed": 0.0, "critical_chance": 0.0, "critical_damage": 0.0}
+	for armor_slot in ["head", "body", "legs", "feet"]:
+		var equipment_data: Resource = get_armor_equipment(armor_slot)
+		if equipment_data == null or (equipment_data.has_method("is_broken") and bool(equipment_data.call("is_broken"))):
+			continue
+		for stat_name in attributes.keys():
+			var stat_value: float = float(equipment_data.call("get_effective_stat", stat_name)) if equipment_data.has_method("get_effective_stat") else float(equipment_data.get(stat_name))
+			attributes[stat_name] = float(attributes[stat_name]) + stat_value
+	if _stats_component != null and _stats_component.has_method("apply_equipment_attributes"):
+		_stats_component.call("apply_equipment_attributes", attributes)
+	if _movement_component != null and _movement_component.has_method("configure_max_speed"):
+		_movement_component.call("configure_max_speed", _base_move_speed + float(attributes.get("move_speed", 0.0)))
 
 
 func _on_global_equipment_changed() -> void:

@@ -118,12 +118,28 @@ func _physics_process(delta: float) -> void:
 func apply_damage(damage: float, source: Node) -> void:
 	if not _can_receive_damage(damage):
 		return
+	# 装备闪避；每次有效受击请求独立判定，成功时不扣血、不触发受击间隔和击退。
+	var dodge_chance: float = float(_stats_component.call("get_dodge_chance")) if _stats_component != null and _stats_component.has_method("get_dodge_chance") else 0.0
+	if dodge_chance > 0.0 and randf() < clampf(dodge_chance, 0.0, 1.0):
+		return
 
+	# 统一伤害计算器；敌方攻击力与玩家防御力在此完成结算。
+	var calculator_script: Script = preload("res://scripts/components/combat_damage_calculator.gd")
+	# 来源攻击力；旧来源缺少接口时按 100 处理，使既有伤害保持不变。
+	var source_attack_power: float = float(source.call("get_attack_power")) if source != null and source.has_method("get_attack_power") else 100.0
+	# 玩家防御力；属性组件缺失接口时按 0 处理。
+	var player_defense_power: float = float(_stats_component.call("get_defense_power")) if _stats_component != null and _stats_component.has_method("get_defense_power") else 0.0
+	# 最终伤害结果；敌方默认不暴击，接口为特殊敌人保留扩展能力。
+	var damage_result: Dictionary = calculator_script.calculate_damage(damage, source_attack_power, player_defense_power, float(source.call("get_critical_chance")) if source != null and source.has_method("get_critical_chance") else 0.0, float(source.call("get_critical_damage_multiplier")) if source != null and source.has_method("get_critical_damage_multiplier") else 1.5)
+	# 最终伤害；生命扣除、镜头震动和受击反馈使用同一整数结果。
+	var final_damage: float = float(damage_result.get("damage", 0))
 	_damage_interval_remaining = maxf(damage_interval, 0.0)
 	# 受伤前死亡状态；取值来自属性组件，默认用于避免死亡特效重复生成。
 	var was_dead: bool = _is_stats_dead()
 	if _stats_component.has_method("take_damage"):
-		_stats_component.call("take_damage", damage)
+		_stats_component.call("take_damage", final_damage)
+	if _equipment_component != null and _equipment_component.has_method("consume_armor_durability_on_hit"):
+		_equipment_component.call("consume_armor_durability_on_hit")
 
 	# 受伤后死亡状态；取值来自属性组件，默认用于决定播放受击或死亡特效。
 	var is_dead_after_damage: bool = _is_stats_dead()
@@ -132,7 +148,7 @@ func apply_damage(damage: float, source: Node) -> void:
 	else:
 		_spawn_player_hit_effect()
 
-	_shake_screen_for_damage(damage)
+	_shake_screen_for_damage(final_damage)
 	_apply_knockback_from_source(source)
 
 

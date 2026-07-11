@@ -137,6 +137,8 @@ func _try_fire_projectile(direction: Vector2) -> void:
 
 	if projectile.has_method("configure_projectile"):
 		projectile.call("configure_projectile", ranged_projectile_damage, ranged_projectile_impact_force, ranged_projectile_range)
+	if projectile.has_method("set_attack_power"):
+		projectile.call("set_attack_power", attack_power)
 	if projectile.has_method("launch"):
 		projectile.call("launch", resolved_direction, ranged_projectile_speed)
 

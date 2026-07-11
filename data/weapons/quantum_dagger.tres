@@ -15,5 +15,6 @@ energy_cost = 7.0
 front_recoil_force = 140.0
 impact_force = 160.0
 melee_damage = 18.0
+critical_chance = 0.2
 melee_cooldown = 0.22
 melee_active_duration = 0.08

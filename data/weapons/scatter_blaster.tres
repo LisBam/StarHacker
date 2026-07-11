@@ -20,3 +20,4 @@ ranged_cooldown = 0.38
 spread_degrees = 9.0
 recoil_force = 140.0
 impact_force = 320.0
+critical_chance = 0.06

@@ -16,6 +16,10 @@ const ENEMY_PERCEPTION_COMPONENT_SCRIPT: Script = preload("res://scripts/compone
 const ENEMY_MOVEMENT_COMPONENT_SCRIPT: Script = preload("res://scripts/components/enemy_movement_component.gd")
 ## 敌人战术组件脚本；默认用于兼容旧场景缺少组件节点时动态补齐，只处理本怪物独立搜查与伏击点。
 const ENEMY_TACTICAL_COMPONENT_SCRIPT: Script = preload("res://scripts/components/enemy_tactical_component.gd")
+## 统一伤害计算器脚本；集中执行攻防和暴击公式。
+const COMBAT_DAMAGE_CALCULATOR_SCRIPT: Script = preload("res://scripts/components/combat_damage_calculator.gd")
+## 伤害飘字脚本；怪物受伤时在世界坐标生成上浮文本。
+const DAMAGE_NUMBER_POPUP_SCRIPT: Script = preload("res://scripts/effects/damage_number_popup.gd")
 ## AI 空闲状态；默认表示怪物没有玩家记忆，会回到出生点附近巡逻或待机警戒。
 const TARGET_AI_STATE_IDLE: int = 0
 ## AI 可见追击状态；默认表示怪物拥有无遮挡视线，会直接锁定玩家并寻路追击。
@@ -36,6 +40,10 @@ const PLAYER_PHYSICS_LAYER_MASK: int = 1
 @export_range(0.0, 1.0, 0.001) var weapon_drop_chance: float = 0.20
 ## 攻击力；取值建议大于等于 0，默认 12 表示每次近身攻击造成的伤害，运行时修改会影响玩家受击压力。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var attack_damage: float = 12.0
+## 敌人攻击力；默认 100，与玩家防御 0 组合时保持既有伤害不变，生成属性倍率会同步影响。
+@export_range(0.0, 99999.0, 1.0, "or_greater") var attack_power: float = 100.0
+## 敌人防御力；默认 0，玩家攻击通过统一公式读取，生成属性倍率会同步影响。
+@export_range(0.0, 99999.0, 1.0, "or_greater") var defense_power: float = 0.0
 ## 韧性；取值为百分比，默认 0 表示不减免控制，1 表示减少 1% 击退效果，100 表示完全免疫击退。
 @export_range(0.0, 100.0, 1.0) var toughness: float = 0.0
 ## 攻击冲击力；取值建议大于等于 0，默认 180 会在命中玩家时造成短距离击退。
@@ -252,6 +260,8 @@ func apply_spawn_variation(size_multiplier: float, attribute_multiplier: float) 
 	max_health *= _spawn_attribute_multiplier
 	current_health = max_health
 	attack_damage *= _spawn_attribute_multiplier
+	attack_power *= _spawn_attribute_multiplier
+	defense_power *= _spawn_attribute_multiplier
 	attack_impact_force *= _spawn_attribute_multiplier
 	move_speed *= _spawn_attribute_multiplier
 	vision_range *= _spawn_attribute_multiplier
@@ -539,8 +549,13 @@ func apply_damage(damage: float, source: Node) -> void:
 	if damage <= 0.0 or current_health <= 0.0:
 		return
 
-	current_health = clampf(current_health - damage, 0.0, max_health)
+	# 伤害结算结果；旧来源缺少接口时使用 100 攻击、0% 暴击和 150% 暴伤。
+	var damage_result: Dictionary = COMBAT_DAMAGE_CALCULATOR_SCRIPT.calculate_damage(damage, _get_source_combat_value(source, "get_attack_power", 100.0), defense_power, _get_source_combat_value(source, "get_critical_chance", 0.0), _get_source_combat_value(source, "get_critical_damage_multiplier", 1.5))
+	# 最终伤害；生命与飘字统一使用同一个整数结果。
+	var final_damage: float = float(damage_result.get("damage", 0))
+	current_health = clampf(current_health - final_damage, 0.0, max_health)
 	health_changed.emit(current_health, max_health)
+	DAMAGE_NUMBER_POPUP_SCRIPT.spawn_damage_number(get_tree().current_scene, global_position, final_damage, bool(damage_result.get("is_critical", false)))
 	_apply_knockback_from_source(source)
 	if current_health <= 0.0:
 		_spawn_death_effect()
@@ -548,6 +563,22 @@ func apply_damage(damage: float, source: Node) -> void:
 		queue_free()
 	else:
 		_spawn_hit_effect()
+
+
+func get_attack_power() -> float:
+	return maxf(attack_power, 0.0)
+
+
+func get_critical_chance() -> float:
+	return 0.0
+
+
+func get_critical_damage_multiplier() -> float:
+	return 1.5
+
+
+func _get_source_combat_value(source: Node, method_name: String, fallback_value: float) -> float:
+	return float(source.call(method_name)) if source != null and source.has_method(method_name) else fallback_value
 
 
 func _try_attack_target() -> void:

@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="EquipmentData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/equipment_data.gd" id="1_equipment"]
+
+[resource]
+script = ExtResource("1_equipment")
+equipment_id = "basic_boots"
+display_name = "量子机动战靴"
+equipment_slot = "feet"
+description = "提供移速、闪避与少量攻击力的脚部装备。"
+sell_price = 70
+attack_power = 4.0
+dodge_chance = 0.04
+move_speed = 18.0

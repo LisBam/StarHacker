@@ -113,6 +113,8 @@ var _inventory_slot_controls: Array = []
 var _inventory_equipment_ranged_controls: Array = []
 ## 背包左侧近战装备槽控件缓存；取值为 WeaponSlotControl 或 null，默认动态创建，修改会影响背包内近战显示。
 var _inventory_equipment_melee_control: Control
+## 背包左侧四部位装备槽按钮；键为 head、body、legs、feet，值为动态 Button。
+var _inventory_armor_slot_buttons: Dictionary = {}
 ## 最近触发冷却的远程槽索引；取值为 -1 或有效远程槽，默认 -1 表示无远程冷却显示目标，修改会影响远程 CD 遮罩位置。
 var _last_cooling_ranged_slot: int = -1
 ## 背包当前二级筛选页；取值为 all、ranged、melee 或 enhancement_stones，默认 all。
@@ -646,7 +648,24 @@ func _rebuild_inventory_equipment_slots() -> void:
 	var melee_slot_control: Control = _create_weapon_slot_control(inventory_slot_minimum_size)
 	_inventory_equipment_melee_host.add_child(melee_slot_control)
 	_inventory_equipment_melee_control = melee_slot_control
+	_build_inventory_armor_slots()
 	_refresh_inventory_equipment_slots()
+
+
+func _build_inventory_armor_slots() -> void:
+	# 防具槽宿主；复用近战槽所在左栏，在其下方追加与武器栏同宽的四个部位槽。
+	_inventory_armor_slot_buttons.clear()
+	var armor_title: Label = Label.new()
+	armor_title.text = "装备"
+	armor_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_inventory_equipment_melee_host.add_child(armor_title)
+	for armor_slot in ["head", "body", "legs", "feet"]:
+		# 防具槽按钮；点击已装备物品时卸回战斗背包，空槽不响应。
+		var armor_button: Button = Button.new()
+		armor_button.custom_minimum_size = inventory_slot_minimum_size
+		armor_button.pressed.connect(Callable(self, "_on_inventory_armor_slot_pressed").bind(armor_slot))
+		_inventory_equipment_melee_host.add_child(armor_button)
+		_inventory_armor_slot_buttons[armor_slot] = armor_button
 
 
 func _refresh_inventory_equipment_slots() -> void:
@@ -669,6 +688,38 @@ func _refresh_inventory_equipment_slots() -> void:
 		_inventory_equipment_melee_control.call("set_slot_data", "equipment", "melee", -1, melee_weapon, true)
 		_inventory_equipment_melee_control.call("set_empty_text", "空近战")
 		_inventory_equipment_melee_control.call("set_weapon_target_selection_state", _pending_combat_stone_resource != null, _can_pending_combat_repair_target(melee_weapon))
+	_refresh_inventory_armor_slots()
+
+
+func _refresh_inventory_armor_slots() -> void:
+	# 部位中文名；固定用于槽位空状态和装备名称前缀。
+	var slot_labels: Dictionary = {"head": "头部", "body": "躯干", "legs": "腿部", "feet": "脚部"}
+	for armor_slot in _inventory_armor_slot_buttons.keys():
+		var armor_button: Button = _inventory_armor_slot_buttons[armor_slot] as Button
+		var equipment_resource: Resource = _equipment_component.call("get_armor_equipment", armor_slot) as Resource if _equipment_component != null and _equipment_component.has_method("get_armor_equipment") else null
+		armor_button.text = "%s\n%s" % [slot_labels.get(armor_slot, armor_slot), str(equipment_resource.get("display_name")) if equipment_resource != null else "空"]
+		# 修复目标状态；满耐久装备覆盖灰色并不可点击，有耐久缺口时保持可选。
+		var repair_selection_active: bool = _pending_combat_stone_resource != null and str(_pending_combat_stone_resource.get("item_kind")) == "repair_kit"
+		var repair_selectable: bool = equipment_resource != null and _can_pending_combat_repair_target(equipment_resource)
+		armor_button.disabled = equipment_resource == null or (repair_selection_active and not repair_selectable)
+		armor_button.modulate = Color(0.42, 0.42, 0.42, 0.72) if repair_selection_active and not repair_selectable and equipment_resource != null else Color.WHITE
+		armor_button.tooltip_text = ItemDetailFormatter.build_plain_text(equipment_resource) if equipment_resource != null else ""
+
+
+func _on_inventory_armor_slot_pressed(armor_slot: String) -> void:
+	# 全局库存服务；防具槽点击卸回随身背包，所有权和存档由统一接口处理。
+	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+	if global_inventory == null or not global_inventory.has_method("transfer_equipment_to_storage"):
+		return
+	# 修复包选择期间点击装备槽会优先使用修复包，不执行卸下。
+	var equipment_resource: Resource = _equipment_component.call("get_armor_equipment", armor_slot) as Resource if _equipment_component != null and _equipment_component.has_method("get_armor_equipment") else null
+	if _pending_combat_stone_resource != null and str(_pending_combat_stone_resource.get("item_kind")) == "repair_kit":
+		if _can_pending_combat_repair_target(equipment_resource):
+			_apply_combat_repair(_pending_combat_stone_resource, equipment_resource)
+		return
+	if bool(global_inventory.call("transfer_equipment_to_storage", "armor_" + armor_slot, "backpack")):
+		_refresh_equipment()
+		_rebuild_inventory_slots()
 
 
 func _refresh_cooldown_overlays() -> void:
@@ -1599,13 +1650,17 @@ func _can_use_training_tools() -> bool:
 
 
 func _can_pending_combat_repair_target(weapon_resource: Resource) -> bool:
-	if _pending_combat_stone_resource == null or weapon_resource == null or str(weapon_resource.get("weapon_type")) not in ["ranged", "melee"]:
+	if _pending_combat_stone_resource == null or str(_pending_combat_stone_resource.get("item_kind")) != "repair_kit" or weapon_resource == null:
+		return false
+	# 合法修复目标；武器与四部位装备都必须提供耐久字段。
+	var item_kind: String = str(weapon_resource.get("item_kind"))
+	if str(weapon_resource.get("weapon_type")) not in ["ranged", "melee"] and item_kind != "equipment":
 		return false
 	# 当前耐久；只有存在耐久缺口的武器才应被绿色高亮为修复包目标。
 	var current_durability: float = maxf(float(weapon_resource.get("current_durability")), 0.0)
 	# 最大耐久；至少为 1，避免旧资源数据异常导致比较无效。
 	var maximum_durability: float = maxf(float(weapon_resource.get("max_durability")), 1.0)
-	return current_durability < maximum_durability
+	return current_durability < maximum_durability and not is_equal_approx(current_durability, maximum_durability)
 
 
 func _set_inventory_filter(new_filter: String) -> void:
@@ -2474,6 +2529,18 @@ func _refresh_inventory_stone_attribute_filter_display() -> void:
 func _on_combat_resource_action_requested(item_resource: Resource) -> void:
 	if item_resource == null:
 		return
+	if str(item_resource.get("item_kind")) == "equipment":
+		_combat_action_weapon_resource = item_resource
+		_combat_action_stone_resource = null
+		_combat_action_weapon_source_index = -1
+		var equipment_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+		_combat_action_item_quantity = 1
+		_inventory_item_action_menu.clear()
+		_inventory_item_action_menu.add_item("装备", INVENTORY_ITEM_ACTION_EQUIP)
+		_add_inventory_discard_actions(1)
+		_inventory_item_action_menu.position = Vector2i(get_viewport().get_mouse_position())
+		_inventory_item_action_menu.popup()
+		return
 	_combat_action_stone_resource = item_resource
 	_combat_action_weapon_resource = null
 	_combat_action_weapon_source_index = -1
@@ -2505,6 +2572,17 @@ func _on_inventory_item_action_menu_id_pressed(action_id: int) -> void:
 	elif action_id == INVENTORY_ITEM_ACTION_EQUIP and _combat_action_weapon_resource != null and _equipment_component != null:
 		# 待装备武器；远程目标为当前手持槽，近战目标为唯一近战槽。
 		var weapon_resource: Resource = _combat_action_weapon_resource
+		if str(weapon_resource.get("item_kind")) == "equipment":
+			# 防具部位；从背包原子装备到对应固定槽，被替换装备回到原背包位置。
+			var armor_slot: String = str(weapon_resource.get("equipment_slot"))
+			var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+			if global_inventory != null and global_inventory.has_method("transfer_storage_to_equipment"):
+				global_inventory.call("transfer_storage_to_equipment", weapon_resource, "backpack", "armor_" + armor_slot)
+			_refresh_equipment()
+			_rebuild_inventory_slots()
+			_combat_action_weapon_resource = null
+			_combat_action_weapon_source_index = -1
+			return
 		# 装备目标类型；与武器 weapon_type 一致，用于复用原子替换流程。
 		var target_kind: String = str(weapon_resource.get("weapon_type"))
 		# 远程目标下标；近战槽使用 -1，远程读取当前手持槽以实现直接替换。

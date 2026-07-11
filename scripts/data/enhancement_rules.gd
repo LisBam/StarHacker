@@ -57,6 +57,15 @@ const STAT_KEYS: Array[String] = [
 	"front_recoil_force",
 	"impact_force",
 	"melee_active_duration",
+	"critical_chance",
+	"critical_damage",
+	"max_durability",
+	"attack_power",
+	"defense_power",
+	"max_health",
+	"health_regeneration_per_five_seconds",
+	"dodge_chance",
+	"move_speed",
 ]
 ## 属性中文名称；键为统一属性名，值用于强化石、搜索、筛选和武器详情。
 const STAT_LABELS: Dictionary = {
@@ -70,6 +79,15 @@ const STAT_LABELS: Dictionary = {
 	"front_recoil_force": "前坐力",
 	"impact_force": "冲击力",
 	"melee_active_duration": "判定时长",
+	"critical_chance": "暴击率",
+	"critical_damage": "暴击伤害",
+	"max_durability": "耐久值",
+	"attack_power": "攻击力",
+	"defense_power": "防御力",
+	"max_health": "最大生命值",
+	"health_regeneration_per_five_seconds": "每5秒回血值",
+	"dodge_chance": "闪避率",
+	"move_speed": "移速",
 }
 ## 每项属性的有利数值方向；1 表示数值增加是强化，-1 表示数值减少是强化。
 const BENEFICIAL_DIRECTIONS: Dictionary = {
@@ -83,6 +101,15 @@ const BENEFICIAL_DIRECTIONS: Dictionary = {
 	"front_recoil_force": 1,
 	"impact_force": 1,
 	"melee_active_duration": 1,
+	"critical_chance": 1,
+	"critical_damage": 1,
+	"max_durability": 1,
+	"attack_power": 1,
+	"defense_power": 1,
+	"max_health": 1,
+	"health_regeneration_per_five_seconds": 1,
+	"dodge_chance": 1,
+	"move_speed": 1,
 }
 
 

@@ -27,6 +27,12 @@ var _velocity: Vector2 = Vector2.RIGHT
 var _age: float = 0.0
 ## 弹体出生位置；取值为全局坐标 Vector2，默认在 ready 时记录当前位置，修改会影响 max_distance 销毁判定。
 var _start_position: Vector2
+## 弹体携带的攻击力；默认 100，命中时参与统一攻防公式。
+var _attack_power: float = 100.0
+## 弹体携带的暴击率；默认 0，每颗弹体命中时独立判定。
+var _critical_chance: float = 0.0
+## 弹体携带的暴击伤害倍率；默认 1.5 表示 150%。
+var _critical_damage: float = 1.5
 
 
 func _ready() -> void:
@@ -68,6 +74,24 @@ func set_max_distance(value: float) -> void:
 
 func set_impact_force(value: float) -> void:
 	impact_force = maxf(value, 0.0)
+
+
+func configure_combat_attributes(new_attack_power: float, new_critical_chance: float, new_critical_damage: float) -> void:
+	_attack_power = maxf(new_attack_power, 0.0)
+	_critical_chance = clampf(new_critical_chance, 0.0, 1.0)
+	_critical_damage = maxf(new_critical_damage, 1.0)
+
+
+func get_attack_power() -> float:
+	return _attack_power
+
+
+func get_critical_chance() -> float:
+	return _critical_chance
+
+
+func get_critical_damage_multiplier() -> float:
+	return _critical_damage
 
 
 func get_impact_force() -> float:

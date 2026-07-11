@@ -6,10 +6,10 @@ class_name SecuritiesTransferDialog
 
 signal transfer_confirmed(amount: int, is_deposit: bool)
 
-## 弹窗默认宽度；默认 420 像素，可完整展示兑换方向、额度和手续费摘要，运行时无需动态修改。
-@export_range(320, 640, 1) var dialog_width: int = 420
-## 弹窗默认高度；默认 150 像素，容纳说明、整数输入和结果摘要，运行时无需动态修改。
-@export_range(120, 240, 1) var dialog_height: int = 150
+## 弹窗默认宽度；默认 400 像素，与股票买卖数量窗口保持一致，运行时无需动态修改。
+@export_range(320, 640, 1) var dialog_width: int = 400
+## 弹窗默认高度；默认 170 像素，与股票买卖数量窗口保持一致并完整容纳滑条、数字输入和结果摘要，运行时无需动态修改。
+@export_range(140, 260, 1) var dialog_height: int = 170
 ## 弹窗背景透明度；默认 0.82，与股票数量选择弹窗保持一致，运行时无需动态修改。
 @export_range(0.40, 1.0, 0.01) var dialog_background_alpha: float = 0.82
 
@@ -21,7 +21,9 @@ var _maximum_amount: int = 1
 var _minimum_amount: int = 1
 ## 当前提现手续费比例；默认 0.005 即 0.5%，充值模式不使用该值扣费。
 var _withdrawal_fee_ratio: float = 0.005
-## 金额输入框；默认运行时创建，只允许输入 1 到最大额度之间的整数。
+## 金额滑条；默认运行时创建，使用整数步长并与数字输入框保持双向同步。
+var _amount_slider: HSlider
+## 金额输入框；默认运行时创建，只允许输入最小到最大额度之间的整数，并与滑条保持双向同步。
 var _amount_spin_box: SpinBox
 ## 兑换说明标签；默认运行时创建，显示方向、最大额度和 1:1 基础兑换规则。
 var _description_label: Label
@@ -45,7 +47,7 @@ func present_deposit(maximum_amount: int) -> void:
 	_withdrawal_fee_ratio = 0.0
 	title = "充值证券币"
 	get_ok_button().text = "确认充值"
-	_description_label.text = "永久金币 1:1 转入证券币 · 最多可充值 %d" % maximum_amount
+	_description_label.text = "金币 1:1 转入证券币 · 最多可充值 %d" % maximum_amount
 	_present_current_configuration()
 
 
@@ -58,7 +60,7 @@ func present_withdrawal(maximum_amount: int, withdrawal_fee_ratio: float, minimu
 	_withdrawal_fee_ratio = clampf(withdrawal_fee_ratio, 0.0, 1.0)
 	title = "提现证券币"
 	get_ok_button().text = "确认提现"
-	_description_label.text = "整数证券币提现为永久金币 · 最多可提现 %d" % maximum_amount
+	_description_label.text = "整数证券币提现为金币 · 最多可提现 %d" % maximum_amount
 	_present_current_configuration()
 
 
@@ -77,8 +79,11 @@ func _ensure_interface_initialized() -> void:
 
 func _present_current_configuration() -> void:
 	## 重置输入范围和默认金额；每次打开均从 1 开始，避免沿用上次大额输入造成误操作。
+	_amount_slider.min_value = float(_minimum_amount)
+	_amount_slider.max_value = float(_maximum_amount)
 	_amount_spin_box.min_value = float(_minimum_amount)
 	_amount_spin_box.max_value = float(_maximum_amount)
+	_amount_slider.set_value_no_signal(float(_minimum_amount))
 	_amount_spin_box.set_value_no_signal(float(_minimum_amount))
 	_refresh_result(_minimum_amount)
 	popup_centered(Vector2i(dialog_width, dialog_height))
@@ -100,15 +105,26 @@ func _build_interface() -> void:
 	_description_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(_description_label)
+	# 金额输入行；滑条负责快速选择，数字输入框负责键盘精确输入，与股票买卖数量窗口保持一致。
+	var amount_row: HBoxContainer = HBoxContainer.new()
+	amount_row.add_theme_constant_override("separation", 8)
+	content.add_child(amount_row)
+	_amount_slider = HSlider.new()
+	_amount_slider.min_value = 1.0
+	_amount_slider.max_value = 1.0
+	_amount_slider.step = 1.0
+	_amount_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_amount_slider.value_changed.connect(_on_amount_slider_changed)
+	amount_row.add_child(_amount_slider)
 	_amount_spin_box = SpinBox.new()
 	_amount_spin_box.min_value = 1.0
 	_amount_spin_box.max_value = 1.0
 	_amount_spin_box.step = 1.0
 	_amount_spin_box.allow_greater = false
 	_amount_spin_box.allow_lesser = false
-	_amount_spin_box.custom_minimum_size = Vector2(120.0, 32.0)
-	_amount_spin_box.value_changed.connect(_on_amount_changed)
-	content.add_child(_amount_spin_box)
+	_amount_spin_box.custom_minimum_size = Vector2(82.0, 32.0)
+	_amount_spin_box.value_changed.connect(_on_amount_spin_box_changed)
+	amount_row.add_child(_amount_spin_box)
 	_result_label = Label.new()
 	_result_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_result_label.add_theme_font_size_override("font_size", 14)
@@ -130,9 +146,17 @@ func _apply_dialog_visual_style() -> void:
 	theme = dialog_theme
 
 
-func _on_amount_changed(value: float) -> void:
-	## 标准化直接输入值；SpinBox 限制整数步长，仍显式取整以避免浮点回调误差。
+func _on_amount_slider_changed(value: float) -> void:
+	## 同步滑条选择到数字框；显式取整保证转账金额始终为整数。
 	var resolved_amount: int = clampi(roundi(value), _minimum_amount, _maximum_amount)
+	_amount_spin_box.set_value_no_signal(float(resolved_amount))
+	_refresh_result(resolved_amount)
+
+
+func _on_amount_spin_box_changed(value: float) -> void:
+	## 同步数字输入到滑条；直接键盘输入同样限制在当前合法额度内。
+	var resolved_amount: int = clampi(roundi(value), _minimum_amount, _maximum_amount)
+	_amount_slider.set_value_no_signal(float(resolved_amount))
 	_refresh_result(resolved_amount)
 
 

@@ -20,15 +20,17 @@ func _ready() -> void:
 	_apply_standard_style()
 
 
-func present(dialog_title: String, message: String, confirm_text: String = "确认", cancel_text: String = "取消", requested_width: int = -1) -> void:
+func present(dialog_title: String, message: String, confirm_text: String = "确认", cancel_text: String = "取消", requested_width: int = -1, requested_height: int = 0, confirmation_enabled: bool = true) -> void:
 	title = dialog_title
 	dialog_text = message
 	get_ok_button().text = confirm_text
 	# 确认按钮初始状态；复用弹窗时清除上一次动态校验留下的禁用状态，再由调用方按当前报价覆盖。
-	get_ok_button().disabled = false
+	# 动态校验补充；在窗口弹出前直接应用最终状态，避免首次布局完成后立即二次更新正文与按钮触发异常高度重算。
+	get_ok_button().disabled = not confirmation_enabled
 	get_cancel_button().text = cancel_text
 	get_cancel_button().visible = true
-	popup_centered(Vector2i(requested_width if requested_width > 0 else dialog_width, 0))
+	# 确认窗口尺寸；高度为 0 时保持通用自动布局，专用多行确认窗口可传入稳定高度避免首次布局抖动。
+	popup_centered(Vector2i(requested_width if requested_width > 0 else dialog_width, maxi(requested_height, 0)))
 
 
 func update_confirmation_message(message: String, confirmation_enabled: bool = true) -> void:

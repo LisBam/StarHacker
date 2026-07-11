@@ -8,6 +8,8 @@ signal closed
 
 ## 仓库物品卡片脚本；背包和装备栏统一复用完整详情、灰色滤镜与点击协议。
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
+## 标准物品操作弹窗脚本；送回操作与背包丢弃、仓库出售复用同一功能按钮视觉资源。
+const ITEM_ACTION_POPUP_SCRIPT: Script = preload("res://scripts/ui/item_action_popup.gd")
 ## 数量选择弹窗脚本；堆叠物品部分送回仓库时复用出售数量 UI。
 const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
 ## 全部送回操作编号；单件物品和整组堆叠共同使用。
@@ -34,8 +36,8 @@ var _remaining_value_label: Label
 var _equipment_grid: GridContainer
 ## 背包物品网格；默认两列，展示全部武器与可堆叠资源。
 var _backpack_grid: GridContainer
-## 操作菜单；根据堆叠数量显示“送回仓库”或“全部/部分送回仓库”。
-var _action_menu: PopupMenu
+## 标准物品操作弹窗；根据堆叠数量显示“送回仓库”或“全部/部分送回仓库”。
+var _action_menu: ItemActionPopup
 ## 数量选择弹窗；部分送回仓库时显示价值、运费和送回后剩余额度。
 var _quantity_dialog: ConfirmationDialog
 ## 当前操作物品；默认 null，菜单关闭不会改变所有权。
@@ -152,8 +154,8 @@ func _build_interface() -> void:
 	_backpack_grid.add_theme_constant_override("h_separation", 8)
 	_backpack_grid.add_theme_constant_override("v_separation", 6)
 	scroll.add_child(_backpack_grid)
-	_action_menu = PopupMenu.new()
-	_action_menu.id_pressed.connect(_on_action_menu_id_pressed)
+	_action_menu = ITEM_ACTION_POPUP_SCRIPT.new() as ItemActionPopup
+	_action_menu.action_pressed.connect(_on_action_menu_id_pressed)
 	add_child(_action_menu)
 	_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as ConfirmationDialog
 	_quantity_dialog.connect("quantity_confirmed", Callable(self, "_on_quantity_confirmed"))
@@ -244,17 +246,15 @@ func _on_item_action_requested(item_resource: Resource, source_location: String,
 	_action_resource = item_resource
 	_action_source_location = source_location
 	_action_quantity = maxi(quantity, 1)
-	_action_menu.clear()
+	_action_menu.clear_actions()
 	if _action_quantity > 1:
-		_action_menu.add_item("全部送回仓库", ACTION_SEND_ALL)
 		# 整组报价；超出金币或剩余额度时仅禁用全部送回，仍保留部分送回入口。
 		var full_quote: Dictionary = _global_inventory.call("get_combat_shipping_quote", item_resource, source_location, _action_quantity) as Dictionary
-		_action_menu.set_item_disabled(_action_menu.get_item_index(ACTION_SEND_ALL), not bool(full_quote.get("selectable", false)))
-		_action_menu.add_item("部分送回仓库", ACTION_SEND_PARTIAL)
+		_action_menu.add_action("全部送回仓库", ACTION_SEND_ALL, not bool(full_quote.get("selectable", false)))
+		_action_menu.add_action("部分送回仓库", ACTION_SEND_PARTIAL)
 	else:
-		_action_menu.add_item("送回仓库", ACTION_SEND_ALL)
-	_action_menu.position = Vector2i(get_viewport().get_mouse_position())
-	_action_menu.popup()
+		_action_menu.add_action("送回仓库", ACTION_SEND_ALL)
+	_action_menu.popup_at(get_viewport().get_mouse_position())
 
 
 func _on_action_menu_id_pressed(action_id: int) -> void:

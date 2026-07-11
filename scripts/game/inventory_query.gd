@@ -34,6 +34,8 @@ const SUBCATEGORY_EQUIPMENT_FEET: String = "feet"
 const SORT_ACQUIRED_TIME: String = "acquired_time"
 ## 物品价值排序；按单价乘堆叠数量从高到低排列，相同价值时回退获得时间。
 const SORT_ITEM_VALUE: String = "item_value"
+## 耐久排序；带耐久物品按当前耐久比例从高到低排列，相同比例按当前耐久值和获得时间回退，无耐久物品排在最后。
+const SORT_DURABILITY: String = "durability"
 ## 强化石方向筛选键分隔符；默认冒号用于把属性名和 +1/-1 方向组合为稳定元数据。
 const STONE_ATTRIBUTE_DIRECTION_SEPARATOR: String = ":"
 ## 强化石方向筛选分组顺序；默认先展示全部“+”属性，再展示全部“-”属性。
@@ -202,6 +204,19 @@ static func _should_come_before(first_entry: Dictionary, second_entry: Dictionar
 		var second_value: int = _get_entry_total_value(second_entry)
 		if first_value != second_value:
 			return first_value > second_value
+	elif sort_mode == SORT_DURABILITY:
+		# 第一项耐久比例；无耐久物品使用 -1，始终排在全部带耐久物品之后。
+		var first_durability_ratio: float = _get_entry_durability_ratio(first_entry)
+		# 第二项耐久比例；与第一项执行降序比较。
+		var second_durability_ratio: float = _get_entry_durability_ratio(second_entry)
+		if not is_equal_approx(first_durability_ratio, second_durability_ratio):
+			return first_durability_ratio > second_durability_ratio
+		# 当前耐久值；相同比例时优先显示实际剩余耐久更高的物品，避免不同上限物品顺序含糊。
+		var first_current_durability: float = _get_entry_current_durability(first_entry)
+		# 第二项当前耐久值；用于同耐久比例下的降序比较。
+		var second_current_durability: float = _get_entry_current_durability(second_entry)
+		if not is_equal_approx(first_current_durability, second_current_durability):
+			return first_current_durability > second_current_durability
 	# 第一项获得时间；时间越新越靠前。
 	var first_time: float = float(first_entry.get("acquired_at", 0.0))
 	# 第二项获得时间；用于默认时间倒序比较。
@@ -221,3 +236,21 @@ static func _get_entry_total_value(entry: Dictionary) -> int:
 	# 堆叠数量；武器为 1，资源限制在至少 1。
 	var quantity: int = maxi(int(entry.get("quantity", 1)), 1)
 	return unit_value * quantity
+
+
+static func _get_entry_durability_ratio(entry: Dictionary) -> float:
+	# 条目资源；只有同时具有当前耐久和最大耐久字段的物品参与耐久排序。
+	var item_resource: Resource = entry.get("resource") as Resource
+	if item_resource == null or item_resource.get("current_durability") == null or item_resource.get("max_durability") == null:
+		return -1.0
+	# 最大耐久；异常非正数按无耐久处理，避免除零并防止损坏数据排到有效物品前方。
+	var maximum_durability: float = float(item_resource.get("max_durability"))
+	if maximum_durability <= 0.0:
+		return -1.0
+	return clampf(float(item_resource.get("current_durability")) / maximum_durability, 0.0, 1.0)
+
+
+static func _get_entry_current_durability(entry: Dictionary) -> float:
+	# 条目资源；无当前耐久字段时返回 -1，与耐久比例的无属性排序位置保持一致。
+	var item_resource: Resource = entry.get("resource") as Resource
+	return maxf(float(item_resource.get("current_durability")), 0.0) if item_resource != null and item_resource.get("current_durability") != null else -1.0

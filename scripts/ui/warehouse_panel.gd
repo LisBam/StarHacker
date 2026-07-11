@@ -6,6 +6,7 @@ extends PanelContainer
 signal closed
 
 ## 仓库物品交互控件脚本；默认复用统一摘要、悬停详情、点击和拖拽协议。
+const ITEM_ACTION_POPUP_SCRIPT: Script = preload("res://scripts/ui/item_action_popup.gd")
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
 ## 通用物品卡片视图；仓库、背包与局外装备槽统一读取其固定尺寸。
 const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
@@ -104,8 +105,8 @@ var _stone_attribute_clear_button: Button
 var _stone_attribute_filter: Array[String] = []
 ## 当前展示排序；默认 acquired_time，可切换 item_value 且不修改真实库存顺序。
 var _storage_sort_mode: String = InventoryQuery.SORT_ACQUIRED_TIME
-## 物品操作菜单；普通点击武器或强化石时显示出售与可选使用操作。
-var _item_action_menu: PopupMenu
+## 标准物品操作弹窗；普通点击物品时显示出售、使用和装备等统一功能按钮。
+var _item_action_menu: ItemActionPopup
 ## 当前操作物品资源；菜单关闭前保持资源实例引用，用于精确出售或启动强化选择。
 var _action_item_resource: Resource
 ## 当前操作物品位置；取值 warehouse 或 backpack，用于出售和消费强化石。
@@ -247,6 +248,8 @@ func _build_storage_interface() -> void:
 	_storage_sort_option.set_item_metadata(0, InventoryQuery.SORT_ACQUIRED_TIME)
 	_storage_sort_option.add_item("物品价值")
 	_storage_sort_option.set_item_metadata(1, InventoryQuery.SORT_ITEM_VALUE)
+	_storage_sort_option.add_item("耐久")
+	_storage_sort_option.set_item_metadata(2, InventoryQuery.SORT_DURABILITY)
 	_storage_sort_option.item_selected.connect(_on_storage_sort_selected)
 	query_bar.add_child(_storage_sort_option)
 	_stone_attribute_option = OptionButton.new()
@@ -361,8 +364,8 @@ func _build_storage_interface() -> void:
 	carried_scroll.add_child(_carried_drop_area)
 	_carried_item_list = _carried_drop_area.call("get_content_container") as HFlowContainer
 
-	_item_action_menu = PopupMenu.new()
-	_item_action_menu.id_pressed.connect(_on_item_action_menu_id_pressed)
+	_item_action_menu = ITEM_ACTION_POPUP_SCRIPT.new() as ItemActionPopup
+	_item_action_menu.action_pressed.connect(_on_item_action_menu_id_pressed)
 	add_child(_item_action_menu)
 	_enhancement_result_dialog = ENHANCEMENT_RESULT_DIALOG_SCRIPT.new() as AcceptDialog
 	add_child(_enhancement_result_dialog)
@@ -583,7 +586,7 @@ func _on_storage_search_changed(_new_text: String) -> void:
 func _on_storage_sort_selected(item_index: int) -> void:
 	# 排序元数据；取值为 acquired_time 或 item_value，异常值回退获得时间。
 	var selected_sort_mode: String = str(_storage_sort_option.get_item_metadata(item_index))
-	_storage_sort_mode = selected_sort_mode if selected_sort_mode in [InventoryQuery.SORT_ACQUIRED_TIME, InventoryQuery.SORT_ITEM_VALUE] else InventoryQuery.SORT_ACQUIRED_TIME
+	_storage_sort_mode = selected_sort_mode if selected_sort_mode in [InventoryQuery.SORT_ACQUIRED_TIME, InventoryQuery.SORT_ITEM_VALUE, InventoryQuery.SORT_DURABILITY] else InventoryQuery.SORT_ACQUIRED_TIME
 	_rebuild_storage_content()
 
 
@@ -684,30 +687,27 @@ func _on_item_action_requested(item_resource: Resource, source_location: String)
 
 	_action_item_resource = item_resource
 	_action_item_location = source_location
-	_item_action_menu.clear()
+	_item_action_menu.clear_actions()
 	# 出售总价；强化石按整组数量计算，强化武器按动态售价计算。
 	var total_sell_price: int = int(_global_inventory.call("get_storage_resource_sell_price", item_resource, source_location))
 	# 当前库存数量；数量大于 1 时提供指定数量出售和全部出售两个独立入口。
 	var stored_quantity: int = int(_global_inventory.call("get_storage_resource_quantity", item_resource, source_location))
 	if stored_quantity > 1:
-		_item_action_menu.add_item("出售指定数量…", ITEM_ACTION_SELL)
-		_item_action_menu.add_item("全部出售（+%d）" % total_sell_price, ITEM_ACTION_SELL_ALL)
-		_item_action_menu.set_item_disabled(_item_action_menu.get_item_index(ITEM_ACTION_SELL_ALL), total_sell_price <= 0)
+		_item_action_menu.add_action("出售指定数量…", ITEM_ACTION_SELL, total_sell_price <= 0, true)
+		_item_action_menu.add_action("全部出售（+%d）" % total_sell_price, ITEM_ACTION_SELL_ALL, total_sell_price <= 0, true)
 	else:
-		_item_action_menu.add_item("出售（+%d）" % total_sell_price, ITEM_ACTION_SELL)
-	_item_action_menu.set_item_disabled(_item_action_menu.get_item_index(ITEM_ACTION_SELL), total_sell_price <= 0)
+		_item_action_menu.add_action("出售（+%d）" % total_sell_price, ITEM_ACTION_SELL, total_sell_price <= 0, true)
 	if str(item_resource.get("item_kind")) == "repair_kit":
-		_item_action_menu.add_item("使用", ITEM_ACTION_USE_REPAIR_KIT)
+		_item_action_menu.add_action("使用", ITEM_ACTION_USE_REPAIR_KIT)
 	elif source_location == "backpack" and str(item_resource.get("item_kind")) == "equipment":
-		_item_action_menu.add_item("装备", ITEM_ACTION_EQUIP)
+		_item_action_menu.add_action("装备", ITEM_ACTION_EQUIP)
 	elif source_location == "backpack" and str(item_resource.get("weapon_type")) in ["ranged", "melee"]:
 		if str(item_resource.get("weapon_type")) == "ranged":
-			_item_action_menu.add_item("装备1", ITEM_ACTION_EQUIP_RANGED_1)
-			_item_action_menu.add_item("装备2", ITEM_ACTION_EQUIP_RANGED_2)
+			_item_action_menu.add_action("装备1", ITEM_ACTION_EQUIP_RANGED_1)
+			_item_action_menu.add_action("装备2", ITEM_ACTION_EQUIP_RANGED_2)
 		else:
-			_item_action_menu.add_item("装备", ITEM_ACTION_EQUIP)
-	_item_action_menu.position = Vector2i(get_viewport().get_mouse_position())
-	_item_action_menu.popup()
+			_item_action_menu.add_action("装备", ITEM_ACTION_EQUIP)
+	_item_action_menu.popup_at(get_viewport().get_mouse_position())
 
 
 func _on_item_action_menu_id_pressed(action_id: int) -> void:

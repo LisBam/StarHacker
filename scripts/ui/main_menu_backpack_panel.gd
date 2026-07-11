@@ -10,6 +10,8 @@ signal closed
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
 ## 装备槽控件脚本；远程、近战和四部位装备复用游戏内背包左侧卡片布局。
 const EQUIPMENT_STORAGE_SLOT_SCRIPT: Script = preload("res://scripts/ui/equipment_storage_slot_control.gd")
+## 背包空白拖放区域脚本；装备可拖到右侧空白处卸下，背包物品也可通过拖放调整顺序。
+const STORAGE_DROP_AREA_SCRIPT: Script = preload("res://scripts/ui/storage_drop_area.gd")
 ## 标准物品操作弹窗脚本；装备和丢弃操作复用全项目功能按钮资源。
 const ITEM_ACTION_POPUP_SCRIPT: Script = preload("res://scripts/ui/item_action_popup.gd")
 ## 数量选择弹窗脚本；堆叠物品部分丢弃时复用战斗背包相同数量输入界面。
@@ -24,6 +26,10 @@ const ACTION_EQUIP_RANGED_TWO: int = 3
 const ACTION_DISCARD_ALL: int = 4
 ## 部分丢弃操作编号；只在堆叠数量大于一时显示。
 const ACTION_DISCARD_PARTIAL: int = 5
+## 卸下装备操作编号；点击左侧非空装备槽后把物品移动回随身背包。
+const ACTION_UNEQUIP: int = 6
+## 使用修复包操作编号；点击后进入背包与装备栏耐久目标选择状态。
+const ACTION_USE_REPAIR_KIT: int = 7
 
 ## 面板最小尺寸；与战斗背包接近，确保左侧七个装备槽和右侧物品网格可读。
 @export var panel_minimum_size: Vector2 = Vector2(960.0, 620.0)
@@ -34,6 +40,8 @@ var _global_inventory: Node
 var _equipment_list: VBoxContainer
 ## 右侧背包物品网格；按真实背包顺序显示全部物品。
 var _item_grid: HFlowContainer
+## 背包拖放区域；接收装备拖到右侧空白处的卸下操作和背包内部排序。
+var _backpack_drop_area: PanelContainer
 ## 标准物品操作弹窗；根据当前物品类型生成装备和丢弃功能按钮。
 var _action_popup: ItemActionPopup
 ## 部分丢弃数量弹窗；确认后从背包直接消费选择数量。
@@ -44,6 +52,16 @@ var _action_resource: Resource
 var _action_quantity: int = 1
 ## 等待部分丢弃的资源；数量确认后读取并立即清空，防止重复确认。
 var _pending_partial_resource: Resource
+## 当前操作装备位置；点击装备槽后保存 ranged_N、melee 或 armor_部位，用于卸下操作。
+var _action_equipment_location: String = ""
+## 待使用修复包资源；非空时下一次点击兼容武器或装备会尝试修复。
+var _pending_repair_kit_resource: Resource
+## 待使用修复包来源；主菜单背包固定为 backpack，但仍保存稳定来源供拖放和服务接口复用。
+var _pending_repair_kit_location: String = ""
+## 修复目标选择状态文本；显示当前修复包名称、成功恢复量或取消提示。
+var _status_label: Label
+## 取消修复包使用按钮；只在目标选择期间显示，避免玩家被锁定在选择状态。
+var _cancel_use_button: Button
 
 
 func _ready() -> void:
@@ -83,6 +101,11 @@ func _build_interface() -> void:
 	warning_label.text = "局外丢弃会直接永久失去物品"
 	warning_label.modulate = Color(1.0, 0.55, 0.55, 1.0)
 	header.add_child(warning_label)
+	_cancel_use_button = Button.new()
+	_cancel_use_button.text = "取消使用"
+	_cancel_use_button.visible = false
+	_cancel_use_button.pressed.connect(_cancel_repair_kit_use)
+	header.add_child(_cancel_use_button)
 	var close_button: Button = Button.new()
 	close_button.text = "关闭背包"
 	close_button.custom_minimum_size = Vector2(116.0, 36.0)
@@ -103,25 +126,22 @@ func _build_interface() -> void:
 	_equipment_list.alignment = BoxContainer.ALIGNMENT_CENTER
 	_equipment_list.add_theme_constant_override("separation", 6)
 	equipment_scroll.add_child(_equipment_list)
-	var backpack_panel: PanelContainer = PanelContainer.new()
-	backpack_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	split.add_child(backpack_panel)
-	var backpack_scroll: ScrollContainer = ScrollContainer.new()
-	backpack_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	backpack_panel.add_child(backpack_scroll)
-	_item_grid = HFlowContainer.new()
-	_item_grid.alignment = FlowContainer.ALIGNMENT_CENTER
-	_item_grid.last_wrap_alignment = FlowContainer.LAST_WRAP_ALIGNMENT_CENTER
-	_item_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_item_grid.add_theme_constant_override("h_separation", 10)
-	_item_grid.add_theme_constant_override("v_separation", 8)
-	backpack_scroll.add_child(_item_grid)
+	_backpack_drop_area = STORAGE_DROP_AREA_SCRIPT.new() as PanelContainer
+	_backpack_drop_area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_backpack_drop_area.call("configure", "backpack", 4)
+	_backpack_drop_area.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
+	split.add_child(_backpack_drop_area)
+	# 物品网格；由通用拖放区域内部创建，整个右侧空白都可接收装备卸下。
+	_item_grid = _backpack_drop_area.call("get_content_container") as HFlowContainer
 	_action_popup = ITEM_ACTION_POPUP_SCRIPT.new() as ItemActionPopup
 	_action_popup.action_pressed.connect(_on_action_pressed)
 	add_child(_action_popup)
 	_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as ConfirmationDialog
 	_quantity_dialog.connect("quantity_confirmed", Callable(self, "_on_quantity_confirmed"))
 	add_child(_quantity_dialog)
+	_status_label = Label.new()
+	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	content.add_child(_status_label)
 
 
 func _connect_inventory_signals() -> void:
@@ -153,6 +173,11 @@ func _add_equipment_slot(slot_label: String, location: String, accepted_type: St
 	var item_resource: Resource = _global_inventory.call("get_equipment_location_resource", location) as Resource
 	var slot_control: Button = EQUIPMENT_STORAGE_SLOT_SCRIPT.new() as Button
 	slot_control.call("configure", slot_label, location, accepted_type, item_resource)
+	slot_control.connect("item_selected", Callable(self, "_on_equipment_selected").bind(location))
+	slot_control.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
+	slot_control.connect("repair_kit_drop_requested", Callable(self, "_on_repair_kit_drop_requested"))
+	# 修复选择状态；可修复目标保持绿色，满耐久目标灰显并阻止无效使用。
+	slot_control.call("set_weapon_target_selection_state", _pending_repair_kit_resource != null, _can_repair_target(item_resource))
 	_equipment_list.add_child(slot_control)
 
 
@@ -170,6 +195,11 @@ func _rebuild_items() -> void:
 		item_control.call("configure", item_resource, "backpack", entry_index, false, "", int(entry.get("quantity", 1)))
 		item_control.call("set_weapon_slot_visual_style", true)
 		item_control.connect("item_action_requested", Callable(self, "_on_item_pressed"))
+		item_control.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
+		item_control.connect("repair_kit_drop_requested", Callable(self, "_on_repair_kit_drop_requested"))
+		# 修复目标选择；背包武器与装备使用和左侧装备栏相同的可选与灰显规则。
+		var is_durable_item: bool = str(item_resource.get("weapon_type")) in ["ranged", "melee"] or str(item_resource.get("item_kind")) == "equipment"
+		item_control.call("set_weapon_target_selection_state", _pending_repair_kit_resource != null and is_durable_item, _can_repair_target(item_resource))
 		_item_grid.add_child(item_control)
 	if entries.is_empty():
 		var empty_label: Label = Label.new()
@@ -178,7 +208,12 @@ func _rebuild_items() -> void:
 
 
 func _on_item_pressed(item_resource: Resource) -> void:
+	if _pending_repair_kit_resource != null:
+		if _can_repair_target(item_resource):
+			_apply_repair_kit(_pending_repair_kit_resource, _pending_repair_kit_location, item_resource)
+		return
 	_action_resource = item_resource
+	_action_equipment_location = ""
 	_action_quantity = int(_global_inventory.call("get_storage_resource_quantity", item_resource, "backpack")) if _global_inventory != null else 1
 	_action_popup.clear_actions()
 	if str(item_resource.get("item_kind")) == "equipment" or str(item_resource.get("weapon_type")) == "melee":
@@ -186,6 +221,8 @@ func _on_item_pressed(item_resource: Resource) -> void:
 	elif str(item_resource.get("weapon_type")) == "ranged":
 		_action_popup.add_action("装备1", ACTION_EQUIP_RANGED_ONE)
 		_action_popup.add_action("装备2", ACTION_EQUIP_RANGED_TWO)
+	elif str(item_resource.get("item_kind")) == "repair_kit":
+		_action_popup.add_action("使用", ACTION_USE_REPAIR_KIT)
 	if _action_quantity > 1:
 		_action_popup.add_action("全部丢弃", ACTION_DISCARD_ALL, false, true)
 		_action_popup.add_action("部分丢弃", ACTION_DISCARD_PARTIAL, false, true)
@@ -211,6 +248,84 @@ func _on_action_pressed(action_id: int) -> void:
 	elif action_id == ACTION_DISCARD_PARTIAL:
 		_pending_partial_resource = _action_resource
 		_quantity_dialog.call("present_discard", str(_action_resource.get("display_name")), maxi(_action_quantity, 1))
+	elif action_id == ACTION_UNEQUIP and not _action_equipment_location.is_empty():
+		_global_inventory.call("transfer_equipment_to_storage", _action_equipment_location, "backpack")
+	elif action_id == ACTION_USE_REPAIR_KIT and str(_action_resource.get("item_kind")) == "repair_kit":
+		_pending_repair_kit_resource = _action_resource
+		_pending_repair_kit_location = "backpack"
+		_cancel_use_button.visible = true
+		_status_label.text = "正在使用 %s：请选择或拖到未满耐久的武器/装备" % str(_action_resource.get("display_name"))
+		_refresh_all()
+
+
+func _on_equipment_selected(item_resource: Resource, equipment_location: String) -> void:
+	if item_resource == null:
+		return
+	if _pending_repair_kit_resource != null:
+		if _can_repair_target(item_resource):
+			_apply_repair_kit(_pending_repair_kit_resource, _pending_repair_kit_location, item_resource)
+		return
+	_action_resource = item_resource
+	_action_equipment_location = equipment_location
+	_action_quantity = 1
+	_action_popup.clear_actions()
+	_action_popup.add_action("卸下", ACTION_UNEQUIP)
+	_action_popup.popup_at(get_viewport().get_mouse_position())
+
+
+func _on_item_drop_requested(drag_data: Dictionary, target_location: String, target_index: int) -> void:
+	if _global_inventory == null:
+		return
+	# 拖拽资源与来源；存储来源为 backpack，装备来源使用具体装备槽位置。
+	var item_resource: Resource = drag_data.get("resource") as Resource
+	var source_location: String = str(drag_data.get("source_location", ""))
+	var source_index: int = int(drag_data.get("source_index", -1))
+	if item_resource == null or source_location.is_empty():
+		return
+	var source_is_backpack: bool = source_location == "backpack"
+	var target_is_backpack: bool = target_location == "backpack"
+	if source_is_backpack and target_is_backpack:
+		var resolved_target_index: int = int(_global_inventory.call("get_backpack_count")) if target_index < 0 else target_index
+		_global_inventory.call("move_backpack_item", source_index, resolved_target_index)
+	elif source_is_backpack and not target_is_backpack:
+		# 背包物品拖入装备槽；GlobalInventory 负责类型验证和已有装备替换回背包。
+		_global_inventory.call("transfer_storage_to_equipment", item_resource, "backpack", target_location)
+	elif not source_is_backpack and target_is_backpack:
+		# 装备拖入背包卡片或空白区域；物品从装备槽卸下并插入目标位置。
+		_global_inventory.call("transfer_equipment_to_storage", source_location, "backpack", target_index)
+	else:
+		# 装备槽之间拖动；兼容类型时移动或交换资源，类型不匹配时由全局服务拒绝。
+		_global_inventory.call("swap_equipment_locations", source_location, target_location)
+
+
+func _on_repair_kit_drop_requested(repair_kit_resource: Resource, source_location: String, weapon_resource: Resource) -> void:
+	_apply_repair_kit(repair_kit_resource, source_location, weapon_resource)
+
+
+func _apply_repair_kit(repair_kit_resource: Resource, source_location: String, weapon_resource: Resource) -> void:
+	if _global_inventory == null or repair_kit_resource == null or weapon_resource == null:
+		return
+	var repair_result: Dictionary = _global_inventory.call("use_repair_kit_with_result", repair_kit_resource, source_location, weapon_resource) as Dictionary
+	if bool(repair_result.get("success", false)):
+		_status_label.text = "修复完成，恢复 %.0f 点耐久" % float(repair_result.get("durability_restored", 0.0))
+		_pending_repair_kit_resource = null
+		_pending_repair_kit_location = ""
+		_cancel_use_button.visible = false
+		_refresh_all()
+
+
+func _can_repair_target(item_resource: Resource) -> bool:
+	if item_resource == null or (str(item_resource.get("weapon_type")) not in ["ranged", "melee"] and str(item_resource.get("item_kind")) != "equipment"):
+		return false
+	return float(item_resource.get("current_durability")) < maxf(float(item_resource.get("max_durability")), 1.0)
+
+
+func _cancel_repair_kit_use() -> void:
+	_pending_repair_kit_resource = null
+	_pending_repair_kit_location = ""
+	_cancel_use_button.visible = false
+	_status_label.text = "已取消使用修复包"
+	_refresh_all()
 
 
 func _on_quantity_confirmed(quantity: int) -> void:

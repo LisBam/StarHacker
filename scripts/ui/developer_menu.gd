@@ -22,6 +22,8 @@ signal map_vision_requested
 
 ## 全局物品服务；默认从 AutoLoad 获取，缺失时禁用资源修改按钮。
 var _global_inventory: Node
+## 股市服务；默认从 AutoLoad 获取，负责行情刷新、随机事件和大盘状态调试。
+var _stock_market_service: Node
 ## 金币余额标签；默认运行时创建，在金币变化后显示最新局外余额。
 var _coins_label: Label
 ## 操作结果标签；默认显示开发者模式提示，执行功能后反馈发放数量或金币变化。
@@ -40,6 +42,16 @@ var _add_coins_button: Button
 var _remove_coins_button: Button
 ## 清空仓库按钮；默认运行时创建，点击后先弹出确认框再移除永久仓库中的全部物品。
 var _clear_warehouse_button: Button
+## 全量行情刷新按钮；模拟一次正式对局结算级别刷新，但不修改玩家行为统计。
+var _stock_full_refresh_button: Button
+## 小幅行情刷新按钮；模拟一次局外 60 秒运行级别刷新。
+var _stock_runtime_refresh_button: Button
+## 随机股市事件按钮；立即抽取并生效一个单股或全局事件。
+var _stock_event_button: Button
+## 大盘状态切换按钮；按牛市、熊市、震荡市顺序循环切换并显示结果。
+var _stock_market_cycle_button: Button
+## 清空股票持仓按钮；移除全部持仓且不返还金币，仅用于测试迁移和空状态界面。
+var _clear_stock_holdings_button: Button
 ## 隐藏入口提示标签；默认显示 LISBAM 说明，战斗模式会改为局内调试提示。
 var _hint_label: Label
 ## 调试信息显示开关；默认关闭，开启后允许商店等界面显示原价倍率等开发计算信息。
@@ -74,6 +86,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	custom_minimum_size = panel_minimum_size
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
+	_stock_market_service = get_tree().root.get_node_or_null("StockMarketService")
 	_build_interface()
 	if _global_inventory != null and _global_inventory.has_signal("coins_changed"):
 		_global_inventory.connect("coins_changed", Callable(self, "_refresh_coins"))
@@ -182,6 +195,43 @@ func _build_interface() -> void:
 	_clear_warehouse_button.pressed.connect(_on_clear_warehouse_pressed)
 	content.add_child(_clear_warehouse_button)
 	_economy_controls.append(_clear_warehouse_button)
+	# 股市调试标题；归入局外经济控件，战斗开发者上下文会统一隐藏。
+	var stock_debug_title: Label = Label.new()
+	stock_debug_title.text = "股市调试"
+	stock_debug_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stock_debug_title.add_theme_font_size_override("font_size", 18)
+	content.add_child(stock_debug_title)
+	_economy_controls.append(stock_debug_title)
+	_stock_full_refresh_button = Button.new()
+	_stock_full_refresh_button.custom_minimum_size = Vector2(0.0, 42.0)
+	_stock_full_refresh_button.text = "立即触发全量刷新"
+	_stock_full_refresh_button.pressed.connect(_on_stock_full_refresh_pressed)
+	content.add_child(_stock_full_refresh_button)
+	_economy_controls.append(_stock_full_refresh_button)
+	_stock_runtime_refresh_button = Button.new()
+	_stock_runtime_refresh_button.custom_minimum_size = Vector2(0.0, 42.0)
+	_stock_runtime_refresh_button.text = "立即触发小幅刷新"
+	_stock_runtime_refresh_button.pressed.connect(_on_stock_runtime_refresh_pressed)
+	content.add_child(_stock_runtime_refresh_button)
+	_economy_controls.append(_stock_runtime_refresh_button)
+	_stock_event_button = Button.new()
+	_stock_event_button.custom_minimum_size = Vector2(0.0, 42.0)
+	_stock_event_button.text = "触发随机事件"
+	_stock_event_button.pressed.connect(_on_stock_event_pressed)
+	content.add_child(_stock_event_button)
+	_economy_controls.append(_stock_event_button)
+	_stock_market_cycle_button = Button.new()
+	_stock_market_cycle_button.custom_minimum_size = Vector2(0.0, 42.0)
+	_stock_market_cycle_button.text = "切换大盘状态"
+	_stock_market_cycle_button.pressed.connect(_on_stock_market_cycle_pressed)
+	content.add_child(_stock_market_cycle_button)
+	_economy_controls.append(_stock_market_cycle_button)
+	_clear_stock_holdings_button = Button.new()
+	_clear_stock_holdings_button.custom_minimum_size = Vector2(0.0, 42.0)
+	_clear_stock_holdings_button.text = "清空全部持仓"
+	_clear_stock_holdings_button.pressed.connect(_on_clear_stock_holdings_pressed)
+	content.add_child(_clear_stock_holdings_button)
+	_economy_controls.append(_clear_stock_holdings_button)
 	_clear_warehouse_confirmation = COMMON_CONFIRMATION_DIALOG_SCRIPT.new() as CommonConfirmationDialog
 	_clear_warehouse_confirmation.confirmed.connect(_on_clear_warehouse_confirmed)
 	add_child(_clear_warehouse_confirmation)
@@ -248,6 +298,13 @@ func _refresh_availability() -> void:
 	_add_coins_button.disabled = not service_available
 	_remove_coins_button.disabled = not service_available
 	_clear_warehouse_button.disabled = not service_available
+	# 股市服务可用性；决定行情刷新、事件和大盘按钮是否允许点击。
+	var stock_service_available: bool = _stock_market_service != null
+	_stock_full_refresh_button.disabled = not stock_service_available
+	_stock_runtime_refresh_button.disabled = not stock_service_available
+	_stock_event_button.disabled = not stock_service_available
+	_stock_market_cycle_button.disabled = not stock_service_available
+	_clear_stock_holdings_button.disabled = not service_available
 	if not service_available:
 		_status_label.text = "GlobalInventory 服务不可用"
 
@@ -346,6 +403,46 @@ func _on_clear_warehouse_confirmed() -> void:
 	# 清空记录组数；武器每件一组，强化石按当前堆叠组统计，用于开发者操作反馈。
 	var cleared_record_count: int = int(_global_inventory.call("clear_warehouse_items"))
 	_status_label.text = "已清空永久仓库，共移除 %d 组物品" % cleared_record_count
+
+
+func _on_stock_full_refresh_pressed() -> void:
+	if _stock_market_service == null or not _stock_market_service.has_method("refresh_market"):
+		return
+	_stock_market_service.call("refresh_market", "settlement")
+	_status_label.text = "已触发一次全量行情刷新"
+
+
+func _on_stock_runtime_refresh_pressed() -> void:
+	if _stock_market_service == null or not _stock_market_service.has_method("refresh_market"):
+		return
+	_stock_market_service.call("refresh_market", "runtime")
+	_status_label.text = "已触发一次小幅行情刷新"
+
+
+func _on_stock_event_pressed() -> void:
+	if _stock_market_service == null or not _stock_market_service.has_method("trigger_random_event"):
+		return
+	# 新触发事件数据；读取消息字段用于开发者操作反馈。
+	var event_data: Dictionary = _stock_market_service.call("trigger_random_event") as Dictionary
+	_status_label.text = "已触发事件：%s" % str(event_data.get("message", "未知事件"))
+
+
+func _on_stock_market_cycle_pressed() -> void:
+	if _stock_market_service == null or not _stock_market_service.has_method("cycle_market_state"):
+		return
+	# 切换后大盘标识；取值为 bull、bear 或 sideways。
+	var market_state: String = str(_stock_market_service.call("cycle_market_state"))
+	# 切换后中文名称；用于状态标签直接展示。
+	var market_name: String = "牛市" if market_state == "bull" else ("熊市" if market_state == "bear" else "震荡市")
+	_status_label.text = "大盘已切换为%s" % market_name
+
+
+func _on_clear_stock_holdings_pressed() -> void:
+	if _global_inventory == null or not _global_inventory.has_method("clear_stock_holdings"):
+		return
+	# 清空股数；统计所有股票被移除的总股数，不返还金币。
+	var cleared_quantity: int = int(_global_inventory.call("clear_stock_holdings"))
+	_status_label.text = "已清空全部持仓，共移除 %d 股，不返还金币" % cleared_quantity
 
 
 func _adjust_coins(amount: int) -> void:

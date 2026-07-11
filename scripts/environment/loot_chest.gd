@@ -175,6 +175,10 @@ func _release_loot(broken_open: bool) -> void:
 	var drop_count: int = _random.randi_range(int(quality_config.get("drop_min", 2)), int(quality_config.get("drop_max", 4)))
 	# 最低高品质掉落数量；不会超过本次实际总掉落数。
 	var minimum_high_quality_count: int = mini(int(quality_config.get("minimum_high_quality_count", 0)), drop_count)
+	# 股市统计服务；宝箱打开只上报一次，不关心手动开启或击破方式。
+	var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")
+	if stock_market_service != null and stock_market_service.has_method("record_run_metric"):
+		stock_market_service.call("record_run_metric", "chests_opened", 1.0)
 	loot_released.emit(global_position, _quality_id, drop_count, minimum_high_quality_count, broken_open)
 	chest_removed.emit(self)
 	queue_free()

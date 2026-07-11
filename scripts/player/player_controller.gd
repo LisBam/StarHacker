@@ -133,6 +133,7 @@ func apply_damage(damage: float, source: Node) -> void:
 	var damage_result: Dictionary = calculator_script.calculate_damage(damage, source_attack_power, player_defense_power, float(source.call("get_critical_chance")) if source != null and source.has_method("get_critical_chance") else 0.0, float(source.call("get_critical_damage_multiplier")) if source != null and source.has_method("get_critical_damage_multiplier") else 1.5)
 	# 最终伤害；生命扣除、镜头震动和受击反馈使用同一整数结果。
 	var final_damage: float = float(damage_result.get("damage", 0))
+	_record_stock_metric("damage_taken", final_damage)
 	_damage_interval_remaining = maxf(damage_interval, 0.0)
 	# 受伤前死亡状态；取值来自属性组件，默认用于避免死亡特效重复生成。
 	var was_dead: bool = _is_stats_dead()
@@ -182,6 +183,7 @@ func _try_fire_ranged_weapon() -> void:
 	var attack_succeeded: bool = _ranged_attack_component.try_attack(_last_aim_direction, current_weapon)
 	if not attack_succeeded:
 		return
+	_record_stock_metric("shots", 1.0)
 
 	_apply_weapon_recoil(current_weapon, _last_aim_direction)
 	_apply_weapon_front_recoil(current_weapon, _last_aim_direction)
@@ -240,6 +242,7 @@ func _consume_weapon_durability(weapon_data: Resource) -> void:
 	var durability_changed: bool = bool(weapon_data.call("consume_durability"))
 	if not durability_changed:
 		return
+	_record_stock_metric("weapon_durability", 1.0)
 	if _equipment_component.has_method("notify_weapon_runtime_state_changed"):
 		_equipment_component.call("notify_weapon_runtime_state_changed", weapon_data)
 	weapon_durability_changed.emit(weapon_data)
@@ -270,6 +273,14 @@ func _handle_dodge_request(movement_direction: Vector2) -> void:
 
 	_dodge_direction = movement_direction.normalized()
 	_dodge_time_remaining = maxf(dodge_duration, 0.01)
+	_record_stock_metric("dodges", 1.0)
+
+
+func _record_stock_metric(metric_name: String, amount: float) -> void:
+	# 股市统计服务；缺失时直接跳过，使玩家控制器仍可在独立测试场景运行。
+	var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")
+	if stock_market_service != null and stock_market_service.has_method("record_run_metric"):
+		stock_market_service.call("record_run_metric", metric_name, amount)
 
 
 func _move_dodge(delta: float) -> void:

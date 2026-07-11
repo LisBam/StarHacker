@@ -266,19 +266,22 @@ func _create_random_equipment() -> Resource:
 
 
 func _apply_second_hand_state(weapon_resource: Resource) -> void:
-	# 最大耐久；二手枪械消耗量以武器自身上限为基准，支持未来不同耐久上限武器。
-	var maximum_durability: float = maxf(float(weapon_resource.get("max_durability")), 1.0)
+	if weapon_resource == null or not weapon_resource.has_method("set_current_durability"):
+		return
 	# 耐久消耗比例；限制上下限后闭区间随机，默认消耗 10% 至 90%。
 	var minimum_consumption: float = clampf(minf(second_hand_durability_consumption_minimum, second_hand_durability_consumption_maximum), 0.0, 1.0)
 	# 最大消耗比例；与最小值共同决定二手枪械剩余耐久范围。
 	var maximum_consumption: float = clampf(maxf(second_hand_durability_consumption_minimum, second_hand_durability_consumption_maximum), 0.0, 1.0)
-	# 本次消耗比例；随机后换算为当前耐久并保留至少 0 点。
+	# 本次消耗比例；先保存随机结果，待历史强化生成完毕后再写入最终商品实例。
 	var consumed_ratio: float = _random.randf_range(minimum_consumption, maximum_consumption)
-	weapon_resource.call("set_current_durability", maximum_durability * (1.0 - consumed_ratio))
 	# 历史强化石数量；使用同一个累计概率随机值，保证至少 N 颗概率严格单调且第 10 颗为 1%。
 	var used_stone_count: int = _roll_second_hand_used_stone_count()
 	for _stone_index in range(used_stone_count):
 		_apply_random_compatible_enhancement(weapon_resource)
+	# 最大耐久；历史强化完成后读取商品自身耐久上限，武器与装备都按同一比例生成独立随机耐久。
+	var maximum_durability: float = maxf(float(weapon_resource.get("max_durability")), 1.0)
+	# 当前耐久；二手商品固定消耗配置区间内的耐久，不会因后续历史强化流程被覆盖为模板满值。
+	weapon_resource.call("set_current_durability", maximum_durability * (1.0 - consumed_ratio))
 	# 运行时商品元数据；Resource 未声明该字段时不能直接 set，因此由商品条目读取返回值单独保存。
 	weapon_resource.set_meta("shop_second_hand", true)
 	weapon_resource.set_meta("shop_used_stone_count", used_stone_count)

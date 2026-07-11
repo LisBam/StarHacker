@@ -97,15 +97,17 @@ func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
 	var drag_data: Dictionary = data as Dictionary
 	if str(drag_data.get("type", "")) != STORAGE_DRAG_DATA_TYPE:
 		return false
-	# 拖拽物品；主槽允许武器或强化石，牺牲槽先接受两类锻造物品，再由面板结合主物品做精确校验。
+	# 拖拽物品；主槽允许武器、装备或强化石，牺牲槽先接受三类锻造物品，再由面板结合主物品做精确校验。
 	var item_resource: Resource = drag_data.get("resource") as Resource
 	if item_resource == null:
 		return false
 	# 是否为武器；通过 weapon_type 识别，避免依赖具体 WeaponData 类。
 	var is_weapon: bool = str(item_resource.get("weapon_type")) in ["ranged", "melee"]
+	# 是否为装备；四个固定部位都属于可恢复耐久和接受装备强化石的锻造目标。
+	var is_equipment: bool = str(item_resource.get("item_kind")) == "equipment"
 	# 是否为强化石；当前唯一可锻造资源类型。
 	var is_stone: bool = str(item_resource.get("item_kind")) == "enhancement_stone"
-	return is_weapon or is_stone
+	return is_weapon or is_equipment or is_stone
 
 
 func _drop_data(_at_position: Vector2, data: Variant) -> void:

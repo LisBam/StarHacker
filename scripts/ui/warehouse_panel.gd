@@ -619,6 +619,12 @@ func _clear_stone_attribute_filter() -> void:
 func _refresh_stone_attribute_filter_display() -> void:
 	_stone_attribute_option.set_item_text(0, "强化筛选（%d）" % _stone_attribute_filter.size())
 	_stone_attribute_option.select(0)
+	# 勾选状态同步；切回摘要项后重新按当前筛选集合绘制复选框，确保玩家能看到已选择的属性方向。
+	for item_index in range(1, _stone_attribute_option.item_count):
+		# 当前筛选键；分隔项没有筛选元数据，应保持不可勾选状态。
+		var filter_key: String = str(_stone_attribute_option.get_item_metadata(item_index))
+		if not filter_key.is_empty():
+			_stone_attribute_option.get_popup().set_item_checked(item_index, filter_key in _stone_attribute_filter)
 	if _stone_attribute_clear_button != null:
 		_stone_attribute_clear_button.disabled = _stone_attribute_filter.is_empty()
 

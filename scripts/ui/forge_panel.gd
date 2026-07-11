@@ -776,6 +776,12 @@ func _refresh_stone_attribute_filter_display() -> void:
 	# 下拉框固定选中摘要项；具体已选条件通过弹出菜单勾选状态查看，避免单选标题覆盖多选结果。
 	_stone_attribute_option.set_item_text(0, "强化筛选（%d）" % _stone_attribute_filter.size())
 	_stone_attribute_option.select(0)
+	# 勾选状态同步；OptionButton 切回摘要项时会刷新弹出菜单选中状态，因此必须在 select 之后按筛选集合重新写入复选框。
+	for item_index in range(1, _stone_attribute_option.item_count):
+		# 当前筛选键；分隔项元数据为空，不参与勾选状态同步。
+		var filter_key: String = str(_stone_attribute_option.get_item_metadata(item_index))
+		if not filter_key.is_empty():
+			_stone_attribute_option.get_popup().set_item_checked(item_index, filter_key in _stone_attribute_filter)
 	if _stone_attribute_clear_button != null:
 		_stone_attribute_clear_button.disabled = _stone_attribute_filter.is_empty()
 

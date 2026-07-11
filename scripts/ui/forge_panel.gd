@@ -701,7 +701,7 @@ func _on_forge_pressed() -> void:
 		return
 	_status_label.text = "锻造完成"
 	_refresh_all()
-	_result_dialog.call("present", forge_result)
+	_result_dialog.call("present_result", forge_result)
 
 
 func _play_forge_animation() -> void:

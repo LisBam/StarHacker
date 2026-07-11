@@ -4,6 +4,7 @@ class_name EquipmentData
 ## 装备数据资源描述头部、躯干、腿部和脚部装备的耐久与战斗属性。
 ## 所有数值通过统一有效属性接口读取，强化只累计百分比而不修改基础字段。
 ## 公式分类补充：暴击率、暴击伤害和闪避率累计直接百分点，其余属性累计乘算比例，基础字段仍保持不变。
+## 装备强化范围补充：暴击率与暴击伤害不再接受装备强化词条，仅保留旧资源基础字段读取兼容；闪避率继续使用加算百分点。
 
 ## 物品类型；固定为 equipment，供库存、装备槽和存档识别。
 @export var item_kind: String = "equipment"
@@ -46,19 +47,21 @@ class_name EquipmentData
 @export var enhancement_modifiers: Dictionary = {}
 
 ## 装备通用强化属性；所有部位均可应用。
-const COMMON_ENHANCEMENT_STATS: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance", "critical_chance", "critical_damage"]
+const COMMON_ENHANCEMENT_STATS: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance"]
 ## 脚部专属强化属性；其他部位不会消费该词条。
 const FEET_ENHANCEMENT_STATS: Array[String] = ["move_speed"]
 ## 头部专属强化属性；其他部位不会消费视野词条。
 const HEAD_ENHANCEMENT_STATS: Array[String] = ["vision_range"]
+## 仅基础装备可提供的属性；暴击率与暴击伤害可以保留资源基础配置，但装备强化石不会生成或应用对应词条。
+const BASE_ONLY_STATS: Array[String] = ["critical_chance", "critical_damage"]
 
 
 func get_base_stat(stat_name: String) -> float:
-	return float(get(stat_name)) if _is_stat_supported(stat_name) else 0.0
+	return float(get(stat_name)) if _is_stat_available(stat_name) else 0.0
 
 
 func get_enhancement_ratio(stat_name: String) -> float:
-	return float(enhancement_modifiers.get(stat_name, 0.0))
+	return float(enhancement_modifiers.get(stat_name, 0.0)) if _is_stat_supported(stat_name) else 0.0
 
 
 func get_maximum_durability() -> float:
@@ -115,8 +118,9 @@ func apply_enhancement(modifiers: Dictionary) -> bool:
 func get_effective_sell_price() -> int:
 	# 强化售价倍率；所有装备属性增加均提高售价，减少均降低售价，最低保留 10%。
 	var modifier_total: float = 0.0
-	for raw_ratio in enhancement_modifiers.values():
-		modifier_total += float(raw_ratio)
+	for raw_stat_name in enhancement_modifiers.keys():
+		if _is_stat_supported(str(raw_stat_name)):
+			modifier_total += float(enhancement_modifiers.get(raw_stat_name, 0.0))
 	# 耐久售价倍率；零耐久保留满耐久有效售价的 10%。
 	var durability_ratio: float = clampf(current_durability / get_maximum_durability(), 0.0, 1.0)
 	return maxi(roundi(float(sell_price) * maxf(1.0 + modifier_total, 0.1) * lerpf(0.1, 1.0, durability_ratio)), 1) if sell_price > 0 else 0
@@ -137,3 +141,8 @@ func set_current_durability(value: float) -> void:
 
 func _is_stat_supported(stat_name: String) -> bool:
 	return stat_name in COMMON_ENHANCEMENT_STATS or (equipment_slot == "feet" and stat_name in FEET_ENHANCEMENT_STATS) or (equipment_slot == "head" and stat_name in HEAD_ENHANCEMENT_STATS)
+
+
+func _is_stat_available(stat_name: String) -> bool:
+	# 可读取属性；包含强化支持属性和仅允许模板配置的暴击属性，避免移除强化能力时破坏既有装备基础数值。
+	return _is_stat_supported(stat_name) or stat_name in BASE_ONLY_STATS

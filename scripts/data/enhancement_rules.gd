@@ -18,6 +18,7 @@ const MAGNITUDE_GROUP_PRIMARY: String = "primary"
 ## 二级乘算属性组标识；用于防御力、能量消耗、扩散、坐力、冲击力和回血的独立幅度配置。
 const MAGNITUDE_GROUP_SECONDARY: String = "secondary"
 ## 三级乘算属性组标识；用于弹体速度、射程、判定时长、移速和耐久值的独立幅度配置。
+## 属性名称补充：max_durability 的现行玩家可见名称统一为“耐久”，含义是改变武器或装备耐久上限。
 const MAGNITUDE_GROUP_TERTIARY: String = "tertiary"
 ## 低级强化石稳定标识；用于随机权重、存档和堆叠签名，不应在运行时修改。
 const QUALITY_LOW: String = "low"
@@ -161,9 +162,9 @@ const STAT_KEYS: Array[String] = [
 	"vision_range",
 ]
 ## 武器强化石属性池；只包含武器能够应用的属性。
-const WEAPON_STAT_KEYS: Array[String] = ["damage", "cooldown", "energy_cost", "projectile_speed", "bullet_range", "spread_degrees", "recoil_force", "front_recoil_force", "impact_force", "melee_active_duration", "critical_chance", "critical_damage"]
+const WEAPON_STAT_KEYS: Array[String] = ["damage", "cooldown", "energy_cost", "projectile_speed", "bullet_range", "spread_degrees", "recoil_force", "front_recoil_force", "impact_force", "melee_active_duration", "critical_chance", "critical_damage", "max_durability"]
 ## 装备强化石属性池；移速仅脚部可应用，视野仅头部可应用。
-const EQUIPMENT_STAT_KEYS: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance", "move_speed", "vision_range", "critical_chance", "critical_damage"]
+const EQUIPMENT_STAT_KEYS: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance", "move_speed", "vision_range"]
 ## 属性中文名称；键为统一属性名，值用于强化石、搜索、筛选和武器详情。
 const STAT_LABELS: Dictionary = {
 	"damage": "伤害",
@@ -178,7 +179,7 @@ const STAT_LABELS: Dictionary = {
 	"melee_active_duration": "判定时长",
 	"critical_chance": "暴击率",
 	"critical_damage": "暴击伤害",
-	"max_durability": "耐久值",
+	"max_durability": "耐久",
 	"attack_power": "攻击力",
 	"defense_power": "防御力",
 	"max_health": "最大生命值",

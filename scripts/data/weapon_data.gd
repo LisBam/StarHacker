@@ -71,7 +71,7 @@ const MINIMUM_DURABILITY_SELL_PRICE_MULTIPLIER: float = 0.1
 ## 冷却和判定时长最小有效值；默认 0.01 秒，防止负强化导致除零或无限攻击。
 const MINIMUM_DURATION_VALUE: float = 0.01
 ## 可应用于所有武器的统一强化属性；新增通用战斗字段时应同步详情格式化器。
-const COMMON_ENHANCEMENT_STATS: Array[String] = ["damage", "cooldown", "energy_cost", "recoil_force", "front_recoil_force", "impact_force", "critical_chance", "critical_damage"]
+const COMMON_ENHANCEMENT_STATS: Array[String] = ["damage", "cooldown", "energy_cost", "recoil_force", "front_recoil_force", "impact_force", "critical_chance", "critical_damage", "max_durability"]
 ## 远程武器专属强化属性；只允许远程武器消费包含这些字段的强化石效果。
 const RANGED_ENHANCEMENT_STATS: Array[String] = ["projectile_speed", "bullet_range", "spread_degrees"]
 ## 近战武器专属强化属性；只允许近战武器消费包含这些字段的强化石效果。
@@ -88,7 +88,8 @@ func is_melee() -> bool:
 
 func get_maximum_durability() -> float:
 	# 武器当前不生成耐久上限词条，统一接口返回模板上限，供锻造、修复和 UI 与装备共用读取方式。
-	return maxf(max_durability, 1.0)
+	# 耐久强化补充：现行武器强化石允许改变耐久上限，因此统一返回乘算词条结算后的有效值。
+	return maxf(get_effective_stat("max_durability"), 1.0)
 
 
 func get_durability_ratio() -> float:
@@ -195,6 +196,9 @@ func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
 		var accumulated_ratio: float = float(enhancement_modifiers.get(stat_name, 0.0)) + modifier_ratio
 		# 累计精度补充；0.001 可保存加算属性的 0.1 个百分点，同时兼容乘算属性的整数百分比。
 		enhancement_modifiers[stat_name] = snappedf(accumulated_ratio, EnhancementRules.MODIFIER_VALUE_PRECISION)
+		if stat_name == "max_durability":
+			# 当前耐久同步；耐久上限降低时限制现值，上限提高时不免费补充新增耐久。
+			set_current_durability(current_durability)
 		# 强化后数值；已应用属性下限保护，可以直接交给弹窗和战斗组件使用。
 		var after_value: float = get_effective_stat(stat_name)
 		# 单条变化明细；保留属性名、百分比和基础/前后数值，避免 UI 重新计算造成误差。

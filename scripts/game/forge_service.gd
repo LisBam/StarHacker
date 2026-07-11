@@ -181,6 +181,7 @@ func execute_forge(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 				(combined_result["detrimental_changes"] as Array).append_array(stone_result.get("detrimental_changes", []) as Array)
 				combined_result["success"] = true
 	# 实际锻造后耐久；耐久值词条可能改变装备上限并限制当前耐久，结果弹窗必须读取最终资源状态。
+	# 名称与目标补充：该词条现统一显示为“耐久”，并可改变武器或装备的有效耐久上限。
 	combined_result["durability_after"] = maxf(float(main_weapon.get("current_durability")), 0.0)
 	combined_result["sell_price_after"] = int(main_weapon.call("get_effective_sell_price")) if main_weapon.has_method("get_effective_sell_price") else sell_price_before
 	_global_inventory.call("notify_weapon_runtime_state_changed", main_weapon)

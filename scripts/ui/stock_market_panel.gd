@@ -22,6 +22,8 @@ const CARD_SIZE: Vector2 = Vector2(160.0, 72.0)
 @export var panel_minimum_size: Vector2 = Vector2(1040.0, 620.0)
 ## 事件提示显示时长；默认 3 秒，结束后线性淡出。
 @export_range(0.5, 10.0, 0.1) var event_message_duration_seconds: float = 3.0
+## 股票二次确认窗口高度；默认 270 像素，稳定容纳七行实时成交信息并避免首次自动布局异常，运行时无需动态修改。
+@export_range(220, 420, 1) var trade_confirmation_dialog_height: int = 270
 
 ## 股市服务；提供行情快照、报价和交易请求，缺失时面板保留关闭能力并禁用交易。
 var _stock_market_service: Node
@@ -378,7 +380,7 @@ func _refresh_selected_stock() -> void:
 	var permanent_coins: int = int(_global_inventory.call("get_coins")) if _global_inventory != null else 0
 	# 当前证券币余额；支持两位小数，是股票买卖的唯一结算货币。
 	var securities_balance: float = float(_stock_market_service.call("get_securities_balance")) if _stock_market_service.has_method("get_securities_balance") else 0.0
-	_coins_label.text = "永久金币：%d\n证券币：%.2f" % [permanent_coins, securities_balance]
+	_coins_label.text = "金币：%d\n证券币：%.2f" % [permanent_coins, securities_balance]
 	# 充值按钮；按名称读取交易区动态控件，缺失时不影响核心行情显示。
 	if _deposit_button != null:
 		_deposit_button.disabled = permanent_coins <= 0
@@ -484,7 +486,7 @@ func _on_securities_deposit_pressed() -> void:
 	# 当前可充值金币；永久金币只支持整数，因此输入金额天然满足 1:1 整数兑换要求。
 	var maximum_amount: int = int(_global_inventory.call("get_coins"))
 	if maximum_amount <= 0:
-		_show_event_banner("当前没有可充值的永久金币")
+		_show_event_banner("当前没有可充值的金币")
 		return
 	_securities_transfer_dialog.call("present_deposit", maximum_amount)
 
@@ -544,8 +546,7 @@ func _on_trade_quantity_confirmed(quantity: int) -> void:
 	var action_name: String = "买入" if _pending_trade_type == "buy" else "卖出"
 	# 确认正文；完整列出股票、数量、实时单价、手续费、金额和支付状态。
 	var message: String = _build_trade_confirmation_message(snapshot, quote)
-	_confirmation_dialog.call("present", "确认%s" % action_name, message, "确认%s" % action_name, "取消", 480)
-	_confirmation_dialog.call("update_confirmation_message", message, bool(quote.get("executable", false)))
+	_confirmation_dialog.call("present", "确认%s" % action_name, message, "确认%s" % action_name, "取消", 480, trade_confirmation_dialog_height, bool(quote.get("executable", false)))
 
 
 func _on_trade_confirmed() -> void:

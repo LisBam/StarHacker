@@ -110,6 +110,11 @@ func get_effective_sell_price() -> int:
 	return maxi(roundi(float(sell_price) * maxf(1.0 + modifier_total, 0.1) * lerpf(0.1, 1.0, durability_ratio)), 1) if sell_price > 0 else 0
 
 
+func get_durability_ratio() -> float:
+	# 当前耐久比例；与 WeaponData 使用同一计算规则，供耐久条、售价和通用 UI 读取稳定的 0 到 1 数值。
+	return clampf(current_durability / maxf(max_durability, 1.0), 0.0, 1.0)
+
+
 func is_broken() -> bool:
 	return current_durability <= 0.0 or is_zero_approx(current_durability)
 

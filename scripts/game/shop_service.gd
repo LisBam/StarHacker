@@ -84,6 +84,8 @@ var _manual_refresh_count: int = 0
 var _entry_sequence: int = 0
 ## 商店随机数生成器；启动时随机化，集中负责商品、价格、耐久与二手强化状态。
 var _random: RandomNumberGenerator = RandomNumberGenerator.new()
+## 已加载商店存档是否修复过异常二手耐久；默认 false，修复后在启动阶段立即回写，避免下次启动再次随机。
+var _loaded_state_was_repaired: bool = false
 
 
 func _ready() -> void:
@@ -93,6 +95,8 @@ func _ready() -> void:
 		_global_inventory.connect("combat_failure_losses_recorded", Callable(self, "_on_combat_failure_losses_recorded"))
 	if not _load_state():
 		_refresh_normal_stock(true)
+	elif _loaded_state_was_repaired:
+		_save_state()
 	ensure_automatic_refresh()
 
 
@@ -268,23 +272,40 @@ func _create_random_equipment() -> Resource:
 func _apply_second_hand_state(weapon_resource: Resource) -> void:
 	if weapon_resource == null or not weapon_resource.has_method("set_current_durability"):
 		return
-	# 耐久消耗比例；限制上下限后闭区间随机，默认消耗 10% 至 90%。
-	var minimum_consumption: float = clampf(minf(second_hand_durability_consumption_minimum, second_hand_durability_consumption_maximum), 0.0, 1.0)
-	# 最大消耗比例；与最小值共同决定二手枪械剩余耐久范围。
-	var maximum_consumption: float = clampf(maxf(second_hand_durability_consumption_minimum, second_hand_durability_consumption_maximum), 0.0, 1.0)
-	# 本次消耗比例；先保存随机结果，待历史强化生成完毕后再写入最终商品实例。
-	var consumed_ratio: float = _random.randf_range(minimum_consumption, maximum_consumption)
 	# 历史强化石数量；使用同一个累计概率随机值，保证至少 N 颗概率严格单调且第 10 颗为 1%。
 	var used_stone_count: int = _roll_second_hand_used_stone_count()
 	for _stone_index in range(used_stone_count):
 		_apply_random_compatible_enhancement(weapon_resource)
-	# 最大耐久；历史强化完成后读取商品自身耐久上限，武器与装备都按同一比例生成独立随机耐久。
-	var maximum_durability: float = maxf(float(weapon_resource.get("max_durability")), 1.0)
-	# 当前耐久；二手商品固定消耗配置区间内的耐久，不会因后续历史强化流程被覆盖为模板满值。
-	weapon_resource.call("set_current_durability", maximum_durability * (1.0 - consumed_ratio))
+	_apply_random_second_hand_durability(weapon_resource)
 	# 运行时商品元数据；Resource 未声明该字段时不能直接 set，因此由商品条目读取返回值单独保存。
 	weapon_resource.set_meta("shop_second_hand", true)
 	weapon_resource.set_meta("shop_used_stone_count", used_stone_count)
+
+
+func _apply_random_second_hand_durability(item_resource: Resource) -> void:
+	if item_resource == null or not item_resource.has_method("set_current_durability"):
+		return
+	# 耐久消耗比例下限；限制配置到 0 至 1，并允许检查器中上下限顺序颠倒。
+	var minimum_consumption: float = clampf(minf(second_hand_durability_consumption_minimum, second_hand_durability_consumption_maximum), 0.0, 1.0)
+	# 耐久消耗比例上限；与下限共同决定二手商品随机剩余耐久区间。
+	var maximum_consumption: float = clampf(maxf(second_hand_durability_consumption_minimum, second_hand_durability_consumption_maximum), 0.0, 1.0)
+	# 本次消耗比例；默认 10% 至 90%，因此最终剩余耐久为最大值的 10% 至 90%。
+	var consumed_ratio: float = _random.randf_range(minimum_consumption, maximum_consumption)
+	# 最大耐久；武器与装备读取各自模板上限，保证不同耐久规格都按比例随机。
+	var maximum_durability: float = maxf(float(item_resource.get("max_durability")), 1.0)
+	item_resource.call("set_current_durability", maximum_durability * (1.0 - consumed_ratio))
+
+
+func _repair_invalid_second_hand_durability(item_resource: Resource, is_second_hand: bool) -> void:
+	if not is_second_hand or item_resource == null or not item_resource.has_method("set_current_durability"):
+		return
+	# 当前耐久；旧商店存档可能已经带二手标记，但仍保存模板满耐久，需要在加载时补齐随机状态。
+	var current_durability: float = maxf(float(item_resource.get("current_durability")), 0.0)
+	# 最大耐久；只修复达到满耐久的异常二手商品，正常随机商品保持原值并继续跨刷新周期稳定保存。
+	var maximum_durability: float = maxf(float(item_resource.get("max_durability")), 1.0)
+	if current_durability >= maximum_durability or is_equal_approx(current_durability, maximum_durability):
+		_apply_random_second_hand_durability(item_resource)
+		_loaded_state_was_repaired = true
 
 
 func _roll_second_hand_used_stone_count() -> int:
@@ -422,6 +443,7 @@ func _save_state() -> void:
 
 
 func _load_state() -> bool:
+	_loaded_state_was_repaired = false
 	if _global_inventory == null or not FileAccess.file_exists(SAVE_PATH):
 		return false
 	# 商店存档文件；读取失败或 JSON 损坏时回退全新刷新，不影响玩家主库存存档。
@@ -483,12 +505,15 @@ func _deserialize_stock_entry(serialized_entry: Dictionary) -> Dictionary:
 	var item_resource: Resource = restored_snapshot.get("resource") as Resource
 	if item_resource == null:
 		return {}
+	# 二手状态；独立读取后用于修复旧存档中二手商品仍为满耐久的问题。
+	var is_second_hand: bool = bool(serialized_entry.get("second_hand", false))
+	_repair_invalid_second_hand_durability(item_resource, is_second_hand)
 	return {
 		"stock_id": str(serialized_entry.get("stock_id", _create_unique_id("stock"))),
 		"resource": item_resource,
 		"quantity": maxi(int(restored_snapshot.get("quantity", 1)), 1),
 		"price": maxi(int(serialized_entry.get("price", 0)), 0),
 		"price_multiplier": float(serialized_entry.get("price_multiplier", 1.0)),
-		"second_hand": bool(serialized_entry.get("second_hand", false)),
+		"second_hand": is_second_hand,
 		"used_stone_count": maxi(int(serialized_entry.get("used_stone_count", 0)), 0),
 	}

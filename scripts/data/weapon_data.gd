@@ -20,12 +20,12 @@ class_name WeaponData
 @export var icon_text: String = "?"
 ## 局外出售价格；取值大于等于 0，默认 0 表示不可出售，只在永久仓库出售时兑换为局外金币且运行时通常不修改。
 @export_range(0, 999999, 1) var sell_price: int = 0
-## 武器最大耐久；取值大于 0，默认 100，运行时通常不修改，调整会影响耐久比例、读条与价格折损速度。
-## 耐久上限配置补充：当前默认值已统一提升为 1000.0，并保留 0.1 浮点精度供后续特殊武器扩展。
-@export_range(1.0, 999999.0, 0.1, "or_greater") var max_durability: float = 1000.0
-## 武器当前耐久；取值会限制在 0 到最大耐久，默认 100，归零后武器保留但不可继续使用。
-## 当前耐久配置补充：新武器默认以 1000.0 满耐久创建，旧 100 上限存档会按比例迁移。
-@export_range(0.0, 999999.0, 0.1) var current_durability: float = 1000.0
+## 武器最大耐久；取值大于 0，默认 500.0，运行时通常不修改，调整会影响耐久比例、读条与价格折损速度。
+## 耐久上限保留 0.1 浮点精度供特殊武器扩展；已存档武器会按原耐久比例迁移到当前基础上限。
+@export_range(1.0, 999999.0, 0.1, "or_greater") var max_durability: float = 500.0
+## 武器当前耐久；取值会限制在 0 到最大耐久，默认 500.0 表示新武器以满耐久创建，归零后武器保留但不可继续使用。
+## 该字段允许运行时因攻击、修复与强化变化，不应绕过统一耐久接口直接写入。
+@export_range(0.0, 999999.0, 0.1) var current_durability: float = 500.0
 ## 每次成功使用消耗的耐久；取值大于等于 0，默认 1，远程射击和近战挥击成功后各扣除一次。
 ## 独立消耗配置补充：默认参考值为 1.0，每把武器资源可覆盖为不同浮点消耗。
 ## 固定消耗规则补充：武器不再暴露独立耐久消耗属性，所有成功使用统一扣除 1 点且运行时不可按武器修改。
@@ -194,7 +194,7 @@ func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
 		# 品质随机补充：正常强化流程传入使用瞬间生成的 5% 至 60% 实际比例，固定 10% 仅保留给旧方向值直接调用兼容。
 		# 独立区间补充：现行乘算幅度最高 55%，加算幅度最高 9.0 个百分点，具体范围由属性和品质共同决定。
 		var accumulated_ratio: float = float(enhancement_modifiers.get(stat_name, 0.0)) + modifier_ratio
-		# 累计精度补充；0.001 可保存加算属性的 0.1 个百分点，同时兼容乘算属性的整数百分比。
+		# 累计精度补充；0.001 可保存加算属性的 0.1 个百分点，同时兼容乘算属性的 0.1% 幅度。
 		enhancement_modifiers[stat_name] = snappedf(accumulated_ratio, EnhancementRules.MODIFIER_VALUE_PRECISION)
 		if stat_name == "max_durability":
 			# 当前耐久同步；耐久上限降低时限制现值，上限提高时不免费补充新增耐久。

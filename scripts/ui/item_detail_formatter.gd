@@ -107,7 +107,7 @@ static func _append_equipment_lines(detail_lines: Array[String], item_resource: 
 	# 当前耐久；取值限制在 0 到最大耐久，与武器详情使用相同的“当前 / 最大”格式。
 	var current_durability: float = maxf(float(item_resource.get("current_durability")), 0.0)
 	# 最大耐久；取值至少为 1，确保装备详情始终明确显示耐久上限。
-	var max_durability: float = maxf(float(item_resource.get("max_durability")), 1.0)
+	var max_durability: float = float(item_resource.call("get_maximum_durability")) if item_resource.has_method("get_maximum_durability") else maxf(float(item_resource.get("max_durability")), 1.0)
 	detail_lines.append("耐久：%.1f / %.1f" % [current_durability, max_durability])
 	if item_resource.has_method("is_broken") and bool(item_resource.call("is_broken")):
 		detail_lines.append("[color=%s]状态：损坏，全部装备属性失效[/color]" % NEGATIVE_COLOR)
@@ -204,11 +204,10 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 	# 当前耐久；取值限制在 0 到最大耐久，用于详情显示与损坏状态说明。
 	var current_durability: float = maxf(float(item_resource.get("current_durability")), 0.0)
 	# 最大耐久；取值至少为 1，避免旧资源字段缺失造成无效比例。
-	var max_durability: float = maxf(float(item_resource.get("max_durability")), 1.0)
+	var max_durability: float = float(item_resource.call("get_maximum_durability")) if item_resource.has_method("get_maximum_durability") else maxf(float(item_resource.get("max_durability")), 1.0)
 	# 单次耐久消耗；每把武器独立配置，成功射击或近战使用时按该浮点数扣除。
-	var durability_cost_per_use: float = maxf(float(item_resource.get("durability_cost_per_use")), 0.0)
+	# 固定消耗显示补充：所有武器统一消耗 1 点，因此详情不再展示没有区分价值的“耐久消耗”字段。
 	detail_lines.append("耐久：%.1f / %.1f" % [current_durability, max_durability])
-	detail_lines.append("耐久消耗：%.1f / 次" % durability_cost_per_use)
 	if item_resource.has_method("is_broken") and bool(item_resource.call("is_broken")):
 		detail_lines.append("[color=%s]状态：损坏，无法使用[/color]" % NEGATIVE_COLOR)
 	# 武器类型；决定伤害、冷却及远近战专属属性的基础字段映射。

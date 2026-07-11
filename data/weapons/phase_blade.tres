@@ -10,7 +10,6 @@ weapon_type = "melee"
 description = "短距离爆发近战武器。"
 icon_text = "B"
 sell_price = 100
-durability_cost_per_use = 1.5
 energy_cost = 14.0
 front_recoil_force = 140.0
 impact_force = 360.0

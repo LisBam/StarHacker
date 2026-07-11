@@ -513,7 +513,9 @@ func _apply_repair_kit(repair_kit_resource: Resource, source_location: String, w
 func _can_repair_target(item_resource: Resource) -> bool:
 	if item_resource == null or (str(item_resource.get("weapon_type")) not in ["ranged", "melee"] and str(item_resource.get("item_kind")) != "equipment"):
 		return false
-	return float(item_resource.get("current_durability")) < maxf(float(item_resource.get("max_durability")), 1.0)
+	# 最大耐久；装备优先读取耐久强化后的有效上限，旧资源回退导出字段。
+	var maximum_durability: float = float(item_resource.call("get_maximum_durability")) if item_resource.has_method("get_maximum_durability") else maxf(float(item_resource.get("max_durability")), 1.0)
+	return float(item_resource.get("current_durability")) < maximum_durability
 
 
 func _cancel_repair_kit_use() -> void:

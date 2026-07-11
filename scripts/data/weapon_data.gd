@@ -28,7 +28,8 @@ class_name WeaponData
 @export_range(0.0, 999999.0, 0.1) var current_durability: float = 1000.0
 ## 每次成功使用消耗的耐久；取值大于等于 0，默认 1，远程射击和近战挥击成功后各扣除一次。
 ## 独立消耗配置补充：默认参考值为 1.0，每把武器资源可覆盖为不同浮点消耗。
-@export_range(0.0, 999999.0, 0.1, "or_greater") var durability_cost_per_use: float = 1.0
+## 固定消耗规则补充：武器不再暴露独立耐久消耗属性，所有成功使用统一扣除 1 点且运行时不可按武器修改。
+const FIXED_DURABILITY_COST_PER_USE: float = 1.0
 ## 每次成功使用武器消耗的能量；取值建议大于等于 0，默认 0 表示免费攻击，修改会影响玩家能量消耗节奏。
 @export_range(0.0, 9999.0, 0.1, "or_greater") var energy_cost: float = 0.0
 ## 远程武器使用的弹体场景；默认空表示不能发射，必须实例化为 Node2D，修改会影响远程攻击生成对象。
@@ -60,6 +61,7 @@ class_name WeaponData
 ## 近战命中框激活时长；取值应大于 0，默认 0.12 秒，修改会影响近战判定窗口。
 @export_range(0.01, 2.0, 0.01) var melee_active_duration: float = 0.12
 ## 累计强化百分比词典；键使用 damage、cooldown 等统一属性名，值为相对基础值的小数比例，运行时由强化石永久累加。
+## 加算属性补充：暴击率与暴击伤害的累计值表示直接百分点偏移，其余武器属性仍表示相对基础值比例。
 @export var enhancement_modifiers: Dictionary = {}
 
 ## 强化后售价最低倍率；默认 0.1，防止大量负词条把售价降为负数，运行时通常不修改。
@@ -84,8 +86,13 @@ func is_melee() -> bool:
 	return weapon_type == "melee"
 
 
+func get_maximum_durability() -> float:
+	# 武器当前不生成耐久上限词条，统一接口返回模板上限，供锻造、修复和 UI 与装备共用读取方式。
+	return maxf(max_durability, 1.0)
+
+
 func get_durability_ratio() -> float:
-	return clampf(current_durability / maxf(max_durability, 1.0), 0.0, 1.0)
+	return clampf(current_durability / get_maximum_durability(), 0.0, 1.0)
 
 
 func is_broken() -> bool:
@@ -97,14 +104,15 @@ func can_be_used() -> bool:
 
 
 func set_current_durability(value: float) -> void:
-	current_durability = clampf(value, 0.0, maxf(max_durability, 1.0))
+	current_durability = clampf(value, 0.0, get_maximum_durability())
 
 
-func consume_durability(amount: float = -1.0) -> bool:
+func consume_durability() -> bool:
 	if is_broken():
 		return false
 	# 实际消耗量；负数使用武器自身单次消耗配置，显式传值用于以后技能或特殊弹药扩展。
-	var resolved_amount: float = durability_cost_per_use if amount < 0.0 else amount
+	# 固定规则补充：现行接口不再接收外部消耗量，所有武器每次成功使用只扣除固定 1 点耐久。
+	var resolved_amount: float = FIXED_DURABILITY_COST_PER_USE
 	if resolved_amount <= 0.0:
 		return false
 	# 消耗前耐久；用于判断本次调用是否实际改变了资源状态。
@@ -130,17 +138,17 @@ func get_enhancement_ratio(stat_name: String) -> float:
 
 
 func get_enhancement_value(stat_name: String) -> float:
-	return get_base_stat(stat_name) * get_enhancement_ratio(stat_name)
+	# 公式分类补充；乘算属性返回基础值换算后的差值，加算属性直接返回累计百分点对最终值造成的真实差值。
+	return get_effective_stat(stat_name) - get_base_stat(stat_name)
 
 
 func get_effective_stat(stat_name: String) -> float:
 	# 有效属性值；基础值乘以累计百分比，所有攻击与玩家反馈组件应通过该接口读取。
-	var effective_value: float = get_base_stat(stat_name) * (1.0 + get_enhancement_ratio(stat_name))
+	# 分类公式补充；暴击率与暴击伤害改为直接加算百分点，其余武器属性继续使用基础值乘算。
+	var effective_value: float = EnhancementRules.calculate_effective_stat(get_base_stat(stat_name), _resolve_canonical_stat_name(stat_name), get_enhancement_ratio(stat_name))
 	# 统一属性名；持续时间保持正数，其余不能为负，避免异常强化破坏战斗组件。
-	var canonical_stat_name: String = _resolve_canonical_stat_name(stat_name)
-	if canonical_stat_name in ["cooldown", "melee_active_duration"]:
-		return maxf(effective_value, MINIMUM_DURATION_VALUE)
-	return maxf(effective_value, 0.0)
+	# 边界规则补充；具体上下限已集中到 EnhancementRules，避免武器与装备产生不同解释。
+	return effective_value
 
 
 func can_apply_enhancement(modifiers: Dictionary) -> bool:
@@ -183,14 +191,17 @@ func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
 		var before_value: float = get_effective_stat(stat_name)
 		# 新累计比例；每条词条按固定 10% 步长累计，强化允许正负相抵且基础属性始终保持不变。
 		# 品质随机补充：正常强化流程传入使用瞬间生成的 5% 至 60% 实际比例，固定 10% 仅保留给旧方向值直接调用兼容。
+		# 独立区间补充：现行乘算幅度最高 55%，加算幅度最高 9.0 个百分点，具体范围由属性和品质共同决定。
 		var accumulated_ratio: float = float(enhancement_modifiers.get(stat_name, 0.0)) + modifier_ratio
-		enhancement_modifiers[stat_name] = snappedf(accumulated_ratio, 0.01)
+		# 累计精度补充；0.001 可保存加算属性的 0.1 个百分点，同时兼容乘算属性的整数百分比。
+		enhancement_modifiers[stat_name] = snappedf(accumulated_ratio, EnhancementRules.MODIFIER_VALUE_PRECISION)
 		# 强化后数值；已应用属性下限保护，可以直接交给弹窗和战斗组件使用。
 		var after_value: float = get_effective_stat(stat_name)
 		# 单条变化明细；保留属性名、百分比和基础/前后数值，避免 UI 重新计算造成误差。
 		var change_entry: Dictionary = {
 			"stat_name": stat_name,
 			"modifier_ratio": modifier_ratio,
+			"calculation_mode": EnhancementRules.get_calculation_mode(stat_name),
 			"base_value": base_value,
 			"before_value": before_value,
 			"change_value": after_value - before_value,

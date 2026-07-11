@@ -74,7 +74,7 @@ func _get_durability_ratio() -> float:
 	if _weapon_resource.has_method("get_durability_ratio"):
 		return clampf(float(_weapon_resource.call("get_durability_ratio")), 0.0, 1.0)
 	# 属性兼容比例；自定义耐久物品即使没有比例方法，也可直接通过当前值与最大值使用标准耐久条。
-	var maximum_durability: float = maxf(float(_weapon_resource.get("max_durability")), 0.0)
+	var maximum_durability: float = float(_weapon_resource.call("get_maximum_durability")) if _weapon_resource.has_method("get_maximum_durability") else maxf(float(_weapon_resource.get("max_durability")), 0.0)
 	if maximum_durability <= 0.0:
 		return 0.0
 	return clampf(float(_weapon_resource.get("current_durability")) / maximum_durability, 0.0, 1.0)

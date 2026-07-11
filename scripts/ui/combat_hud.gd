@@ -1764,7 +1764,7 @@ func _can_pending_combat_repair_target(weapon_resource: Resource) -> bool:
 	# 当前耐久；只有存在耐久缺口的武器才应被绿色高亮为修复包目标。
 	var current_durability: float = maxf(float(weapon_resource.get("current_durability")), 0.0)
 	# 最大耐久；至少为 1，避免旧资源数据异常导致比较无效。
-	var maximum_durability: float = maxf(float(weapon_resource.get("max_durability")), 1.0)
+	var maximum_durability: float = float(weapon_resource.call("get_maximum_durability")) if weapon_resource.has_method("get_maximum_durability") else maxf(float(weapon_resource.get("max_durability")), 1.0)
 	return current_durability < maximum_durability and not is_equal_approx(current_durability, maximum_durability)
 
 

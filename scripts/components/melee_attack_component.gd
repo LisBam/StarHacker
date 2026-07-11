@@ -78,7 +78,7 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	# 本次近战冲击力；取值来自武器数据，默认 0 表示只造成伤害不击退。
 	var selected_impact_force: float = _get_weapon_float(weapon_data, "impact_force", 0.0)
 	# 本次武器暴击率；默认 0，不同近战武器可配置不同初始值。
-	var selected_critical_chance: float = _get_weapon_float(weapon_data, "critical_chance", 0.0) + _get_stats_float("get_equipment_critical_chance", 0.0)
+	var selected_critical_chance: float = clampf(_get_weapon_float(weapon_data, "critical_chance", 0.0) + _get_stats_float("get_equipment_critical_chance", 0.0), 0.0, EnhancementRules.CRITICAL_CHANCE_MAXIMUM)
 	# 本次武器暴击伤害；默认 1.5 表示 150%。
 	var selected_critical_damage: float = _get_weapon_float(weapon_data, "critical_damage", 1.5) + _get_stats_float("get_equipment_critical_damage", 0.0)
 

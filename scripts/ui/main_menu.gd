@@ -20,6 +20,8 @@ const SHOP_PANEL_SCRIPT: Script = preload("res://scripts/ui/shop_panel.gd")
 const FORGE_PANEL_SCRIPT: Script = preload("res://scripts/ui/forge_panel.gd")
 ## 股市面板脚本；默认在主菜单点击炒股按钮后动态创建并组合行情与持仓服务。
 const STOCK_MARKET_PANEL_SCRIPT: Script = preload("res://scripts/ui/stock_market_panel.gd")
+## 矿场面板脚本；默认在主菜单点击矿场按钮后动态创建并读取全局矿场服务。
+const MINING_FARM_PANEL_SCRIPT: Script = preload("res://scripts/ui/mining_farm_panel.gd")
 ## 隐藏开发者菜单脚本；默认只在主菜单依次输入 LISBAM 后显示。
 const DEVELOPER_MENU_SCRIPT: Script = preload("res://scripts/ui/developer_menu.gd")
 ## 开发者模式解锁序列；默认由六个英文字母组成，输入错误会按首字母重新匹配。
@@ -45,6 +47,8 @@ const DEVELOPER_UNLOCK_SEQUENCE: String = "LISBAM"
 @onready var _forge_button: Button = %ForgeButton
 ## 炒股按钮缓存；默认位于锻造按钮右侧，点击后打开永久资产股市界面。
 @onready var _stock_market_button: Button = %StockMarketButton
+## 矿场按钮缓存；默认位于炒股按钮右侧，点击后打开常驻算力资产经营界面。
+@onready var _mining_farm_button: Button = %MiningFarmButton
 ## 设置面板缓存；默认绑定唯一名 SettingsPanel，控制主菜单设置界面的显示和隐藏。
 @onready var _settings_panel: Control = %SettingsPanel
 ## 设置内容容器缓存；默认通过场景路径绑定，用于动态挂载按键绑定面板。
@@ -94,6 +98,10 @@ var _forge_panel: Control
 var _stock_market_overlay: Control
 ## 股市面板实例；默认由 StockMarketPanel 创建，关闭后复用并由服务信号实时刷新。
 var _stock_market_panel: Control
+## 矿场全屏遮罩；默认运行时创建并隐藏，打开时阻止主菜单其他入口接收输入。
+var _mining_farm_overlay: Control
+## 矿场面板实例；关闭后复用，后台收益由独立 Autoload 服务继续低频结算。
+var _mining_farm_panel: Control
 ## 开发者菜单全屏遮罩；默认运行时创建并隐藏，解锁后阻止其他主菜单控件接收输入。
 var _developer_overlay: Control
 ## 开发者菜单实例；默认由 DeveloperMenu 脚本动态创建并在关闭后复用。
@@ -113,6 +121,7 @@ func _ready() -> void:
 	_shop_button.pressed.connect(_on_shop_button_pressed)
 	_forge_button.pressed.connect(_on_forge_button_pressed)
 	_stock_market_button.pressed.connect(_on_stock_market_button_pressed)
+	_mining_farm_button.pressed.connect(_on_mining_farm_button_pressed)
 	_master_volume_slider.value_changed.connect(_on_master_volume_slider_value_changed)
 	_settings_back_button.pressed.connect(_on_settings_back_button_pressed)
 	_build_key_binding_navigation()
@@ -121,6 +130,7 @@ func _ready() -> void:
 	_build_shop_overlay()
 	_build_forge_overlay()
 	_build_stock_market_overlay()
+	_build_mining_farm_overlay()
 	_build_developer_overlay()
 	_settings_panel.visible = false
 	_show_key_binding_page(false)
@@ -203,6 +213,15 @@ func _on_stock_market_button_pressed() -> void:
 	_stock_market_overlay.visible = true
 	if _stock_market_panel != null and _stock_market_panel.has_method("set_market_display_active"):
 		_stock_market_panel.call("set_market_display_active", true)
+
+
+func _on_mining_farm_button_pressed() -> void:
+	if _mining_farm_overlay == null:
+		return
+	_settings_panel.visible = false
+	_mining_farm_overlay.visible = true
+	if _mining_farm_panel != null and _mining_farm_panel.has_method("present"):
+		_mining_farm_panel.call("present")
 
 
 func _build_warehouse_overlay() -> void:
@@ -390,6 +409,41 @@ func _build_stock_market_overlay() -> void:
 	stock_market_panel.call("set_market_display_active", false)
 
 
+func _build_mining_farm_overlay() -> void:
+	if _mining_farm_overlay != null:
+		return
+	# 矿场遮罩；覆盖完整主菜单并拦截输入，关闭面板后整体停止渲染与动效。
+	var mining_farm_overlay: Control = Control.new()
+	mining_farm_overlay.name = "MiningFarmOverlay"
+	mining_farm_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	mining_farm_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(mining_farm_overlay)
+	_mining_farm_overlay = mining_farm_overlay
+	# 矿场背景遮罩；使用与股市一致的深色透明度，使两个局外资产系统视觉并列。
+	var mining_farm_dim: ColorRect = ColorRect.new()
+	mining_farm_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	mining_farm_dim.color = Color(0.0, 0.0, 0.0, 0.68)
+	mining_farm_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	mining_farm_overlay.add_child(mining_farm_dim)
+	# 矿场面板；固定 1080×640 像素并由独立组件维护卡片、交易与动画。
+	var mining_farm_panel: Control = MINING_FARM_PANEL_SCRIPT.new() as Control
+	if mining_farm_panel == null:
+		mining_farm_overlay.visible = false
+		return
+	mining_farm_panel.anchor_left = 0.5
+	mining_farm_panel.anchor_top = 0.5
+	mining_farm_panel.anchor_right = 0.5
+	mining_farm_panel.anchor_bottom = 0.5
+	mining_farm_panel.offset_left = -540.0
+	mining_farm_panel.offset_top = -320.0
+	mining_farm_panel.offset_right = 540.0
+	mining_farm_panel.offset_bottom = 320.0
+	mining_farm_panel.connect("closed", Callable(self, "_on_mining_farm_closed"))
+	mining_farm_overlay.add_child(mining_farm_panel)
+	_mining_farm_panel = mining_farm_panel
+	mining_farm_overlay.visible = false
+
+
 func _build_developer_overlay() -> void:
 	if _developer_overlay != null:
 		return
@@ -436,6 +490,10 @@ func _open_developer_menu() -> void:
 		_stock_market_overlay.visible = false
 	if _stock_market_panel != null and _stock_market_panel.has_method("set_market_display_active"):
 		_stock_market_panel.call("set_market_display_active", false)
+	if _mining_farm_overlay != null:
+		_mining_farm_overlay.visible = false
+	if _mining_farm_panel != null and _mining_farm_panel.has_method("_close_panel"):
+		_mining_farm_panel.call("_close_panel")
 	_developer_overlay.visible = true
 
 
@@ -475,6 +533,12 @@ func _on_stock_market_closed() -> void:
 	if _stock_market_panel != null and _stock_market_panel.has_method("set_market_display_active"):
 		_stock_market_panel.call("set_market_display_active", false)
 	_stock_market_button.grab_focus()
+
+
+func _on_mining_farm_closed() -> void:
+	if _mining_farm_overlay != null:
+		_mining_farm_overlay.visible = false
+	_mining_farm_button.grab_focus()
 
 
 func _on_master_volume_slider_value_changed(value: float) -> void:

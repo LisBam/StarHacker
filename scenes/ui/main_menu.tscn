@@ -140,6 +140,20 @@ offset_bottom = -24.0
 grow_vertical = 0
 text = "炒股"
 
+[node name="MiningFarmButton" type="Button" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(170, 48)
+layout_mode = 1
+anchors_preset = -1
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 934.0
+offset_top = -72.0
+offset_right = 1104.0
+offset_bottom = -24.0
+grow_vertical = 0
+text = "矿场"
+
 [node name="SettingsPanel" type="PanelContainer" parent="."]
 unique_name_in_owner = true
 visible = false

@@ -9,7 +9,8 @@ signal event_announced(message: String)
 ## 股市全局状态存档路径；与商店状态同级独立保存，避免行情字段污染库存物品序列化结构。
 const SAVE_PATH: String = "user://stock_market_state.json"
 ## 股市状态存档版本；版本 1 保存五只股票的行情、周期、事件、行为连续性和局外运行累计值。
-const SAVE_VERSION: int = 1
+## 版本 2 补充；新增大盘、涨跌周期和随机事件的非战斗在线时长双触发进度。
+const SAVE_VERSION: int = 2
 ## 牛市状态标识；价值中枢和短期情绪默认向正方向倾斜。
 const MARKET_BULL: String = "bull"
 ## 熊市状态标识；价值中枢和短期情绪默认向负方向倾斜。
@@ -57,12 +58,20 @@ const EVENT_DEFINITIONS: Array[Dictionary] = [
 @export_range(0.01, 0.50, 0.01) var display_fluctuation_scale: float = 0.18
 ## 大盘正式结算切换周期；默认 8 局，低于 5 会明显削弱趋势感。
 @export_range(5, 30, 1) var market_cycle_settlement_count: int = 8
+## 大盘在线时长切换周期；默认 480 秒即 8 分钟，与 8 局正式结算并行且任一先达到即触发。
+@export_range(60.0, 3600.0, 1.0) var market_cycle_online_seconds: float = 480.0
 ## 涨跌停累计周期；默认每 5 次正式结算重置单股累计涨跌幅。
 @export_range(3, 20, 1) var price_limit_cycle_settlement_count: int = 5
+## 涨跌停在线时长周期；默认 300 秒即 5 分钟，与 5 局正式结算并行且任一先达到即重置周期。
+@export_range(60.0, 1800.0, 1.0) var price_limit_cycle_online_seconds: float = 300.0
 ## 随机事件最短间隔；默认 2 局，低于 2 会让事件噪音淹没行为影响。
 @export_range(2, 20, 1) var event_interval_minimum_settlements: int = 2
 ## 随机事件最长间隔；默认 6 局，必须不小于最短间隔。
 @export_range(2, 30, 1) var event_interval_maximum_settlements: int = 6
+## 随机事件最短在线间隔；默认 120 秒即 2 分钟，与正式结算间隔并行计算。
+@export_range(30.0, 1800.0, 1.0) var event_interval_minimum_online_seconds: float = 120.0
+## 随机事件最长在线间隔；默认 360 秒即 6 分钟，每次事件后重新随机目标时长。
+@export_range(30.0, 3600.0, 1.0) var event_interval_maximum_online_seconds: float = 360.0
 ## 单次正式结算涨跌幅上限；默认 15%，防止多层因素叠加产生瞬时极端价格。
 @export_range(0.01, 0.50, 0.01) var settlement_change_limit: float = 0.15
 ## 单次局外运行涨跌幅上限；默认 7.5%，等于正式结算上限的一半。
@@ -80,8 +89,20 @@ var _stock_states: Dictionary = {}
 var _market_state: String = MARKET_SIDEWAYS
 ## 已完成正式结算总数；用于大盘周期、涨跌停周期与随机事件间隔计数。
 var _settlement_count: int = 0
+## 大盘正式结算周期进度；达到 8 局时切换大盘并同步清零在线进度。
+var _market_cycle_settlement_progress: int = 0
+## 大盘非战斗在线时长进度；达到 8 分钟时切换大盘并同步清零正式结算进度。
+var _market_cycle_online_accumulated_seconds: float = 0.0
+## 涨跌停正式结算周期进度；达到 5 局时重置全部股票的累计涨跌周期起点。
+var _price_limit_cycle_settlement_progress: int = 0
+## 涨跌停非战斗在线时长进度；达到 5 分钟时重置周期并同步清零正式结算进度。
+var _price_limit_cycle_online_accumulated_seconds: float = 0.0
 ## 距离下一次随机事件的剩余正式结算数；默认启动时在 2 到 6 之间随机生成。
 var _settlements_until_event: int = 0
+## 随机事件非战斗在线累计时长；达到本轮随机目标时触发事件并同步重置正式结算倒数。
+var _event_online_accumulated_seconds: float = 0.0
+## 本轮随机事件在线目标时长；默认在 120 至 360 秒之间独立随机。
+var _event_online_target_seconds: float = 0.0
 ## 当前事件状态；空字典表示没有事件，非空时保存事件定义与剩余作用次数。
 var _active_event: Dictionary = {}
 ## 非战斗场景累计运行秒数；达到 60 秒后扣除一个周期并触发一次小幅刷新。
@@ -106,6 +127,8 @@ func _ready() -> void:
 	var state_loaded: bool = _load_state()
 	if _settlements_until_event <= 0:
 		_roll_next_event_interval()
+	if _event_online_target_seconds <= 0.0:
+		_roll_next_online_event_interval()
 	if not state_loaded:
 		_save_state()
 	if _global_inventory != null and _global_inventory.has_signal("run_state_changed"):
@@ -117,6 +140,7 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if _is_combat_run_active():
 		return
+	_update_online_time_triggers(maxf(delta, 0.0))
 	_runtime_accumulated_seconds += maxf(delta, 0.0)
 	# 有效局外刷新间隔；至少 1 秒，避免检查器异常配置造成无限循环。
 	var interval: float = maxf(runtime_refresh_interval_seconds, 1.0)
@@ -250,11 +274,13 @@ func refresh_market(refresh_source: String = REFRESH_SETTLEMENT) -> void:
 	var behavior_impacts: Dictionary = _calculate_behavior_impacts() if is_settlement else {}
 	if is_settlement:
 		_settlement_count += 1
+		_market_cycle_settlement_progress += 1
+		_price_limit_cycle_settlement_progress += 1
 		_update_market_cycles_before_refresh()
 	for stock_id in STOCK_IDS:
 		_refresh_stock(stock_id, refresh_source, float(behavior_impacts.get(stock_id, 0.0)))
 	if not is_display_refresh:
-		_consume_event_duration(is_settlement)
+		_consume_event_duration(refresh_source)
 	if is_settlement:
 		_update_behavior_streaks(behavior_impacts)
 		_settlements_until_event -= 1
@@ -275,6 +301,8 @@ func trigger_random_event() -> Dictionary:
 	definition["remaining_refreshes"] = int(definition.get("duration_refresh", 0))
 	_active_event = definition
 	_roll_next_event_interval()
+	_roll_next_online_event_interval()
+	_event_online_accumulated_seconds = 0.0
 	_save_state()
 	event_announced.emit(str(definition.get("message", "市场出现新变化")))
 	market_changed.emit()
@@ -285,6 +313,8 @@ func set_market_state(market_state: String) -> void:
 	if not market_state in [MARKET_BULL, MARKET_BEAR, MARKET_SIDEWAYS]:
 		return
 	_market_state = market_state
+	_market_cycle_settlement_progress = 0
+	_market_cycle_online_accumulated_seconds = 0.0
 	_save_state()
 	market_changed.emit()
 
@@ -334,6 +364,8 @@ func _refresh_stock(stock_id: String, refresh_source: String, player_impact: flo
 	var center: float = maxf(float(state.get("center", old_price)), 1.0)
 	# 是否正式结算刷新；决定波动倍率、中枢概率和玩家行为是否启用。
 	var is_settlement: bool = refresh_source == REFRESH_SETTLEMENT
+	# 是否局外 60 秒刷新；随机事件的正式结算效果可以由该在线刷新作为替代次数推进。
+	var is_runtime_refresh: bool = refresh_source == REFRESH_RUNTIME
 	# 是否面板微行情刷新；启用时禁用中枢漂移并把全部短期变化缩放为稳定的每秒波动。
 	var is_display_refresh: bool = refresh_source == REFRESH_DISPLAY
 	# 小幅刷新尺度；局外运行时为 0.5，正式结算为 1.0。
@@ -356,7 +388,7 @@ func _refresh_stock(stock_id: String, refresh_source: String, player_impact: flo
 	var same_direction_count: int = int(state.get("behavior_streak", 0))
 	if is_settlement and same_direction_count >= 2 and not is_zero_approx(player_impact):
 		drift_probability = 0.55
-	if event_direction != 0.0 and is_settlement:
+	if event_direction != 0.0 and (is_settlement or is_runtime_refresh):
 		drift_probability = 0.80
 	if _random.randf() < drift_probability:
 		# 中枢最小漂移比例；正式为 0.6%，局外为 0.3%。
@@ -483,25 +515,65 @@ func _update_behavior_streaks(impacts: Dictionary) -> void:
 
 
 func _update_market_cycles_before_refresh() -> void:
-	if _settlement_count > 0 and _settlement_count % maxi(market_cycle_settlement_count, 1) == 0:
-		# 可切换大盘候选；移除当前状态，确保周期切换不会原地不变。
-		var candidates: Array[String] = [MARKET_BULL, MARKET_BEAR, MARKET_SIDEWAYS]
-		candidates.erase(_market_state)
-		_market_state = candidates[_random.randi_range(0, candidates.size() - 1)]
-	if _settlement_count > 0 and (_settlement_count - 1) % maxi(price_limit_cycle_settlement_count, 1) == 0:
-		for stock_id in STOCK_IDS:
-			# 当前股票状态；把周期起始价更新为切换时的实时价格。
-			var state: Dictionary = _stock_states.get(stock_id, {}) as Dictionary
-			state["cycle_start_price"] = float(state.get("price", 1.0))
-			_stock_states[stock_id] = state
+	if _market_cycle_settlement_progress >= maxi(market_cycle_settlement_count, 1):
+		_switch_market_state()
+		_market_cycle_settlement_progress = 0
+		_market_cycle_online_accumulated_seconds = 0.0
+	if _price_limit_cycle_settlement_progress >= maxi(price_limit_cycle_settlement_count, 1):
+		_reset_price_limit_cycle()
+		_price_limit_cycle_settlement_progress = 0
+		_price_limit_cycle_online_accumulated_seconds = 0.0
 
 
-func _consume_event_duration(is_settlement: bool) -> void:
+func _update_online_time_triggers(delta: float) -> void:
+	_market_cycle_online_accumulated_seconds += delta
+	_price_limit_cycle_online_accumulated_seconds += delta
+	_event_online_accumulated_seconds += delta
+	# 本帧是否修改了周期状态；没有变化时不触发额外存档和 UI 刷新。
+	var cycle_state_changed: bool = false
+	if _market_cycle_online_accumulated_seconds >= maxf(market_cycle_online_seconds, 1.0):
+		_switch_market_state()
+		_market_cycle_online_accumulated_seconds = 0.0
+		_market_cycle_settlement_progress = 0
+		cycle_state_changed = true
+	if _price_limit_cycle_online_accumulated_seconds >= maxf(price_limit_cycle_online_seconds, 1.0):
+		_reset_price_limit_cycle()
+		_price_limit_cycle_online_accumulated_seconds = 0.0
+		_price_limit_cycle_settlement_progress = 0
+		cycle_state_changed = true
+	if _event_online_accumulated_seconds >= maxf(_event_online_target_seconds, 1.0):
+		trigger_random_event()
+		return
+	if cycle_state_changed:
+		_save_state()
+		market_changed.emit()
+
+
+func _switch_market_state() -> void:
+	# 可切换大盘候选；移除当前状态，确保正式结算或在线时长触发后不会原地不变。
+	var candidates: Array[String] = [MARKET_BULL, MARKET_BEAR, MARKET_SIDEWAYS]
+	candidates.erase(_market_state)
+	_market_state = candidates[_random.randi_range(0, candidates.size() - 1)]
+
+
+func _reset_price_limit_cycle() -> void:
+	for stock_id in STOCK_IDS:
+		# 当前股票状态；把周期起始价更新为触发时的实时价格，解除上一周期累计涨跌限制。
+		var state: Dictionary = _stock_states.get(stock_id, {}) as Dictionary
+		state["cycle_start_price"] = float(state.get("price", 1.0))
+		_stock_states[stock_id] = state
+
+
+func _consume_event_duration(refresh_source: String) -> void:
 	if _active_event.is_empty():
 		return
+	# 是否正式结算刷新；推进事件的正式结算持续次数。
+	var is_settlement: bool = refresh_source == REFRESH_SETTLEMENT
+	# 是否局外 60 秒刷新；作为不进行对局时的替代次数，同样推进正式结算类事件效果。
+	var is_runtime_refresh: bool = refresh_source == REFRESH_RUNTIME
 	if int(_active_event.get("remaining_refreshes", 0)) > 0:
 		_active_event["remaining_refreshes"] = int(_active_event.get("remaining_refreshes", 0)) - 1
-	if is_settlement and int(_active_event.get("remaining_settlements", 0)) > 0:
+	if (is_settlement or is_runtime_refresh) and int(_active_event.get("remaining_settlements", 0)) > 0:
 		_active_event["remaining_settlements"] = int(_active_event.get("remaining_settlements", 0)) - 1
 	if int(_active_event.get("remaining_refreshes", 0)) <= 0 and int(_active_event.get("remaining_settlements", 0)) <= 0:
 		_active_event.clear()
@@ -558,6 +630,14 @@ func _roll_next_event_interval() -> void:
 	# 事件最长间隔；不得小于最短间隔，异常配置会自动向上修正。
 	var maximum_value: int = maxi(event_interval_maximum_settlements, minimum_value)
 	_settlements_until_event = _random.randi_range(minimum_value, maximum_value)
+
+
+func _roll_next_online_event_interval() -> void:
+	# 在线事件最短间隔；至少 1 秒，默认 120 秒。
+	var minimum_value: float = maxf(event_interval_minimum_online_seconds, 1.0)
+	# 在线事件最长间隔；不得小于最短间隔，默认 360 秒。
+	var maximum_value: float = maxf(event_interval_maximum_online_seconds, minimum_value)
+	_event_online_target_seconds = _random.randf_range(minimum_value, maximum_value)
 
 
 func _on_run_state_changed() -> void:
@@ -660,7 +740,13 @@ func _save_state() -> void:
 		"version": SAVE_VERSION,
 		"market_state": _market_state,
 		"settlement_count": _settlement_count,
+		"market_cycle_settlement_progress": _market_cycle_settlement_progress,
+		"market_cycle_online_accumulated_seconds": _market_cycle_online_accumulated_seconds,
+		"price_limit_cycle_settlement_progress": _price_limit_cycle_settlement_progress,
+		"price_limit_cycle_online_accumulated_seconds": _price_limit_cycle_online_accumulated_seconds,
 		"settlements_until_event": _settlements_until_event,
+		"event_online_accumulated_seconds": _event_online_accumulated_seconds,
+		"event_online_target_seconds": _event_online_target_seconds,
 		"active_event": _active_event,
 		"runtime_accumulated_seconds": _runtime_accumulated_seconds,
 		"stock_states": _stock_states,
@@ -688,7 +774,13 @@ func _load_state() -> bool:
 	if not _market_state in [MARKET_BULL, MARKET_BEAR, MARKET_SIDEWAYS]:
 		_market_state = MARKET_SIDEWAYS
 	_settlement_count = maxi(int(save_data.get("settlement_count", 0)), 0)
+	_market_cycle_settlement_progress = clampi(int(save_data.get("market_cycle_settlement_progress", _settlement_count % maxi(market_cycle_settlement_count, 1))), 0, maxi(market_cycle_settlement_count - 1, 0))
+	_market_cycle_online_accumulated_seconds = clampf(float(save_data.get("market_cycle_online_accumulated_seconds", 0.0)), 0.0, maxf(market_cycle_online_seconds, 1.0))
+	_price_limit_cycle_settlement_progress = clampi(int(save_data.get("price_limit_cycle_settlement_progress", _settlement_count % maxi(price_limit_cycle_settlement_count, 1))), 0, maxi(price_limit_cycle_settlement_count - 1, 0))
+	_price_limit_cycle_online_accumulated_seconds = clampf(float(save_data.get("price_limit_cycle_online_accumulated_seconds", 0.0)), 0.0, maxf(price_limit_cycle_online_seconds, 1.0))
 	_settlements_until_event = maxi(int(save_data.get("settlements_until_event", 0)), 0)
+	_event_online_accumulated_seconds = maxf(float(save_data.get("event_online_accumulated_seconds", 0.0)), 0.0)
+	_event_online_target_seconds = maxf(float(save_data.get("event_online_target_seconds", 0.0)), 0.0)
 	_runtime_accumulated_seconds = clampf(float(save_data.get("runtime_accumulated_seconds", 0.0)), 0.0, maxf(runtime_refresh_interval_seconds, 1.0))
 	# 原始事件字段；合法字典会恢复剩余次数，其他类型视为无事件。
 	var raw_event: Variant = save_data.get("active_event", {})

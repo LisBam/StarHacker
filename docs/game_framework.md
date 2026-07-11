@@ -167,7 +167,7 @@
 
 主菜单在“背包、仓库、商店、锻造”右侧提供“炒股”入口。`MainMenu` 只创建和关闭遮罩；1040×620 像素 `StockMarketPanel` 负责展示与确认，行情规则集中在 `StockMarketService`，持仓和永久金币集中在 `GlobalInventory`。完整接口、采集点和存档字段见 `docs/stock_market.md`。
 
-股票卡片与持仓卡片复用 160×72 像素 `ItemCardView`；交易数量复用 `SellQuantityDialog`；最终买卖确认复用 `CommonConfirmationDialog`；折线图由无服务依赖的 `StockChartControl` 绘制最近 30 个价格点。面板打开时通过 `set_market_panel_open(true)` 启用每 1 秒一次的真实微行情，关闭时停用并统一保存最终价格；微行情不推进局数、事件次数或中枢漂移。正式 UI 不显示中枢、刷新计时或概率，只有 `DebugSettings` 开启后追加开发字段。
+股票卡片与持仓卡片复用 160×72 像素 `ItemCardView`；交易数量复用 `SellQuantityDialog`；最终买卖确认复用 `CommonConfirmationDialog`；折线图由无服务依赖的 `StockChartControl` 绘制最近 30 个价格点。面板打开时通过 `set_market_panel_open(true)` 启用每 1 秒一次的真实微行情，关闭时停用并统一保存最终价格；微行情不推进局数、事件次数或中枢漂移。大盘切换、累计涨跌周期和随机事件另由正式结算进度与非战斗在线时长双触发，任一路径触发后同步重置另一条进度；事件正式结算类持续效果也可由 60 秒局外小幅刷新推进。正式 UI 不显示中枢、刷新计时或概率，只有 `DebugSettings` 开启后追加开发字段。
 
 ## 暂停与设置
 

@@ -11,4 +11,6 @@ description = "兼顾攻击稳定性与闪避能力的腿部装备。"
 sell_price = 75
 attack_power = 6.0
 defense_power = 6.0
+max_health = 10.0
+health_regeneration_per_five_seconds = 1.0
 dodge_chance = 0.03

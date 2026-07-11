@@ -103,13 +103,17 @@ func sync_combat_states(infinite_health_enabled: bool, infinite_energy_enabled: 
 
 
 func _build_interface() -> void:
+	# 滚动容器；窗口高度不足时允许访问底部关闭按钮，避免新增调试项后控件超出屏幕。
+	var scroll_container: ScrollContainer = ScrollContainer.new()
+	scroll_container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(scroll_container)
 	# 外层边距；默认让标题、按钮和状态文本与面板边缘保持稳定距离。
 	var margin: MarginContainer = MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 24)
 	margin.add_theme_constant_override("margin_top", 20)
 	margin.add_theme_constant_override("margin_right", 24)
 	margin.add_theme_constant_override("margin_bottom", 20)
-	add_child(margin)
+	scroll_container.add_child(margin)
 	# 主内容容器；纵向排列标题、余额、武器/强化石/金币功能、状态与关闭按钮。
 	var content: VBoxContainer = VBoxContainer.new()
 	content.add_theme_constant_override("separation", 12)
@@ -386,3 +390,12 @@ func _on_map_vision_pressed() -> void:
 
 func _on_close_pressed() -> void:
 	closed.emit()
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	# ESC 关闭开发者菜单；仅处理按下且非重复事件，防止一次长按连续触发。
+	if event is InputEventKey:
+		var key_event: InputEventKey = event as InputEventKey
+		if key_event.pressed and not key_event.echo and key_event.keycode == KEY_ESCAPE:
+			closed.emit()
+			get_viewport().set_input_as_handled()

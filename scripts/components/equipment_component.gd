@@ -323,7 +323,7 @@ func _apply_armor_attributes() -> void:
 	if _stats_component != null and _stats_component.has_method("apply_equipment_attributes"):
 		_stats_component.call("apply_equipment_attributes", attributes)
 	if _movement_component != null and _movement_component.has_method("configure_max_speed"):
-		_movement_component.call("configure_max_speed", _base_move_speed + float(attributes.get("move_speed", 0.0)))
+		_movement_component.call("configure_max_speed", _base_move_speed * (1.0 + maxf(float(attributes.get("move_speed", 0.0)), 0.0)))
 
 
 func _on_global_equipment_changed() -> void:

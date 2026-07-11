@@ -111,7 +111,7 @@ static func _append_equipment_lines(detail_lines: Array[String], item_resource: 
 		var value: float = float(item_resource.call("get_effective_stat", stat_name)) if item_resource.has_method("get_effective_stat") else float(item_resource.get(stat_name))
 		if value <= 0.0:
 			continue
-		var value_text: String = "%.0f%%" % (value * 100.0) if stat_name in ["dodge_chance", "critical_chance", "critical_damage"] else ("%.1f" % value)
+		var value_text: String = "%.0f%%" % (value * 100.0) if stat_name in ["dodge_chance", "move_speed", "critical_chance", "critical_damage"] else ("%.1f" % value)
 		detail_lines.append("%s：%s" % [EnhancementRules.get_stat_label(stat_name), value_text])
 
 
@@ -159,7 +159,7 @@ static func _append_repair_kit_lines(detail_lines: Array[String], item_resource:
 	# 修复量；取值至少为 0，显示为整数以匹配所有当前修复包的固定耐久数值。
 	var repair_amount: float = maxf(float(item_resource.get("repair_amount")), 0.0)
 	detail_lines.append("[b]使用效果[/b]")
-	detail_lines.append("仅可对武器使用")
+	detail_lines.append("可对武器或装备使用")
 	detail_lines.append("恢复耐久：%.0f" % repair_amount)
 
 
@@ -194,6 +194,11 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 	_append_weapon_stat_line(detail_lines, item_resource, "damage", 1)
 	_append_weapon_stat_line(detail_lines, item_resource, "cooldown", 2, " 秒")
 	_append_weapon_stat_line(detail_lines, item_resource, "energy_cost", 1)
+	# 暴击属性；资源以小数倍率保存，悬浮窗统一转换为百分比显示。
+	var effective_critical_chance: float = float(item_resource.call("get_effective_stat", "critical_chance")) if item_resource.has_method("get_effective_stat") else float(item_resource.get("critical_chance"))
+	var effective_critical_damage: float = float(item_resource.call("get_effective_stat", "critical_damage")) if item_resource.has_method("get_effective_stat") else float(item_resource.get("critical_damage"))
+	detail_lines.append("暴击率：%.0f%%" % (effective_critical_chance * 100.0))
+	detail_lines.append("暴击伤害：%.0f%%" % (effective_critical_damage * 100.0))
 	if weapon_type == "ranged":
 		_append_weapon_stat_line(detail_lines, item_resource, "bullet_range", 1)
 		_append_weapon_stat_line(detail_lines, item_resource, "projectile_speed", 1)

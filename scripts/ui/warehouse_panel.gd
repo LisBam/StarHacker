@@ -277,6 +277,7 @@ func _build_storage_interface() -> void:
 	content.add_child(primary_filter_bar)
 	_create_storage_category_button(primary_filter_bar, "全部", InventoryQuery.PRIMARY_ALL, true)
 	_create_storage_category_button(primary_filter_bar, "武器", InventoryQuery.PRIMARY_WEAPONS, true)
+	_create_storage_category_button(primary_filter_bar, "装备", InventoryQuery.PRIMARY_EQUIPMENT, true)
 	_create_storage_category_button(primary_filter_bar, "资源", InventoryQuery.PRIMARY_RESOURCES, true)
 	_storage_subcategory_bar = HBoxContainer.new()
 	_storage_subcategory_bar.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -457,6 +458,11 @@ func _build_loadout_entries() -> void:
 	# 近战装备资源；空值显示可接收近战武器的槽位，有资源时可拖往仓库或随身背包。
 	var melee_resource: Resource = _global_inventory.call("get_melee_equipment_resource") as Resource
 	_loadout_list.add_child(_create_storage_equipment_slot("近战", "melee", "melee", melee_resource))
+	# 四部位装备槽；复用武器装备槽控件、排版、耐久条和悬浮窗。
+	var armor_slot_labels: Dictionary = {"head": "头部", "body": "躯干", "legs": "腿部", "feet": "脚部"}
+	for armor_slot in ["head", "body", "legs", "feet"]:
+		var armor_resource: Resource = _global_inventory.call("get_armor_equipment_resource", armor_slot) as Resource
+		_loadout_list.add_child(_create_storage_equipment_slot(str(armor_slot_labels[armor_slot]), "armor_" + armor_slot, armor_slot, armor_resource))
 
 
 func _create_storage_equipment_slot(slot_label: String, location: String, weapon_type: String, item_resource: Resource) -> Control:
@@ -488,7 +494,7 @@ func _get_item_detail_tooltip(item_resource: Resource) -> String:
 
 
 func _is_pending_item_usable_on_weapon(weapon_resource: Resource) -> bool:
-	if weapon_resource == null or str(weapon_resource.get("weapon_type")) not in ["ranged", "melee"]:
+	if weapon_resource == null or (str(weapon_resource.get("weapon_type")) not in ["ranged", "melee"] and str(weapon_resource.get("item_kind")) != "equipment"):
 		return false
 	if _pending_repair_kit_resource != null:
 		# 当前耐久；修复包只应高亮仍有耐久缺口的武器，满耐久武器不提供无效选择。
@@ -525,6 +531,11 @@ func _rebuild_storage_subcategory_buttons() -> void:
 	if _storage_primary_category == InventoryQuery.PRIMARY_WEAPONS:
 		_create_storage_category_button(_storage_subcategory_bar, "近战", InventoryQuery.SUBCATEGORY_MELEE, false)
 		_create_storage_category_button(_storage_subcategory_bar, "远程", InventoryQuery.SUBCATEGORY_RANGED, false)
+	elif _storage_primary_category == InventoryQuery.PRIMARY_EQUIPMENT:
+		_create_storage_category_button(_storage_subcategory_bar, "头部", "head", false)
+		_create_storage_category_button(_storage_subcategory_bar, "躯干", "body", false)
+		_create_storage_category_button(_storage_subcategory_bar, "腿部", "legs", false)
+		_create_storage_category_button(_storage_subcategory_bar, "脚部", "feet", false)
 	elif _storage_primary_category == InventoryQuery.PRIMARY_RESOURCES:
 		_create_storage_category_button(_storage_subcategory_bar, "强化石", InventoryQuery.SUBCATEGORY_ENHANCEMENT_STONES, false)
 		_create_storage_category_button(_storage_subcategory_bar, "道具", InventoryQuery.SUBCATEGORY_ITEMS, false)
@@ -653,12 +664,12 @@ func _on_quick_action_requested(item_resource: Resource, source_location: String
 func _on_item_action_requested(item_resource: Resource, source_location: String) -> void:
 	if item_resource == null or _global_inventory == null:
 		return
-	if _pending_repair_kit_resource != null and str(item_resource.get("weapon_type")) in ["melee", "ranged"]:
+	if _pending_repair_kit_resource != null and (str(item_resource.get("weapon_type")) in ["melee", "ranged"] or str(item_resource.get("item_kind")) == "equipment"):
 		if not _is_pending_item_usable_on_weapon(item_resource):
 			return
 		_on_repair_kit_weapon_selected(item_resource)
 		return
-	if _pending_stone_resource != null and str(item_resource.get("weapon_type")) in ["melee", "ranged"]:
+	if _pending_stone_resource != null and (str(item_resource.get("weapon_type")) in ["melee", "ranged"] or str(item_resource.get("item_kind")) == "equipment"):
 		_on_enhancement_weapon_selected(item_resource)
 		return
 
@@ -678,6 +689,8 @@ func _on_item_action_requested(item_resource: Resource, source_location: String)
 	_item_action_menu.set_item_disabled(_item_action_menu.get_item_index(ITEM_ACTION_SELL), total_sell_price <= 0)
 	if str(item_resource.get("item_kind")) == "repair_kit":
 		_item_action_menu.add_item("使用", ITEM_ACTION_USE_REPAIR_KIT)
+	elif source_location == "backpack" and str(item_resource.get("item_kind")) == "equipment":
+		_item_action_menu.add_item("装备", ITEM_ACTION_EQUIP)
 	elif source_location == "backpack" and str(item_resource.get("weapon_type")) in ["ranged", "melee"]:
 		if str(item_resource.get("weapon_type")) == "ranged":
 			_item_action_menu.add_item("装备1", ITEM_ACTION_EQUIP_RANGED_1)
@@ -706,7 +719,7 @@ func _on_item_action_menu_id_pressed(action_id: int) -> void:
 		_capture_stone_return_view()
 		_backpack_expanded = true
 		# 强化目标选择页；自动切回全部武器并清空查询条件，确保仓库、背包和装备栏目标立即可见。
-		_storage_primary_category = InventoryQuery.PRIMARY_WEAPONS
+		_storage_primary_category = InventoryQuery.PRIMARY_ALL
 		_storage_subcategory = InventoryQuery.SUBCATEGORY_ALL
 		_clear_stone_attribute_filter()
 		_storage_search_edit.clear()
@@ -719,7 +732,7 @@ func _on_item_action_menu_id_pressed(action_id: int) -> void:
 		_pending_repair_kit_location = _action_item_location
 		_backpack_expanded = true
 		# 修复目标选择页；武器可位于永久仓库、随身背包或局外装备栏，因此显示完整武器浏览视图。
-		_storage_primary_category = InventoryQuery.PRIMARY_WEAPONS
+		_storage_primary_category = InventoryQuery.PRIMARY_ALL
 		_storage_subcategory = InventoryQuery.SUBCATEGORY_ALL
 		_clear_stone_attribute_filter()
 		_storage_search_edit.clear()
@@ -865,6 +878,9 @@ func _equip_backpack_weapon(weapon_resource: Resource, target_ranged_slot: int =
 	# 武器类型；远程武器替换当前手持槽，近战武器替换唯一近战槽，与战斗背包点击装备逻辑一致。
 	# 远程槽选择补充：仓库背包菜单现在通过“装备1”“装备2”明确指定远程目标槽，不再隐式使用当前槽。
 	var weapon_type: String = str(weapon_resource.get("weapon_type"))
+	if str(weapon_resource.get("item_kind")) == "equipment":
+		_global_inventory.call("transfer_storage_to_equipment", weapon_resource, "backpack", "armor_" + str(weapon_resource.get("equipment_slot")))
+		return
 	# 装备目标位置；远程目标由当前选中槽组成，近战目标使用稳定 melee 标识。
 	# 显式目标补充：远程分支使用菜单传入的槽位下标生成目标位置。
 	var target_location: String = "melee"

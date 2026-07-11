@@ -48,7 +48,8 @@ func configure(slot_label: String, location: String, accepted_weapon_type: Strin
 	_ensure_durability_bar()
 	_durability_bar.call("configure", _item_resource)
 	text = "%s：%s" % [_slot_label, _get_item_display_name()]
-	tooltip_text = detail_tooltip if not detail_tooltip.is_empty() else ("拖入%s武器" % ("远程" if _accepted_weapon_type == "ranged" else "近战"))
+	var accepted_label: String = {"ranged": "远程武器", "melee": "近战武器", "head": "头部装备", "body": "躯干装备", "legs": "腿部装备", "feet": "脚部装备"}.get(_accepted_weapon_type, "物品")
+	tooltip_text = detail_tooltip if not detail_tooltip.is_empty() else "拖入%s" % accepted_label
 	disabled = false
 	mouse_default_cursor_shape = Control.CURSOR_DRAG if _item_resource != null else Control.CURSOR_POINTING_HAND
 	if not pressed.is_connected(_on_pressed):
@@ -68,7 +69,7 @@ func set_enhancement_target_highlight(enabled: bool) -> void:
 
 func set_weapon_target_selection_state(selection_active: bool, selectable: bool) -> void:
 	# 目标选择状态；空装备槽不参与可用或不可用表现，只有真实武器会被高亮或置灰。
-	var has_weapon: bool = _item_resource != null and str(_item_resource.get("weapon_type")) in ["ranged", "melee"]
+	var has_weapon: bool = _item_resource != null and (str(_item_resource.get("weapon_type")) in ["ranged", "melee"] or str(_item_resource.get("item_kind")) == "equipment")
 	_enhancement_target_highlight = selection_active and selectable and has_weapon
 	_weapon_target_selection_blocked = selection_active and not selectable and has_weapon
 	_refresh_enhancement_target_highlight()
@@ -114,7 +115,11 @@ func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
 		return false
 	if dragged_resource != null and str(dragged_resource.get("item_kind")) == "repair_kit":
 		return _item_resource != null and not str(drag_data.get("source_location", "")).is_empty()
-	return dragged_resource != null and str(dragged_resource.get("weapon_type")) == _accepted_weapon_type
+	if dragged_resource == null:
+		return false
+	if _accepted_weapon_type in ["ranged", "melee"]:
+		return str(dragged_resource.get("weapon_type")) == _accepted_weapon_type
+	return str(dragged_resource.get("item_kind")) == "equipment" and str(dragged_resource.get("equipment_slot")) == _accepted_weapon_type
 
 
 func _drop_data(_at_position: Vector2, data: Variant) -> void:

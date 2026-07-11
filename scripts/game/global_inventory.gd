@@ -507,6 +507,21 @@ func grant_all_known_weapons_to_warehouse() -> int:
 	return granted_count
 
 
+func grant_all_known_equipment_to_warehouse() -> int:
+	# 发放数量；每种已知装备各深拷贝一件进入永久仓库。
+	var granted_count: int = 0
+	for equipment_id in EQUIPMENT_RESOURCE_PATHS.keys():
+		var equipment_resource: Resource = _load_equipment_resource(str(equipment_id))
+		if equipment_resource == null:
+			continue
+		_insert_record_with_stack_merge(_warehouse_records, _create_record(equipment_resource))
+		granted_count += 1
+	if granted_count > 0:
+		_queue_save_inventory()
+		warehouse_changed.emit()
+	return granted_count
+
+
 func grant_random_enhancement_stones_to_warehouse(stone_count: int = DEVELOPER_STONE_GRANT_COUNT) -> int:
 	# 实际发放数量；限制为非负数，每颗独立随机并按词条方向自动合并到永久仓库堆叠。
 	var granted_count: int = 0

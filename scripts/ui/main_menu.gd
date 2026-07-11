@@ -201,6 +201,8 @@ func _on_stock_market_button_pressed() -> void:
 		return
 	_settings_panel.visible = false
 	_stock_market_overlay.visible = true
+	if _stock_market_panel != null and _stock_market_panel.has_method("set_market_display_active"):
+		_stock_market_panel.call("set_market_display_active", true)
 
 
 func _build_warehouse_overlay() -> void:
@@ -385,6 +387,7 @@ func _build_stock_market_overlay() -> void:
 	stock_market_overlay.add_child(stock_market_panel)
 	_stock_market_panel = stock_market_panel
 	stock_market_overlay.visible = false
+	stock_market_panel.call("set_market_display_active", false)
 
 
 func _build_developer_overlay() -> void:
@@ -431,6 +434,8 @@ func _open_developer_menu() -> void:
 		_forge_overlay.visible = false
 	if _stock_market_overlay != null:
 		_stock_market_overlay.visible = false
+	if _stock_market_panel != null and _stock_market_panel.has_method("set_market_display_active"):
+		_stock_market_panel.call("set_market_display_active", false)
 	_developer_overlay.visible = true
 
 
@@ -467,6 +472,8 @@ func _on_forge_closed() -> void:
 func _on_stock_market_closed() -> void:
 	if _stock_market_overlay != null:
 		_stock_market_overlay.visible = false
+	if _stock_market_panel != null and _stock_market_panel.has_method("set_market_display_active"):
+		_stock_market_panel.call("set_market_display_active", false)
 	_stock_market_button.grab_focus()
 
 

@@ -57,6 +57,8 @@ var _pending_trade_type: String = ""
 var _pending_stock_id: String = ""
 ## 当前待确认交易数量；取值至少为 1，确认弹窗显示与执行共同使用。
 var _pending_quantity: int = 0
+## 当前待确认整数成交价；打开数量弹窗时锁定，避免每秒微行情导致确认金额与最终结算不一致。
+var _pending_unit_price: int = 0
 ## 事件提示补间；新事件到来时停止旧补间并从完全可见重新开始。
 var _event_tween: Tween
 
@@ -69,6 +71,15 @@ func _ready() -> void:
 	_connect_services()
 	_refresh_all()
 	_show_active_event_if_available()
+
+
+func _exit_tree() -> void:
+	set_market_display_active(false)
+
+
+func set_market_display_active(active: bool) -> void:
+	if _stock_market_service != null and _stock_market_service.has_method("set_market_panel_open"):
+		_stock_market_service.call("set_market_panel_open", active)
 
 
 func _build_interface() -> void:
@@ -205,9 +216,11 @@ func _build_interface() -> void:
 	holdings_scroll.add_child(_holdings_container)
 	_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as ConfirmationDialog
 	_quantity_dialog.connect("quantity_confirmed", Callable(self, "_on_trade_quantity_confirmed"))
+	_quantity_dialog.canceled.connect(_on_trade_canceled)
 	add_child(_quantity_dialog)
 	_confirmation_dialog = COMMON_CONFIRMATION_DIALOG_SCRIPT.new() as ConfirmationDialog
 	_confirmation_dialog.confirmed.connect(_on_trade_confirmed)
+	_confirmation_dialog.canceled.connect(_on_trade_canceled)
 	add_child(_confirmation_dialog)
 
 
@@ -282,7 +295,7 @@ func _refresh_stock_card(stock_id: String) -> void:
 		# 中枢偏离率；当前价相对动态价值中枢的百分比，仅调试模式可见。
 		var deviation_ratio: float = (float(snapshot.get("price", 0.0)) / center - 1.0) if center > 0.0 else 0.0
 		detail += "  中枢%.1f 偏离%+.1f%%" % [center, deviation_ratio * 100.0]
-	card.call("configure", null, 1, str(snapshot.get("name", "股票")), detail, "%d 金币" % int(snapshot.get("price", 0.0)))
+	card.call("configure", null, 1, str(snapshot.get("name", "股票")), detail, "%.2f 金币" % float(snapshot.get("price", 0.0)))
 	card.call("set_visual_state", stock_id == _selected_stock_id, false)
 
 
@@ -298,7 +311,7 @@ func _refresh_selected_stock() -> void:
 	_selected_title_label.text = "%s · %s" % [str(snapshot.get("name", "股票")), str(snapshot.get("module", ""))]
 	# 全市场快照；提供有效大盘名称和调试运行累计进度。
 	var market_snapshot: Dictionary = _stock_market_service.call("get_market_snapshot") as Dictionary
-	_selected_summary_label.text = "当前价 %d 金币    [color=%s]%+.2f%%[/color]    大盘：%s" % [int(snapshot.get("price", 0.0)), color_name, change_ratio * 100.0, str(market_snapshot.get("market_state_name", "震荡市"))]
+	_selected_summary_label.text = "当前价 %.2f 金币    [color=%s]%+.2f%%[/color]    大盘：%s" % [float(snapshot.get("price", 0.0)), color_name, change_ratio * 100.0, str(market_snapshot.get("market_state_name", "震荡市"))]
 	if _is_debug_information_visible():
 		# 调试中枢；取值为当前长期合理价格线，仅用于开发者验证均值回归。
 		var debug_center: float = float(snapshot.get("center", 0.0))
@@ -312,12 +325,12 @@ func _refresh_selected_stock() -> void:
 	var quantity: int = int(holding.get("quantity", 0))
 	# 加权平均成本；包含历史买入手续费，用于计算真实浮动盈亏。
 	var average_cost: float = float(holding.get("average_cost", 0.0))
-	# 当前整数价格；由服务对内部浮点价格四舍五入后展示和成交。
-	var current_price: int = int(snapshot.get("price", 0.0))
+	# 当前显示价格；保留两位小数用于每秒行情，实际成交仍由服务四舍五入为整数金币。
+	var current_price: float = float(snapshot.get("price", 0.0))
 	# 浮动盈亏金额；当前市值减持仓总成本，未持仓时为 0。
-	var profit: float = (float(current_price) - average_cost) * quantity
+	var profit: float = (current_price - average_cost) * quantity
 	# 浮动盈亏比例；以加权平均成本为分母，零成本时保持 0。
-	var profit_ratio: float = (float(current_price) / average_cost - 1.0) if average_cost > 0.0 else 0.0
+	var profit_ratio: float = (current_price / average_cost - 1.0) if average_cost > 0.0 else 0.0
 	# 盈亏颜色；盈利绿色、亏损红色、持平白色。
 	var profit_color: String = "green" if profit > 0.0 else ("red" if profit < 0.0 else "white")
 	_position_label.text = "持仓 %d 股\n成本 %.2f\n[color=%s]浮盈亏 %+.0f (%+.2f%%)[/color]" % [quantity, average_cost, profit_color, profit, profit_ratio * 100.0]
@@ -357,7 +370,7 @@ func _refresh_holdings() -> void:
 		var card: Control = ITEM_CARD_VIEW_SCRIPT.new() as Control
 		card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		host.add_child(card)
-		card.call("configure", null, 1, "%s · %d股" % [str(snapshot.get("name", "股票")), quantity], "成本 %.2f  [color=%s]%+.0f / %+.2f%%[/color]" % [average_cost, profit_color, profit, profit_ratio * 100.0], "%d 金币" % roundi(current_price))
+		card.call("configure", null, 1, "%s · %d股" % [str(snapshot.get("name", "股票")), quantity], "成本 %.2f  [color=%s]%+.0f / %+.2f%%[/color]" % [average_cost, profit_color, profit, profit_ratio * 100.0], "%.2f 金币" % current_price)
 		_holdings_container.add_child(host)
 	if _holdings_container.get_child_count() == 0:
 		# 空持仓提示；在没有任何股票时替代卡片列表。
@@ -413,19 +426,23 @@ func _on_sell_pressed() -> void:
 
 
 func _begin_quantity_selection(trade_type: String, maximum_quantity: int) -> void:
+	set_market_display_active(false)
 	_pending_trade_type = trade_type
 	_pending_stock_id = _selected_stock_id
 	# 待交易股票快照；缓存弹窗展示名称和当前单价，最终确认时会再次读取实时报价。
+	# 报价锁定补充；快照只读取名称，整数成交价由服务单独读取并冻结到本次确认流程结束。
 	var snapshot: Dictionary = _stock_market_service.call("get_stock_snapshot", _pending_stock_id) as Dictionary
-	_quantity_dialog.call("present_stock_trade", str(snapshot.get("name", "股票")), maximum_quantity, int(snapshot.get("price", 1.0)), trade_type == "buy")
+	_pending_unit_price = int(_stock_market_service.call("get_current_price", _pending_stock_id))
+	_quantity_dialog.call("present_stock_trade", str(snapshot.get("name", "股票")), maximum_quantity, _pending_unit_price, trade_type == "buy")
 
 
 func _on_trade_quantity_confirmed(quantity: int) -> void:
 	_pending_quantity = maxi(quantity, 1)
 	# 最终确认前股票快照；数量弹窗关闭后重新读取当前价，避免使用过期报价。
+	# 报价锁定补充；此处重新读取快照只用于股票名称，金额继续使用已锁定的 _pending_unit_price。
 	var snapshot: Dictionary = _stock_market_service.call("get_stock_snapshot", _pending_stock_id) as Dictionary
-	# 最终确认单价；正整数金币，与服务成交价保持一致。
-	var price: int = int(snapshot.get("price", 1.0))
+	# 最终确认单价；使用数量弹窗打开时锁定的整数报价，避免确认过程中每秒变化。
+	var price: int = maxi(_pending_unit_price, 1)
 	# 成交额小计；数量乘当前单价，不包含手续费。
 	var gross: int = price * _pending_quantity
 	# 交易手续费；成交额 0.5% 向上取整，最低 1 金币。
@@ -447,15 +464,25 @@ func _on_trade_confirmed() -> void:
 	# 交易结果；统一读取服务返回消息，在顶部短暂提示成功或失败原因。
 	var trade_result: Dictionary = {}
 	if _pending_trade_type == "buy":
-		trade_result = _stock_market_service.call("request_buy", _pending_stock_id, _pending_quantity) as Dictionary
+		trade_result = _stock_market_service.call("request_buy", _pending_stock_id, _pending_quantity, _pending_unit_price) as Dictionary
 	elif _pending_trade_type == "sell":
-		trade_result = _stock_market_service.call("request_sell", _pending_stock_id, _pending_quantity) as Dictionary
+		trade_result = _stock_market_service.call("request_sell", _pending_stock_id, _pending_quantity, _pending_unit_price) as Dictionary
 	if not trade_result.is_empty():
 		_show_event_banner(str(trade_result.get("message", "交易已处理")))
 	_pending_trade_type = ""
 	_pending_stock_id = ""
 	_pending_quantity = 0
+	_pending_unit_price = 0
+	set_market_display_active(is_visible_in_tree())
 	_refresh_all()
+
+
+func _on_trade_canceled() -> void:
+	_pending_trade_type = ""
+	_pending_stock_id = ""
+	_pending_quantity = 0
+	_pending_unit_price = 0
+	set_market_display_active(is_visible_in_tree())
 
 
 func _show_event_banner(message: String) -> void:

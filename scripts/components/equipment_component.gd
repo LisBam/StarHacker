@@ -220,16 +220,31 @@ func notify_weapon_runtime_state_changed(weapon_data: Resource) -> void:
 func consume_armor_durability_on_hit() -> void:
 	# 是否有耐久变化；只在实际变化后刷新属性和排队存档。
 	var changed: bool = false
+	# 本次防具耐久总消耗；四部位实际变化量相加后交给股市行为统计。
+	var total_consumed_durability: float = 0.0
+	# 本次新损坏防具数量；只统计从正耐久降到零的部位，避免后续受击重复计数。
+	var newly_broken_count: int = 0
 	for armor_slot in ["head", "body", "legs", "feet"]:
 		var equipment_data: Resource = get_armor_equipment(armor_slot)
 		if equipment_data == null or armor_durability_cost_per_hit <= 0.0:
 			continue
 		var durability_before: float = maxf(float(equipment_data.get("current_durability")), 0.0)
 		equipment_data.call("set_current_durability", durability_before - armor_durability_cost_per_hit)
+		# 扣除后耐久；用于统计真实消耗并识别首次归零。
+		var durability_after: float = maxf(float(equipment_data.get("current_durability")), 0.0)
+		total_consumed_durability += maxf(durability_before - durability_after, 0.0)
+		if durability_before > 0.0 and durability_after <= 0.0:
+			newly_broken_count += 1
 		changed = changed or not is_equal_approx(durability_before, float(equipment_data.get("current_durability")))
 		if _global_inventory != null and _global_inventory.has_method("notify_weapon_runtime_state_changed"):
 			_global_inventory.call("notify_weapon_runtime_state_changed", equipment_data)
 	if changed:
+		# 股市统计服务；只发送数值事件，不让装备组件依赖具体股票目录或定价公式。
+		var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")
+		if stock_market_service != null and stock_market_service.has_method("record_run_metric"):
+			stock_market_service.call("record_run_metric", "armor_durability", total_consumed_durability)
+			if newly_broken_count > 0:
+				stock_market_service.call("record_run_metric", "broken_armor", newly_broken_count)
 		_apply_armor_attributes()
 		equipment_changed.emit()
 

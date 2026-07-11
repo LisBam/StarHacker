@@ -18,6 +18,8 @@ const MAIN_MENU_BACKPACK_PANEL_SCRIPT: Script = preload("res://scripts/ui/main_m
 const SHOP_PANEL_SCRIPT: Script = preload("res://scripts/ui/shop_panel.gd")
 ## 局外锻造面板脚本；默认在主菜单点击锻造按钮后动态创建并组合库存与锻造服务。
 const FORGE_PANEL_SCRIPT: Script = preload("res://scripts/ui/forge_panel.gd")
+## 股市面板脚本；默认在主菜单点击炒股按钮后动态创建并组合行情与持仓服务。
+const STOCK_MARKET_PANEL_SCRIPT: Script = preload("res://scripts/ui/stock_market_panel.gd")
 ## 隐藏开发者菜单脚本；默认只在主菜单依次输入 LISBAM 后显示。
 const DEVELOPER_MENU_SCRIPT: Script = preload("res://scripts/ui/developer_menu.gd")
 ## 开发者模式解锁序列；默认由六个英文字母组成，输入错误会按首字母重新匹配。
@@ -41,6 +43,8 @@ const DEVELOPER_UNLOCK_SEQUENCE: String = "LISBAM"
 @onready var _shop_button: Button = %ShopButton
 ## 锻造按钮缓存；默认位于商店按钮右侧，点击后打开主武器修复与强化界面。
 @onready var _forge_button: Button = %ForgeButton
+## 炒股按钮缓存；默认位于锻造按钮右侧，点击后打开永久资产股市界面。
+@onready var _stock_market_button: Button = %StockMarketButton
 ## 设置面板缓存；默认绑定唯一名 SettingsPanel，控制主菜单设置界面的显示和隐藏。
 @onready var _settings_panel: Control = %SettingsPanel
 ## 设置内容容器缓存；默认通过场景路径绑定，用于动态挂载按键绑定面板。
@@ -86,6 +90,10 @@ var _shop_panel: Control
 var _forge_overlay: Control
 ## 锻造面板实例；默认由 ForgePanel 脚本创建，关闭后复用并保留未执行的槽位引用。
 var _forge_panel: Control
+## 股市全屏遮罩；默认运行时创建并隐藏，打开时阻止主菜单其他入口接收输入。
+var _stock_market_overlay: Control
+## 股市面板实例；默认由 StockMarketPanel 创建，关闭后复用并由服务信号实时刷新。
+var _stock_market_panel: Control
 ## 开发者菜单全屏遮罩；默认运行时创建并隐藏，解锁后阻止其他主菜单控件接收输入。
 var _developer_overlay: Control
 ## 开发者菜单实例；默认由 DeveloperMenu 脚本动态创建并在关闭后复用。
@@ -104,6 +112,7 @@ func _ready() -> void:
 	_backpack_button.pressed.connect(_on_backpack_button_pressed)
 	_shop_button.pressed.connect(_on_shop_button_pressed)
 	_forge_button.pressed.connect(_on_forge_button_pressed)
+	_stock_market_button.pressed.connect(_on_stock_market_button_pressed)
 	_master_volume_slider.value_changed.connect(_on_master_volume_slider_value_changed)
 	_settings_back_button.pressed.connect(_on_settings_back_button_pressed)
 	_build_key_binding_navigation()
@@ -111,6 +120,7 @@ func _ready() -> void:
 	_build_backpack_overlay()
 	_build_shop_overlay()
 	_build_forge_overlay()
+	_build_stock_market_overlay()
 	_build_developer_overlay()
 	_settings_panel.visible = false
 	_show_key_binding_page(false)
@@ -184,6 +194,13 @@ func _on_forge_button_pressed() -> void:
 		return
 	_settings_panel.visible = false
 	_forge_overlay.visible = true
+
+
+func _on_stock_market_button_pressed() -> void:
+	if _stock_market_overlay == null:
+		return
+	_settings_panel.visible = false
+	_stock_market_overlay.visible = true
 
 
 func _build_warehouse_overlay() -> void:
@@ -335,6 +352,41 @@ func _build_forge_overlay() -> void:
 	forge_overlay.visible = false
 
 
+func _build_stock_market_overlay() -> void:
+	if _stock_market_overlay != null:
+		return
+	# 股市遮罩；覆盖完整主菜单并拦截输入，关闭时只隐藏界面而不停止后台行情服务。
+	var stock_market_overlay: Control = Control.new()
+	stock_market_overlay.name = "StockMarketOverlay"
+	stock_market_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	stock_market_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(stock_market_overlay)
+	_stock_market_overlay = stock_market_overlay
+	# 股市背景遮罩；透明度与商店、仓库保持一致，使行情面板成为清晰的局外焦点。
+	var stock_market_dim: ColorRect = ColorRect.new()
+	stock_market_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	stock_market_dim.color = Color(0.0, 0.0, 0.0, 0.68)
+	stock_market_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	stock_market_overlay.add_child(stock_market_dim)
+	# 股市面板；固定 1040×620 像素并由独立组件处理行情展示与交易确认。
+	var stock_market_panel: Control = STOCK_MARKET_PANEL_SCRIPT.new() as Control
+	if stock_market_panel == null:
+		stock_market_overlay.visible = false
+		return
+	stock_market_panel.anchor_left = 0.5
+	stock_market_panel.anchor_top = 0.5
+	stock_market_panel.anchor_right = 0.5
+	stock_market_panel.anchor_bottom = 0.5
+	stock_market_panel.offset_left = -520.0
+	stock_market_panel.offset_top = -310.0
+	stock_market_panel.offset_right = 520.0
+	stock_market_panel.offset_bottom = 310.0
+	stock_market_panel.connect("closed", Callable(self, "_on_stock_market_closed"))
+	stock_market_overlay.add_child(stock_market_panel)
+	_stock_market_panel = stock_market_panel
+	stock_market_overlay.visible = false
+
+
 func _build_developer_overlay() -> void:
 	if _developer_overlay != null:
 		return
@@ -377,6 +429,8 @@ func _open_developer_menu() -> void:
 		_shop_overlay.visible = false
 	if _forge_overlay != null:
 		_forge_overlay.visible = false
+	if _stock_market_overlay != null:
+		_stock_market_overlay.visible = false
 	_developer_overlay.visible = true
 
 
@@ -408,6 +462,12 @@ func _on_forge_closed() -> void:
 	if _forge_overlay != null:
 		_forge_overlay.visible = false
 	_forge_button.grab_focus()
+
+
+func _on_stock_market_closed() -> void:
+	if _stock_market_overlay != null:
+		_stock_market_overlay.visible = false
+	_stock_market_button.grab_focus()
 
 
 func _on_master_volume_slider_value_changed(value: float) -> void:

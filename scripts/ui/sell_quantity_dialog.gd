@@ -15,6 +15,8 @@ const DISPLAY_MODE_TRANSFER: String = "transfer"
 const DISPLAY_MODE_DISCARD: String = "discard"
 ## 物资送回数量模式标识；显示本次价值、20% 运费和送回后的剩余额度。
 const DISPLAY_MODE_SHIPPING: String = "shipping"
+## 股票交易数量模式标识；显示当前数量和每股价格，最终手续费由后续通用确认弹窗精确展示。
+const DISPLAY_MODE_STOCK_TRADE: String = "stock_trade"
 
 ## 弹窗默认宽度；默认 520 像素可容纳物品名称、数量滑条和数字输入框。
 ## 当前尺寸补充；默认值已调整为 400 像素以保持紧凑，仍可在检查器中按界面语言长度调整，运行时无需动态修改。
@@ -103,6 +105,18 @@ func present_shipping(item_display_name: String, maximum_quantity: int, unit_ite
 	title = "选择送回数量"
 	get_ok_button().text = "送回仓库"
 	_description_label.text = "%s · 最多可选择 %d 个" % [_item_display_name, _maximum_quantity]
+	_present_current_configuration()
+
+
+func present_stock_trade(stock_display_name: String, maximum_quantity: int, unit_price: int, is_buying: bool) -> void:
+	_ensure_interface_initialized()
+	_display_mode = DISPLAY_MODE_STOCK_TRADE
+	_item_display_name = stock_display_name if not stock_display_name.is_empty() else "股票"
+	_maximum_quantity = maxi(maximum_quantity, 1)
+	_unit_sell_price = maxi(unit_price, 1)
+	title = "选择买入数量" if is_buying else "选择卖出数量"
+	get_ok_button().text = "下一步"
+	_description_label.text = "%s · 当前单价 %d 金币 · 最多 %d 股" % [_item_display_name, _unit_sell_price, _maximum_quantity]
 	_present_current_configuration()
 
 
@@ -221,6 +235,9 @@ func _refresh_total_price(quantity: int) -> void:
 		var remaining_after_shipping: int = _shipping_remaining_value - shipping_value
 		_total_price_label.text = "价值 %d · 运费 %d · 送回后剩余 %d" % [shipping_value, shipping_fee, remaining_after_shipping]
 		get_ok_button().disabled = shipping_value > _shipping_remaining_value
+		return
+	if _display_mode == DISPLAY_MODE_STOCK_TRADE:
+		_total_price_label.text = "%d 股 · 价格小计 %d 金币" % [resolved_quantity, _unit_sell_price * resolved_quantity]
 		return
 	get_ok_button().disabled = false
 	# 出售总价；单价乘当前数量，用于确认前即时预览金币收益。

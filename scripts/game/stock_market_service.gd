@@ -1,0 +1,640 @@
+extends Node
+
+## 股市服务独立维护行情、动态价值中枢、大盘周期、随机事件和对局行为统计。
+## UI 只读取公开快照并请求交易；金币与持仓所有权由 GlobalInventory 统一结算和持久化。
+
+signal market_changed
+signal event_announced(message: String)
+
+## 股市全局状态存档路径；与商店状态同级独立保存，避免行情字段污染库存物品序列化结构。
+const SAVE_PATH: String = "user://stock_market_state.json"
+## 股市状态存档版本；版本 1 保存五只股票的行情、周期、事件、行为连续性和局外运行累计值。
+const SAVE_VERSION: int = 1
+## 牛市状态标识；价值中枢和短期情绪默认向正方向倾斜。
+const MARKET_BULL: String = "bull"
+## 熊市状态标识；价值中枢和短期情绪默认向负方向倾斜。
+const MARKET_BEAR: String = "bear"
+## 震荡市状态标识；方向接近中性且短期波动幅度扩大。
+const MARKET_SIDEWAYS: String = "sideways"
+## 对局结算刷新来源标识；启用完整波动、玩家行为和对局涨跌停规则。
+const REFRESH_SETTLEMENT: String = "settlement"
+## 局外运行刷新来源标识；只使用半幅情绪、低概率中枢漂移和半幅均值回归。
+const REFRESH_RUNTIME: String = "runtime"
+## 股票稳定顺序；UI、存档迁移、行为统计和事件目标统一使用该顺序。
+const STOCK_IDS: Array[String] = ["quantum_arms", "astral_defense", "hacker_tech", "frontline_supply", "relic_exploration"]
+## 股票静态目录；初始价仅用于首次初始化和极端软上下限，不作为长期强制回归锚点。
+const STOCK_DEFINITIONS: Dictionary = {
+	"quantum_arms": {"name": "量子军备集团", "module": "全品类远程、近战武器", "base_price": 120.0, "volatility": 0.030},
+	"astral_defense": {"name": "星穹防务工业", "module": "四部位防具装备", "base_price": 90.0, "volatility": 0.020},
+	"hacker_tech": {"name": "骇客数字科技", "module": "强化石、锻造增幅系统", "base_price": 150.0, "volatility": 0.030},
+	"frontline_supply": {"name": "前线保障供应链", "module": "修复包、物资撤离补给", "base_price": 60.0, "volatility": 0.020},
+	"relic_exploration": {"name": "遗迹勘探开发", "module": "宝箱、稀有掉落与高价值物资", "base_price": 200.0, "volatility": 0.045},
+}
+## 随机事件目录；duration_settlement 控制对局中枢强制次数，duration_refresh 控制全部刷新情绪或波动次数。
+const EVENT_DEFINITIONS: Array[Dictionary] = [
+	{"id": "arms_good", "message": "量子武器新批次量产下线", "stock_id": "quantum_arms", "direction": 1, "duration_settlement": 2, "duration_refresh": 2},
+	{"id": "defense_good", "message": "新型复合护甲通过实战认证", "stock_id": "astral_defense", "direction": 1, "duration_settlement": 2, "duration_refresh": 2},
+	{"id": "tech_good", "message": "强化算法取得重大突破", "stock_id": "hacker_tech", "direction": 1, "duration_settlement": 2, "duration_refresh": 3},
+	{"id": "supply_good", "message": "前线补给线全线贯通", "stock_id": "frontline_supply", "direction": 1, "duration_settlement": 2, "duration_refresh": 2},
+	{"id": "relic_good", "message": "大型遗迹群勘探确认", "stock_id": "relic_exploration", "direction": 1, "duration_settlement": 2, "duration_refresh": 3},
+	{"id": "arms_bad", "message": "武器主生产线故障停产", "stock_id": "quantum_arms", "direction": -1, "duration_settlement": 2, "duration_refresh": 2},
+	{"id": "defense_bad", "message": "防具原材料价格大幅上涨", "stock_id": "astral_defense", "direction": -1, "duration_settlement": 2, "duration_refresh": 2},
+	{"id": "tech_bad", "message": "区域防火墙全面升级", "stock_id": "hacker_tech", "direction": -1, "duration_settlement": 2, "duration_refresh": 3},
+	{"id": "supply_bad", "message": "补给通道遭电磁破坏", "stock_id": "frontline_supply", "direction": -1, "duration_settlement": 2, "duration_refresh": 2},
+	{"id": "relic_bad", "message": "遗迹勘探发生安全事故", "stock_id": "relic_exploration", "direction": -1, "duration_settlement": 2, "duration_refresh": 3},
+	{"id": "global_bull", "message": "量子科技板块牛市行情", "stock_id": "", "direction": 1, "temporary_market": MARKET_BULL, "duration_settlement": 2, "duration_refresh": 2},
+	{"id": "global_bear", "message": "市场恐慌情绪蔓延", "stock_id": "", "direction": -1, "temporary_market": MARKET_BEAR, "duration_settlement": 2, "duration_refresh": 2},
+	{"id": "global_volatile", "message": "市场震荡整理", "stock_id": "", "direction": 0, "volatility_multiplier": 1.5, "duration_settlement": 0, "duration_refresh": 5},
+]
+
+## 局外运行刷新间隔；默认 60 秒，只在非战斗场景累计，运行时通常不动态修改。
+@export_range(10.0, 600.0, 1.0) var runtime_refresh_interval_seconds: float = 60.0
+## 大盘正式结算切换周期；默认 8 局，低于 5 会明显削弱趋势感。
+@export_range(5, 30, 1) var market_cycle_settlement_count: int = 8
+## 涨跌停累计周期；默认每 5 次正式结算重置单股累计涨跌幅。
+@export_range(3, 20, 1) var price_limit_cycle_settlement_count: int = 5
+## 随机事件最短间隔；默认 2 局，低于 2 会让事件噪音淹没行为影响。
+@export_range(2, 20, 1) var event_interval_minimum_settlements: int = 2
+## 随机事件最长间隔；默认 6 局，必须不小于最短间隔。
+@export_range(2, 30, 1) var event_interval_maximum_settlements: int = 6
+## 单次正式结算涨跌幅上限；默认 15%，防止多层因素叠加产生瞬时极端价格。
+@export_range(0.01, 0.50, 0.01) var settlement_change_limit: float = 0.15
+## 单次局外运行涨跌幅上限；默认 7.5%，等于正式结算上限的一半。
+@export_range(0.005, 0.25, 0.005) var runtime_change_limit: float = 0.075
+## 周期累计涨跌幅上限；默认正负 30%，达到后剩余正式刷新被限制在周期边界内。
+@export_range(0.05, 1.0, 0.01) var cycle_change_limit: float = 0.30
+
+## 全局库存服务；负责金币、持仓和正式对局活动状态，缺失时行情仍可独立运行和调试。
+var _global_inventory: Node
+## 行情运行时状态；键为股票标识，值包含当前价、中枢、历史、周期起点和连续行为方向。
+var _stock_states: Dictionary = {}
+## 当前长期大盘状态；默认震荡市，每 8 次正式结算随机切换为不同状态。
+var _market_state: String = MARKET_SIDEWAYS
+## 已完成正式结算总数；用于大盘周期、涨跌停周期与随机事件间隔计数。
+var _settlement_count: int = 0
+## 距离下一次随机事件的剩余正式结算数；默认启动时在 2 到 6 之间随机生成。
+var _settlements_until_event: int = 0
+## 当前事件状态；空字典表示没有事件，非空时保存事件定义与剩余作用次数。
+var _active_event: Dictionary = {}
+## 非战斗场景累计运行秒数；达到 60 秒后扣除一个周期并触发一次小幅刷新。
+var _runtime_accumulated_seconds: float = 0.0
+## 本局行为原始统计；键为通用指标名，值为累计数量或价值，用于正式结算时计算五只股票影响。
+var _run_metrics: Dictionary = {}
+## 上一帧正式对局活动状态；用于从 GlobalInventory 的无参数状态信号识别开始与完成边界。
+var _previous_run_active: bool = false
+## 服务随机数生成器；负责中枢、情绪、大盘与事件抽取，启动时随机化。
+var _random: RandomNumberGenerator = RandomNumberGenerator.new()
+
+
+func _ready() -> void:
+	_random.randomize()
+	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
+	_initialize_default_states()
+	# 行情读档结果；首次运行或损坏存档时立即写入完整默认状态，确保初始化可追溯。
+	var state_loaded: bool = _load_state()
+	if _settlements_until_event <= 0:
+		_roll_next_event_interval()
+	if not state_loaded:
+		_save_state()
+	if _global_inventory != null and _global_inventory.has_signal("run_state_changed"):
+		_global_inventory.connect("run_state_changed", Callable(self, "_on_run_state_changed"))
+	_previous_run_active = _is_combat_run_active()
+	set_process(true)
+
+
+func _process(delta: float) -> void:
+	if _is_combat_run_active():
+		return
+	_runtime_accumulated_seconds += maxf(delta, 0.0)
+	# 有效局外刷新间隔；至少 1 秒，避免检查器异常配置造成无限循环。
+	var interval: float = maxf(runtime_refresh_interval_seconds, 1.0)
+	while _runtime_accumulated_seconds >= interval:
+		_runtime_accumulated_seconds -= interval
+		refresh_market(REFRESH_RUNTIME)
+
+
+func get_stock_definitions() -> Dictionary:
+	return STOCK_DEFINITIONS.duplicate(true)
+
+
+func get_market_snapshot() -> Dictionary:
+	# 股票快照表；逐只深复制运行时状态，外部不能直接修改服务内存。
+	var stocks: Dictionary = {}
+	for stock_id in STOCK_IDS:
+		# 单股运行时状态；包含价格、中枢、历史、行为连续性和调试概率。
+		var state: Dictionary = _stock_states.get(stock_id, {}) as Dictionary
+		stocks[stock_id] = state.duplicate(true)
+	return {
+		"market_state": _market_state,
+		"market_state_name": _get_market_state_name(_get_effective_market_state()),
+		"settlement_count": _settlement_count,
+		"runtime_progress": clampf(_runtime_accumulated_seconds / maxf(runtime_refresh_interval_seconds, 1.0), 0.0, 1.0),
+		"active_event": _active_event.duplicate(true),
+		"stocks": stocks,
+	}
+
+
+func get_stock_snapshot(stock_id: String) -> Dictionary:
+	if not stock_id in STOCK_IDS:
+		return {}
+	# 合并快照；先复制静态定义，再用运行时行情字段覆盖同名键。
+	var result: Dictionary = (STOCK_DEFINITIONS.get(stock_id, {}) as Dictionary).duplicate(true)
+	result.merge((_stock_states.get(stock_id, {}) as Dictionary).duplicate(true), true)
+	result["stock_id"] = stock_id
+	return result
+
+
+func get_current_price(stock_id: String) -> int:
+	# 单股运行时状态；内部价格使用浮点平滑计算，成交时四舍五入为正整数金币。
+	var state: Dictionary = _stock_states.get(stock_id, {}) as Dictionary
+	return maxi(roundi(float(state.get("price", 0.0))), 1)
+
+
+func get_maximum_buy_quantity(stock_id: String) -> int:
+	if _global_inventory == null or not _global_inventory.has_method("get_coins"):
+		return 0
+	# 当前整数成交价；必须大于 0 才可计算可买数量。
+	var price: int = get_current_price(stock_id)
+	# 当前永久金币；由 GlobalInventory 作为唯一所有者提供。
+	var coins: int = int(_global_inventory.call("get_coins"))
+	if price <= 0 or coins <= 0:
+		return 0
+	# 初始数量估算；先按不含手续费的整股数量计算，再向下校验含费实际花费。
+	var estimated_quantity: int = maxi(floori(float(coins) / float(price)), 0)
+	while estimated_quantity > 0:
+		# 估算总额；手续费按总成交额 0.5% 向上取整且最低 1 金币。
+		var estimated_gross: int = price * estimated_quantity
+		# 估算手续费；与最终买入请求使用同一公式，防止数量弹窗出现无法成交的上限。
+		var estimated_fee: int = maxi(ceili(float(estimated_gross) * 0.005), 1)
+		if estimated_gross + estimated_fee <= coins:
+			break
+		estimated_quantity -= 1
+	return estimated_quantity
+
+
+func request_buy(stock_id: String, quantity: int) -> Dictionary:
+	if not stock_id in STOCK_IDS or quantity <= 0 or _global_inventory == null or not _global_inventory.has_method("buy_stock_holding"):
+		return {"success": false, "message": "无法执行买入"}
+	# 当前成交单价；确认时重新读取，避免数量选择期间行情变化后使用旧价格。
+	var price: int = get_current_price(stock_id)
+	# 买入成交额；数量乘当前价，不包含手续费。
+	var gross: int = price * quantity
+	# 买入手续费；成交额 0.5% 向上取整且最低 1 金币。
+	var fee: int = maxi(ceili(float(gross) * 0.005), 1)
+	# 买入总花费；成交额与手续费相加后交给库存原子扣款。
+	var total_cost: int = gross + fee
+	# 买入结果；库存服务会再次校验金币并更新加权成本。
+	var success: bool = bool(_global_inventory.call("buy_stock_holding", stock_id, quantity, price, total_cost))
+	return {"success": success, "message": "买入成功" if success else "金币不足或持仓服务不可用", "quantity": quantity, "price": price, "fee": fee, "total": total_cost}
+
+
+func request_sell(stock_id: String, quantity: int) -> Dictionary:
+	if not stock_id in STOCK_IDS or quantity <= 0 or _global_inventory == null or not _global_inventory.has_method("sell_stock_holding"):
+		return {"success": false, "message": "无法执行卖出"}
+	# 当前成交单价；确认时重新读取，确保即时交易使用实时报价。
+	var price: int = get_current_price(stock_id)
+	# 卖出成交额；数量乘当前价，不包含手续费。
+	var gross: int = price * quantity
+	# 卖出手续费；用于确认框明示，实际所得按乘 0.995 后向下取整。
+	var fee: int = maxi(ceili(float(gross) * 0.005), 1)
+	# 卖出实际所得；向下取整且最低 1 金币。
+	var proceeds: int = maxi(int(floor(float(gross) * 0.995)), 1)
+	# 卖出结果；库存服务会再次校验持仓数量并实时增加永久金币。
+	var success: bool = bool(_global_inventory.call("sell_stock_holding", stock_id, quantity, proceeds))
+	return {"success": success, "message": "卖出成功" if success else "持仓数量不足", "quantity": quantity, "price": price, "fee": fee, "total": proceeds}
+
+
+func refresh_market(refresh_source: String = REFRESH_SETTLEMENT) -> void:
+	# 是否为正式结算刷新；决定完整波动、玩家行为、周期和事件计数是否生效。
+	var is_settlement: bool = refresh_source == REFRESH_SETTLEMENT
+	# 五只股票行为影响；局外刷新使用空字典并视为零影响。
+	var behavior_impacts: Dictionary = _calculate_behavior_impacts() if is_settlement else {}
+	if is_settlement:
+		_settlement_count += 1
+		_update_market_cycles_before_refresh()
+	for stock_id in STOCK_IDS:
+		_refresh_stock(stock_id, refresh_source, float(behavior_impacts.get(stock_id, 0.0)))
+	_consume_event_duration(is_settlement)
+	if is_settlement:
+		_update_behavior_streaks(behavior_impacts)
+		_settlements_until_event -= 1
+		if _settlements_until_event <= 0:
+			trigger_random_event()
+		_run_metrics.clear()
+	_save_state()
+	market_changed.emit()
+
+
+func trigger_random_event() -> Dictionary:
+	if EVENT_DEFINITIONS.is_empty():
+		return {}
+	# 随机事件定义；深复制后附加剩余次数，避免修改静态事件目录。
+	var definition: Dictionary = EVENT_DEFINITIONS[_random.randi_range(0, EVENT_DEFINITIONS.size() - 1)].duplicate(true)
+	definition["remaining_settlements"] = int(definition.get("duration_settlement", 0))
+	definition["remaining_refreshes"] = int(definition.get("duration_refresh", 0))
+	_active_event = definition
+	_roll_next_event_interval()
+	_save_state()
+	event_announced.emit(str(definition.get("message", "市场出现新变化")))
+	market_changed.emit()
+	return definition.duplicate(true)
+
+
+func set_market_state(market_state: String) -> void:
+	if not market_state in [MARKET_BULL, MARKET_BEAR, MARKET_SIDEWAYS]:
+		return
+	_market_state = market_state
+	_save_state()
+	market_changed.emit()
+
+
+func cycle_market_state() -> String:
+	# 大盘循环顺序；开发者按钮按牛、熊、震荡依次切换。
+	var states: Array[String] = [MARKET_BULL, MARKET_BEAR, MARKET_SIDEWAYS]
+	# 当前大盘下标；异常状态会得到 -1 并自然切换到牛市。
+	var current_index: int = states.find(_market_state)
+	set_market_state(states[(current_index + 1) % states.size()])
+	return _market_state
+
+
+func record_run_metric(metric_name: String, amount: float = 1.0) -> void:
+	if metric_name.is_empty() or amount == 0.0 or not _is_combat_run_active():
+		return
+	_run_metrics[metric_name] = float(_run_metrics.get(metric_name, 0.0)) + amount
+
+
+func record_resource_obtained(item_resource: Resource, quantity: int = 1) -> void:
+	if item_resource == null or quantity <= 0:
+		return
+	# 物品类型；用于区分强化石、修复包和其他资源。
+	var item_kind: String = str(item_resource.get("item_kind"))
+	if item_kind == "enhancement_stone":
+		record_run_metric("enhancement_stones", quantity)
+		# 强化石品质；高级和极品会额外计入高品质强化石指标。
+		var quality_id: String = str(item_resource.get("quality_id"))
+		if quality_id in ["high", "supreme"]:
+			record_run_metric("high_enhancement_stones", quantity)
+	elif not str(item_resource.get("weapon_id")).is_empty():
+		record_run_metric("new_weapons", quantity)
+	# 通用物品品质；高级和极品物品共同影响遗迹勘探开发。
+	var item_quality_id: String = str(item_resource.get("quality_id"))
+	if item_quality_id in ["high", "supreme"]:
+		record_run_metric("high_quality_items", quantity)
+
+
+func _refresh_stock(stock_id: String, refresh_source: String, player_impact: float) -> void:
+	# 股票静态定义；提供初始价、名称和基础波动率。
+	var definition: Dictionary = STOCK_DEFINITIONS.get(stock_id, {}) as Dictionary
+	# 股票运行时状态；刷新后会原位更新并重新写回状态表。
+	var state: Dictionary = _stock_states.get(stock_id, {}) as Dictionary
+	# 刷新前价格；至少 1 金币，作为本次涨跌幅与单次限制的基准。
+	var old_price: float = maxf(float(state.get("price", definition.get("base_price", 1.0))), 1.0)
+	# 当前动态价值中枢；至少 1 金币，长期回归只围绕该值而非初始价。
+	var center: float = maxf(float(state.get("center", old_price)), 1.0)
+	# 是否正式结算刷新；决定波动倍率、中枢概率和玩家行为是否启用。
+	var is_settlement: bool = refresh_source == REFRESH_SETTLEMENT
+	# 小幅刷新尺度；局外运行时为 0.5，正式结算为 1.0。
+	var scale: float = 1.0 if is_settlement else 0.5
+	# 大盘方向分数；牛市为 1、熊市为 -1、震荡为 0。
+	var market_direction: float = _get_market_direction(_get_effective_market_state())
+	# 当前事件方向；目标不匹配或事件无有效次数时为 0。
+	var event_direction: float = _get_event_direction_for_stock(stock_id, is_settlement)
+	# 本次中枢漂移概率；正式基础 25%、局外基础 10%，连续行为和事件会覆盖。
+	var drift_probability: float = 0.25 if is_settlement else 0.10
+	# 上一轮连续同向行为局数；达到 2 时增强下一局中枢传导。
+	var same_direction_count: int = int(state.get("behavior_streak", 0))
+	if is_settlement and same_direction_count >= 2 and not is_zero_approx(player_impact):
+		drift_probability = 0.55
+	if event_direction != 0.0 and is_settlement:
+		drift_probability = 0.80
+	if _random.randf() < drift_probability:
+		# 中枢最小漂移比例；正式为 0.6%，局外为 0.3%。
+		var minimum_drift: float = 0.006 if is_settlement else 0.003
+		# 中枢最大漂移比例；正式为 1.2%，局外为 0.6%，连续行为可扩大 1.3 倍。
+		var maximum_drift: float = 0.012 if is_settlement else 0.006
+		if is_settlement and same_direction_count >= 2 and not is_zero_approx(player_impact):
+			maximum_drift *= 1.3
+		# 漂移方向总分；事件优先，否则叠加大盘和玩家行为方向。
+		var direction_score: float = event_direction if event_direction != 0.0 else market_direction + signf(player_impact) * 0.65
+		# 最终漂移方向；总分为零时等概率选择正负方向。
+		var drift_direction: float = signf(direction_score) if not is_zero_approx(direction_score) else (-1.0 if _random.randf() < 0.5 else 1.0)
+		center *= 1.0 + _random.randf_range(minimum_drift, maximum_drift) * drift_direction
+	# 初始基准价；仅用于 50% 至 300% 极端软保护，不参与日常回归。
+	var base_price: float = float(definition.get("base_price", old_price))
+	center = clampf(center, base_price * 0.5, base_price * 3.0)
+	# 当前价格相对中枢偏离率；正值高于中枢，负值低于中枢。
+	var deviation_ratio: float = (old_price - center) / center
+	# 本次均值回归变化量；局外刷新按 0.5 尺度减半。
+	var reversion: float = _calculate_mean_reversion(deviation_ratio) * scale
+	# 本次情绪基础波动率；来自股票类型并受刷新源、大盘和事件倍率调整。
+	var volatility: float = float(definition.get("volatility", 0.03)) * scale
+	if _get_effective_market_state() == MARKET_SIDEWAYS:
+		volatility *= 1.2
+	volatility *= _get_event_volatility_multiplier()
+	# 情绪方向偏置；大盘提供较弱倾斜，目标事件提供更强倾斜。
+	var sentiment_bias: float = market_direction * volatility * 0.28 + event_direction * volatility * 0.55
+	# 短期市场情绪；每次刷新必定抽取随机波动并叠加方向偏置。
+	var sentiment: float = _random.randf_range(-volatility, volatility) + sentiment_bias
+	# 三层定价与回归合成变化；中枢、情绪、行为权重分别为 50%、35%、15%。
+	var weighted_change: float = ((center / old_price) - 1.0) * 0.50 + sentiment * 0.35 + clampf(player_impact, -0.02, 0.02) * 0.15 + reversion
+	# 单次涨跌上限；正式为 15%，局外为 7.5%。
+	var single_limit: float = settlement_change_limit if is_settlement else runtime_change_limit
+	weighted_change = clampf(weighted_change, -single_limit, single_limit)
+	# 限制后的新价格；后续继续应用软边界和正式周期累计边界。
+	var new_price: float = old_price * (1.0 + weighted_change)
+	new_price = clampf(new_price, base_price * 0.5, base_price * 3.0)
+	# 当前涨跌周期起始价；每 5 次正式结算重置，周期内正式与局外刷新共同遵守 ±30% 边界。
+	var cycle_start_price: float = maxf(float(state.get("cycle_start_price", old_price)), 1.0)
+	new_price = clampf(new_price, cycle_start_price * (1.0 - cycle_change_limit), cycle_start_price * (1.0 + cycle_change_limit))
+	state["center"] = center
+	state["price"] = maxf(new_price, 1.0)
+	state["last_change_ratio"] = (new_price - old_price) / old_price
+	state["last_player_impact"] = player_impact if is_settlement else 0.0
+	# 玩家行为贡献占比；行为层加权变化占最终实际涨跌幅的绝对比例，最终持平时按 0 处理。
+	var actual_change_ratio: float = float(state.get("last_change_ratio", 0.0))
+	state["last_player_contribution_ratio"] = clampf(absf(player_impact * 0.15) / absf(actual_change_ratio), 0.0, 1.0) if is_settlement and not is_zero_approx(actual_change_ratio) else 0.0
+	state["next_drift_probability"] = drift_probability
+	# 最近价格历史；追加新整数价格并只保留最近 30 次刷新。
+	var history: Array = state.get("history", []) as Array
+	history.append(maxi(roundi(new_price), 1))
+	while history.size() > 30:
+		history.remove_at(0)
+	state["history"] = history
+	_stock_states[stock_id] = state
+
+
+func _calculate_mean_reversion(deviation_ratio: float) -> float:
+	# 绝对偏离率；决定分段概率和修正力度。
+	var absolute_deviation: float = absf(deviation_ratio)
+	if absolute_deviation <= 0.10:
+		return 0.0
+	# 当前分段修正强度；表示修正偏离量的比例。
+	var strength: float = 0.0
+	# 当前分段触发概率；超过 50% 偏离时为 100%。
+	var probability: float = 0.0
+	if absolute_deviation <= 0.25:
+		strength = 0.10
+		probability = 0.60
+	elif absolute_deviation <= 0.50:
+		strength = 0.18
+		probability = 0.85
+	else:
+		strength = 0.25
+		probability = 1.0
+	if _random.randf() > probability:
+		return 0.0
+	return -deviation_ratio * strength
+
+
+func _calculate_behavior_impacts() -> Dictionary:
+	return {
+		"quantum_arms": clampf(floor(float(_run_metrics.get("shots", 0.0)) / 100.0) * 0.003 + floor(float(_run_metrics.get("weapon_durability", 0.0)) / 500.0) * 0.004 + float(_run_metrics.get("new_weapons", 0.0)) * 0.002 + floor(float(_run_metrics.get("extracted_weapon_value", 0.0)) / 800.0) * 0.003, -0.02, 0.02),
+		"astral_defense": clampf(floor(float(_run_metrics.get("damage_taken", 0.0)) / 100.0) * 0.005 + floor(float(_run_metrics.get("armor_durability", 0.0)) / 300.0) * 0.004 + floor(float(_run_metrics.get("dodges", 0.0)) / 20.0) * 0.002 + float(_run_metrics.get("broken_armor", 0.0)) * 0.003, -0.02, 0.02),
+		"hacker_tech": clampf(float(_run_metrics.get("enhancement_stones", 0.0)) * 0.002 + float(_run_metrics.get("shipped_enhancement_stones", 0.0)) * 0.003 + floor(float(_run_metrics.get("chests_opened", 0.0)) / 5.0) * 0.002 + float(_run_metrics.get("high_enhancement_stones", 0.0)) * 0.004, -0.02, 0.02),
+		"frontline_supply": clampf(float(_run_metrics.get("repair_kits_used", 0.0)) * 0.004 + floor(float(_run_metrics.get("shipped_value", 0.0)) / 500.0) * 0.003 + floor(float(_run_metrics.get("lost_value", 0.0)) / 300.0) * 0.005 + floor(float(_run_metrics.get("survival_seconds", 0.0)) / 120.0) * 0.002, -0.02, 0.02),
+		"relic_exploration": clampf(float(_run_metrics.get("chests_opened", 0.0)) * 0.002 + float(_run_metrics.get("high_quality_items", 0.0)) * 0.005 + floor(float(_run_metrics.get("extracted_value", 0.0)) / 1000.0) * 0.003 - floor(float(_run_metrics.get("lost_high_value", 0.0)) / 800.0) * 0.004, -0.02, 0.02),
+	}
+
+
+func _update_behavior_streaks(impacts: Dictionary) -> void:
+	for stock_id in STOCK_IDS:
+		# 当前股票状态；读取上局方向和连续次数后更新本局传导记录。
+		var state: Dictionary = _stock_states.get(stock_id, {}) as Dictionary
+		# 本局行为方向；正影响为 1、负影响为 -1、无影响为 0。
+		var impact_direction: int = int(signf(float(impacts.get(stock_id, 0.0))))
+		# 上局行为方向；用于判断是否继续同向累计。
+		var previous_direction: int = int(state.get("behavior_direction", 0))
+		if impact_direction == 0:
+			state["behavior_streak"] = 0
+			state["behavior_direction"] = 0
+		elif impact_direction == previous_direction:
+			state["behavior_streak"] = int(state.get("behavior_streak", 0)) + 1
+		else:
+			state["behavior_streak"] = 1
+			state["behavior_direction"] = impact_direction
+		_stock_states[stock_id] = state
+
+
+func _update_market_cycles_before_refresh() -> void:
+	if _settlement_count > 0 and _settlement_count % maxi(market_cycle_settlement_count, 1) == 0:
+		# 可切换大盘候选；移除当前状态，确保周期切换不会原地不变。
+		var candidates: Array[String] = [MARKET_BULL, MARKET_BEAR, MARKET_SIDEWAYS]
+		candidates.erase(_market_state)
+		_market_state = candidates[_random.randi_range(0, candidates.size() - 1)]
+	if _settlement_count > 0 and (_settlement_count - 1) % maxi(price_limit_cycle_settlement_count, 1) == 0:
+		for stock_id in STOCK_IDS:
+			# 当前股票状态；把周期起始价更新为切换时的实时价格。
+			var state: Dictionary = _stock_states.get(stock_id, {}) as Dictionary
+			state["cycle_start_price"] = float(state.get("price", 1.0))
+			_stock_states[stock_id] = state
+
+
+func _consume_event_duration(is_settlement: bool) -> void:
+	if _active_event.is_empty():
+		return
+	if int(_active_event.get("remaining_refreshes", 0)) > 0:
+		_active_event["remaining_refreshes"] = int(_active_event.get("remaining_refreshes", 0)) - 1
+	if is_settlement and int(_active_event.get("remaining_settlements", 0)) > 0:
+		_active_event["remaining_settlements"] = int(_active_event.get("remaining_settlements", 0)) - 1
+	if int(_active_event.get("remaining_refreshes", 0)) <= 0 and int(_active_event.get("remaining_settlements", 0)) <= 0:
+		_active_event.clear()
+
+
+func _get_event_direction_for_stock(stock_id: String, is_settlement: bool) -> float:
+	if _active_event.is_empty():
+		return 0.0
+	# 事件目标股票；空字符串表示作用于全部股票。
+	var target_stock_id: String = str(_active_event.get("stock_id", ""))
+	if not target_stock_id.is_empty() and target_stock_id != stock_id:
+		return 0.0
+	if is_settlement and int(_active_event.get("remaining_settlements", 0)) > 0:
+		return float(_active_event.get("direction", 0))
+	if int(_active_event.get("remaining_refreshes", 0)) > 0:
+		return float(_active_event.get("direction", 0))
+	return 0.0
+
+
+func _get_event_volatility_multiplier() -> float:
+	if int(_active_event.get("remaining_refreshes", 0)) <= 0:
+		return 1.0
+	return maxf(float(_active_event.get("volatility_multiplier", 1.0)), 0.0)
+
+
+func _get_effective_market_state() -> String:
+	if int(_active_event.get("remaining_settlements", 0)) > 0:
+		# 临时大盘标识；只有三个合法状态才覆盖长期大盘。
+		var temporary_market: String = str(_active_event.get("temporary_market", ""))
+		if temporary_market in [MARKET_BULL, MARKET_BEAR, MARKET_SIDEWAYS]:
+			return temporary_market
+	return _market_state
+
+
+func _get_market_direction(market_state: String) -> float:
+	if market_state == MARKET_BULL:
+		return 1.0
+	if market_state == MARKET_BEAR:
+		return -1.0
+	return 0.0
+
+
+func _get_market_state_name(market_state: String) -> String:
+	if market_state == MARKET_BULL:
+		return "牛市"
+	if market_state == MARKET_BEAR:
+		return "熊市"
+	return "震荡市"
+
+
+func _roll_next_event_interval() -> void:
+	# 事件最短间隔；至少 2 局，防止事件每局扎堆触发。
+	var minimum_value: int = maxi(event_interval_minimum_settlements, 2)
+	# 事件最长间隔；不得小于最短间隔，异常配置会自动向上修正。
+	var maximum_value: int = maxi(event_interval_maximum_settlements, minimum_value)
+	_settlements_until_event = _random.randi_range(minimum_value, maximum_value)
+
+
+func _on_run_state_changed() -> void:
+	# 当前正式对局活动状态；与上一状态比较以识别开始和完成边界。
+	var is_active: bool = _is_combat_run_active()
+	if is_active and not _previous_run_active:
+		_run_metrics.clear()
+	elif not is_active and _previous_run_active:
+		_collect_outcome_metrics()
+		refresh_market(REFRESH_SETTLEMENT)
+	_previous_run_active = is_active
+
+
+func _collect_outcome_metrics() -> void:
+	if _global_inventory == null or not _global_inventory.has_method("get_last_run_outcome"):
+		return
+	# 当前战斗场景；操作系统关闭窗口等绕过 HUD 的结算路径仍可从 GameWorld 补取存活时长。
+	var current_scene: Node = get_tree().current_scene
+	if current_scene != null and current_scene.has_method("get_survival_time_seconds"):
+		# 场景存活时长；与 HUD 上报值取较大者，避免同一次正常结算重复相加。
+		var scene_survival_seconds: float = maxf(float(current_scene.call("get_survival_time_seconds")), 0.0)
+		_run_metrics["survival_seconds"] = maxf(float(_run_metrics.get("survival_seconds", 0.0)), scene_survival_seconds)
+	# 最近一次战斗结算；包含成功/失败类型以及获得、丢失条目。
+	var outcome: Dictionary = _global_inventory.call("get_last_run_outcome") as Dictionary
+	# 实际丢失条目；失败时用于累计供应链和遗迹勘探的负向价值指标。
+	var lost_entries: Array = outcome.get("lost_entries", []) as Array
+	# 本局首次获得条目；成功时用于估算撤离带出总价值和武器价值。
+	var gained_entries: Array = outcome.get("gained_entries", []) as Array
+	# 本局丢失总价值；每个条目按单位售价乘实际丢失数量累计。
+	var lost_value: int = 0
+	# 本局丢失高价值物品累计；单条总价值达到 800 金币时计入。
+	var lost_high_value: int = 0
+	# 成功撤离带出总价值；按本局首次获得条目累计。
+	var extracted_value: int = 0
+	# 成功撤离带出武器价值；只累计具有 weapon_id 的条目。
+	var extracted_weapon_value: int = 0
+	for raw_entry in gained_entries:
+		if not (raw_entry is Dictionary):
+			continue
+		# 获得条目字典；提供资源引用和实际数量。
+		var gained_entry: Dictionary = raw_entry as Dictionary
+		# 获得物品资源；用于读取售价和武器标识。
+		var gained_resource: Resource = gained_entry.get("resource") as Resource
+		# 获得数量；至少为 1，堆叠资源按结算记录数量计算。
+		var gained_quantity: int = maxi(int(gained_entry.get("quantity", 1)), 1)
+		# 获得物品单位价值；缺失资源时按 0 处理。
+		var gained_unit_value: int = int(gained_resource.get("sell_price")) if gained_resource != null else 0
+		extracted_value += gained_unit_value * gained_quantity
+		if gained_resource != null and not str(gained_resource.get("weapon_id")).is_empty():
+			extracted_weapon_value += gained_unit_value * gained_quantity
+	for raw_entry in lost_entries:
+		if not (raw_entry is Dictionary):
+			continue
+		# 丢失条目字典；提供资源引用和实际数量。
+		var entry: Dictionary = raw_entry as Dictionary
+		# 丢失物品资源；用于读取当前有效售价。
+		var resource: Resource = entry.get("resource") as Resource
+		# 丢失数量；至少为 1，强化石等堆叠按实际颗数计算。
+		var quantity: int = maxi(int(entry.get("quantity", 1)), 1)
+		# 丢失物品单位价值；缺失资源时按 0 处理。
+		var unit_value: int = int(resource.get("sell_price")) if resource != null else 0
+		lost_value += unit_value * quantity
+		if unit_value * quantity >= 800:
+			lost_high_value += unit_value * quantity
+	_run_metrics["lost_value"] = float(_run_metrics.get("lost_value", 0.0)) + lost_value
+	_run_metrics["lost_high_value"] = float(_run_metrics.get("lost_high_value", 0.0)) + lost_high_value
+	if str(outcome.get("result", "failure")) == "success":
+		_run_metrics["extracted_value"] = maxf(float(_run_metrics.get("extracted_value", 0.0)), extracted_value)
+		_run_metrics["extracted_weapon_value"] = maxf(float(_run_metrics.get("extracted_weapon_value", 0.0)), extracted_weapon_value)
+
+
+func _is_combat_run_active() -> bool:
+	return _global_inventory != null and _global_inventory.has_method("is_combat_run_active") and bool(_global_inventory.call("is_combat_run_active"))
+
+
+func _initialize_default_states() -> void:
+	_stock_states.clear()
+	for stock_id in STOCK_IDS:
+		# 股票静态定义；初始化时读取对应初始基准价。
+		var definition: Dictionary = STOCK_DEFINITIONS.get(stock_id, {}) as Dictionary
+		# 股票初始价；同时作为首次价格、中枢和涨跌周期起点。
+		var base_price: float = float(definition.get("base_price", 1.0))
+		_stock_states[stock_id] = {
+			"price": base_price,
+			"center": base_price,
+			"history": [roundi(base_price)],
+			"last_change_ratio": 0.0,
+			"cycle_start_price": base_price,
+			"behavior_streak": 0,
+			"behavior_direction": 0,
+			"last_player_impact": 0.0,
+			"last_player_contribution_ratio": 0.0,
+			"next_drift_probability": 0.25,
+		}
+
+
+func _save_state() -> void:
+	# 股市存档根字典；保存全部长期行情状态，不包含玩家持仓和金币。
+	var save_data: Dictionary = {
+		"version": SAVE_VERSION,
+		"market_state": _market_state,
+		"settlement_count": _settlement_count,
+		"settlements_until_event": _settlements_until_event,
+		"active_event": _active_event,
+		"runtime_accumulated_seconds": _runtime_accumulated_seconds,
+		"stock_states": _stock_states,
+	}
+	# 股市存档文件；打开失败时保留内存状态并等待下一次刷新重试。
+	var save_file: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if save_file != null:
+		save_file.store_string(JSON.stringify(save_data))
+
+
+func _load_state() -> bool:
+	if not FileAccess.file_exists(SAVE_PATH):
+		return false
+	# 股市只读存档文件；打开失败时回退完整默认状态。
+	var save_file: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.READ)
+	if save_file == null:
+		return false
+	# JSON 解析结果；非字典视为损坏存档并回退默认初始化。
+	var parsed: Variant = JSON.parse_string(save_file.get_as_text())
+	if not (parsed is Dictionary):
+		return false
+	# 股市存档字典；包含大盘、周期、事件、运行累计和单股状态。
+	var save_data: Dictionary = parsed as Dictionary
+	_market_state = str(save_data.get("market_state", MARKET_SIDEWAYS))
+	if not _market_state in [MARKET_BULL, MARKET_BEAR, MARKET_SIDEWAYS]:
+		_market_state = MARKET_SIDEWAYS
+	_settlement_count = maxi(int(save_data.get("settlement_count", 0)), 0)
+	_settlements_until_event = maxi(int(save_data.get("settlements_until_event", 0)), 0)
+	_runtime_accumulated_seconds = clampf(float(save_data.get("runtime_accumulated_seconds", 0.0)), 0.0, maxf(runtime_refresh_interval_seconds, 1.0))
+	# 原始事件字段；合法字典会恢复剩余次数，其他类型视为无事件。
+	var raw_event: Variant = save_data.get("active_event", {})
+	_active_event = (raw_event as Dictionary).duplicate(true) if raw_event is Dictionary else {}
+	# 原始股票状态表；只恢复五个已知稳定股票标识。
+	var raw_states: Variant = save_data.get("stock_states", {})
+	if raw_states is Dictionary:
+		for stock_id in STOCK_IDS:
+			# 单股原始状态；必须为字典才与默认字段合并。
+			var raw_state: Variant = (raw_states as Dictionary).get(stock_id)
+			if raw_state is Dictionary:
+				# 单股默认状态；先保留新版本新增字段，再用存档值覆盖已有行情。
+				var default_state: Dictionary = _stock_states.get(stock_id, {}) as Dictionary
+				default_state.merge((raw_state as Dictionary).duplicate(true), true)
+				_stock_states[stock_id] = default_state
+	return true

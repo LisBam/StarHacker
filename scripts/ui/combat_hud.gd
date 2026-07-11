@@ -3252,6 +3252,8 @@ func _show_success_settlement() -> void:
 	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
 	# 成功结算；缺少全局服务时使用空收益兜底，仍展示撤离成功界面。
 	var outcome: Dictionary = {"result": "success", "title": "撤离成功", "gained_entries": [], "lost_entries": [], "gained_items": [], "lost_items": []}
+	_record_stock_survival_time()
+	_record_stock_extracted_values(global_inventory)
 	if global_inventory != null and global_inventory.has_method("complete_combat_run_success"):
 		outcome = global_inventory.call("complete_combat_run_success")
 	_present_run_outcome(outcome)
@@ -3271,8 +3273,28 @@ func _show_failure_settlement(reason: String) -> void:
 
 	_run_outcome_resolved = true
 	# 失败结算；包含完整丢失与随机保留物品名称，直接用于结算界面。
+	_record_stock_survival_time()
 	var outcome: Dictionary = global_inventory.call("complete_combat_run_failure", reason)
 	_present_run_outcome(outcome)
+
+
+func _record_stock_survival_time() -> void:
+	# 股市统计服务；在库存结束正式对局前记录存活时间，避免 run_active 关闭后统计请求被忽略。
+	var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")
+	if stock_market_service != null and stock_market_service.has_method("record_run_metric"):
+		stock_market_service.call("record_run_metric", "survival_seconds", _get_survival_time_seconds())
+
+
+func _record_stock_extracted_values(global_inventory: Node) -> void:
+	if global_inventory == null or not global_inventory.has_method("get_combat_carried_value_summary"):
+		return
+	# 随身价值摘要；成功撤离完成所有权结算前读取，覆盖开局携带与本局获得的全部物品。
+	var value_summary: Dictionary = global_inventory.call("get_combat_carried_value_summary") as Dictionary
+	# 股市统计服务；只在成功撤离路径调用，因此不会把失败前随身价值误记为带出价值。
+	var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")
+	if stock_market_service != null and stock_market_service.has_method("record_run_metric"):
+		stock_market_service.call("record_run_metric", "extracted_value", int(value_summary.get("total_value", 0)))
+		stock_market_service.call("record_run_metric", "extracted_weapon_value", int(value_summary.get("weapon_value", 0)))
 
 
 func _present_run_outcome(outcome: Dictionary) -> void:

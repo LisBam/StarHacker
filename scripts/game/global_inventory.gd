@@ -8,13 +8,16 @@ signal equipment_changed
 signal run_state_changed
 signal warehouse_changed
 signal coins_changed
+## 股票持仓变化信号；买入、卖出、旧存档迁移或开发者清空持仓后通知股市 UI 刷新。
+signal stock_holdings_changed
 ## 战斗失败遗失记录信号；参数为本次实际遗失条目，商店灰市通过该只读快照维护最近五次失败物品。
 signal combat_failure_losses_recorded(lost_entries: Array)
 
 ## 全局背包存档路径；默认写入用户目录，保存物品标识、获得时间、排序优先级和装备槽。
 const SAVE_PATH: String = "user://global_inventory.json"
 ## 当前库存存档版本；默认 7，版本 7 起支持可堆叠修复包的独立数据恢复。
-const SAVE_VERSION: int = 8
+## 版本 9 补充；当前值升级为 9，用于保存股票持仓数量和加权平均成本，旧存档自动初始化为空持仓。
+const SAVE_VERSION: int = 9
 ## 强化公式存档版本；版本 2 起暴击率、暴击伤害和闪避率的累计值按直接百分点保存。
 const ENHANCEMENT_FORMULA_VERSION: int = 2
 ## 旧版耐久上限；固定 100.0，用于把版本 5 的当前耐久按比例迁移到新版上限。
@@ -119,10 +122,16 @@ var _save_queued: bool = false
 @export_range(0.05, 10.0, 0.05) var durability_save_delay_seconds: float = 0.5
 ## 是否已有耐久存档等待执行；默认 false，用于把短时间内多次射击合并为一次磁盘写入。
 var _durability_save_queued: bool = false
+## 股票交易合并存档间隔；默认 0.5 秒，连续买卖会合并磁盘写入但内存余额和持仓实时生效。
+@export_range(0.05, 10.0, 0.05) var stock_trade_save_delay_seconds: float = 0.5
+## 是否已有股票交易存档等待执行；默认 false，用于限制高频连续交易的磁盘写入次数。
+var _stock_trade_save_queued: bool = false
 ## 服务随机数生成器；默认启动时随机化，用于失败结算随机保留 50% 背包物品。
 var _random: RandomNumberGenerator = RandomNumberGenerator.new()
 ## 局外金币余额；取值大于等于 0，默认 0，只在主菜单仓库出售永久物品时增加。
 var _coins: int = DEFAULT_STARTING_COINS
+## 股票持仓表；键为稳定股票标识，值包含非负整数 quantity 与非负浮点 average_cost。
+var _stock_holdings: Dictionary = {}
 
 
 func _ready() -> void:
@@ -136,6 +145,9 @@ func _ready() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST and _run_active:
 		complete_combat_run_failure("主动退出游戏")
+		_save_inventory()
+	elif what == NOTIFICATION_WM_CLOSE_REQUEST and _stock_trade_save_queued:
+		# 关闭窗口前立即落盘；避免最后 0.5 秒内的交易尚未触发合并计时器而丢失。
 		_save_inventory()
 
 
@@ -287,6 +299,88 @@ func get_coins() -> int:
 	return _coins
 
 
+func get_stock_holdings() -> Dictionary:
+	return _stock_holdings.duplicate(true)
+
+
+func get_stock_holding(stock_id: String) -> Dictionary:
+	# 指定股票持仓；返回副本，外部只能通过买卖接口修改真实数量和成本。
+	var holding: Dictionary = _stock_holdings.get(stock_id, {}) as Dictionary
+	return holding.duplicate(true)
+
+
+func buy_stock_holding(stock_id: String, quantity: int, unit_price: int, total_cost: int) -> bool:
+	if stock_id.is_empty() or quantity <= 0 or unit_price <= 0 or total_cost <= 0 or _coins < total_cost:
+		return false
+	# 原持仓；缺失时按零数量、零成本初始化，旧存档无需预先写入五只空记录。
+	var holding: Dictionary = _stock_holdings.get(stock_id, {"quantity": 0, "average_cost": 0.0}) as Dictionary
+	# 原持仓数量；取值至少为 0，异常负数会在交易前归零。
+	var old_quantity: int = maxi(int(holding.get("quantity", 0)), 0)
+	# 原持仓成本；取值为每股加权平均实际买入价格，异常负值会归零。
+	var old_average_cost: float = maxf(float(holding.get("average_cost", 0.0)), 0.0)
+	# 新持仓数量；买入数量直接累加，股票不受物品堆叠上限影响。
+	var new_quantity: int = old_quantity + quantity
+	# 本次含费每股成本；手续费计入持仓成本，保证浮动盈亏反映真实买入支出。
+	var transaction_unit_cost: float = float(total_cost) / float(quantity)
+	# 新加权平均成本；按原持仓总成本与本次实际支出合并计算。
+	var new_average_cost: float = (old_average_cost * old_quantity + transaction_unit_cost * quantity) / float(new_quantity)
+	_coins -= total_cost
+	_stock_holdings[stock_id] = {"quantity": new_quantity, "average_cost": new_average_cost}
+	_queue_stock_trade_save()
+	coins_changed.emit()
+	stock_holdings_changed.emit()
+	return true
+
+
+func sell_stock_holding(stock_id: String, quantity: int, proceeds: int) -> bool:
+	if stock_id.is_empty() or quantity <= 0 or proceeds <= 0:
+		return false
+	# 当前持仓；卖出必须由稳定股票标识找到足量持仓，UI 预览过期时会在此重新校验。
+	var holding: Dictionary = _stock_holdings.get(stock_id, {}) as Dictionary
+	# 当前持仓数量；取值至少为 0，用于限制本次卖出数量。
+	var current_quantity: int = maxi(int(holding.get("quantity", 0)), 0)
+	if current_quantity < quantity:
+		return false
+	# 剩余数量；全部卖出时移除空记录，部分卖出继续保留原加权平均成本。
+	var remaining_quantity: int = current_quantity - quantity
+	_coins += proceeds
+	if remaining_quantity <= 0:
+		_stock_holdings.erase(stock_id)
+	else:
+		holding["quantity"] = remaining_quantity
+		_stock_holdings[stock_id] = holding
+	_queue_stock_trade_save()
+	coins_changed.emit()
+	stock_holdings_changed.emit()
+	return true
+
+
+func clear_stock_holdings() -> int:
+	# 清空前总股数；用于开发者菜单反馈，不返还任何金币。
+	var cleared_quantity: int = 0
+	for raw_holding in _stock_holdings.values():
+		if raw_holding is Dictionary:
+			cleared_quantity += maxi(int((raw_holding as Dictionary).get("quantity", 0)), 0)
+	_stock_holdings.clear()
+	_queue_stock_trade_save()
+	stock_holdings_changed.emit()
+	return cleared_quantity
+
+
+func _queue_stock_trade_save() -> void:
+	if _stock_trade_save_queued:
+		return
+	_stock_trade_save_queued = true
+	# 合并计时器；暂停与局外界面中仍继续计时，确保确认弹窗连续交易不会逐笔写盘。
+	var save_timer: SceneTreeTimer = get_tree().create_timer(maxf(stock_trade_save_delay_seconds, 0.05), true, false, true)
+	save_timer.timeout.connect(_flush_queued_stock_trade_save, CONNECT_ONE_SHOT)
+
+
+func _flush_queued_stock_trade_save() -> void:
+	_stock_trade_save_queued = false
+	_queue_save_inventory()
+
+
 func get_combat_shipped_value() -> int:
 	# 已送回价值仅在当前战斗内累计，返回值限制在合法范围以兼容旧运行状态。
 	return clampi(_combat_shipped_value, 0, COMBAT_SHIPPING_VALUE_LIMIT)
@@ -295,6 +389,26 @@ func get_combat_shipped_value() -> int:
 func get_combat_shipping_remaining_value() -> int:
 	# 剩余送回价值；所有物资撤离点共用同一单局额度，关闭或重新打开面板不会恢复。
 	return maxi(COMBAT_SHIPPING_VALUE_LIMIT - get_combat_shipped_value(), 0)
+
+
+func get_combat_carried_value_summary() -> Dictionary:
+	# 当前随身总价值；包含背包和全部装备槽，供成功撤离前统计带出价值。
+	var total_value: int = 0
+	# 当前随身武器价值；只包含具有 weapon_id 的近战和远程武器。
+	var weapon_value: int = 0
+	for record in _get_all_owned_records():
+		# 随身物品资源；异常空记录不计入撤离价值。
+		var item_resource: Resource = record.get("resource") as Resource
+		if item_resource == null:
+			continue
+		# 随身物品数量；武器和装备通常为 1，堆叠资源按实际数量累计。
+		var quantity: int = maxi(int(record.get("quantity", 1)), 1)
+		# 随身物品总价；使用库存统一有效售价，耐久和强化状态会自然反映在价值中。
+		var record_value: int = _get_resource_sell_price(item_resource) * quantity
+		total_value += record_value
+		if _is_weapon_resource(item_resource):
+			weapon_value += record_value
+	return {"total_value": total_value, "weapon_value": weapon_value}
 
 
 func get_combat_shipping_quote(item_resource: Resource, source_location: String, requested_quantity: int = 1) -> Dictionary:
@@ -371,6 +485,12 @@ func ship_combat_resource_to_warehouse(item_resource: Resource, source_location:
 	var shipping_value: int = int(quote.get("value", 0))
 	_coins = maxi(_coins - shipping_fee, 0)
 	_combat_shipped_value = clampi(_combat_shipped_value + shipping_value, 0, COMBAT_SHIPPING_VALUE_LIMIT)
+	# 股市统计服务；物资送回只上报实际成功结算的价值和强化石数量。
+	var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")
+	if stock_market_service != null and stock_market_service.has_method("record_run_metric"):
+		stock_market_service.call("record_run_metric", "shipped_value", shipping_value)
+		if str(item_resource.get("item_kind")) == "enhancement_stone":
+			stock_market_service.call("record_run_metric", "shipped_enhancement_stones", shipping_quantity)
 	_refresh_current_ranged_slot_after_equipment_change()
 	_queue_save_inventory()
 	inventory_changed.emit()
@@ -870,6 +990,11 @@ func use_repair_kit_with_result(repair_kit_resource: Resource, source_location: 
 	_queue_save_inventory()
 	_emit_storage_changed(source_location)
 	notify_weapon_runtime_state_changed(weapon_resource)
+	if _run_active:
+		# 股市统计服务；只记录正式战斗内实际成功消耗的修复包，局外整备不会影响行情。
+		var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")
+		if stock_market_service != null and stock_market_service.has_method("record_run_metric"):
+			stock_market_service.call("record_run_metric", "repair_kits_used", 1.0)
 	return {"success": true, "weapon": weapon_resource, "repair_kit": repair_kit_resource, "durability_before": durability_before, "durability_after": durability_after, "durability_restored": durability_restored}
 
 
@@ -1700,6 +1825,10 @@ func _track_combat_acquisition(item_resource: Resource) -> void:
 		return
 	_run_seen_resource_instance_ids[resource_instance_id] = true
 	_run_gained_resources.append(item_resource)
+	# 股市统计服务；只在首次战场获得时上报，自己丢弃后重新拾取不会重复影响行情。
+	var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")
+	if stock_market_service != null and stock_market_service.has_method("record_resource_obtained"):
+		stock_market_service.call("record_resource_obtained", item_resource, 1)
 
 
 func _build_run_gained_entries() -> Array[Dictionary]:
@@ -1787,6 +1916,7 @@ func _save_inventory() -> void:
 		"last_extraction_epoch": _last_extraction_epoch,
 		"current_ranged_slot": _current_ranged_slot,
 		"coins": _coins,
+		"stock_holdings": _stock_holdings,
 		"warehouse": serialized_warehouse,
 		"backpack": serialized_backpack,
 		"ranged_equipment": serialized_ranged,
@@ -1825,6 +1955,23 @@ func _load_inventory() -> bool:
 	_last_extraction_epoch = maxi(int(save_data.get("last_extraction_epoch", 0)), 0)
 	_current_ranged_slot = clampi(int(save_data.get("current_ranged_slot", 0)), 0, DEFAULT_RANGED_SLOT_COUNT - 1)
 	_coins = maxi(int(save_data.get("coins", DEFAULT_STARTING_COINS)), 0)
+	_stock_holdings.clear()
+	# 股票持仓存档；版本 9 起逐项恢复数量与成本，旧版存档自然保持空持仓。
+	var raw_stock_holdings: Variant = save_data.get("stock_holdings", {})
+	if raw_stock_holdings is Dictionary:
+		for raw_stock_id in (raw_stock_holdings as Dictionary).keys():
+			# 股票标识；空字符串视为损坏记录，不进入运行时持仓表。
+			var stock_id: String = str(raw_stock_id)
+			# 原始持仓；必须为字典，其他 JSON 值会被忽略。
+			var raw_holding: Variant = (raw_stock_holdings as Dictionary).get(raw_stock_id)
+			if stock_id.is_empty() or not (raw_holding is Dictionary):
+				continue
+			# 恢复数量；只保留正整数，零持仓不写入内存表。
+			var quantity: int = maxi(int((raw_holding as Dictionary).get("quantity", 0)), 0)
+			# 恢复成本；取值至少为 0，修改只影响浮动盈亏显示，不影响卖出所得。
+			var average_cost: float = maxf(float((raw_holding as Dictionary).get("average_cost", 0.0)), 0.0)
+			if quantity > 0:
+				_stock_holdings[stock_id] = {"quantity": quantity, "average_cost": average_cost}
 
 	# 存档是否包含独立永久仓库；旧版存档没有该字段，原“全局背包”物品会安全迁移到永久仓库。
 	var has_separate_warehouse: bool = save_data.has("warehouse")

@@ -34,6 +34,8 @@ class_name EquipmentData
 @export_range(0.0, 1.0, 0.01) var dodge_chance: float = 0.0
 ## 移速加成比例；使用 0 到 1 小数，默认 0，仅脚部装备支持，0.06 表示提高 6%。
 @export_range(0.0, 10.0, 0.01, "or_greater") var move_speed: float = 0.0
+## 视野加成比例；使用 0 到 1 小数，默认 0，仅头部装备支持，数值越高相机视野越广。
+@export_range(0.0, 10.0, 0.01, "or_greater") var vision_range: float = 0.0
 ## 暴击率加成；使用 0 到 1 小数，默认 0，装备有效时与武器暴击率相加。
 @export_range(0.0, 1.0, 0.01) var critical_chance: float = 0.0
 ## 暴击伤害倍率增量；默认 0，0.1 表示在基础 150% 上增加 10 个百分点。
@@ -45,6 +47,8 @@ class_name EquipmentData
 const COMMON_ENHANCEMENT_STATS: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance", "critical_chance", "critical_damage"]
 ## 脚部专属强化属性；其他部位不会消费该词条。
 const FEET_ENHANCEMENT_STATS: Array[String] = ["move_speed"]
+## 头部专属强化属性；其他部位不会消费视野词条。
+const HEAD_ENHANCEMENT_STATS: Array[String] = ["vision_range"]
 
 
 func get_base_stat(stat_name: String) -> float:
@@ -115,4 +119,4 @@ func set_current_durability(value: float) -> void:
 
 
 func _is_stat_supported(stat_name: String) -> bool:
-	return stat_name in COMMON_ENHANCEMENT_STATS or (equipment_slot == "feet" and stat_name in FEET_ENHANCEMENT_STATS)
+	return stat_name in COMMON_ENHANCEMENT_STATS or (equipment_slot == "feet" and stat_name in FEET_ENHANCEMENT_STATS) or (equipment_slot == "head" and stat_name in HEAD_ENHANCEMENT_STATS)

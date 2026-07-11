@@ -105,13 +105,13 @@ static func build_bbcode(item_resource: Resource, quantity: int = 1, price_label
 
 static func _append_equipment_lines(detail_lines: Array[String], item_resource: Resource) -> void:
 	# 装备属性顺序；与强化规则和玩家属性聚合保持一致。
-	var stat_names: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance", "move_speed", "critical_chance", "critical_damage"]
+	var stat_names: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance", "move_speed", "vision_range", "critical_chance", "critical_damage"]
 	detail_lines.append("[b]装备属性[/b]")
 	for stat_name in stat_names:
 		var value: float = float(item_resource.call("get_effective_stat", stat_name)) if item_resource.has_method("get_effective_stat") else float(item_resource.get(stat_name))
 		if value <= 0.0:
 			continue
-		var value_text: String = "%.0f%%" % (value * 100.0) if stat_name in ["dodge_chance", "move_speed", "critical_chance", "critical_damage"] else ("%.1f" % value)
+		var value_text: String = "%.0f%%" % (value * 100.0) if stat_name in ["dodge_chance", "move_speed", "vision_range", "critical_chance", "critical_damage"] else ("%.1f" % value)
 		detail_lines.append("%s：%s" % [EnhancementRules.get_stat_label(stat_name), value_text])
 
 

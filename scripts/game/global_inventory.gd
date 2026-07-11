@@ -746,6 +746,8 @@ func use_enhancement_stone_with_result(stone_resource: Resource, source_location
 	}
 	if not _is_enhancement_stone(stone_resource) or not (_is_weapon_resource(weapon_resource) or _is_equipment_resource(weapon_resource)):
 		return failed_result
+	if stone_resource.has_method("can_apply_to_weapon") and not bool(stone_resource.call("can_apply_to_weapon", weapon_resource)):
+		return failed_result
 	# 强化石来源索引；仅允许消费仓库或背包内仍由玩家持有的资源。
 	var stone_record_index: int = _find_storage_record_index(source_location, stone_resource)
 	# 强化石来源记录数组；非法位置返回空数组并拒绝消费。
@@ -1877,6 +1879,7 @@ func _serialize_record(record: Dictionary) -> Dictionary:
 		# 强化石品质；版本 4 起与实际百分比一起保存，旧存档读取时回退为低级。
 		# 方向化存档补充：当前版本只保存品质、属性和方向，旧百分比读取后会归一化为 +/-1。
 		serialized_record["quality_id"] = str(item_resource.get("quality_id"))
+		serialized_record["target_kind"] = str(item_resource.get("target_kind"))
 		serialized_record["display_name"] = str(item_resource.get("display_name"))
 		serialized_record["description"] = str(item_resource.get("description"))
 		serialized_record["icon_text"] = str(item_resource.get("icon_text"))
@@ -1917,9 +1920,10 @@ func _deserialize_record(serialized_record: Dictionary) -> Dictionary:
 		# 强化石资源；由存档字段直接重建，避免依赖项目内固定 tres 模板。
 		var enhancement_stone: EnhancementStoneData = EnhancementStoneData.new()
 		enhancement_stone.quality_id = str(serialized_record.get("quality_id", EnhancementRules.QUALITY_LOW))
+		enhancement_stone.target_kind = str(serialized_record.get("target_kind", "weapon"))
 		# 恢复显示名称；旧存档的通用“强化石”自动升级为对应品质名称。
 		var saved_display_name: String = str(serialized_record.get("display_name", ""))
-		enhancement_stone.display_name = EnhancementRules.get_quality_display_name(enhancement_stone.quality_id) if saved_display_name.is_empty() or saved_display_name in ["强化石", "低级强化石"] else saved_display_name
+		enhancement_stone.display_name = EnhancementStoneData._build_display_name(enhancement_stone.quality_id, enhancement_stone.get_resolved_target_kind()) if saved_display_name.is_empty() or not ("武器强化石" in saved_display_name or "装备强化石" in saved_display_name) else saved_display_name
 		enhancement_stone.description = str(serialized_record.get("description", enhancement_stone.description))
 		enhancement_stone.icon_text = str(serialized_record.get("icon_text", enhancement_stone.icon_text))
 		enhancement_stone.sell_price = maxi(int(serialized_record.get("sell_price", 0)), 0)

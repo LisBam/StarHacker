@@ -226,7 +226,7 @@ func _add_item_card(parent_grid: GridContainer, item_resource: Resource, source_
 		return
 	# 最少一件报价；卡片只有在至少能送回一个单位时可点击，整组超额仍可通过部分送回继续操作。
 	var minimum_quote: Dictionary = _global_inventory.call("get_combat_shipping_quote", item_resource, source_location, 1) as Dictionary
-	# 当前展示数量报价；卡片显示整件或整组物品实际需要支付的撤离收费，而不是局外售价。
+	# 当前展示数量报价；卡片显示整件或整组物品实际需要支付的撤离收费，悬停详情仍展示出售价格。
 	var display_quote: Dictionary = _global_inventory.call("get_combat_shipping_quote", item_resource, source_location, quantity) as Dictionary
 	# 当前撤离收费；取值为物品当前有效价值的 20% 向上取整。
 	var extraction_fee: int = maxi(int(display_quote.get("fee", 0)), 0)

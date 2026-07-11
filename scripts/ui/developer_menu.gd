@@ -9,11 +9,12 @@ signal infinite_health_toggled(enabled: bool)
 signal infinite_energy_toggled(enabled: bool)
 signal weapon_durability_consumption_toggled(disabled: bool)
 signal training_settings_requested
+signal map_vision_requested
 
 ## 菜单最小尺寸；默认 520x580，适合在主菜单中央显示资源操作和调试信息开关。
 @export var panel_minimum_size: Vector2 = Vector2(520.0, 580.0)
-## 战斗调试上下文面板高度；默认 520 像素，用于容纳无限属性、免耐久和训练设置入口，运行时通常不动态修改。
-@export_range(360.0, 720.0, 1.0) var combat_panel_height: float = 520.0
+## 战斗调试上下文面板高度；默认 580 像素，用于容纳无限属性、地图视野和训练设置入口，运行时通常不动态修改。
+@export_range(360.0, 720.0, 1.0) var combat_panel_height: float = 580.0
 ## 单次金币调整数量；默认 1000，对应增加和减少按钮的固定测试步长。
 @export_range(1, 9999999, 1) var coin_step: int = 1000
 ## 单次随机强化石发放数量；默认 10，修改会同步按钮文案和实际永久仓库发放数量。
@@ -51,6 +52,8 @@ var _infinite_health_check_button: CheckButton
 var _infinite_energy_check_button: CheckButton
 ## 不消耗武器耐久开关；默认关闭，战斗模式中切换后请求 PlayerController 跳过耐久扣除。
 var _disable_weapon_durability_check_button: CheckButton
+## 获取地图视野按钮；默认只在战斗开发者上下文显示，点击后请求 GameWorld 把整张地图标记为已探索。
+var _map_vision_button: Button
 ## 训练场设置按钮；默认只在战斗模式显示，请求 CombatHud 打开现有训练工具面板。
 var _training_settings_button: Button
 ## 当前是否为战斗开发者上下文；默认 false 表示主菜单局外资源模式。
@@ -200,6 +203,11 @@ func _build_interface() -> void:
 	_disable_weapon_durability_check_button.custom_minimum_size = Vector2(0.0, 40.0)
 	_disable_weapon_durability_check_button.toggled.connect(_on_weapon_durability_consumption_toggled)
 	_combat_controls_container.add_child(_disable_weapon_durability_check_button)
+	_map_vision_button = Button.new()
+	_map_vision_button.text = "获取地图视野"
+	_map_vision_button.custom_minimum_size = Vector2(0.0, 44.0)
+	_map_vision_button.pressed.connect(_on_map_vision_pressed)
+	_combat_controls_container.add_child(_map_vision_button)
 	_training_settings_button = Button.new()
 	_training_settings_button.text = "打开训练场设置"
 	_training_settings_button.custom_minimum_size = Vector2(0.0, 44.0)
@@ -352,6 +360,11 @@ func _on_weapon_durability_consumption_toggled(disabled: bool) -> void:
 
 func _on_training_settings_pressed() -> void:
 	training_settings_requested.emit()
+
+
+func _on_map_vision_pressed() -> void:
+	map_vision_requested.emit()
+	_status_label.text = "已获取整张地图视野"
 
 
 func _on_close_pressed() -> void:

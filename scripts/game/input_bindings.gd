@@ -131,6 +131,31 @@ func reset_to_defaults() -> void:
 	bindings_changed.emit()
 
 
+func reset_action_to_default(action_name: StringName) -> bool:
+	if not is_configurable_action(action_name):
+		return false
+
+	# 动作名字符串；用于从启动时缓存的默认绑定表读取指定操作，避免单项恢复影响其他自定义按键。
+	var action_name_string: String = str(action_name)
+	if not _default_events_by_action.has(action_name_string):
+		return false
+	if not InputMap.has_action(action_name):
+		InputMap.add_action(action_name)
+
+	InputMap.action_erase_events(action_name)
+	# 指定动作默认事件；元素为 InputEvent，逐项复制回 InputMap，避免运行时事件对象共享状态。
+	var default_events: Array = _default_events_by_action[action_name_string]
+	# 默认事件遍历项；取值为 InputEvent，复制后恢复到当前指定动作。
+	for default_event in default_events:
+		if default_event is InputEvent:
+			InputMap.action_add_event(action_name, (default_event as InputEvent).duplicate())
+
+	_set_action_explicitly_unbound(action_name, false)
+	_save_bindings()
+	bindings_changed.emit()
+	return true
+
+
 func _capture_default_events() -> void:
 	_default_events_by_action.clear()
 	# 可配置动作遍历项；取值为 action_entries 字典，默认记录项目输入映射中的初始事件。

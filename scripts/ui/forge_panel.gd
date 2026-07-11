@@ -36,8 +36,8 @@ var _global_inventory: Node
 var _forge_service: ForgeService
 ## 当前下半区来源；默认背包，可通过按钮切换到永久仓库。
 var _current_source: String = SOURCE_BACKPACK
-## 当前一级分类；默认武器，切换来源时保留方便连续挑选材料。
-var _primary_category: String = InventoryQuery.PRIMARY_WEAPONS
+## 当前一级分类；默认全部，切换来源时保留方便连续挑选武器与资源材料。
+var _primary_category: String = InventoryQuery.PRIMARY_ALL
 ## 当前二级分类；默认全部，切换一级分类时重置。
 var _subcategory: String = InventoryQuery.SUBCATEGORY_ALL
 ## 当前强化石属性筛选键集合；默认空数组表示全部属性与方向，多项条件按并集展示。
@@ -260,6 +260,7 @@ func _build_interface() -> void:
 	primary_bar.alignment = BoxContainer.ALIGNMENT_CENTER
 	primary_bar.add_theme_constant_override("separation", 8)
 	category_columns.add_child(primary_bar)
+	_create_category_button(primary_bar, "全部", InventoryQuery.PRIMARY_ALL, true)
 	_create_category_button(primary_bar, "武器", InventoryQuery.PRIMARY_WEAPONS, true)
 	_create_category_button(primary_bar, "资源", InventoryQuery.PRIMARY_RESOURCES, true)
 	_subcategory_bar = HBoxContainer.new()
@@ -678,7 +679,7 @@ func _rebuild_subcategory_buttons() -> void:
 	if _primary_category == InventoryQuery.PRIMARY_WEAPONS:
 		_create_category_button(_subcategory_bar, "近战", InventoryQuery.SUBCATEGORY_MELEE, false)
 		_create_category_button(_subcategory_bar, "远程", InventoryQuery.SUBCATEGORY_RANGED, false)
-	else:
+	elif _primary_category == InventoryQuery.PRIMARY_RESOURCES:
 		_create_category_button(_subcategory_bar, "强化石", InventoryQuery.SUBCATEGORY_ENHANCEMENT_STONES, false)
 		_create_category_button(_subcategory_bar, "道具", InventoryQuery.SUBCATEGORY_ITEMS, false)
 	_refresh_source_and_category_buttons()

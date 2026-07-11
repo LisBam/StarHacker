@@ -80,11 +80,11 @@ var _mode_toggle_button: Button
 var _coins_label: Label
 ## 新版仓库摘要标签；默认显示永久仓库与随身背包数量，并明确安全和死亡损失边界。
 var _storage_summary_label: Label
-## 当前主分类；取值为 weapons 或 resources，默认武器分类并同步作用于仓库和背包。
-var _storage_primary_category: String = InventoryQuery.PRIMARY_WEAPONS
+## 当前主分类；取值为 all、weapons 或 resources，默认全部并同步作用于仓库和背包。
+var _storage_primary_category: String = InventoryQuery.PRIMARY_ALL
 ## 当前子分类；默认 all，进入武器或资源主分类时分别显示对应二级分类。
 var _storage_subcategory: String = InventoryQuery.SUBCATEGORY_ALL
-## 主分类按钮表；键为 weapons 或 resources，值为运行时按钮。
+## 主分类按钮表；键为 all、weapons 或 resources，值为运行时按钮。
 var _storage_primary_buttons: Dictionary = {}
 ## 子分类按钮表；键为当前分类标识，值为运行时按钮，每次切换主分类时重建。
 var _storage_subcategory_buttons: Dictionary = {}
@@ -270,11 +270,12 @@ func _build_storage_interface() -> void:
 	_stone_attribute_clear_button.pressed.connect(_on_clear_stone_attribute_filter_pressed)
 	query_bar.add_child(_stone_attribute_clear_button)
 
-	# 一级分类栏；只显示武器和资源，二级分类由下一行根据主分类动态生成。
+	# 一级分类栏；全部入口同时展示武器和资源，二级分类由下一行根据主分类动态生成。
 	var primary_filter_bar: HBoxContainer = HBoxContainer.new()
 	primary_filter_bar.alignment = BoxContainer.ALIGNMENT_CENTER
 	primary_filter_bar.add_theme_constant_override("separation", 8)
 	content.add_child(primary_filter_bar)
+	_create_storage_category_button(primary_filter_bar, "全部", InventoryQuery.PRIMARY_ALL, true)
 	_create_storage_category_button(primary_filter_bar, "武器", InventoryQuery.PRIMARY_WEAPONS, true)
 	_create_storage_category_button(primary_filter_bar, "资源", InventoryQuery.PRIMARY_RESOURCES, true)
 	_storage_subcategory_bar = HBoxContainer.new()
@@ -524,7 +525,7 @@ func _rebuild_storage_subcategory_buttons() -> void:
 	if _storage_primary_category == InventoryQuery.PRIMARY_WEAPONS:
 		_create_storage_category_button(_storage_subcategory_bar, "近战", InventoryQuery.SUBCATEGORY_MELEE, false)
 		_create_storage_category_button(_storage_subcategory_bar, "远程", InventoryQuery.SUBCATEGORY_RANGED, false)
-	else:
+	elif _storage_primary_category == InventoryQuery.PRIMARY_RESOURCES:
 		_create_storage_category_button(_storage_subcategory_bar, "强化石", InventoryQuery.SUBCATEGORY_ENHANCEMENT_STONES, false)
 		_create_storage_category_button(_storage_subcategory_bar, "道具", InventoryQuery.SUBCATEGORY_ITEMS, false)
 	_refresh_storage_category_buttons()

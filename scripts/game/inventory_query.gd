@@ -4,6 +4,8 @@ class_name InventoryQuery
 ## 库存查询器为局外仓库和局内背包提供统一的多层分类、关键词、强化属性筛选和展示排序。
 ## 查询只返回带原始 source_index 的条目副本，不修改 GlobalInventory 的真实顺序和所有权记录。
 
+## 全部主分类；同时包含武器和资源，用于所有一级分类栏的首个聚合入口。
+const PRIMARY_ALL: String = "all"
 ## 武器主分类；包含全部 melee 与 ranged 武器。
 const PRIMARY_WEAPONS: String = "weapons"
 ## 资源主分类；包含强化石及以后扩展的非武器资源。
@@ -78,6 +80,8 @@ static func _matches_category(entry: Dictionary, primary_category: String, subca
 	var item_kind: String = str(item_resource.get("item_kind"))
 	# 武器类型；只在武器主分类内参与近战和远程子分类判断。
 	var weapon_type: String = str(item_resource.get("weapon_type"))
+	if primary_category == PRIMARY_ALL:
+		return subcategory == SUBCATEGORY_ALL
 	if primary_category == PRIMARY_WEAPONS:
 		if weapon_type not in [SUBCATEGORY_MELEE, SUBCATEGORY_RANGED]:
 			return false

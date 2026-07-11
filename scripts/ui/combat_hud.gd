@@ -56,7 +56,7 @@ const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
 @export var toggle_inventory_action: StringName = &"toggle_inventory"
 ## 暂停输入动作名；默认 pause_game 对应 ESC，运行时通常不修改，改名会影响暂停菜单打开方式。
 @export var pause_action: StringName = &"pause_game"
-## 大地图开关输入动作名；默认 toggle_large_map 对应 M 键，运行时通常不修改，改名会影响大地图打开方式。
+## 大地图开关输入动作名；默认 toggle_large_map 对应 Q 键，运行时通常不修改，改名会影响大地图打开方式。
 @export var toggle_large_map_action: StringName = &"toggle_large_map"
 ## 快速拾取输入动作名；默认 pickup_nearby 对应 F 键，运行时通常不修改，改名会影响附近掉落物快速拾取。
 @export var pickup_action: StringName = &"pickup_nearby"
@@ -82,8 +82,8 @@ const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
 @export_range(80.0, 600.0, 1.0) var nearby_drop_expanded_height: float = 220.0
 ## 附近掉落物收起高度；默认 42 像素，只保留标题和紧贴标题的背景板。
 @export_range(24.0, 120.0, 1.0) var nearby_drop_collapsed_height: float = 42.0
-## 战斗开发者菜单半尺寸；默认 280x280，修改会影响暂停遮罩中调试面板的可用空间，运行时通常不动态修改。
-@export var combat_developer_menu_half_size: Vector2 = Vector2(280.0, 280.0)
+## 战斗开发者菜单半尺寸；默认 280x310，修改会影响暂停遮罩中调试面板的可用空间，运行时通常不动态修改。
+@export var combat_developer_menu_half_size: Vector2 = Vector2(280.0, 310.0)
 ## 远程冷却遮罩最短显示时长；默认 0.12 秒，更短或相等的高射速冷却不显示遮罩以避免持续闪烁。
 @export_range(0.0, 1.0, 0.01) var ranged_cooldown_overlay_minimum_duration: float = 0.12
 
@@ -117,8 +117,10 @@ var _inventory_equipment_melee_control: Control
 var _last_cooling_ranged_slot: int = -1
 ## 背包当前二级筛选页；取值为 all、ranged、melee 或 enhancement_stones，默认 all。
 var _inventory_filter: String = INVENTORY_FILTER_ALL
-## 背包当前主分类；取值为 weapons 或 resources，默认武器并决定二级按钮内容。
-var _inventory_primary_category: String = InventoryQuery.PRIMARY_WEAPONS
+## 背包当前主分类；取值为 all、weapons 或 resources，默认全部并决定二级按钮内容。
+var _inventory_primary_category: String = InventoryQuery.PRIMARY_ALL
+## 背包全部主分类按钮；默认运行时创建，同时展示武器和资源并隐藏类型专属二级入口。
+var _inventory_primary_all_button: Button
 ## 背包武器主分类按钮；默认运行时创建，点击后显示全部/近战/远程二级页。
 var _inventory_primary_weapons_button: Button
 ## 背包资源主分类按钮；默认运行时创建，点击后显示全部/强化石二级页。
@@ -241,8 +243,8 @@ var _developer_training_access_unlocked: bool = false
 var _escape_confirmation_dialog: ConfirmationDialog
 ## 当前结算结构化结果；默认空字典，结算弹窗打开后缓存获得与丢失条目供分类按钮重复重建。
 var _settlement_outcome: Dictionary = {}
-## 结算获得物品主分类；取值为 weapons 或 resources，默认 weapons 与战斗背包分类入口一致。
-var _settlement_primary_category: String = InventoryQuery.PRIMARY_WEAPONS
+## 结算获得物品主分类；取值为 all、weapons 或 resources，默认全部与战斗背包分类入口一致。
+var _settlement_primary_category: String = InventoryQuery.PRIMARY_ALL
 ## 结算获得物品子分类；取值随主分类变化，默认 all 表示展示当前主分类全部条目。
 var _settlement_subcategory: String = InventoryQuery.SUBCATEGORY_ALL
 
@@ -330,7 +332,7 @@ var _settlement_subcategory: String = InventoryQuery.SUBCATEGORY_ALL
 @onready var _pause_master_volume_value_label: Label = %PauseMasterVolumeValueLabel
 ## 暂停设置返回按钮缓存；默认绑定 PauseSettingsBackButton，点击后返回暂停主菜单。
 @onready var _pause_settings_back_button: Button = %PauseSettingsBackButton
-## 大地图遮罩缓存；默认绑定 LargeMapOverlay，M 键切换显示，显示时锁定战斗输入。
+## 大地图遮罩缓存；默认绑定 LargeMapOverlay，Q 键切换显示，显示时锁定战斗输入。
 @onready var _large_map_overlay: Control = %LargeMapOverlay
 ## 死亡遮罩缓存；默认绑定 DeathOverlay，玩家生命归零时显示并暂停场景树。
 @onready var _death_overlay: Control = %DeathOverlay
@@ -888,6 +890,7 @@ func _build_combat_developer_overlay() -> void:
 	developer_menu.connect("infinite_energy_toggled", Callable(self, "_on_developer_infinite_energy_toggled"))
 	developer_menu.connect("weapon_durability_consumption_toggled", Callable(self, "_on_developer_weapon_durability_consumption_toggled"))
 	developer_menu.connect("training_settings_requested", Callable(self, "_on_developer_training_settings_requested"))
+	developer_menu.connect("map_vision_requested", Callable(self, "_on_developer_map_vision_requested"))
 	developer_overlay.add_child(developer_menu)
 	_combat_developer_menu = developer_menu
 	developer_menu.call("configure_combat_context", _is_infinite_health_enabled(), _is_infinite_energy_enabled(), _is_weapon_durability_consumption_disabled_by_debug())
@@ -1418,11 +1421,17 @@ func _bind_inventory_filter_buttons() -> void:
 			_inventory_stone_attribute_clear_button.pressed.connect(_on_clear_inventory_stone_attribute_filter_pressed)
 			query_bar.add_child(_inventory_stone_attribute_clear_button)
 
-			# 一级分类栏；武器和资源独立于原二级分类栏，形成清晰的多层结构。
+			# 一级分类栏；全部、武器和资源独立于原二级分类栏，形成清晰的多层结构。
 			var primary_bar: HBoxContainer = HBoxContainer.new()
 			primary_bar.add_theme_constant_override("separation", 6)
 			backpack_content.add_child(primary_bar)
 			backpack_content.move_child(primary_bar, filter_parent.get_index())
+			_inventory_primary_all_button = Button.new()
+			_inventory_primary_all_button.text = "全部"
+			_inventory_primary_all_button.toggle_mode = true
+			_inventory_primary_all_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			_inventory_primary_all_button.pressed.connect(Callable(self, "_on_inventory_primary_category_pressed").bind(InventoryQuery.PRIMARY_ALL))
+			primary_bar.add_child(_inventory_primary_all_button)
 			_inventory_primary_weapons_button = Button.new()
 			_inventory_primary_weapons_button.text = "武器"
 			_inventory_primary_weapons_button.toggle_mode = true
@@ -1611,6 +1620,8 @@ func _set_inventory_filter(new_filter: String) -> void:
 
 
 func _refresh_inventory_filter_buttons() -> void:
+	if _inventory_primary_all_button != null:
+		_inventory_primary_all_button.set_pressed_no_signal(_inventory_primary_category == InventoryQuery.PRIMARY_ALL)
 	if _inventory_primary_weapons_button != null:
 		_inventory_primary_weapons_button.set_pressed_no_signal(_inventory_primary_category == InventoryQuery.PRIMARY_WEAPONS)
 	if _inventory_primary_resources_button != null:
@@ -1622,18 +1633,20 @@ func _refresh_inventory_filter_buttons() -> void:
 		_inventory_filter_stones_button.set_pressed_no_signal(_inventory_filter == INVENTORY_FILTER_STONES)
 	if _inventory_filter_items_button != null:
 		_inventory_filter_items_button.set_pressed_no_signal(_inventory_filter == INVENTORY_FILTER_ITEMS)
-	# 二级分类可见性；武器显示全部/近战/远程，资源显示全部/强化石。
+	# 二级分类可见性；全部主分类只保留聚合“全部”，武器和资源分别显示各自专属入口。
 	var weapon_category_visible: bool = _inventory_primary_category == InventoryQuery.PRIMARY_WEAPONS
+	# 资源分类可见状态；仅资源页展示强化石、道具和属性筛选，聚合页不会误套用资源条件。
+	var resource_category_visible: bool = _inventory_primary_category == InventoryQuery.PRIMARY_RESOURCES
 	_inventory_filter_melee_button.visible = weapon_category_visible
 	_inventory_filter_ranged_button.visible = weapon_category_visible
 	if _inventory_filter_stones_button != null:
-		_inventory_filter_stones_button.visible = not weapon_category_visible
+		_inventory_filter_stones_button.visible = resource_category_visible
 	if _inventory_filter_items_button != null:
-		_inventory_filter_items_button.visible = not weapon_category_visible
+		_inventory_filter_items_button.visible = resource_category_visible
 	if _inventory_stone_attribute_option != null:
-		_inventory_stone_attribute_option.visible = not weapon_category_visible
+		_inventory_stone_attribute_option.visible = resource_category_visible
 	if _inventory_stone_attribute_clear_button != null:
-		_inventory_stone_attribute_clear_button.visible = not weapon_category_visible
+		_inventory_stone_attribute_clear_button.visible = resource_category_visible
 		_inventory_stone_attribute_clear_button.disabled = _inventory_stone_attribute_filter.is_empty()
 
 
@@ -1648,6 +1661,8 @@ func _get_inventory_filter_label() -> String:
 		return "资源 · 道具"
 	if _inventory_primary_category == InventoryQuery.PRIMARY_RESOURCES:
 		return "资源 · 全部"
+	if _inventory_primary_category == InventoryQuery.PRIMARY_ALL:
+		return "全部物品"
 
 	return "武器 · 全部"
 
@@ -2854,6 +2869,11 @@ func _on_developer_training_settings_requested() -> void:
 	_refresh_combat_input_state()
 
 
+func _on_developer_map_vision_requested() -> void:
+	if _game_world != null and _game_world.has_method("unlock_full_map_vision"):
+		_game_world.call("unlock_full_map_vision")
+
+
 func _on_pause_settings_button_pressed() -> void:
 	_show_pause_settings(true)
 
@@ -3026,7 +3046,7 @@ func _present_run_outcome(outcome: Dictionary) -> void:
 	# 结算结果类型；success 表示撤离成功，其他值统一按失败展示。
 	var result_type: String = str(outcome.get("result", "failure"))
 	_settlement_outcome = outcome.duplicate()
-	_settlement_primary_category = InventoryQuery.PRIMARY_WEAPONS
+	_settlement_primary_category = InventoryQuery.PRIMARY_ALL
 	_settlement_subcategory = InventoryQuery.SUBCATEGORY_ALL
 	_death_title_label.text = str(outcome.get("title", "战斗结算"))
 	_rebuild_settlement_list()
@@ -3069,10 +3089,18 @@ func _rebuild_settlement_list() -> void:
 
 
 func _build_settlement_category_controls() -> void:
-	# 主分类栏；结构与战斗背包一致，武器和资源各自维护独立子分类集合。
+	# 主分类栏；结构与战斗背包一致，全部入口聚合展示武器和资源。
 	var primary_bar: HBoxContainer = HBoxContainer.new()
 	primary_bar.add_theme_constant_override("separation", 6)
 	_death_settlement_list.add_child(primary_bar)
+	# 全部主分类按钮；按下后同时展示本局武器和资源条目。
+	var all_button: Button = Button.new()
+	all_button.text = "全部"
+	all_button.toggle_mode = true
+	all_button.button_pressed = _settlement_primary_category == InventoryQuery.PRIMARY_ALL
+	all_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	all_button.pressed.connect(Callable(self, "_on_settlement_primary_category_pressed").bind(InventoryQuery.PRIMARY_ALL))
+	primary_bar.add_child(all_button)
 	# 武器主分类按钮；按下后默认回到武器全部子分类。
 	var weapons_button: Button = Button.new()
 	weapons_button.text = "武器"
@@ -3098,7 +3126,7 @@ func _build_settlement_category_controls() -> void:
 	if _settlement_primary_category == InventoryQuery.PRIMARY_WEAPONS:
 		_add_settlement_subcategory_button(subcategory_bar, "近战", InventoryQuery.SUBCATEGORY_MELEE)
 		_add_settlement_subcategory_button(subcategory_bar, "远程", InventoryQuery.SUBCATEGORY_RANGED)
-	else:
+	elif _settlement_primary_category == InventoryQuery.PRIMARY_RESOURCES:
 		_add_settlement_subcategory_button(subcategory_bar, "强化石", InventoryQuery.SUBCATEGORY_ENHANCEMENT_STONES)
 
 

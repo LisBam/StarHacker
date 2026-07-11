@@ -46,7 +46,7 @@ offset_top = 32.0
 offset_right = 70.0
 offset_bottom = 52.0
 theme_override_font_sizes/font_size = 12
-text = "普通宝箱  10/10"
+text = "普通宝箱"
 horizontal_alignment = 1
 
 [node name="OpenProgress" type="ProgressBar" parent="."]

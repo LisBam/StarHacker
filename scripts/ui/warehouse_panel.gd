@@ -7,6 +7,8 @@ signal closed
 
 ## 仓库物品交互控件脚本；默认复用统一摘要、悬停详情、点击和拖拽协议。
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
+## 通用物品卡片视图；仓库、背包与局外装备槽统一读取其固定尺寸。
+const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
 ## 存储拖放区域脚本；默认让仓库和背包空白区域都能接收跨容器拖拽。
 const STORAGE_DROP_AREA_SCRIPT: Script = preload("res://scripts/ui/storage_drop_area.gd")
 ## 局外装备拖拽槽脚本；默认负责远近战类型校验以及装备栏双向拖拽数据生成。
@@ -59,11 +61,11 @@ var _backpack_expanded: bool = false
 ## 新版永久仓库拖放区域；默认运行时创建，上方始终显示且不参与死亡损失。
 var _warehouse_drop_area: PanelContainer
 ## 新版永久仓库物品列表；默认运行时从拖放区域取得，用于创建可拖拽物品行。
-var _warehouse_item_list: GridContainer
+var _warehouse_item_list: HFlowContainer
 ## 新版随身背包拖放区域；默认运行时创建，仅展开模式可见并会随玩家进入战斗。
 var _carried_drop_area: PanelContainer
 ## 新版随身背包物品列表；默认运行时从拖放区域取得，用于创建快捷转仓与装备按钮。
-var _carried_item_list: GridContainer
+var _carried_item_list: HFlowContainer
 ## 新版装备栏容器；默认运行时创建并固定在展开背包区域左侧。
 var _loadout_list: VBoxContainer
 ## 新版背包区域根容器；默认隐藏，切换显示模式后控制下半区整体可见性。
@@ -302,7 +304,7 @@ func _build_storage_interface() -> void:
 	_warehouse_drop_area.call("configure", "warehouse", 2)
 	_warehouse_drop_area.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
 	_warehouse_scroll.add_child(_warehouse_drop_area)
-	_warehouse_item_list = _warehouse_drop_area.call("get_content_container") as GridContainer
+	_warehouse_item_list = _warehouse_drop_area.call("get_content_container") as HFlowContainer
 	_storage_split_handle = VERTICAL_SPLIT_HANDLE_SCRIPT.new() as Control
 	_storage_split_handle.call("configure", warehouse_split_ratio)
 	_storage_split_handle.connect("split_ratio_changed", Callable(self, "_on_storage_split_ratio_changed"))
@@ -357,7 +359,7 @@ func _build_storage_interface() -> void:
 	_carried_drop_area.call("configure", "backpack", 2)
 	_carried_drop_area.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
 	carried_scroll.add_child(_carried_drop_area)
-	_carried_item_list = _carried_drop_area.call("get_content_container") as GridContainer
+	_carried_item_list = _carried_drop_area.call("get_content_container") as HFlowContainer
 
 	_item_action_menu = PopupMenu.new()
 	_item_action_menu.id_pressed.connect(_on_item_action_menu_id_pressed)
@@ -425,6 +427,7 @@ func _build_storage_entry_row(entry: Dictionary, location: String, entry_index: 
 		return
 
 	# 物品数量；武器固定为 1，强化石按 1 到 99 显示在方形资源格中。
+	# 通用模板补充：强化石数量规则保持不变，但显示区域现与所有物品统一为 160×72 卡片。
 	var quantity: int = clampi(int(entry.get("quantity", 1)), 1, 99)
 	# 上次撤离前缀；最近一次成功撤离携带的物品手动转入永久仓库后继续显示该标记。
 	var extraction_prefix: String = "[上次撤离] " if bool(entry.get("is_last_extraction", false)) else ""
@@ -477,7 +480,7 @@ func _create_storage_equipment_slot(slot_label: String, location: String, weapon
 	slot_control.connect("enhancement_drop_requested", Callable(self, "_on_enhancement_drop_requested"))
 	slot_control.connect("repair_kit_drop_requested", Callable(self, "_on_repair_kit_drop_requested"))
 	slot_control.call("set_weapon_target_selection_state", _is_weapon_target_selection_active(), _is_pending_item_usable_on_weapon(item_resource))
-	slot_control.custom_minimum_size = Vector2(0.0, 46.0)
+	slot_control.custom_minimum_size = ITEM_CARD_VIEW_SCRIPT.get_standard_size()
 	return slot_control
 
 

@@ -10,6 +10,8 @@ signal closed
 const FORGE_SLOT_CONTROL_SCRIPT: Script = preload("res://scripts/ui/forge_slot_control.gd")
 ## 仓库物品卡片脚本；下半区复用仓库同款摘要、拖拽数据和完整详情。
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
+## 通用物品卡片视图；锻造槽位布局读取其固定尺寸，禁止再使用独立正方形槽位规格。
+const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
 ## 锻造结果弹窗脚本；展示强化前后属性、价格与额外耐久恢复。
 const ENHANCEMENT_RESULT_DIALOG_SCRIPT: Script = preload("res://scripts/ui/enhancement_result_dialog.gd")
 ## 背包来源标识；与 GlobalInventory 公开接口保持一致。
@@ -83,7 +85,7 @@ var _subcategory_buttons: Dictionary = {}
 ## 二级分类栏；武器显示全部/近战/远程，资源显示全部/强化石。
 var _subcategory_bar: HBoxContainer
 ## 下半区物品网格；每次槽位、来源或查询变化后重建。
-var _item_grid: GridContainer
+var _item_grid: HFlowContainer
 ## 锻造结果弹窗；完成动画和实际结算后展示属性与耐久变化。
 var _result_dialog: AcceptDialog
 ## 当前是否正在播放锻造并执行结算；为 true 时阻止关闭、换槽和重复点击。
@@ -270,13 +272,15 @@ func _build_interface() -> void:
 	category_columns.add_child(_subcategory_bar)
 	_rebuild_subcategory_buttons()
 	# 下半区物品滚动网格；双列卡片与仓库保持一致，已选武器隐藏，强化石按剩余可选数量显示。
+	# 流式布局补充：当前按可用宽度自动换行并逐行居中，不再限制双列。
 	var inventory_scroll: ScrollContainer = ScrollContainer.new()
 	inventory_scroll.custom_minimum_size = Vector2(0.0, 135.0)
 	inventory_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	inventory_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	content.add_child(inventory_scroll)
-	_item_grid = GridContainer.new()
-	_item_grid.columns = 2
+	_item_grid = HFlowContainer.new()
+	_item_grid.alignment = FlowContainer.ALIGNMENT_CENTER
+	_item_grid.last_wrap_alignment = FlowContainer.LAST_WRAP_ALIGNMENT_CENTER
 	_item_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_item_grid.add_theme_constant_override("h_separation", 8)
 	_item_grid.add_theme_constant_override("v_separation", 6)
@@ -291,17 +295,22 @@ func _build_interface() -> void:
 
 func _build_forge_slots() -> void:
 	# 槽位半边长；所有锚点偏移共用该值，保证检查器调整槽位大小后仍以中心准确对齐。
-	var slot_half_size: float = forge_slot_size * 0.5
+	# 槽位固定尺寸；主槽与牺牲槽强制读取全项目通用物品卡片规格，检查器旧参数不再造成样式分化。
+	var slot_size: Vector2 = ITEM_CARD_VIEW_SCRIPT.get_standard_size()
+	# 槽位半宽；用于以锚点中心计算固定卡片左右偏移。
+	var slot_half_width: float = slot_size.x * 0.5
+	# 槽位半高；用于以锚点中心计算固定卡片上下偏移。
+	var slot_half_height: float = slot_size.y * 0.5
 	_main_slot = FORGE_SLOT_CONTROL_SCRIPT.new() as Button
 	_main_slot.call("configure", -1, true, forge_slot_size)
 	_main_slot.anchor_left = 0.5
 	_main_slot.anchor_top = 0.5
 	_main_slot.anchor_right = 0.5
 	_main_slot.anchor_bottom = 0.5
-	_main_slot.offset_left = -slot_half_size
-	_main_slot.offset_top = -slot_half_size
-	_main_slot.offset_right = slot_half_size
-	_main_slot.offset_bottom = slot_half_size
+	_main_slot.offset_left = -slot_half_width
+	_main_slot.offset_top = -slot_half_height
+	_main_slot.offset_right = slot_half_width
+	_main_slot.offset_bottom = slot_half_height
 	_main_slot.connect("item_requested", Callable(self, "_on_slot_item_requested"))
 	_main_slot.connect("return_requested", Callable(self, "_on_slot_return_requested"))
 	_forge_board.add_child(_main_slot)
@@ -315,10 +324,10 @@ func _build_forge_slots() -> void:
 		sacrifice_slot.anchor_top = 0.5 + sin(slot_angle) * 0.31
 		sacrifice_slot.anchor_right = sacrifice_slot.anchor_left
 		sacrifice_slot.anchor_bottom = sacrifice_slot.anchor_top
-		sacrifice_slot.offset_left = -slot_half_size
-		sacrifice_slot.offset_top = -slot_half_size
-		sacrifice_slot.offset_right = slot_half_size
-		sacrifice_slot.offset_bottom = slot_half_size
+		sacrifice_slot.offset_left = -slot_half_width
+		sacrifice_slot.offset_top = -slot_half_height
+		sacrifice_slot.offset_right = slot_half_width
+		sacrifice_slot.offset_bottom = slot_half_height
 		if slot_index == 0:
 			# 顶部槽额外上移；保持环形结构不变，仅增加它与中央主槽之间的可读间隔。
 			sacrifice_slot.offset_top -= top_sacrifice_slot_upward_offset
@@ -356,6 +365,7 @@ func _refresh_slots() -> void:
 	for slot_index in range(_sacrifice_slots.size()):
 		_sacrifice_slots[slot_index].call("refresh", _sacrifice_entries[slot_index])
 		# 当前牺牲条目；无主物品、类型/品质不匹配或服务预览判定无效果时显示红色滤镜。
+		# 统一禁用补充：当前失效材料改用 ItemCardView 标准灰色遮罩，不再显示红色滤镜。
 		var sacrifice_entry: Dictionary = _sacrifice_entries[slot_index]
 		# 当前牺牲资源；空槽保持正常视觉。
 		var sacrifice_resource: Resource = sacrifice_entry.get("resource") as Resource
@@ -431,8 +441,8 @@ func _rebuild_inventory_items() -> void:
 		item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		item_control.call("configure", item_resource, _current_source, int(entry.get("source_index", -1)), false, "", int(entry.get("quantity", 1)))
 		# 武器与装备统一使用深色宽卡排版和底部耐久条。
-		if str(item_resource.get("weapon_type")) in ["ranged", "melee"] or str(item_resource.get("item_kind")) == "equipment":
-			item_control.call("set_weapon_slot_visual_style", true)
+		# 通用模板补充：当前所有锻造来源物品均复用固定尺寸卡片，不再按物品类型切换视觉风格。
+		item_control.call("set_weapon_slot_visual_style", true)
 		# 材料可选状态；主槽为空时只允许合法主物品，主槽已有物品时只允许符合其牺牲规则的候选材料。
 		var main_resource: Resource = _main_entry.get("resource") as Resource
 		# 当前卡片是否可选；不可选物品显示灰色滤镜并阻止点击与拖拽。

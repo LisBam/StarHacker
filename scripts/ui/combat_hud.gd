@@ -11,6 +11,8 @@ const WEAPON_SLOT_CONTROL_SCRIPT: Script = preload("res://scripts/ui/weapon_slot
 const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_panel.gd")
 ## 结算物品控件脚本；默认复用仓库的双列物品摘要与完整悬停详情，但结算列表不启用点击和拖拽。
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
+## 通用物品卡片视图；战斗装备栏、背包与结算列表统一读取其固定尺寸，禁止场景内单独覆盖。
+const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
 ## 统一装备槽控件；四部位装备复用仓库武器槽的排版、耐久条、拖拽视觉与悬浮窗。
 const EQUIPMENT_STORAGE_SLOT_SCRIPT: Script = preload("res://scripts/ui/equipment_storage_slot_control.gd")
 ## 隐藏开发者菜单脚本；默认在暂停界面输入 LISBAM 后以战斗调试上下文显示。
@@ -77,11 +79,14 @@ const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
 ## 主菜单场景路径；默认返回项目主菜单，必须填写 tscn 资源，运行时通常不修改，改错会导致暂停菜单返回失败。
 @export_file("*.tscn") var main_menu_scene_path: String = "res://scenes/ui/main_menu.tscn"
 ## 远程装备槽最小尺寸；默认 80x54 适合底部低遮挡显示，运行时通常不修改，扩展槽数量时可调小。
-@export var ranged_slot_minimum_size: Vector2 = Vector2(80.0, 54.0)
+## 统一模板补充：当前默认值已固定为 160x72，运行时不应通过该兼容字段改变卡片尺寸。
+@export var ranged_slot_minimum_size: Vector2 = Vector2(160.0, 72.0)
 ## 近战装备槽最小尺寸；默认 80x54 与远程槽一致，运行时通常不修改，修改会影响底部装备栏对齐。
-@export var melee_slot_minimum_size: Vector2 = Vector2(80.0, 54.0)
+## 统一模板补充：当前默认值已固定为 160x72，运行时不应通过该兼容字段改变卡片尺寸。
+@export var melee_slot_minimum_size: Vector2 = Vector2(160.0, 72.0)
 ## 背包物品槽最小尺寸；默认 112x72 适合网格展示，运行时通常不修改，修改会影响背包容量视觉密度。
-@export var inventory_slot_minimum_size: Vector2 = Vector2(112.0, 72.0)
+## 统一模板补充：当前默认值已固定为 160x72，运行时不应通过该兼容字段改变卡片尺寸。
+@export var inventory_slot_minimum_size: Vector2 = Vector2(160.0, 72.0)
 ## 附近掉落物检测距离；取值建议大于玩家半径，默认 120 像素，修改会影响掉落物列表出现距离。
 @export_range(16.0, 600.0, 1.0) var nearby_drop_pickup_range: float = 120.0
 ## 附近掉落物列表最大显示数量；取值建议 1 到 8，默认 5，修改会影响列表高度和拾取选择数量。
@@ -295,7 +300,7 @@ var _settlement_subcategory: String = InventoryQuery.SUBCATEGORY_ALL
 ## 背包左侧近战装备槽容器缓存；默认绑定 InventoryEquipmentMeleeSlotHost，动态创建当前近战装备槽。
 @onready var _inventory_equipment_melee_host: VBoxContainer = %InventoryEquipmentMeleeSlotHost
 ## 背包右侧武器网格缓存；默认绑定 InventoryWeaponGrid，动态创建背包武器物品槽，节点缺失会导致背包物品无法显示。
-@onready var _inventory_weapon_grid: GridContainer = %InventoryWeaponGrid
+@onready var _inventory_weapon_grid: HFlowContainer = %InventoryWeaponGrid
 ## 背包空白投放区域缓存；默认绑定 InventoryScroll，拖拽到空白处时把武器放入背包末尾。
 @onready var _inventory_drop_area: Node = %InventoryScroll
 ## 背包全部筛选按钮缓存；默认绑定 InventoryFilterAllButton，点击后显示全部武器。
@@ -620,12 +625,13 @@ func _rebuild_inventory_slots() -> void:
 			# 资源数量；取值 1 到 99，强化石与修复包都使用资源方格显示。
 			var quantity: int = clampi(int((raw_entry as Dictionary).get("quantity", 1)), 1, 99)
 			# 资源方格；复用仓库控件的方形布局，修复包可点击或拖动到武器，强化石仅保留锻造材料属性。
+			# 通用模板补充：资源交互规则保持不变，实际显示区域统一为 160×72 物品卡片。
 			var resource_slot: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
 			resource_slot.call("configure", item_data, "backpack", source_index, false, "", quantity)
 			resource_slot.call("set_weapon_slot_visual_style", true)
 			# 道具目标选择期间资源不是合法武器目标，统一覆盖灰色滤镜并阻止点击或拖拽。
 			resource_slot.call("set_item_selection_state", _pending_combat_stone_resource != null, false, false)
-			resource_slot.custom_minimum_size = inventory_slot_minimum_size
+			resource_slot.custom_minimum_size = ITEM_CARD_VIEW_SCRIPT.get_standard_size()
 			resource_slot.connect("item_action_requested", Callable(self, "_on_combat_resource_action_requested"))
 			_inventory_weapon_grid.add_child(resource_slot)
 			_inventory_slot_controls.append(resource_slot)
@@ -682,7 +688,7 @@ func _build_inventory_armor_slots() -> void:
 	for armor_slot in ["head", "body", "legs", "feet"]:
 		# 防具槽按钮；点击已装备物品时卸回战斗背包，空槽不响应。
 		var armor_control: Control = EQUIPMENT_STORAGE_SLOT_SCRIPT.new() as Control
-		armor_control.custom_minimum_size = inventory_slot_minimum_size
+		armor_control.custom_minimum_size = ITEM_CARD_VIEW_SCRIPT.get_standard_size()
 		armor_control.connect("item_selected", Callable(self, "_on_inventory_armor_item_selected").bind(armor_slot))
 		_inventory_equipment_melee_host.add_child(armor_control)
 		_inventory_armor_slot_buttons[armor_slot] = armor_control
@@ -769,7 +775,8 @@ func _refresh_cooldown_overlays() -> void:
 func _create_weapon_slot_control(minimum_size: Vector2) -> Control:
 	# 新建武器槽控件；取值为 WeaponSlotControl 实例，默认由预加载脚本创建，修改会影响所有槽位基础控件。
 	var slot_control: Control = WEAPON_SLOT_CONTROL_SCRIPT.new() as Control
-	slot_control.custom_minimum_size = minimum_size
+	# 固定卡片尺寸；保留参数仅兼容既有调用签名，实际尺寸统一由标准模板决定。
+	slot_control.custom_minimum_size = ITEM_CARD_VIEW_SCRIPT.get_standard_size()
 	slot_control.connect("drop_received", Callable(self, "_on_weapon_slot_drop_received"))
 	slot_control.connect("drag_released_outside", Callable(self, "_on_weapon_slot_drag_released_outside"))
 	slot_control.connect("item_selected", Callable(self, "_on_combat_weapon_selected"))
@@ -3365,13 +3372,13 @@ func _build_settlement_section(section_name: String, entries: Array, empty_text:
 			# 结算数量；强化石堆叠在同一卡片显示 xN，武器保持数量 1。
 			var quantity: int = clampi(int(entry.get("quantity", 1)), 1, 99)
 			var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
-			item_control.custom_minimum_size = Vector2(0.0, 48.0)
+			item_control.custom_minimum_size = ITEM_CARD_VIEW_SCRIPT.get_standard_size()
 			item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			item_control.call("configure", item_resource, "", -1, false, "", quantity)
 			item_grid.add_child(item_control)
 		else:
 			var fallback_label: Label = Label.new()
 			fallback_label.text = str(entry.get("display_name", "未知物品"))
-			fallback_label.custom_minimum_size = Vector2(0.0, 48.0)
+			fallback_label.custom_minimum_size = ITEM_CARD_VIEW_SCRIPT.get_standard_size()
 			fallback_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			item_grid.add_child(fallback_label)

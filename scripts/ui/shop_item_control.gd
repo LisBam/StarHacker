@@ -8,7 +8,10 @@ signal purchase_requested(stock_id: String, failure_group_id: String)
 
 ## 物品详情格式化器；复用仓库的武器属性、耐久、强化词条和资源说明。
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
+## 通用物品卡片视图；普通商店与灰市商品必须与背包、仓库和锻造使用同一固定尺寸模板。
+const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
 ## 武器耐久条组件；商店武器卡片复用仓库同款底部耐久条，直接反映二手武器状态。
+## 通用耐久补充：当前实际显示由 ItemCardView 内部按耐久属性决定，装备等非武器耐久物品同样适用。
 const WEAPON_DURABILITY_BAR_SCRIPT: Script = preload("res://scripts/ui/weapon_durability_bar.gd")
 
 ## 当前商品资源；配置后用于悬停详情和显示名称，空值时禁用按钮。
@@ -20,7 +23,10 @@ var _failure_group_id: String = ""
 ## 当前商品数量；武器固定为一，资源允许显示堆叠数量。
 var _quantity: int = 1
 ## 武器耐久条缓存；默认按需创建，资源商品保持隐藏，武器商品固定贴在卡片底部。
+## 通用模板补充：该缓存仅保留旧接口兼容，当前商品耐久显示由 _item_card_view 统一承担。
 var _durability_bar: Control
+## 通用物品卡片视图缓存；默认首次配置时创建，统一商品名称、类型、价格与耐久组件。
+var _item_card_view: Control
 
 
 func configure(entry: Dictionary, is_gray_market: bool) -> void:
@@ -44,25 +50,40 @@ func configure(entry: Dictionary, is_gray_market: bool) -> void:
 		item_name = "【二手】%s" % item_name
 	# 价格显示文本；默认仅显示最终金币，开发者开启调试信息后才公开原价倍率。
 	var price_text: String = _build_price_text(purchase_price, price_multiplier)
-	if is_weapon:
-		text = "%s · %s\n%s" % [item_name, item_type, price_text]
-	else:
-		text = "%s%s · %s\n%s" % [item_name, " x%d" % _quantity if _quantity > 1 else "", item_type, price_text]
-	_ensure_durability_bar()
-	_durability_bar.call("configure", _item_resource)
-	_durability_bar.visible = is_weapon
+	text = ""
+	_ensure_item_card_view()
+	_item_card_view.call("configure", _item_resource, _quantity, item_type, price_text, "无效商品", item_name)
+	_item_card_view.call("set_visual_state", false, false)
 	tooltip_text = ITEM_DETAIL_FORMATTER.call("build_plain_text", _item_resource, _quantity) if _item_resource != null else ""
 	disabled = _item_resource == null or _stock_id.is_empty()
-	custom_minimum_size = Vector2(0.0, 66.0)
+	_item_card_view.call("set_disabled_state", disabled)
+	custom_minimum_size = ITEM_CARD_VIEW_SCRIPT.get_standard_size()
+	size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	flat = true
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if not disabled else Control.CURSOR_ARROW
 	if not pressed.is_connected(_on_pressed):
 		pressed.connect(_on_pressed)
+	if not mouse_entered.is_connected(_on_mouse_entered):
+		mouse_entered.connect(_on_mouse_entered)
+	if not mouse_exited.is_connected(_on_mouse_exited):
+		mouse_exited.connect(_on_mouse_exited)
 
 
 func _on_pressed() -> void:
 	if disabled or _stock_id.is_empty():
 		return
 	purchase_requested.emit(_stock_id, _failure_group_id)
+
+
+func _on_mouse_entered() -> void:
+	if _item_card_view != null and _item_resource != null:
+		_item_card_view.call("play_hover", self, true)
+
+
+func _on_mouse_exited() -> void:
+	if _item_card_view != null:
+		_item_card_view.call("play_hover", self, false)
 
 
 func _make_custom_tooltip(_for_text: String) -> Object:
@@ -83,3 +104,12 @@ func _ensure_durability_bar() -> void:
 	_durability_bar = WEAPON_DURABILITY_BAR_SCRIPT.new() as Control
 	_durability_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_durability_bar)
+
+
+func _ensure_item_card_view() -> void:
+	if _item_card_view != null:
+		return
+	# 商品按钮只保留购买信号，全部视觉内容由跨系统通用模板承担。
+	_item_card_view = ITEM_CARD_VIEW_SCRIPT.new() as Control
+	_item_card_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_item_card_view)

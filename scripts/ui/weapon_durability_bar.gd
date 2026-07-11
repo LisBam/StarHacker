@@ -3,6 +3,7 @@ class_name WeaponDurabilityBar
 
 ## 武器耐久条是只读显示组件，负责把 WeaponData 的当前耐久比例绘制在物品 UI 最底部。
 ## 组件不修改武器状态，可复用于战斗装备槽、战斗背包、仓库、局外装备栏和结算卡片。
+## 通用耐久补充：组件现按耐久属性而非武器类型工作，也供穿戴装备、锻造、商店和后续耐久物品复用。
 
 ## 耐久条高度；默认 5 像素，贴在父物品 UI 底部并保持与父控件等宽。
 @export_range(2.0, 16.0, 1.0) var bar_height: float = 5.0
@@ -37,12 +38,12 @@ func _ready() -> void:
 
 func configure(weapon_resource: Resource) -> void:
 	_weapon_resource = weapon_resource
-	visible = _is_weapon_resource(_weapon_resource)
+	visible = _has_durability_attributes(_weapon_resource)
 	queue_redraw()
 
 
 func refresh() -> void:
-	visible = _is_weapon_resource(_weapon_resource)
+	visible = _has_durability_attributes(_weapon_resource)
 	queue_redraw()
 
 
@@ -68,9 +69,15 @@ func _notification(what: int) -> void:
 
 
 func _get_durability_ratio() -> float:
-	if _weapon_resource == null or not _weapon_resource.has_method("get_durability_ratio"):
+	if _weapon_resource == null:
 		return 1.0
-	return clampf(float(_weapon_resource.call("get_durability_ratio")), 0.0, 1.0)
+	if _weapon_resource.has_method("get_durability_ratio"):
+		return clampf(float(_weapon_resource.call("get_durability_ratio")), 0.0, 1.0)
+	# 属性兼容比例；自定义耐久物品即使没有比例方法，也可直接通过当前值与最大值使用标准耐久条。
+	var maximum_durability: float = maxf(float(_weapon_resource.get("max_durability")), 0.0)
+	if maximum_durability <= 0.0:
+		return 0.0
+	return clampf(float(_weapon_resource.get("current_durability")) / maximum_durability, 0.0, 1.0)
 
 
 func _get_fill_color(durability_ratio: float) -> Color:
@@ -84,4 +91,22 @@ func _get_fill_color(durability_ratio: float) -> Color:
 
 
 func _is_weapon_resource(item_resource: Resource) -> bool:
-	return item_resource != null and str(item_resource.get("weapon_type")) in ["ranged", "melee"]
+	return _has_durability_attributes(item_resource)
+
+
+func _has_durability_attributes(item_resource: Resource) -> bool:
+	# 耐久组件显示条件；只有资源同时声明当前耐久与最大耐久属性时才渲染，物品类型不参与判断。
+	if item_resource == null:
+		return false
+	# 属性存在状态；通过属性列表识别真实声明，避免 Resource.get() 对不存在字段的空值产生误判。
+	var has_current_durability: bool = false
+	# 最大耐久属性存在状态；必须与当前耐久同时存在才构成完整耐久模型。
+	var has_maximum_durability: bool = false
+	for property_info in item_resource.get_property_list():
+		# 属性名称；取值来自 Godot 资源属性字典，字符串比较可兼容脚本变量与导出变量。
+		var property_name: String = str((property_info as Dictionary).get("name", ""))
+		has_current_durability = has_current_durability or property_name == "current_durability"
+		has_maximum_durability = has_maximum_durability or property_name == "max_durability"
+		if has_current_durability and has_maximum_durability:
+			return true
+	return false

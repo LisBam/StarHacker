@@ -304,12 +304,14 @@ layout_mode = 2
 size_flags_vertical = 3
 script = ExtResource("4_inventory_drop_area")
 
-[node name="InventoryWeaponGrid" type="GridContainer" parent="BattleHUD/Root/InventoryPanel/InventoryMargin/InventoryContent/InventoryColumns/BackpackPanel/BackpackMargin/BackpackContent/InventoryScroll"]
+[node name="InventoryWeaponGrid" type="HFlowContainer" parent="BattleHUD/Root/InventoryPanel/InventoryMargin/InventoryContent/InventoryColumns/BackpackPanel/BackpackMargin/BackpackContent/InventoryScroll"]
 unique_name_in_owner = true
 layout_mode = 2
+size_flags_horizontal = 3
 theme_override_constants/h_separation = 10
 theme_override_constants/v_separation = 10
-columns = 4
+alignment = 1
+last_wrap_alignment = 1
 
 [node name="LargeMapOverlay" type="Control" parent="BattleHUD/Root"]
 unique_name_in_owner = true

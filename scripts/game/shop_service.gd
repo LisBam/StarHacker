@@ -22,12 +22,18 @@ const STONE_DETRIMENTAL_CHANCE: float = 0.28
 
 ## 普通商店自动刷新间隔；默认 600 秒即 10 分钟，运行时通常不动态修改。
 @export_range(60.0, 86400.0, 1.0) var automatic_refresh_interval_seconds: float = 600.0
-## 普通商店每次刷新的武器商品数量；默认 6 件，修改会影响武器分类的库存密度。
-@export_range(1, 30, 1) var weapon_stock_count: int = 6
-## 普通商店每次刷新的装备商品数量；默认 4 件，四个部位等概率抽取并允许重复。
-@export_range(1, 30, 1) var equipment_stock_count: int = 4
-## 普通商店每次刷新的资源商品数量；默认 6 件，当前资源为随机品质强化石。
-@export_range(1, 30, 1) var resource_stock_count: int = 6
+## 普通商店旧版武器总数参数；保留存档和检查器兼容，实际刷新数量由近战与远程两个独立参数决定。
+@export_range(1, 30, 1) var weapon_stock_count: int = 10
+## 普通商店每次刷新的近战武器数量；默认 5 把，只从 melee 武器池抽取。
+@export_range(1, 30, 1) var melee_weapon_stock_count: int = 5
+## 普通商店每次刷新的远程武器数量；默认 5 把，只从 ranged 武器池抽取。
+@export_range(1, 30, 1) var ranged_weapon_stock_count: int = 5
+## 普通商店每次刷新的装备商品数量；默认 5 件，四个部位等概率抽取并允许重复。
+@export_range(1, 30, 1) var equipment_stock_count: int = 5
+## 普通商店每次刷新的强化石数量；默认 10 颗，品质、适用类型和词条均独立随机。
+@export_range(1, 30, 1) var resource_stock_count: int = 10
+## 普通商店每次刷新的道具数量；默认 5 个，从已配置修复包模板中等概率抽取。
+@export_range(1, 30, 1) var item_stock_count: int = 5
 ## 普通商品最低原价倍率；默认 1.5 倍，与设计规则下限一致。
 @export_range(1.0, 20.0, 0.05) var normal_price_multiplier_minimum: float = 1.5
 ## 普通商品最高原价倍率；默认 3.0 倍，与设计规则上限一致。
@@ -70,6 +76,12 @@ const STONE_DETRIMENTAL_CHANCE: float = 0.28
 	"res://data/equipment/basic_body_armor.tres",
 	"res://data/equipment/basic_leg_armor.tres",
 	"res://data/equipment/basic_boots.tres",
+])
+## 可刷新道具资源路径；当前包含初级、中级和高级修复包，生成时等概率抽取并复制独立实例。
+@export var item_resource_paths: PackedStringArray = PackedStringArray([
+	"res://data/items/repair_kit_basic.tres",
+	"res://data/items/repair_kit_medium.tres",
+	"res://data/items/repair_kit_advanced.tres",
 ])
 
 ## 全局库存服务缓存；负责金币扣除、商品入仓库和资源快照序列化。
@@ -218,9 +230,14 @@ func _refresh_normal_stock(reset_manual_refresh_count: bool) -> void:
 		_manual_refresh_count = 0
 		_next_automatic_refresh_unix = int(Time.get_unix_time_from_system() + automatic_refresh_interval_seconds)
 	_shop_stock.clear()
-	for _weapon_index in range(maxi(weapon_stock_count, 1)):
-		# 随机武器商品；加载失败时跳过，不阻断其他商品生成。
-		var weapon_resource: Resource = _create_random_weapon()
+	for _melee_weapon_index in range(maxi(melee_weapon_stock_count, 1)):
+		# 随机近战武器商品；只从 melee 模板抽取，确保每轮固定提供五把近战武器。
+		var weapon_resource: Resource = _create_random_weapon("melee")
+		if weapon_resource != null:
+			_shop_stock.append(_create_normal_stock_entry(weapon_resource))
+	for _ranged_weapon_index in range(maxi(ranged_weapon_stock_count, 1)):
+		# 随机远程武器商品；只从 ranged 模板抽取，确保每轮固定提供五把远程武器。
+		var weapon_resource: Resource = _create_random_weapon("ranged")
 		if weapon_resource != null:
 			_shop_stock.append(_create_normal_stock_entry(weapon_resource))
 	for _equipment_index in range(maxi(equipment_stock_count, 1)):
@@ -233,16 +250,31 @@ func _refresh_normal_stock(reset_manual_refresh_count: bool) -> void:
 		var enhancement_stone: EnhancementStoneData = EnhancementStoneData.create_random(_random, STONE_MINIMUM_MODIFIER_COUNT, STONE_MAXIMUM_MODIFIER_COUNT, STONE_DETRIMENTAL_CHANCE, STONE_BASE_SELL_PRICE)
 		if enhancement_stone != null:
 			_shop_stock.append(_create_normal_stock_entry(enhancement_stone))
+	for _item_index in range(maxi(item_stock_count, 1)):
+		# 随机道具商品；当前从三档修复包中抽取，加载失败时不影响其他商品。
+		var item_resource: Resource = _create_random_item()
+		if item_resource != null:
+			_shop_stock.append(_create_normal_stock_entry(item_resource))
 	_save_state()
 	shop_stock_changed.emit()
 	refresh_state_changed.emit()
 
 
-func _create_random_weapon() -> Resource:
+func _create_random_weapon(requested_weapon_type: String = "") -> Resource:
 	if weapon_resource_paths.is_empty():
 		return null
-	# 资源路径；全部已配置武器等概率抽取，允许同轮出现多件同类武器但实例状态独立。
-	var resource_path: String = weapon_resource_paths[_random.randi_range(0, weapon_resource_paths.size() - 1)]
+	# 候选路径；指定 melee 或 ranged 时预加载模板检查类型，空类型继续兼容旧版全部武器抽取。
+	var candidate_paths: PackedStringArray = PackedStringArray()
+	for configured_path in weapon_resource_paths:
+		if not ResourceLoader.exists(configured_path):
+			continue
+		var configured_resource: Resource = load(configured_path) as Resource
+		if configured_resource != null and (requested_weapon_type.is_empty() or str(configured_resource.get("weapon_type")) == requested_weapon_type):
+			candidate_paths.append(configured_path)
+	if candidate_paths.is_empty():
+		return null
+	# 资源路径；从已通过类型筛选的候选池等概率抽取，允许同轮重复商品。
+	var resource_path: String = candidate_paths[_random.randi_range(0, candidate_paths.size() - 1)]
 	if not ResourceLoader.exists(resource_path):
 		return null
 	# 武器模板；项目资源保持只读，商品必须深拷贝后才能随机耐久和强化。
@@ -256,6 +288,18 @@ func _create_random_weapon() -> Resource:
 	if str(weapon_resource.get("weapon_type")) == "ranged" and _random.randf() < second_hand_firearm_chance:
 		_apply_second_hand_state(weapon_resource)
 	return weapon_resource
+
+
+func _create_random_item() -> Resource:
+	if item_resource_paths.is_empty():
+		return null
+	# 道具路径；从全部合法模板中等概率抽取，空路径或加载失败模板不会生成商品。
+	var resource_path: String = item_resource_paths[_random.randi_range(0, item_resource_paths.size() - 1)]
+	if not ResourceLoader.exists(resource_path):
+		return null
+	# 道具模板与实例；深拷贝保证商品购买后不会与其他同类商品共享运行时状态。
+	var item_template: Resource = load(resource_path) as Resource
+	return item_template.duplicate(true) as Resource if item_template != null else null
 
 
 func _create_random_equipment() -> Resource:

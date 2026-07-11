@@ -1,10 +1,17 @@
 extends PanelContainer
-class_name MainMenuBackpackPanel
+class_name SharedBackpackPanel
 
 ## 主菜单背包面板复用战斗背包的“左侧装备栏 + 右侧随身物品”结构和标准物品卡片。
 ## 局外没有地面掉落容器，因此丢弃操作直接永久移除对应背包记录，不生成可重新拾取的物品。
 
 signal closed
+## 丢弃请求；战斗上下文由 CombatHud 生成地面掉落，局外上下文由组件直接永久删除。
+signal combat_discard_requested(item_resource: Resource, quantity: int)
+
+## 主菜单上下文标识；丢弃直接永久删除，其他装备、修复和查询行为与战斗一致。
+const CONTEXT_MAIN_MENU: String = "main_menu"
+## 战斗上下文标识；丢弃请求交给 CombatHud 生成地面掉落。
+const CONTEXT_COMBAT: String = "combat"
 
 ## 仓库物品卡片脚本；随身物品复用完整详情、耐久条、点击和悬停交互。
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
@@ -62,6 +69,32 @@ var _pending_repair_kit_location: String = ""
 var _status_label: Label
 ## 取消修复包使用按钮；只在目标选择期间显示，避免玩家被锁定在选择状态。
 var _cancel_use_button: Button
+## 当前运行上下文；默认主菜单，必须在加入场景树前通过 configure_context 修改。
+var _context_mode: String = CONTEXT_MAIN_MENU
+## 顶部上下文提示；主菜单说明永久删除，战斗说明物品会掉落到角色附近。
+var _context_hint_label: Label
+## 当前一级分类；默认全部，取值与 InventoryQuery 主分类常量一致。
+var _primary_category: String = InventoryQuery.PRIMARY_ALL
+## 当前二级分类；默认全部，切换一级分类时重置并重建按钮。
+var _subcategory: String = InventoryQuery.SUBCATEGORY_ALL
+## 当前排序模式；默认获得时间，可切换物品价值或耐久降序。
+var _sort_mode: String = InventoryQuery.SORT_ACQUIRED_TIME
+## 当前强化石属性方向筛选集合；默认空数组表示不过滤词条，多项条件按并集匹配。
+var _stone_attribute_filter: Array[String] = []
+## 关键词搜索框；按名称、说明、分类和强化词条实时过滤右侧背包物品。
+var _search_edit: LineEdit
+## 排序下拉框；提供获得时间、物品价值和耐久三种统一排序。
+var _sort_option: OptionButton
+## 强化词条筛选下拉框；只在资源分类显示并支持多项属性方向勾选。
+var _stone_attribute_option: OptionButton
+## 清空强化筛选按钮；当前没有筛选条件时禁用。
+var _stone_attribute_clear_button: Button
+## 一级分类按钮表；用于同步全部、武器、装备和资源的选中状态。
+var _primary_buttons: Dictionary = {}
+## 二级分类按钮表；根据当前一级分类动态重建。
+var _subcategory_buttons: Dictionary = {}
+## 二级分类按钮栏；武器、装备和资源显示各自子分类。
+var _subcategory_bar: HBoxContainer
 
 
 func _ready() -> void:
@@ -69,6 +102,16 @@ func _ready() -> void:
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
 	_build_interface()
 	_connect_inventory_signals()
+	_refresh_all()
+
+
+func configure_context(context_mode: String) -> void:
+	# 上下文模式；只接受主菜单或战斗两个稳定值，异常输入回退主菜单安全策略。
+	_context_mode = context_mode if context_mode in [CONTEXT_MAIN_MENU, CONTEXT_COMBAT] else CONTEXT_MAIN_MENU
+
+
+func refresh() -> void:
+	## 公开刷新入口；宿主在打开面板或上下文数据批量变化后调用，不需要了解组件内部控件结构。
 	_refresh_all()
 
 
@@ -97,10 +140,10 @@ func _build_interface() -> void:
 	title_label.add_theme_font_size_override("font_size", 25)
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title_label)
-	var warning_label: Label = Label.new()
-	warning_label.text = "局外丢弃会直接永久失去物品"
-	warning_label.modulate = Color(1.0, 0.55, 0.55, 1.0)
-	header.add_child(warning_label)
+	_context_hint_label = Label.new()
+	_context_hint_label.text = "丢弃会掉落到角色附近" if _context_mode == CONTEXT_COMBAT else "局外丢弃会直接永久失去物品"
+	_context_hint_label.modulate = Color(1.0, 0.72, 0.42, 1.0) if _context_mode == CONTEXT_COMBAT else Color(1.0, 0.55, 0.55, 1.0)
+	header.add_child(_context_hint_label)
 	_cancel_use_button = Button.new()
 	_cancel_use_button.text = "取消使用"
 	_cancel_use_button.visible = false
@@ -111,6 +154,57 @@ func _build_interface() -> void:
 	close_button.custom_minimum_size = Vector2(116.0, 36.0)
 	close_button.pressed.connect(func() -> void: closed.emit())
 	header.add_child(close_button)
+	# 查询栏；布局和功能与游戏内背包一致，只作用于右侧随身物品列表。
+	var query_bar: HBoxContainer = HBoxContainer.new()
+	query_bar.add_theme_constant_override("separation", 7)
+	content.add_child(query_bar)
+	_search_edit = LineEdit.new()
+	_search_edit.placeholder_text = "搜索物品、分类或强化词条"
+	_search_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_search_edit.text_changed.connect(func(_text: String) -> void: _rebuild_items())
+	query_bar.add_child(_search_edit)
+	_sort_option = OptionButton.new()
+	_sort_option.add_item("获得时间")
+	_sort_option.set_item_metadata(0, InventoryQuery.SORT_ACQUIRED_TIME)
+	_sort_option.add_item("物品价值")
+	_sort_option.set_item_metadata(1, InventoryQuery.SORT_ITEM_VALUE)
+	_sort_option.add_item("耐久")
+	_sort_option.set_item_metadata(2, InventoryQuery.SORT_DURABILITY)
+	_sort_option.item_selected.connect(_on_sort_selected)
+	query_bar.add_child(_sort_option)
+	_stone_attribute_option = OptionButton.new()
+	_stone_attribute_option.custom_minimum_size = Vector2(148.0, 34.0)
+	_stone_attribute_option.add_item("强化筛选（0）")
+	_stone_attribute_option.set_item_metadata(0, "")
+	for direction in InventoryQuery.STONE_FILTER_DIRECTIONS:
+		_stone_attribute_option.add_separator(InventoryQuery.get_stone_attribute_direction_group_label(direction))
+		for stat_name in EnhancementRules.STAT_KEYS:
+			_stone_attribute_option.add_item(InventoryQuery.get_stone_attribute_filter_label(stat_name, direction))
+			var filter_index: int = _stone_attribute_option.item_count - 1
+			_stone_attribute_option.set_item_metadata(filter_index, InventoryQuery.build_stone_attribute_filter_key(stat_name, direction))
+			_stone_attribute_option.get_popup().set_item_as_checkable(filter_index, true)
+	_stone_attribute_option.get_popup().hide_on_checkable_item_selection = false
+	_stone_attribute_option.item_selected.connect(_on_stone_attribute_selected)
+	query_bar.add_child(_stone_attribute_option)
+	_stone_attribute_clear_button = Button.new()
+	_stone_attribute_clear_button.text = "清空筛选"
+	_stone_attribute_clear_button.pressed.connect(_clear_stone_attribute_filter)
+	query_bar.add_child(_stone_attribute_clear_button)
+	# 分类栏；一级分类固定一行，二级分类根据当前类型动态变化。
+	var category_columns: VBoxContainer = VBoxContainer.new()
+	category_columns.add_theme_constant_override("separation", 3)
+	content.add_child(category_columns)
+	var primary_bar: HBoxContainer = HBoxContainer.new()
+	primary_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+	category_columns.add_child(primary_bar)
+	_create_category_button(primary_bar, "全部", InventoryQuery.PRIMARY_ALL, true)
+	_create_category_button(primary_bar, "武器", InventoryQuery.PRIMARY_WEAPONS, true)
+	_create_category_button(primary_bar, "装备", InventoryQuery.PRIMARY_EQUIPMENT, true)
+	_create_category_button(primary_bar, "资源", InventoryQuery.PRIMARY_RESOURCES, true)
+	_subcategory_bar = HBoxContainer.new()
+	_subcategory_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+	category_columns.add_child(_subcategory_bar)
+	_rebuild_subcategory_buttons()
 	# 左右分栏；左侧固定装备栏，右侧背包物品独立滚动。
 	var split: HSplitContainer = HSplitContainer.new()
 	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -186,8 +280,10 @@ func _rebuild_items() -> void:
 	if _global_inventory == null:
 		return
 	var entries: Array = _global_inventory.call("get_backpack_entries")
-	for entry_index in range(entries.size()):
-		var entry: Dictionary = entries[entry_index] as Dictionary
+	# 可见条目；统一查询器保留每项原始 source_index，排序和筛选后拖拽仍操作正确背包记录。
+	var visible_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(entries, _primary_category, _subcategory, _search_edit.text, _stone_attribute_filter, _sort_mode)
+	for entry in visible_entries:
+		var entry_index: int = int(entry.get("source_index", -1))
 		var item_resource: Resource = entry.get("resource") as Resource
 		if item_resource == null:
 			continue
@@ -201,10 +297,110 @@ func _rebuild_items() -> void:
 		var is_durable_item: bool = str(item_resource.get("weapon_type")) in ["ranged", "melee"] or str(item_resource.get("item_kind")) == "equipment"
 		item_control.call("set_weapon_target_selection_state", _pending_repair_kit_resource != null and is_durable_item, _can_repair_target(item_resource))
 		_item_grid.add_child(item_control)
-	if entries.is_empty():
+	if visible_entries.is_empty():
 		var empty_label: Label = Label.new()
-		empty_label.text = "背包为空"
+		empty_label.text = "当前分类与筛选没有物品"
 		_item_grid.add_child(empty_label)
+
+
+func _create_category_button(target_bar: HBoxContainer, button_text: String, category_name: String, is_primary: bool) -> void:
+	# 分类按钮；稳定分类标识通过绑定参数传递，显示文字变化不会影响查询。
+	var category_button: Button = Button.new()
+	category_button.text = button_text
+	category_button.custom_minimum_size = Vector2(92.0, 30.0)
+	if is_primary:
+		category_button.pressed.connect(_on_primary_category_pressed.bind(category_name))
+		_primary_buttons[category_name] = category_button
+	else:
+		category_button.pressed.connect(_on_subcategory_pressed.bind(category_name))
+		_subcategory_buttons[category_name] = category_button
+	target_bar.add_child(category_button)
+
+
+func _rebuild_subcategory_buttons() -> void:
+	_clear_container(_subcategory_bar)
+	_subcategory_buttons.clear()
+	_create_category_button(_subcategory_bar, "全部", InventoryQuery.SUBCATEGORY_ALL, false)
+	if _primary_category == InventoryQuery.PRIMARY_WEAPONS:
+		_create_category_button(_subcategory_bar, "近战", InventoryQuery.SUBCATEGORY_MELEE, false)
+		_create_category_button(_subcategory_bar, "远程", InventoryQuery.SUBCATEGORY_RANGED, false)
+	elif _primary_category == InventoryQuery.PRIMARY_EQUIPMENT:
+		_create_category_button(_subcategory_bar, "头部", InventoryQuery.SUBCATEGORY_EQUIPMENT_HEAD, false)
+		_create_category_button(_subcategory_bar, "躯干", InventoryQuery.SUBCATEGORY_EQUIPMENT_BODY, false)
+		_create_category_button(_subcategory_bar, "腿部", InventoryQuery.SUBCATEGORY_EQUIPMENT_LEGS, false)
+		_create_category_button(_subcategory_bar, "脚部", InventoryQuery.SUBCATEGORY_EQUIPMENT_FEET, false)
+	elif _primary_category == InventoryQuery.PRIMARY_RESOURCES:
+		_create_category_button(_subcategory_bar, "强化石", InventoryQuery.SUBCATEGORY_ENHANCEMENT_STONES, false)
+		_create_category_button(_subcategory_bar, "道具", InventoryQuery.SUBCATEGORY_ITEMS, false)
+	_refresh_query_controls()
+
+
+func _on_primary_category_pressed(category_name: String) -> void:
+	_primary_category = category_name
+	_subcategory = InventoryQuery.SUBCATEGORY_ALL
+	_clear_stone_attribute_filter(false)
+	_rebuild_subcategory_buttons()
+	_rebuild_items()
+
+
+func _on_subcategory_pressed(category_name: String) -> void:
+	_subcategory = category_name
+	_refresh_query_controls()
+	_rebuild_items()
+
+
+func _on_sort_selected(item_index: int) -> void:
+	var selected_mode: String = str(_sort_option.get_item_metadata(item_index))
+	_sort_mode = selected_mode if selected_mode in [InventoryQuery.SORT_ACQUIRED_TIME, InventoryQuery.SORT_ITEM_VALUE, InventoryQuery.SORT_DURABILITY] else InventoryQuery.SORT_ACQUIRED_TIME
+	_rebuild_items()
+
+
+func _on_stone_attribute_selected(item_index: int) -> void:
+	if item_index <= 0:
+		_stone_attribute_option.select(0)
+		return
+	var filter_key: String = str(_stone_attribute_option.get_item_metadata(item_index))
+	if filter_key.is_empty():
+		return
+	var should_select: bool = filter_key not in _stone_attribute_filter
+	_stone_attribute_option.get_popup().set_item_checked(item_index, should_select)
+	if should_select:
+		_stone_attribute_filter.append(filter_key)
+	else:
+		_stone_attribute_filter.erase(filter_key)
+	_refresh_stone_attribute_filter_display()
+	_rebuild_items()
+
+
+func _clear_stone_attribute_filter(rebuild_items: bool = true) -> void:
+	_stone_attribute_filter.clear()
+	for item_index in range(1, _stone_attribute_option.item_count):
+		if not str(_stone_attribute_option.get_item_metadata(item_index)).is_empty():
+			_stone_attribute_option.get_popup().set_item_checked(item_index, false)
+	_refresh_stone_attribute_filter_display()
+	if rebuild_items:
+		_rebuild_items()
+
+
+func _refresh_stone_attribute_filter_display() -> void:
+	_stone_attribute_option.set_item_text(0, "强化筛选（%d）" % _stone_attribute_filter.size())
+	_stone_attribute_option.select(0)
+	for item_index in range(1, _stone_attribute_option.item_count):
+		var filter_key: String = str(_stone_attribute_option.get_item_metadata(item_index))
+		if not filter_key.is_empty():
+			_stone_attribute_option.get_popup().set_item_checked(item_index, filter_key in _stone_attribute_filter)
+	_stone_attribute_clear_button.disabled = _stone_attribute_filter.is_empty()
+
+
+func _refresh_query_controls() -> void:
+	for category_name in _primary_buttons.keys():
+		(_primary_buttons[category_name] as Button).disabled = str(category_name) == _primary_category
+	for category_name in _subcategory_buttons.keys():
+		(_subcategory_buttons[category_name] as Button).disabled = str(category_name) == _subcategory
+	var resource_category_active: bool = _primary_category == InventoryQuery.PRIMARY_RESOURCES
+	_stone_attribute_option.visible = resource_category_active
+	_stone_attribute_clear_button.visible = resource_category_active
+	_refresh_stone_attribute_filter_display()
 
 
 func _on_item_pressed(item_resource: Resource) -> void:
@@ -244,7 +440,7 @@ func _on_action_pressed(action_id: int) -> void:
 			target_location = "ranged_0" if action_id == ACTION_EQUIP_RANGED_ONE else "ranged_1"
 		_global_inventory.call("transfer_storage_to_equipment", _action_resource, "backpack", target_location)
 	elif action_id == ACTION_DISCARD_ALL:
-		_global_inventory.call("consume_storage_resource_quantity", _action_resource, "backpack", maxi(_action_quantity, 1))
+		_execute_discard(_action_resource, maxi(_action_quantity, 1))
 	elif action_id == ACTION_DISCARD_PARTIAL:
 		_pending_partial_resource = _action_resource
 		_quantity_dialog.call("present_discard", str(_action_resource.get("display_name")), maxi(_action_quantity, 1))
@@ -333,7 +529,17 @@ func _on_quantity_confirmed(quantity: int) -> void:
 		return
 	var item_resource: Resource = _pending_partial_resource
 	_pending_partial_resource = null
-	_global_inventory.call("consume_storage_resource_quantity", item_resource, "backpack", quantity)
+	_execute_discard(item_resource, quantity)
+
+
+func _execute_discard(item_resource: Resource, quantity: int) -> void:
+	# 战斗丢弃；所有权扣除和地面生成由 CombatHud 原有流程处理，组件只发出上下文请求。
+	if _context_mode == CONTEXT_COMBAT:
+		combat_discard_requested.emit(item_resource, maxi(quantity, 1))
+		return
+	# 局外丢弃；没有地面容器，直接从全局背包永久消费指定数量。
+	if _global_inventory != null:
+		_global_inventory.call("consume_storage_resource_quantity", item_resource, "backpack", maxi(quantity, 1))
 
 
 func _clear_container(container: Node) -> void:

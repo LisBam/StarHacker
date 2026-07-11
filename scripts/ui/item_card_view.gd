@@ -22,6 +22,12 @@ const CORNER_RADIUS: float = 4.0
 const HOVER_SCALE: float = 1.03
 ## 标准悬浮动画时长；默认 0.12 秒，进入与离开使用相同缓动时间。
 const HOVER_DURATION: float = 0.12
+## 标准点击按下缩放；默认 0.96，全部物品控件按下时使用相同收缩幅度。
+const CLICK_PRESS_SCALE: float = 0.96
+## 标准点击按下动画时长；默认 0.07 秒，保证反馈清晰且不拖慢操作。
+const CLICK_PRESS_DURATION: float = 0.07
+## 标准点击释放动画时长；默认 0.12 秒，释放后根据鼠标位置恢复悬浮或普通比例。
+const CLICK_RELEASE_DURATION: float = 0.12
 ## 标准拖拽来源缩放；默认 0.96，所有可拖拽物品被拿起时使用相同收缩幅度。
 const DRAG_SOURCE_SCALE: float = 0.96
 ## 标准拖拽来源透明度；默认 0.58，拖拽期间统一降低原卡片存在感。
@@ -63,6 +69,10 @@ var _cooldown_ratio: float = 0.0
 var _disabled: bool = false
 ## 当前宿主是否处于拖拽来源状态；默认 false，启用时暂停悬浮动画以保持来源缩放与透明度稳定。
 var _drag_source_active: bool = false
+## 当前鼠标是否位于卡片宿主范围内；默认 false，点击释放时用于决定恢复悬浮比例或普通比例。
+var _hovered: bool = false
+## 当前卡片是否处于鼠标按下状态；默认 false，按下期间暂停悬浮补间避免动画冲突。
+var _pressed: bool = false
 ## 顶部上下文标签缓存；默认在首次进入场景树时创建，显示物品类型或槽位职责。
 var _context_label: Label
 ## 中部物品名称标签缓存；默认在首次进入场景树时创建，显示名称与堆叠数量。
@@ -82,6 +92,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	clip_contents = true
 	_build_content()
+	_bind_click_host()
 	_refresh_content()
 	queue_redraw()
 
@@ -125,13 +136,29 @@ func play_hover(host_control: Control, hovered: bool) -> void:
 	# 统一悬浮反馈；禁用卡片始终恢复原比例，合法卡片使用固定 1.03 倍缩放。
 	if host_control == null:
 		return
+	_hovered = hovered
 	if _drag_source_active:
+		return
+	if _pressed:
 		return
 	_stop_interaction_tween()
 	host_control.pivot_offset = host_control.size * 0.5
 	var target_scale: Vector2 = Vector2.ONE * HOVER_SCALE if hovered and not _disabled else Vector2.ONE
 	_interaction_tween = host_control.create_tween()
 	_interaction_tween.tween_property(host_control, "scale", target_scale, HOVER_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+
+func play_click(host_control: Control, pressed: bool) -> void:
+	# 统一点击反馈；按下时收缩至 0.96，释放后根据鼠标是否仍悬浮恢复 1.03 或 1.0。
+	if host_control == null or _disabled or _drag_source_active:
+		return
+	_pressed = pressed
+	_stop_interaction_tween()
+	host_control.pivot_offset = host_control.size * 0.5
+	var target_scale: Vector2 = Vector2.ONE * CLICK_PRESS_SCALE if pressed else (Vector2.ONE * HOVER_SCALE if _hovered else Vector2.ONE)
+	var duration: float = CLICK_PRESS_DURATION if pressed else CLICK_RELEASE_DURATION
+	_interaction_tween = host_control.create_tween()
+	_interaction_tween.tween_property(host_control, "scale", target_scale, duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 
 func create_drag_preview() -> Control:
@@ -154,6 +181,8 @@ func play_drag_source(host_control: Control, active: bool) -> void:
 	if host_control == null:
 		return
 	_drag_source_active = active
+	if active:
+		_pressed = false
 	_stop_interaction_tween()
 	host_control.pivot_offset = host_control.size * 0.5
 	var target_scale: Vector2 = Vector2.ONE * DRAG_SOURCE_SCALE if active else Vector2.ONE
@@ -219,14 +248,21 @@ func _build_content() -> void:
 	var content: VBoxContainer = VBoxContainer.new()
 	content.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_theme_constant_override("separation", 0)
+	content.alignment = BoxContainer.ALIGNMENT_CENTER
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	margin.add_child(content)
 	_context_label = Label.new()
 	_context_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_context_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_context_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_context_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_context_label.add_theme_font_size_override("font_size", 10)
 	content.add_child(_context_label)
 	_name_label = Label.new()
 	_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_name_label.add_theme_font_size_override("font_size", 13)
 	content.add_child(_name_label)
@@ -235,7 +271,9 @@ func _build_content() -> void:
 	_detail_label.fit_content = true
 	_detail_label.scroll_active = false
 	_detail_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_detail_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_detail_label.custom_minimum_size = Vector2(0.0, 18.0)
+	_detail_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_detail_label.add_theme_font_size_override("normal_font_size", 10)
 	content.add_child(_detail_label)
 	_durability_bar = DURABILITY_BAR_SCRIPT.new() as Control
@@ -285,3 +323,22 @@ func _stop_interaction_tween() -> void:
 	if _interaction_tween != null and _interaction_tween.is_valid():
 		_interaction_tween.kill()
 	_interaction_tween = null
+
+
+func _bind_click_host() -> void:
+	# 点击宿主绑定；Button 类物品控件自动接入统一按下与释放动画，非按钮宿主由其输入协议主动调用 play_click()。
+	var host_button: BaseButton = get_parent() as BaseButton
+	if host_button == null:
+		return
+	if not host_button.button_down.is_connected(_on_host_button_down):
+		host_button.button_down.connect(_on_host_button_down.bind(host_button))
+	if not host_button.button_up.is_connected(_on_host_button_up):
+		host_button.button_up.connect(_on_host_button_up.bind(host_button))
+
+
+func _on_host_button_down(host_button: BaseButton) -> void:
+	play_click(host_button, true)
+
+
+func _on_host_button_up(host_button: BaseButton) -> void:
+	play_click(host_button, false)

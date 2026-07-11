@@ -31,6 +31,8 @@ const FORGE_ANIMATION_ROTATIONS: float = 1.5
 @export_range(64.0, 104.0, 1.0) var forge_slot_size: float = 84.0
 ## 顶部中心牺牲槽额外上移距离；默认 16 像素，用于与主锻造槽保持清晰间隔，运行时无需动态修改。
 @export_range(0.0, 64.0, 1.0) var top_sacrifice_slot_upward_offset: float = 16.0
+## 下方两个牺牲槽额外下移距离；默认 24 像素，用于避免固定宽卡片与主道具槽发生重叠，运行时无需动态修改。
+@export_range(0.0, 64.0, 1.0) var bottom_sacrifice_slot_downward_offset: float = 24.0
 
 ## 全局库存服务缓存；提供背包/仓库条目、金币、材料数量与强化应用。
 var _global_inventory: Node
@@ -332,6 +334,10 @@ func _build_forge_slots() -> void:
 			# 顶部槽额外上移；保持环形结构不变，仅增加它与中央主槽之间的可读间隔。
 			sacrifice_slot.offset_top -= top_sacrifice_slot_upward_offset
 			sacrifice_slot.offset_bottom -= top_sacrifice_slot_upward_offset
+		if slot_index in [2, 3]:
+			# 下方材料槽偏移；右下与左下两个槽同步下移，保持环形对称并与主槽留出清晰间隔。
+			sacrifice_slot.offset_top += bottom_sacrifice_slot_downward_offset
+			sacrifice_slot.offset_bottom += bottom_sacrifice_slot_downward_offset
 		sacrifice_slot.connect("item_requested", Callable(self, "_on_slot_item_requested"))
 		sacrifice_slot.connect("return_requested", Callable(self, "_on_slot_return_requested"))
 		_forge_board.add_child(sacrifice_slot)

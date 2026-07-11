@@ -445,13 +445,17 @@ func _create_drag_preview_control() -> Control:
 
 func _play_inventory_click_press_animation() -> void:
 	# 全局交互补充：武器点击不再播放专属按压缩放，避免与其他物品卡片产生差异化反馈。
-	return
+	# 通用点击补充：当前直接调用 ItemCardView 标准点击动画，与全部物品控件保持一致。
+	if _item_card_view != null:
+		_item_card_view.call("play_click", self, true)
 
 
 func _play_inventory_click_release_animation() -> void:
 	# 回弹阶段；先略微放大并提亮，再回到原始比例和颜色，形成明确但短促的点击确认感。
 	# 全局交互补充：当前取消专属回弹，点击释放保持与仓库、商店、锻造和资源卡片一致。
-	return
+	# 通用点击补充：释放后由 ItemCardView 根据悬浮状态恢复统一比例。
+	if _item_card_view != null:
+		_item_card_view.call("play_click", self, false)
 
 
 func _play_inventory_drag_source_animation() -> void:

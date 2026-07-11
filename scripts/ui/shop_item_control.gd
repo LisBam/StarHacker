@@ -13,6 +13,8 @@ const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.g
 ## 武器耐久条组件；商店武器卡片复用仓库同款底部耐久条，直接反映二手武器状态。
 ## 通用耐久补充：当前实际显示由 ItemCardView 内部按耐久属性决定，装备等非武器耐久物品同样适用。
 const WEAPON_DURABILITY_BAR_SCRIPT: Script = preload("res://scripts/ui/weapon_durability_bar.gd")
+## 商店金币黄色；商品价格统一使用明亮金黄色，便于与普通物品摘要区分。
+const COIN_TEXT_COLOR: String = "#ffd45c"
 
 ## 当前商品资源；配置后用于悬停详情和显示名称，空值时禁用按钮。
 var _item_resource: Resource
@@ -50,9 +52,11 @@ func configure(entry: Dictionary, is_gray_market: bool) -> void:
 		item_name = "【二手】%s" % item_name
 	# 价格显示文本；默认仅显示最终金币，开发者开启调试信息后才公开原价倍率。
 	var price_text: String = _build_price_text(purchase_price, price_multiplier)
+	# 商品顶部摘要；强化石直接显示全部属性方向，其他商品继续显示标准物品类型。
+	var context_text: String = _build_stone_attribute_text() if _is_enhancement_stone() else item_type
 	text = ""
 	_ensure_item_card_view()
-	_item_card_view.call("configure", _item_resource, _quantity, item_type, price_text, "无效商品", item_name)
+	_item_card_view.call("configure", _item_resource, _quantity, context_text, price_text, "无效商品", item_name)
 	_item_card_view.call("set_visual_state", false, false)
 	tooltip_text = ITEM_DETAIL_FORMATTER.call("build_plain_text", _item_resource, _quantity) if _item_resource != null else ""
 	disabled = _item_resource == null or _stock_id.is_empty()
@@ -95,7 +99,25 @@ func _build_price_text(purchase_price: int, price_multiplier: float) -> String:
 	var debug_settings: Node = get_tree().root.get_node_or_null("DebugSettings")
 	# 是否显示调试倍率；默认 false，仅在开发者菜单明确开启后显示原价计算过程。
 	var show_debug_information: bool = debug_settings != null and debug_settings.has_method("is_debug_information_visible") and bool(debug_settings.call("is_debug_information_visible"))
-	return "%d金币（原价×%.2f）" % [purchase_price, price_multiplier] if show_debug_information else "%d金币" % purchase_price
+	var raw_price_text: String = "%d金币（原价×%.2f）" % [purchase_price, price_multiplier] if show_debug_information else "%d金币" % purchase_price
+	return "[color=%s]%s[/color]" % [COIN_TEXT_COLOR, raw_price_text]
+
+
+func _is_enhancement_stone() -> bool:
+	return _item_resource != null and str(_item_resource.get("item_kind")) == "enhancement_stone"
+
+
+func _build_stone_attribute_text() -> String:
+	if not _is_enhancement_stone():
+		return ""
+	# 强化石属性；按统一规则目录顺序显示属性名称与正负方向，不提前公开使用时才随机的实际百分比。
+	var modifiers: Dictionary = EnhancementRules.normalize_modifiers(_item_resource.get("modifiers") as Dictionary)
+	# 属性文本集合；多个属性以空格分隔，并由通用卡片负责超长文本居中截断。
+	var attribute_tokens: PackedStringArray = PackedStringArray()
+	for stat_name in EnhancementRules.STAT_KEYS:
+		if modifiers.has(stat_name):
+			attribute_tokens.append(EnhancementRules.build_modifier_token(stat_name, modifiers.get(stat_name), false))
+	return " ".join(attribute_tokens) if not attribute_tokens.is_empty() else "无属性"
 
 
 func _ensure_durability_bar() -> void:

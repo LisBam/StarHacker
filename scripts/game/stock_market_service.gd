@@ -239,12 +239,50 @@ func get_maximum_buy_quantity(stock_id: String) -> int:
 	return estimated_quantity
 
 
+func get_trade_quote(stock_id: String, quantity: int, trade_type: String) -> Dictionary:
+	## 生成指定数量的实时交易报价；该接口只读取行情、金币和持仓，不修改任何资产。
+	## 返回字典包含单价、成交额、手续费、最终金额和当前可执行状态，供所有交易界面统一展示。
+	if not stock_id in STOCK_IDS or quantity <= 0 or not trade_type in ["buy", "sell"]:
+		return {"valid": false, "executable": false, "message": "交易参数无效"}
+	# 当前整数成交价；每次调用都读取当秒行情，交易流程中的旧报价不会参与计算。
+	var price: int = get_current_price(stock_id)
+	# 实时成交额；数量乘当前整数单价，不包含手续费。
+	var gross: int = price * quantity
+	# 实时手续费；买卖均按成交额 0.5% 向上取整且最低 1 金币。
+	var fee: int = maxi(ceili(float(gross) * 0.005), 1)
+	# 当前可用金币；库存服务不可用时按 0 处理并令买入报价不可执行。
+	var available_coins: int = int(_global_inventory.call("get_coins")) if _global_inventory != null and _global_inventory.has_method("get_coins") else 0
+	# 当前持仓数量；库存服务不可用或没有持仓时按 0 处理并令卖出报价不可执行。
+	var available_quantity: int = int((_global_inventory.call("get_stock_holding", stock_id) as Dictionary).get("quantity", 0)) if _global_inventory != null and _global_inventory.has_method("get_stock_holding") else 0
+	# 最终结算金额；买入为成交额加手续费，卖出为扣除 0.5% 后向下取整且最低 1 金币。
+	var total: int = gross + fee if trade_type == "buy" else maxi(int(floor(float(gross) * 0.995)), 1)
+	# 当前报价是否可执行；买入复核金币，卖出复核持仓，防止弹窗展示期间资产或价格变化造成非法成交。
+	var executable: bool = available_coins >= total if trade_type == "buy" else available_quantity >= quantity
+	# 不可执行原因；用于二次确认窗口明确提示玩家需要等待价格回落、减少数量或检查持仓。
+	var message: String = "可以成交"
+	if not executable:
+		message = "金币不足，需要 %d 金币，当前仅有 %d 金币" % [total, available_coins] if trade_type == "buy" else "持仓不足，当前仅有 %d 股" % available_quantity
+	return {
+		"valid": true,
+		"executable": executable,
+		"message": message,
+		"quantity": quantity,
+		"price": price,
+		"gross": gross,
+		"fee": fee,
+		"total": total,
+		"available_coins": available_coins,
+		"available_quantity": available_quantity,
+	}
+
+
 func request_buy(stock_id: String, quantity: int, quoted_price: int = -1) -> Dictionary:
 	if not stock_id in STOCK_IDS or quantity <= 0 or _global_inventory == null or not _global_inventory.has_method("buy_stock_holding"):
 		return {"success": false, "message": "无法执行买入"}
 	# 当前成交单价；确认时重新读取，避免数量选择期间行情变化后使用旧价格。
 	# 报价锁定补充；UI 传入正整数 quoted_price 时使用弹窗打开瞬间的锁定价格，未传入时读取实时价格。
-	var price: int = quoted_price if quoted_price > 0 else get_current_price(stock_id)
+	# 实时成交规则；旧锁价说明仅保留历史注释兼容，quoted_price 参数只维持调用兼容，任何传入值都不会覆盖点击确认瞬间的实时行情。
+	var price: int = get_current_price(stock_id)
 	# 买入成交额；数量乘当前价，不包含手续费。
 	var gross: int = price * quantity
 	# 买入手续费；成交额 0.5% 向上取整且最低 1 金币。
@@ -253,7 +291,9 @@ func request_buy(stock_id: String, quantity: int, quoted_price: int = -1) -> Dic
 	var total_cost: int = gross + fee
 	# 买入结果；库存服务会再次校验金币并更新加权成本。
 	var success: bool = bool(_global_inventory.call("buy_stock_holding", stock_id, quantity, price, total_cost))
-	return {"success": success, "message": "买入成功" if success else "金币不足或持仓服务不可用", "quantity": quantity, "price": price, "fee": fee, "total": total_cost}
+	# 买入失败说明；库存原子扣款失败时返回点击瞬间所需金额与余额，避免旧弹窗价格造成原因不明。
+	var failure_message: String = "金币不足，需要 %d 金币，当前仅有 %d 金币" % [total_cost, int(_global_inventory.call("get_coins"))] if _global_inventory.has_method("get_coins") else "金币不足或持仓服务不可用"
+	return {"success": success, "message": "买入成功" if success else failure_message, "quantity": quantity, "price": price, "fee": fee, "total": total_cost}
 
 
 func request_sell(stock_id: String, quantity: int, quoted_price: int = -1) -> Dictionary:
@@ -261,7 +301,8 @@ func request_sell(stock_id: String, quantity: int, quoted_price: int = -1) -> Di
 		return {"success": false, "message": "无法执行卖出"}
 	# 当前成交单价；确认时重新读取，确保即时交易使用实时报价。
 	# 报价锁定补充；UI 传入正整数 quoted_price 时使用弹窗打开瞬间的锁定价格，未传入时读取实时价格。
-	var price: int = quoted_price if quoted_price > 0 else get_current_price(stock_id)
+	# 实时成交规则；旧锁价说明仅保留历史注释兼容，quoted_price 参数只维持调用兼容，任何传入值都不会覆盖点击确认瞬间的实时行情。
+	var price: int = get_current_price(stock_id)
 	# 卖出成交额；数量乘当前价，不包含手续费。
 	var gross: int = price * quantity
 	# 卖出手续费；用于确认框明示，实际所得按乘 0.995 后向下取整。

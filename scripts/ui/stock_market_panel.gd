@@ -58,6 +58,7 @@ var _pending_stock_id: String = ""
 ## 当前待确认交易数量；取值至少为 1，确认弹窗显示与执行共同使用。
 var _pending_quantity: int = 0
 ## 当前待确认整数成交价；打开数量弹窗时锁定，避免每秒微行情导致确认金额与最终结算不一致。
+## 实时交易规则；旧锁价说明仅保留历史注释兼容，当前值会随行情刷新，仅代表弹窗最近一次展示价而不锁定成交价。
 var _pending_unit_price: int = 0
 ## 事件提示补间；新事件到来时停止旧补间并从完全可见重新开始。
 var _event_tween: Tween
@@ -272,6 +273,7 @@ func _refresh_all() -> void:
 		_refresh_stock_card(str(stock_id))
 	_refresh_selected_stock()
 	_refresh_holdings()
+	_refresh_pending_trade_dialog()
 
 
 func _refresh_stock_card(stock_id: String) -> void:
@@ -426,36 +428,33 @@ func _on_sell_pressed() -> void:
 
 
 func _begin_quantity_selection(trade_type: String, maximum_quantity: int) -> void:
-	set_market_display_active(false)
 	_pending_trade_type = trade_type
 	_pending_stock_id = _selected_stock_id
 	# 待交易股票快照；缓存弹窗展示名称和当前单价，最终确认时会再次读取实时报价。
 	# 报价锁定补充；快照只读取名称，整数成交价由服务单独读取并冻结到本次确认流程结束。
+	# 实时交易规则；旧冻结说明仅保留历史注释兼容，当前流程会持续刷新整数展示价并在点击确认时重新取价。
 	var snapshot: Dictionary = _stock_market_service.call("get_stock_snapshot", _pending_stock_id) as Dictionary
 	_pending_unit_price = int(_stock_market_service.call("get_current_price", _pending_stock_id))
-	_quantity_dialog.call("present_stock_trade", str(snapshot.get("name", "股票")), maximum_quantity, _pending_unit_price, trade_type == "buy")
+	# 当前永久金币；数量弹窗会在买入模式按实时报价复核所选数量是否仍可支付。
+	var available_coins: int = int(_global_inventory.call("get_coins")) if _global_inventory != null and _global_inventory.has_method("get_coins") else 0
+	_quantity_dialog.call("present_stock_trade", str(snapshot.get("name", "股票")), maximum_quantity, _pending_unit_price, trade_type == "buy", available_coins)
 
 
 func _on_trade_quantity_confirmed(quantity: int) -> void:
 	_pending_quantity = maxi(quantity, 1)
 	# 最终确认前股票快照；数量弹窗关闭后重新读取当前价，避免使用过期报价。
 	# 报价锁定补充；此处重新读取快照只用于股票名称，金额继续使用已锁定的 _pending_unit_price。
+	# 实时交易规则；旧锁价说明仅保留历史注释兼容，金额由下方服务报价持续更新，缓存价不参与成交。
 	var snapshot: Dictionary = _stock_market_service.call("get_stock_snapshot", _pending_stock_id) as Dictionary
-	# 最终确认单价；使用数量弹窗打开时锁定的整数报价，避免确认过程中每秒变化。
-	var price: int = maxi(_pending_unit_price, 1)
-	# 成交额小计；数量乘当前单价，不包含手续费。
-	var gross: int = price * _pending_quantity
-	# 交易手续费；成交额 0.5% 向上取整，最低 1 金币。
-	var fee: int = maxi(ceili(float(gross) * 0.005), 1)
-	# 最终金额；买入为成交额加手续费，卖出为成交额扣 0.5% 后向下取整。
-	var final_amount: int = gross + fee if _pending_trade_type == "buy" else maxi(int(floor(float(gross) * 0.995)), 1)
+	# 实时交易报价；统一由服务计算单价、手续费、金额和可执行状态，避免 UI 复制公式后产生差异。
+	var quote: Dictionary = _stock_market_service.call("get_trade_quote", _pending_stock_id, _pending_quantity, _pending_trade_type) as Dictionary
+	_pending_unit_price = int(quote.get("price", 0))
 	# 操作名称；用于确认弹窗标题和按钮文本。
 	var action_name: String = "买入" if _pending_trade_type == "buy" else "卖出"
-	# 最终金额标签；买入显示花费，卖出显示所得。
-	var amount_name: String = "最终花费" if _pending_trade_type == "buy" else "最终所得"
-	# 确认正文；完整列出股票、数量、单价、手续费和最终金额。
-	var message: String = "%s %d 股\n当前单价：%d 金币\n手续费：%d 金币\n%s：%d 金币" % [str(snapshot.get("name", "股票")), _pending_quantity, price, fee, amount_name, final_amount]
+	# 确认正文；完整列出股票、数量、实时单价、手续费、金额和支付状态。
+	var message: String = _build_trade_confirmation_message(snapshot, quote)
 	_confirmation_dialog.call("present", "确认%s" % action_name, message, "确认%s" % action_name, "取消", 480)
+	_confirmation_dialog.call("update_confirmation_message", message, bool(quote.get("executable", false)))
 
 
 func _on_trade_confirmed() -> void:
@@ -464,16 +463,15 @@ func _on_trade_confirmed() -> void:
 	# 交易结果；统一读取服务返回消息，在顶部短暂提示成功或失败原因。
 	var trade_result: Dictionary = {}
 	if _pending_trade_type == "buy":
-		trade_result = _stock_market_service.call("request_buy", _pending_stock_id, _pending_quantity, _pending_unit_price) as Dictionary
+		trade_result = _stock_market_service.call("request_buy", _pending_stock_id, _pending_quantity) as Dictionary
 	elif _pending_trade_type == "sell":
-		trade_result = _stock_market_service.call("request_sell", _pending_stock_id, _pending_quantity, _pending_unit_price) as Dictionary
+		trade_result = _stock_market_service.call("request_sell", _pending_stock_id, _pending_quantity) as Dictionary
 	if not trade_result.is_empty():
 		_show_event_banner(str(trade_result.get("message", "交易已处理")))
 	_pending_trade_type = ""
 	_pending_stock_id = ""
 	_pending_quantity = 0
 	_pending_unit_price = 0
-	set_market_display_active(is_visible_in_tree())
 	_refresh_all()
 
 
@@ -482,7 +480,37 @@ func _on_trade_canceled() -> void:
 	_pending_stock_id = ""
 	_pending_quantity = 0
 	_pending_unit_price = 0
-	set_market_display_active(is_visible_in_tree())
+
+
+func _refresh_pending_trade_dialog() -> void:
+	## 同步交易弹窗中的实时行情；数量选择和二次确认期间都不会暂停面板微行情。
+	if _pending_trade_type.is_empty() or _pending_stock_id.is_empty() or _stock_market_service == null:
+		return
+	# 当前整数单价；每次市场刷新都覆盖最近展示值，不作为最终成交锁价。
+	_pending_unit_price = int(_stock_market_service.call("get_current_price", _pending_stock_id))
+	# 当前永久金币；买入数量上限和二次确认支付状态都按该余额实时复核。
+	var available_coins: int = int(_global_inventory.call("get_coins")) if _global_inventory != null and _global_inventory.has_method("get_coins") else 0
+	if _quantity_dialog != null and _quantity_dialog.visible:
+		# 数量弹窗实时上限；买入按当前价和余额计算，卖出按当前持仓计算。
+		var maximum_quantity: int = int(_stock_market_service.call("get_maximum_buy_quantity", _pending_stock_id)) if _pending_trade_type == "buy" else int(_get_holding(_pending_stock_id).get("quantity", 0))
+		_quantity_dialog.call("update_stock_trade", _pending_unit_price, maximum_quantity, available_coins)
+		return
+	if _confirmation_dialog == null or not _confirmation_dialog.visible or _pending_quantity <= 0:
+		return
+	# 二次确认实时报价；价格上涨导致余额不足时禁用确认，价格回落后会自动恢复。
+	var quote: Dictionary = _stock_market_service.call("get_trade_quote", _pending_stock_id, _pending_quantity, _pending_trade_type) as Dictionary
+	# 待交易股票快照；提供稳定显示名称，交易目标始终使用缓存股票标识。
+	var snapshot: Dictionary = _stock_market_service.call("get_stock_snapshot", _pending_stock_id) as Dictionary
+	_confirmation_dialog.call("update_confirmation_message", _build_trade_confirmation_message(snapshot, quote), bool(quote.get("executable", false)))
+
+
+func _build_trade_confirmation_message(snapshot: Dictionary, quote: Dictionary) -> String:
+	## 构建二次确认实时摘要；返回值可在每秒行情刷新时直接替换现有正文。
+	# 最终金额标签；买入显示花费，卖出显示所得。
+	var amount_name: String = "最终花费" if _pending_trade_type == "buy" else "最终所得"
+	# 当前支付状态；不可执行时展示具体原因，价格恢复到可支付范围后改回成交提示。
+	var status_text: String = "当前可成交" if bool(quote.get("executable", false)) else str(quote.get("message", "当前无法成交"))
+	return "%s %d 股\n实时单价：%d 金币\n手续费：%d 金币\n%s：%d 金币\n%s\n成交价持续波动，以点击确认瞬间的实时价格为准" % [str(snapshot.get("name", "股票")), _pending_quantity, int(quote.get("price", 0)), int(quote.get("fee", 0)), amount_name, int(quote.get("total", 0)), status_text]
 
 
 func _show_event_banner(message: String) -> void:

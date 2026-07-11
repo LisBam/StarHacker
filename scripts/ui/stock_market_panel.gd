@@ -14,6 +14,8 @@ const STOCK_CHART_CONTROL_SCRIPT: Script = preload("res://scripts/ui/stock_chart
 const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
 ## 通用确认弹窗脚本；买入和卖出最终确认统一显示数量、单价、手续费和结算金额。
 const COMMON_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/common_confirmation_dialog.gd")
+## 证券币转账弹窗脚本；负责整数金币充值和整数证券币提现的金额输入与结果预览。
+const SECURITIES_TRANSFER_DIALOG_SCRIPT: Script = preload("res://scripts/ui/securities_transfer_dialog.gd")
 ## 标准股票卡片尺寸；固定 160×72，与项目物品卡片规范一致。
 const CARD_SIZE: Vector2 = Vector2(160.0, 72.0)
 ## 面板目标尺寸；默认 1040×620，宿主应按该尺寸居中放置。
@@ -39,6 +41,10 @@ var _selected_summary_label: RichTextLabel
 var _chart: Control
 ## 金币余额标签；监听 GlobalInventory.coins_changed 后即时刷新。
 var _coins_label: Label
+## 证券币充值按钮；永久金币不足时禁用，点击后打开整数充值输入窗口。
+var _deposit_button: Button
+## 证券币提现按钮；余额不足以产生至少 1 金币到账时禁用，点击后打开整数提现输入窗口。
+var _withdraw_button: Button
 ## 当前持仓摘要；显示股数、成本价和浮动盈亏。
 var _position_label: RichTextLabel
 ## 买入按钮；无可买数量时禁用，点击后先打开数量选择弹窗。
@@ -51,6 +57,8 @@ var _event_banner: Label
 var _quantity_dialog: ConfirmationDialog
 ## 最终交易确认弹窗；确认后调用服务执行原子交易。
 var _confirmation_dialog: ConfirmationDialog
+## 证券币转账弹窗；同一实例复用充值和提现模式，实际资产变更由股市服务执行。
+var _securities_transfer_dialog: ConfirmationDialog
 ## 当前待确认交易类型；取值 buy、sell 或空字符串。
 var _pending_trade_type: String = ""
 ## 当前待确认股票标识；数量选择时缓存，避免玩家切换卡片后交易目标变化。
@@ -59,7 +67,8 @@ var _pending_stock_id: String = ""
 var _pending_quantity: int = 0
 ## 当前待确认整数成交价；打开数量弹窗时锁定，避免每秒微行情导致确认金额与最终结算不一致。
 ## 实时交易规则；旧锁价说明仅保留历史注释兼容，当前值会随行情刷新，仅代表弹窗最近一次展示价而不锁定成交价。
-var _pending_unit_price: int = 0
+## 证券币成交精度补充；该变量当前保存两位小数证券币实时价，旧整数类型说明仅为历史兼容保留。
+var _pending_unit_price: float = 0.0
 ## 事件提示补间；新事件到来时停止旧补间并从完全可见重新开始。
 var _event_tween: Tween
 
@@ -181,6 +190,24 @@ func _build_interface() -> void:
 	_coins_label = Label.new()
 	_coins_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	trade_content.add_child(_coins_label)
+	# 证券币兑换按钮行；充值把整数金币 1:1 转入，提现把整数证券币扣费后兑换为整数金币。
+	var securities_transfer_row: HBoxContainer = HBoxContainer.new()
+	securities_transfer_row.add_theme_constant_override("separation", 6)
+	trade_content.add_child(securities_transfer_row)
+	# 充值按钮；没有永久金币时禁用，防止打开无有效金额的输入窗口。
+	_deposit_button = Button.new()
+	_deposit_button.name = "DepositButton"
+	_deposit_button.text = "充值"
+	_deposit_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_deposit_button.pressed.connect(_on_securities_deposit_pressed)
+	securities_transfer_row.add_child(_deposit_button)
+	# 提现按钮；证券币整数部分不足 1 时禁用，小数余额继续保留在证券账户。
+	_withdraw_button = Button.new()
+	_withdraw_button.name = "WithdrawButton"
+	_withdraw_button.text = "提现"
+	_withdraw_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_withdraw_button.pressed.connect(_on_securities_withdrawal_pressed)
+	securities_transfer_row.add_child(_withdraw_button)
 	_position_label = RichTextLabel.new()
 	_position_label.bbcode_enabled = true
 	_position_label.fit_content = true
@@ -223,6 +250,9 @@ func _build_interface() -> void:
 	_confirmation_dialog.confirmed.connect(_on_trade_confirmed)
 	_confirmation_dialog.canceled.connect(_on_trade_canceled)
 	add_child(_confirmation_dialog)
+	_securities_transfer_dialog = SECURITIES_TRANSFER_DIALOG_SCRIPT.new() as ConfirmationDialog
+	_securities_transfer_dialog.connect("transfer_confirmed", Callable(self, "_on_securities_transfer_confirmed"))
+	add_child(_securities_transfer_dialog)
 
 
 func _connect_services() -> void:
@@ -231,6 +261,8 @@ func _connect_services() -> void:
 			_stock_market_service.connect("market_changed", Callable(self, "_refresh_all"))
 		if _stock_market_service.has_signal("event_announced"):
 			_stock_market_service.connect("event_announced", Callable(self, "_show_event_banner"))
+		if _stock_market_service.has_signal("securities_balance_changed"):
+			_stock_market_service.connect("securities_balance_changed", Callable(self, "_on_securities_balance_changed"))
 	if _global_inventory != null:
 		if _global_inventory.has_signal("coins_changed"):
 			_global_inventory.connect("coins_changed", Callable(self, "_refresh_all"))
@@ -243,6 +275,11 @@ func _connect_services() -> void:
 
 
 func _on_debug_information_visibility_changed(_visible: bool) -> void:
+	_refresh_all()
+
+
+func _on_securities_balance_changed(_balance: float) -> void:
+	## 证券币账户变化后刷新余额、买入上限与已打开交易弹窗，不直接读取信号参数作为唯一状态源。
 	_refresh_all()
 
 
@@ -297,7 +334,7 @@ func _refresh_stock_card(stock_id: String) -> void:
 		# 中枢偏离率；当前价相对动态价值中枢的百分比，仅调试模式可见。
 		var deviation_ratio: float = (float(snapshot.get("price", 0.0)) / center - 1.0) if center > 0.0 else 0.0
 		detail += "  中枢%.1f 偏离%+.1f%%" % [center, deviation_ratio * 100.0]
-	card.call("configure", null, 1, str(snapshot.get("name", "股票")), detail, "%.2f 金币" % float(snapshot.get("price", 0.0)))
+	card.call("configure", null, 1, str(snapshot.get("name", "股票")), detail, "%.2f 证券币" % float(snapshot.get("price", 0.0)))
 	card.call("set_visual_state", stock_id == _selected_stock_id, false)
 
 
@@ -313,7 +350,7 @@ func _refresh_selected_stock() -> void:
 	_selected_title_label.text = "%s · %s" % [str(snapshot.get("name", "股票")), str(snapshot.get("module", ""))]
 	# 全市场快照；提供有效大盘名称和调试运行累计进度。
 	var market_snapshot: Dictionary = _stock_market_service.call("get_market_snapshot") as Dictionary
-	_selected_summary_label.text = "当前价 %.2f 金币    [color=%s]%+.2f%%[/color]    大盘：%s" % [float(snapshot.get("price", 0.0)), color_name, change_ratio * 100.0, str(market_snapshot.get("market_state_name", "震荡市"))]
+	_selected_summary_label.text = "当前价 %.2f 证券币    [color=%s]%+.2f%%[/color]    大盘：%s" % [float(snapshot.get("price", 0.0)), color_name, change_ratio * 100.0, str(market_snapshot.get("market_state_name", "震荡市"))]
 	if _is_debug_information_visible():
 		# 调试中枢；取值为当前长期合理价格线，仅用于开发者验证均值回归。
 		var debug_center: float = float(snapshot.get("center", 0.0))
@@ -328,6 +365,7 @@ func _refresh_selected_stock() -> void:
 	# 加权平均成本；包含历史买入手续费，用于计算真实浮动盈亏。
 	var average_cost: float = float(holding.get("average_cost", 0.0))
 	# 当前显示价格；保留两位小数用于每秒行情，实际成交仍由服务四舍五入为整数金币。
+	# 证券币成交规则；旧整数说明仅保留历史注释兼容，当前价和成交均直接使用两位小数证券币。
 	var current_price: float = float(snapshot.get("price", 0.0))
 	# 浮动盈亏金额；当前市值减持仓总成本，未持仓时为 0。
 	var profit: float = (current_price - average_cost) * quantity
@@ -336,7 +374,19 @@ func _refresh_selected_stock() -> void:
 	# 盈亏颜色；盈利绿色、亏损红色、持平白色。
 	var profit_color: String = "green" if profit > 0.0 else ("red" if profit < 0.0 else "white")
 	_position_label.text = "持仓 %d 股\n成本 %.2f\n[color=%s]浮盈亏 %+.0f (%+.2f%%)[/color]" % [quantity, average_cost, profit_color, profit, profit_ratio * 100.0]
-	_coins_label.text = "永久金币：%d" % (int(_global_inventory.call("get_coins")) if _global_inventory != null else 0)
+	# 当前永久金币；仅用于证券币充值，不再直接参与股票买入结算。
+	var permanent_coins: int = int(_global_inventory.call("get_coins")) if _global_inventory != null else 0
+	# 当前证券币余额；支持两位小数，是股票买卖的唯一结算货币。
+	var securities_balance: float = float(_stock_market_service.call("get_securities_balance")) if _stock_market_service.has_method("get_securities_balance") else 0.0
+	_coins_label.text = "永久金币：%d\n证券币：%.2f" % [permanent_coins, securities_balance]
+	# 充值按钮；按名称读取交易区动态控件，缺失时不影响核心行情显示。
+	if _deposit_button != null:
+		_deposit_button.disabled = permanent_coins <= 0
+	# 提现按钮；只允许提现证券币整数部分，余额不足 1 时禁用。
+	# 最小有效提现额；扣除手续费后必须至少产生 1 个整数金币到账。
+	var minimum_withdrawal_amount: int = int(_stock_market_service.call("get_minimum_withdrawal_amount"))
+	if _withdraw_button != null:
+		_withdraw_button.disabled = minimum_withdrawal_amount <= 0 or floori(securities_balance) < minimum_withdrawal_amount
 	_buy_button.disabled = int(_stock_market_service.call("get_maximum_buy_quantity", _selected_stock_id)) <= 0
 	_sell_button.disabled = quantity <= 0
 
@@ -372,7 +422,7 @@ func _refresh_holdings() -> void:
 		var card: Control = ITEM_CARD_VIEW_SCRIPT.new() as Control
 		card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		host.add_child(card)
-		card.call("configure", null, 1, "%s · %d股" % [str(snapshot.get("name", "股票")), quantity], "成本 %.2f  [color=%s]%+.0f / %+.2f%%[/color]" % [average_cost, profit_color, profit, profit_ratio * 100.0], "%.2f 金币" % current_price)
+		card.call("configure", null, 1, "%s · %d股" % [str(snapshot.get("name", "股票")), quantity], "成本 %.2f  [color=%s]%+.2f / %+.2f%%[/color]" % [average_cost, profit_color, profit, profit_ratio * 100.0], "%.2f 证券币" % current_price)
 		_holdings_container.add_child(host)
 	if _holdings_container.get_child_count() == 0:
 		# 空持仓提示；在没有任何股票时替代卡片列表。
@@ -427,6 +477,44 @@ func _on_sell_pressed() -> void:
 	_begin_quantity_selection("sell", maximum_quantity)
 
 
+func _on_securities_deposit_pressed() -> void:
+	## 打开证券币充值输入；最大金额取当前实时永久金币，最终扣款仍由服务再次复核。
+	if _global_inventory == null or not _global_inventory.has_method("get_coins"):
+		return
+	# 当前可充值金币；永久金币只支持整数，因此输入金额天然满足 1:1 整数兑换要求。
+	var maximum_amount: int = int(_global_inventory.call("get_coins"))
+	if maximum_amount <= 0:
+		_show_event_banner("当前没有可充值的永久金币")
+		return
+	_securities_transfer_dialog.call("present_deposit", maximum_amount)
+
+
+func _on_securities_withdrawal_pressed() -> void:
+	## 打开证券币提现输入；只开放当前余额整数部分，小数余额继续保留在证券账户中。
+	if _stock_market_service == null or not _stock_market_service.has_method("get_securities_balance"):
+		return
+	# 当前最大提现整数额；向下取整确保任何证券币小数部分都不会被隐式兑换或丢失。
+	var maximum_amount: int = floori(float(_stock_market_service.call("get_securities_balance")))
+	# 最小有效提现额；默认 0.5% 手续费时为 2 证券币，可确保向下取整后至少到账 1 金币。
+	var minimum_amount: int = int(_stock_market_service.call("get_minimum_withdrawal_amount"))
+	if minimum_amount <= 0 or maximum_amount < minimum_amount:
+		_show_event_banner("证券币整数余额不足，无法提现")
+		return
+	# 当前提现手续费比例；由服务统一配置，输入弹窗只用于预览到账金币。
+	var withdrawal_fee_ratio: float = float(_stock_market_service.call("get_withdrawal_fee_ratio"))
+	_securities_transfer_dialog.call("present_withdrawal", maximum_amount, withdrawal_fee_ratio, minimum_amount)
+
+
+func _on_securities_transfer_confirmed(amount: int, is_deposit: bool) -> void:
+	## 执行充值或提现；服务会按确认瞬间的真实余额复核，失败时两种资产都保持安全状态。
+	if _stock_market_service == null or amount <= 0:
+		return
+	# 转账结果；充值和提现共用顶部提示，成功后余额信号会自动刷新所有交易控件。
+	var transfer_result: Dictionary = _stock_market_service.call("request_securities_deposit", amount) as Dictionary if is_deposit else _stock_market_service.call("request_securities_withdrawal", amount) as Dictionary
+	_show_event_banner(str(transfer_result.get("message", "转账已处理")))
+	_refresh_all()
+
+
 func _begin_quantity_selection(trade_type: String, maximum_quantity: int) -> void:
 	_pending_trade_type = trade_type
 	_pending_stock_id = _selected_stock_id
@@ -434,10 +522,13 @@ func _begin_quantity_selection(trade_type: String, maximum_quantity: int) -> voi
 	# 报价锁定补充；快照只读取名称，整数成交价由服务单独读取并冻结到本次确认流程结束。
 	# 实时交易规则；旧冻结说明仅保留历史注释兼容，当前流程会持续刷新整数展示价并在点击确认时重新取价。
 	var snapshot: Dictionary = _stock_market_service.call("get_stock_snapshot", _pending_stock_id) as Dictionary
-	_pending_unit_price = int(_stock_market_service.call("get_current_price", _pending_stock_id))
+	_pending_unit_price = float(_stock_market_service.call("get_current_price", _pending_stock_id))
 	# 当前永久金币；数量弹窗会在买入模式按实时报价复核所选数量是否仍可支付。
-	var available_coins: int = int(_global_inventory.call("get_coins")) if _global_inventory != null and _global_inventory.has_method("get_coins") else 0
-	_quantity_dialog.call("present_stock_trade", str(snapshot.get("name", "股票")), maximum_quantity, _pending_unit_price, trade_type == "buy", available_coins)
+	# 证券币余额规则；旧永久金币说明仅保留历史注释兼容，股票弹窗只校验独立证券币余额。
+	var available_coins: float = float(_stock_market_service.call("get_securities_balance"))
+	# 股票手续费比例；由服务配置提供，确保数量弹窗预览与最终结算使用同一数值来源。
+	var fee_ratio: float = float(_stock_market_service.call("get_stock_trade_fee_ratio"))
+	_quantity_dialog.call("present_stock_trade", str(snapshot.get("name", "股票")), maximum_quantity, _pending_unit_price, trade_type == "buy", available_coins, fee_ratio)
 
 
 func _on_trade_quantity_confirmed(quantity: int) -> void:
@@ -448,7 +539,7 @@ func _on_trade_quantity_confirmed(quantity: int) -> void:
 	var snapshot: Dictionary = _stock_market_service.call("get_stock_snapshot", _pending_stock_id) as Dictionary
 	# 实时交易报价；统一由服务计算单价、手续费、金额和可执行状态，避免 UI 复制公式后产生差异。
 	var quote: Dictionary = _stock_market_service.call("get_trade_quote", _pending_stock_id, _pending_quantity, _pending_trade_type) as Dictionary
-	_pending_unit_price = int(quote.get("price", 0))
+	_pending_unit_price = float(quote.get("price", 0.0))
 	# 操作名称；用于确认弹窗标题和按钮文本。
 	var action_name: String = "买入" if _pending_trade_type == "buy" else "卖出"
 	# 确认正文；完整列出股票、数量、实时单价、手续费、金额和支付状态。
@@ -471,7 +562,7 @@ func _on_trade_confirmed() -> void:
 	_pending_trade_type = ""
 	_pending_stock_id = ""
 	_pending_quantity = 0
-	_pending_unit_price = 0
+	_pending_unit_price = 0.0
 	_refresh_all()
 
 
@@ -479,7 +570,7 @@ func _on_trade_canceled() -> void:
 	_pending_trade_type = ""
 	_pending_stock_id = ""
 	_pending_quantity = 0
-	_pending_unit_price = 0
+	_pending_unit_price = 0.0
 
 
 func _refresh_pending_trade_dialog() -> void:
@@ -487,9 +578,10 @@ func _refresh_pending_trade_dialog() -> void:
 	if _pending_trade_type.is_empty() or _pending_stock_id.is_empty() or _stock_market_service == null:
 		return
 	# 当前整数单价；每次市场刷新都覆盖最近展示值，不作为最终成交锁价。
-	_pending_unit_price = int(_stock_market_service.call("get_current_price", _pending_stock_id))
+	_pending_unit_price = float(_stock_market_service.call("get_current_price", _pending_stock_id))
 	# 当前永久金币；买入数量上限和二次确认支付状态都按该余额实时复核。
-	var available_coins: int = int(_global_inventory.call("get_coins")) if _global_inventory != null and _global_inventory.has_method("get_coins") else 0
+	# 证券币余额规则；旧永久金币说明仅保留历史注释兼容，交易弹窗只使用证券币余额。
+	var available_coins: float = float(_stock_market_service.call("get_securities_balance"))
 	if _quantity_dialog != null and _quantity_dialog.visible:
 		# 数量弹窗实时上限；买入按当前价和余额计算，卖出按当前持仓计算。
 		var maximum_quantity: int = int(_stock_market_service.call("get_maximum_buy_quantity", _pending_stock_id)) if _pending_trade_type == "buy" else int(_get_holding(_pending_stock_id).get("quantity", 0))
@@ -510,7 +602,7 @@ func _build_trade_confirmation_message(snapshot: Dictionary, quote: Dictionary) 
 	var amount_name: String = "最终花费" if _pending_trade_type == "buy" else "最终所得"
 	# 当前支付状态；不可执行时展示具体原因，价格恢复到可支付范围后改回成交提示。
 	var status_text: String = "当前可成交" if bool(quote.get("executable", false)) else str(quote.get("message", "当前无法成交"))
-	return "%s %d 股\n实时单价：%d 金币\n手续费：%d 金币\n%s：%d 金币\n%s\n成交价持续波动，以点击确认瞬间的实时价格为准" % [str(snapshot.get("name", "股票")), _pending_quantity, int(quote.get("price", 0)), int(quote.get("fee", 0)), amount_name, int(quote.get("total", 0)), status_text]
+	return "%s %d 股\n实时单价：%.2f 证券币\n手续费：%.2f 证券币\n%s：%.2f 证券币\n%s\n成交价持续波动，以点击确认瞬间的实时价格为准" % [str(snapshot.get("name", "股票")), _pending_quantity, float(quote.get("price", 0.0)), float(quote.get("fee", 0.0)), amount_name, float(quote.get("total", 0.0)), status_text]
 
 
 func _show_event_banner(message: String) -> void:
@@ -543,7 +635,7 @@ func _on_close_pressed() -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not is_visible_in_tree() or not (event is InputEventKey):
 		return
-	if (_quantity_dialog != null and _quantity_dialog.visible) or (_confirmation_dialog != null and _confirmation_dialog.visible):
+	if (_quantity_dialog != null and _quantity_dialog.visible) or (_confirmation_dialog != null and _confirmation_dialog.visible) or (_securities_transfer_dialog != null and _securities_transfer_dialog.visible):
 		return
 	# 键盘事件；只处理首次按下的 ESC，长按重复不会连续发送关闭信号。
 	var key_event: InputEventKey = event as InputEventKey

@@ -10,7 +10,8 @@ signal event_announced(message: String)
 const SAVE_PATH: String = "user://stock_market_state.json"
 ## 股市状态存档版本；版本 1 保存五只股票的行情、周期、事件、行为连续性和局外运行累计值。
 ## 版本 2 补充；新增大盘、涨跌周期和随机事件的非战斗在线时长双触发进度。
-const SAVE_VERSION: int = 2
+## 版本 3 补充；在线触发阈值统一扩大 3 倍，并按原进度比例迁移版本 2 的累计时长与事件目标。
+const SAVE_VERSION: int = 3
 ## 牛市状态标识；价值中枢和短期情绪默认向正方向倾斜。
 const MARKET_BULL: String = "bull"
 ## 熊市状态标识；价值中枢和短期情绪默认向负方向倾斜。
@@ -59,19 +60,23 @@ const EVENT_DEFINITIONS: Array[Dictionary] = [
 ## 大盘正式结算切换周期；默认 8 局，低于 5 会明显削弱趋势感。
 @export_range(5, 30, 1) var market_cycle_settlement_count: int = 8
 ## 大盘在线时长切换周期；默认 480 秒即 8 分钟，与 8 局正式结算并行且任一先达到即触发。
-@export_range(60.0, 3600.0, 1.0) var market_cycle_online_seconds: float = 480.0
+## 三倍时长补充；当前默认值为 1440 秒即 24 分钟，正式结算阈值仍保持 8 局。
+@export_range(60.0, 3600.0, 1.0) var market_cycle_online_seconds: float = 1440.0
 ## 涨跌停累计周期；默认每 5 次正式结算重置单股累计涨跌幅。
 @export_range(3, 20, 1) var price_limit_cycle_settlement_count: int = 5
 ## 涨跌停在线时长周期；默认 300 秒即 5 分钟，与 5 局正式结算并行且任一先达到即重置周期。
-@export_range(60.0, 1800.0, 1.0) var price_limit_cycle_online_seconds: float = 300.0
+## 三倍时长补充；当前默认值为 900 秒即 15 分钟，正式结算阈值仍保持 5 局。
+@export_range(60.0, 1800.0, 1.0) var price_limit_cycle_online_seconds: float = 900.0
 ## 随机事件最短间隔；默认 2 局，低于 2 会让事件噪音淹没行为影响。
 @export_range(2, 20, 1) var event_interval_minimum_settlements: int = 2
 ## 随机事件最长间隔；默认 6 局，必须不小于最短间隔。
 @export_range(2, 30, 1) var event_interval_maximum_settlements: int = 6
 ## 随机事件最短在线间隔；默认 120 秒即 2 分钟，与正式结算间隔并行计算。
-@export_range(30.0, 1800.0, 1.0) var event_interval_minimum_online_seconds: float = 120.0
+## 三倍时长补充；当前最短在线间隔为 360 秒即 6 分钟。
+@export_range(30.0, 1800.0, 1.0) var event_interval_minimum_online_seconds: float = 360.0
 ## 随机事件最长在线间隔；默认 360 秒即 6 分钟，每次事件后重新随机目标时长。
-@export_range(30.0, 3600.0, 1.0) var event_interval_maximum_online_seconds: float = 360.0
+## 三倍时长补充；当前最长在线间隔为 1080 秒即 18 分钟。
+@export_range(30.0, 3600.0, 1.0) var event_interval_maximum_online_seconds: float = 1080.0
 ## 单次正式结算涨跌幅上限；默认 15%，防止多层因素叠加产生瞬时极端价格。
 @export_range(0.01, 0.50, 0.01) var settlement_change_limit: float = 0.15
 ## 单次局外运行涨跌幅上限；默认 7.5%，等于正式结算上限的一半。
@@ -92,16 +97,19 @@ var _settlement_count: int = 0
 ## 大盘正式结算周期进度；达到 8 局时切换大盘并同步清零在线进度。
 var _market_cycle_settlement_progress: int = 0
 ## 大盘非战斗在线时长进度；达到 8 分钟时切换大盘并同步清零正式结算进度。
+## 三倍时长补充；当前实际阈值为 24 分钟，修改只影响在线路径。
 var _market_cycle_online_accumulated_seconds: float = 0.0
 ## 涨跌停正式结算周期进度；达到 5 局时重置全部股票的累计涨跌周期起点。
 var _price_limit_cycle_settlement_progress: int = 0
 ## 涨跌停非战斗在线时长进度；达到 5 分钟时重置周期并同步清零正式结算进度。
+## 三倍时长补充；当前实际阈值为 15 分钟，修改只影响在线路径。
 var _price_limit_cycle_online_accumulated_seconds: float = 0.0
 ## 距离下一次随机事件的剩余正式结算数；默认启动时在 2 到 6 之间随机生成。
 var _settlements_until_event: int = 0
 ## 随机事件非战斗在线累计时长；达到本轮随机目标时触发事件并同步重置正式结算倒数。
 var _event_online_accumulated_seconds: float = 0.0
 ## 本轮随机事件在线目标时长；默认在 120 至 360 秒之间独立随机。
+## 三倍时长补充；当前实际随机区间为 360 至 1080 秒，即 6 至 18 分钟。
 var _event_online_target_seconds: float = 0.0
 ## 当前事件状态；空字典表示没有事件，非空时保存事件定义与剩余作用次数。
 var _active_event: Dictionary = {}
@@ -770,6 +778,8 @@ func _load_state() -> bool:
 		return false
 	# 股市存档字典；包含大盘、周期、事件、运行累计和单股状态。
 	var save_data: Dictionary = parsed as Dictionary
+	# 已保存股市版本；版本 3 之前使用原在线阈值，读取后需要按 3 倍比例迁移。
+	var saved_version: int = maxi(int(save_data.get("version", 1)), 1)
 	_market_state = str(save_data.get("market_state", MARKET_SIDEWAYS))
 	if not _market_state in [MARKET_BULL, MARKET_BEAR, MARKET_SIDEWAYS]:
 		_market_state = MARKET_SIDEWAYS
@@ -781,6 +791,12 @@ func _load_state() -> bool:
 	_settlements_until_event = maxi(int(save_data.get("settlements_until_event", 0)), 0)
 	_event_online_accumulated_seconds = maxf(float(save_data.get("event_online_accumulated_seconds", 0.0)), 0.0)
 	_event_online_target_seconds = maxf(float(save_data.get("event_online_target_seconds", 0.0)), 0.0)
+	if saved_version < 3:
+		_market_cycle_online_accumulated_seconds = minf(_market_cycle_online_accumulated_seconds * 3.0, maxf(market_cycle_online_seconds, 1.0))
+		_price_limit_cycle_online_accumulated_seconds = minf(_price_limit_cycle_online_accumulated_seconds * 3.0, maxf(price_limit_cycle_online_seconds, 1.0))
+		_event_online_accumulated_seconds *= 3.0
+		if _event_online_target_seconds > 0.0:
+			_event_online_target_seconds *= 3.0
 	_runtime_accumulated_seconds = clampf(float(save_data.get("runtime_accumulated_seconds", 0.0)), 0.0, maxf(runtime_refresh_interval_seconds, 1.0))
 	# 原始事件字段；合法字典会恢复剩余次数，其他类型视为无事件。
 	var raw_event: Variant = save_data.get("active_event", {})

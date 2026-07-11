@@ -393,9 +393,12 @@ func _on_close_pressed() -> void:
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
+	# 隐藏菜单不得拦截 ESC，否则暂停菜单、仓库、背包和设置界面无法收到关闭输入。
+	if not is_visible_in_tree():
+		return
 	# ESC 关闭开发者菜单；仅处理按下且非重复事件，防止一次长按连续触发。
 	if event is InputEventKey:
 		var key_event: InputEventKey = event as InputEventKey
-		if key_event.pressed and not key_event.echo and key_event.keycode == KEY_ESCAPE:
+		if key_event.pressed and not key_event.echo and (key_event.keycode == KEY_ESCAPE or key_event.physical_keycode == KEY_ESCAPE):
 			closed.emit()
 			get_viewport().set_input_as_handled()

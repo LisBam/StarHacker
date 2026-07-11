@@ -12,3 +12,4 @@ sell_price = 60
 defense_power = 8.0
 max_health = 12.0
 dodge_chance = 0.01
+vision_range = 0.08

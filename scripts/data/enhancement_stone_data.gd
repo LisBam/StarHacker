@@ -10,6 +10,8 @@ class_name EnhancementStoneData
 @export var item_kind: String = "enhancement_stone"
 ## 强化石品质标识；取值为 low、medium、high 或 supreme，默认 low 用于旧存档迁移。
 @export_enum("low", "medium", "high", "supreme") var quality_id: String = EnhancementRules.QUALITY_LOW
+## 强化石适用类型；weapon 只能强化武器，equipment 只能强化装备。
+@export_enum("weapon", "equipment") var target_kind: String = "weapon"
 ## 强化石显示名称；默认“强化石”，随机生成时会按词条数量补充品质描述。
 @export var display_name: String = "强化石"
 ## 强化石说明；默认说明属性方向词条用途，运行时通常不动态修改。
@@ -38,6 +40,7 @@ func get_stack_signature() -> String:
 	var signature_parts: PackedStringArray = PackedStringArray()
 	# 品质签名片段；同词条但不同品质不会合并，避免显示名称和价值丢失。
 	signature_parts.append("quality=%s" % get_resolved_quality_id())
+	signature_parts.append("target=%s" % get_resolved_target_kind())
 	for modifier_key in sorted_keys:
 		# 词条百分比；按 0.01 精度序列化，只有品质、属性和数值都一致时才能堆叠。
 		var modifier_ratio: float = float(normalized_modifiers.get(modifier_key, 0.0))
@@ -53,6 +56,10 @@ func get_effective_sell_price() -> int:
 func can_apply_to_weapon(weapon_data: Resource) -> bool:
 	if weapon_data == null:
 		return false
+	# 适用类型；武器强化石与装备强化石不能跨类型使用。
+	var target_is_equipment: bool = str(weapon_data.get("item_kind")) == "equipment"
+	if (get_resolved_target_kind() == "equipment") != target_is_equipment:
+		return false
 	if weapon_data.has_method("can_apply_enhancement"):
 		return bool(weapon_data.call("can_apply_enhancement", get_normalized_modifiers()))
 	return not get_normalized_modifiers().is_empty() and not str(weapon_data.get("weapon_type")).is_empty()
@@ -66,6 +73,10 @@ func get_resolved_quality_id() -> String:
 	return quality_id if quality_id in EnhancementRules.QUALITY_ORDER else EnhancementRules.QUALITY_LOW
 
 
+func get_resolved_target_kind() -> String:
+	return target_kind if target_kind in ["weapon", "equipment"] else "weapon"
+
+
 func create_upgraded_copy() -> EnhancementStoneData:
 	# 下一品质；空字符串表示当前已经是极品强化石，不能再生成更高阶资源。
 	var next_quality_id: String = EnhancementRules.get_next_quality_id(get_resolved_quality_id())
@@ -76,7 +87,7 @@ func create_upgraded_copy() -> EnhancementStoneData:
 	if upgraded_stone == null:
 		return null
 	upgraded_stone.quality_id = next_quality_id
-	upgraded_stone.display_name = EnhancementRules.get_quality_display_name(next_quality_id)
+	upgraded_stone.display_name = _build_display_name(next_quality_id, upgraded_stone.get_resolved_target_kind())
 	return upgraded_stone
 
 
@@ -105,7 +116,7 @@ func get_pickup_preview_name() -> String:
 	return "%s（%s）" % [display_name, " ".join(preview_labels)]
 
 
-static func create_random(random_source: RandomNumberGenerator, minimum_modifier_count: int = 1, maximum_modifier_count: int = 3, detrimental_modifier_chance: float = 0.28, base_sell_price: int = 30) -> EnhancementStoneData:
+static func create_random(random_source: RandomNumberGenerator, minimum_modifier_count: int = 1, maximum_modifier_count: int = 3, detrimental_modifier_chance: float = 0.28, base_sell_price: int = 30, requested_target_kind: String = "") -> EnhancementStoneData:
 	if random_source == null:
 		return null
 	# 兼容参数快照；保留旧调用签名以避免扩展脚本失效，当前词条数和削弱概率完全由品质规则决定。
@@ -126,7 +137,10 @@ static func create_random(random_source: RandomNumberGenerator, minimum_modifier
 	var rolled_detrimental: bool = random_source.randf() < float(quality_config.get("detrimental_chance", 0.0))
 	modifier_count = clampi(1 + (1 if rolled_extra_beneficial else 0) + (1 if rolled_detrimental else 0), resolved_minimum_count, resolved_maximum_count)
 	# 随机属性顺序；先洗牌再截取，保证同一颗强化石不会出现重复属性。
-	var shuffled_stats: Array[String] = EnhancementRules.STAT_KEYS.duplicate()
+	# 适用类型；未指定时武器石与装备石等概率生成。
+	var generated_target_kind: String = requested_target_kind if requested_target_kind in ["weapon", "equipment"] else ("weapon" if random_source.randf() < 0.5 else "equipment")
+	# 对应属性池；不会生成另一类型的无效属性。
+	var shuffled_stats: Array[String] = (EnhancementRules.WEAPON_STAT_KEYS if generated_target_kind == "weapon" else EnhancementRules.EQUIPMENT_STAT_KEYS).duplicate()
 	for stat_index in range(shuffled_stats.size() - 1, 0, -1):
 		# 交换下标；Fisher-Yates 洗牌保证每种属性组合概率一致。
 		var swap_index: int = random_source.randi_range(0, stat_index)
@@ -159,10 +173,16 @@ static func create_random(random_source: RandomNumberGenerator, minimum_modifier
 	# 强化石资源；名称保持统一以提升同类识别，售价按词条数量线性增长。
 	var enhancement_stone: EnhancementStoneData = EnhancementStoneData.new()
 	enhancement_stone.quality_id = generated_quality_id
-	enhancement_stone.display_name = EnhancementRules.get_quality_display_name(generated_quality_id)
+	enhancement_stone.target_kind = generated_target_kind
+	enhancement_stone.display_name = _build_display_name(generated_quality_id, generated_target_kind)
+	enhancement_stone.description = "用于强化%s，属性方向会永久累计到对应目标。" % ("装备" if generated_target_kind == "equipment" else "武器")
 	enhancement_stone.sell_price = maxi(base_sell_price * modifier_count, 0)
 	enhancement_stone.modifiers = generated_modifiers
 	return enhancement_stone
+
+
+static func _build_display_name(quality: String, stone_target_kind: String) -> String:
+	return "%s%s强化石" % [EnhancementRules.get_quality_display_name(quality).trim_suffix("强化石"), "装备" if stone_target_kind == "equipment" else "武器"]
 
 
 func _append_modifier_tokens(target_tokens: PackedStringArray, normalized_modifiers: Dictionary, beneficial: bool) -> void:

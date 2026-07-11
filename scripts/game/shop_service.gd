@@ -258,7 +258,11 @@ func _create_random_equipment() -> Resource:
 		return null
 	# 装备商品；深拷贝保证购买后的耐久和强化不会污染模板或其他商品。
 	var equipment_template: Resource = load(resource_path) as Resource
-	return equipment_template.duplicate(true) as Resource if equipment_template != null else null
+	var equipment_resource: Resource = equipment_template.duplicate(true) as Resource if equipment_template != null else null
+	if equipment_resource != null and _random.randf() < second_hand_firearm_chance:
+		# 二手装备；与远程武器使用相同概率、耐久区间和历史强化次数规则。
+		_apply_second_hand_state(equipment_resource)
+	return equipment_resource
 
 
 func _apply_second_hand_state(weapon_resource: Resource) -> void:
@@ -296,7 +300,9 @@ func _roll_second_hand_used_stone_count() -> int:
 func _apply_random_compatible_enhancement(weapon_resource: Resource) -> bool:
 	for _attempt_index in range(maxi(second_hand_stone_compatibility_attempts, 1)):
 		# 历史强化石；品质、属性和方向与正常掉落一致，但不会进入玩家库存。
-		var enhancement_stone: EnhancementStoneData = EnhancementStoneData.create_random(_random, STONE_MINIMUM_MODIFIER_COUNT, STONE_MAXIMUM_MODIFIER_COUNT, STONE_DETRIMENTAL_CHANCE, STONE_BASE_SELL_PRICE)
+		# 适用类型；装备商品固定使用装备强化石，武器商品固定使用武器强化石。
+		var target_kind: String = "equipment" if str(weapon_resource.get("item_kind")) == "equipment" else "weapon"
+		var enhancement_stone: EnhancementStoneData = EnhancementStoneData.create_random(_random, STONE_MINIMUM_MODIFIER_COUNT, STONE_MAXIMUM_MODIFIER_COUNT, STONE_DETRIMENTAL_CHANCE, STONE_BASE_SELL_PRICE, target_kind)
 		if enhancement_stone == null or not enhancement_stone.can_apply_to_weapon(weapon_resource):
 			continue
 		# 延迟实际倍率；按品质逐条生成百分比，与玩家在锻造中消耗强化石使用同一规则。

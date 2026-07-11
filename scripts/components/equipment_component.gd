@@ -33,6 +33,10 @@ var _armor_equipment: Dictionary = {}
 var _stats_component: Node
 ## 玩家移动组件缓存；脚部装备变化时更新最大移速。
 var _movement_component: Node
+## 玩家战斗相机缓存；头部视野属性变化时调整相机缩放。
+var _combat_camera: Camera2D
+## 不含装备的基础相机缩放；默认进入场景时读取当前 Camera2D.zoom。
+var _base_camera_zoom: Vector2 = Vector2.ONE
 ## 不含装备的基础移速；默认 320，首次同步时从移动组件读取。
 var _base_move_speed: float = 320.0
 
@@ -45,8 +49,11 @@ var _global_inventory: Node
 func _ready() -> void:
 	_stats_component = owner.get_node_or_null("StatsComponent") if owner != null else get_node_or_null("../StatsComponent")
 	_movement_component = owner.get_node_or_null("MovementComponent") if owner != null else get_node_or_null("../MovementComponent")
+	_combat_camera = owner.get_node_or_null("Camera2D") as Camera2D if owner != null else get_node_or_null("../Camera2D") as Camera2D
 	if _movement_component != null and _movement_component.has_method("get_max_speed"):
 		_base_move_speed = float(_movement_component.call("get_max_speed"))
+	if _combat_camera != null:
+		_base_camera_zoom = _combat_camera.zoom
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
 	if _global_inventory != null and _global_inventory.has_method("get_ranged_equipment_resources"):
 		if _global_inventory.has_signal("equipment_changed"):
@@ -312,7 +319,7 @@ func _sync_from_global_inventory() -> void:
 
 func _apply_armor_attributes() -> void:
 	# 聚合属性；损坏装备不提供任何加成，避免零耐久仍持续生效。
-	var attributes: Dictionary = {"attack_power": 0.0, "defense_power": 0.0, "max_health": 0.0, "health_regeneration_per_five_seconds": 0.0, "dodge_chance": 0.0, "move_speed": 0.0, "critical_chance": 0.0, "critical_damage": 0.0}
+	var attributes: Dictionary = {"attack_power": 0.0, "defense_power": 0.0, "max_health": 0.0, "health_regeneration_per_five_seconds": 0.0, "dodge_chance": 0.0, "move_speed": 0.0, "vision_range": 0.0, "critical_chance": 0.0, "critical_damage": 0.0}
 	for armor_slot in ["head", "body", "legs", "feet"]:
 		var equipment_data: Resource = get_armor_equipment(armor_slot)
 		if equipment_data == null or (equipment_data.has_method("is_broken") and bool(equipment_data.call("is_broken"))):
@@ -324,6 +331,10 @@ func _apply_armor_attributes() -> void:
 		_stats_component.call("apply_equipment_attributes", attributes)
 	if _movement_component != null and _movement_component.has_method("configure_max_speed"):
 		_movement_component.call("configure_max_speed", _base_move_speed * (1.0 + maxf(float(attributes.get("move_speed", 0.0)), 0.0)))
+	if _combat_camera != null:
+		# 相机缩放越小视野越广；按 1 + 视野百分比反比缩放，8% 视野对应缩放除以 1.08。
+		var vision_multiplier: float = 1.0 + maxf(float(attributes.get("vision_range", 0.0)), 0.0)
+		_combat_camera.zoom = _base_camera_zoom / vision_multiplier
 
 
 func _on_global_equipment_changed() -> void:

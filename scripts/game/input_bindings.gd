@@ -83,15 +83,39 @@ func is_action_using_default(action_name: StringName) -> bool:
 	var action_name_string: String = str(action_name)
 	if not _default_events_by_action.has(action_name_string):
 		return false
-	# 当前事件和默认事件；按顺序逐项比较事件文本和物理属性。
+	# 当前事件和默认事件；按顺序比较实际键位、修饰键或鼠标按钮，忽略捕获事件携带的冗余运行时字段。
 	var current_events: Array = InputMap.action_get_events(action_name) if InputMap.has_action(action_name) else []
 	var default_events: Array = _default_events_by_action[action_name_string]
 	if current_events.size() != default_events.size():
 		return false
 	for event_index in range(current_events.size()):
-		if not (current_events[event_index] as InputEvent).is_match(default_events[event_index] as InputEvent):
+		if not _are_binding_events_equivalent(current_events[event_index] as InputEvent, default_events[event_index] as InputEvent):
 			return false
 	return true
+
+
+func _are_binding_events_equivalent(current_event: InputEvent, default_event: InputEvent) -> bool:
+	if current_event is InputEventKey and default_event is InputEventKey:
+		# 当前键盘事件；玩家现场捕获时可能同时包含 physical_keycode 与 keycode。
+		var current_key_event: InputEventKey = current_event as InputEventKey
+		# 默认键盘事件；项目 InputMap 通常只保存 physical_keycode，因此不能直接依赖 InputEvent.is_match。
+		var default_key_event: InputEventKey = default_event as InputEventKey
+		# 当前有效键位；优先比较物理键位，确保键盘布局变化时仍按同一实体按键判定。
+		var current_effective_keycode: Key = current_key_event.physical_keycode if current_key_event.physical_keycode != KEY_NONE else current_key_event.keycode
+		# 默认有效键位；与当前事件使用同一优先级，避免 Q 重新绑定为 Q 后被误判为自定义键位。
+		var default_effective_keycode: Key = default_key_event.physical_keycode if default_key_event.physical_keycode != KEY_NONE else default_key_event.keycode
+		return current_effective_keycode == default_effective_keycode \
+			and current_key_event.alt_pressed == default_key_event.alt_pressed \
+			and current_key_event.shift_pressed == default_key_event.shift_pressed \
+			and current_key_event.ctrl_pressed == default_key_event.ctrl_pressed \
+			and current_key_event.meta_pressed == default_key_event.meta_pressed
+	if current_event is InputEventMouseButton and default_event is InputEventMouseButton:
+		# 当前鼠标事件；绑定语义只由按钮编号决定，位置、按下状态和滚轮运行时数据不参与默认判定。
+		var current_mouse_event: InputEventMouseButton = current_event as InputEventMouseButton
+		# 默认鼠标事件；与当前事件比较相同按钮编号即可确认是否恢复原键位。
+		var default_mouse_event: InputEventMouseButton = default_event as InputEventMouseButton
+		return current_mouse_event.button_index == default_mouse_event.button_index
+	return false
 
 
 func get_event_display_text(event: InputEvent) -> String:

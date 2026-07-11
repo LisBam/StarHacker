@@ -33,6 +33,14 @@ const INVENTORY_FILTER_MELEE: String = "melee"
 const INVENTORY_FILTER_STONES: String = "enhancement_stones"
 ## 背包道具分页标识；默认匹配 item_kind 为 repair_kit 的可用道具资源。
 const INVENTORY_FILTER_ITEMS: String = "items"
+## 背包头部装备分页标识；默认匹配 equipment_slot 为 head 的装备资源。
+const INVENTORY_FILTER_EQUIPMENT_HEAD: String = "head"
+## 背包躯干装备分页标识；默认匹配 equipment_slot 为 body 的装备资源。
+const INVENTORY_FILTER_EQUIPMENT_BODY: String = "body"
+## 背包腿部装备分页标识；默认匹配 equipment_slot 为 legs 的装备资源。
+const INVENTORY_FILTER_EQUIPMENT_LEGS: String = "legs"
+## 背包脚部装备分页标识；默认匹配 equipment_slot 为 feet 的装备资源。
+const INVENTORY_FILTER_EQUIPMENT_FEET: String = "feet"
 ## 局内强化石操作菜单使用项编号；固定为 1，选择后进入背包或装备栏武器选择状态。
 const INVENTORY_ITEM_ACTION_USE: int = 1
 ## 局内武器操作菜单装备项编号；固定为 2，远程武器替换当前手持槽，近战武器替换近战槽。
@@ -119,9 +127,9 @@ var _inventory_equipment_melee_control: Control
 var _inventory_armor_slot_buttons: Dictionary = {}
 ## 最近触发冷却的远程槽索引；取值为 -1 或有效远程槽，默认 -1 表示无远程冷却显示目标，修改会影响远程 CD 遮罩位置。
 var _last_cooling_ranged_slot: int = -1
-## 背包当前二级筛选页；取值为 all、ranged、melee 或 enhancement_stones，默认 all。
+## 背包当前二级筛选页；取值为 all、武器类型、装备部位或资源类型，默认 all。
 var _inventory_filter: String = INVENTORY_FILTER_ALL
-## 背包当前主分类；取值为 all、weapons 或 resources，默认全部并决定二级按钮内容。
+## 背包当前主分类；取值为 all、weapons、equipment 或 resources，默认全部并决定二级按钮内容。
 var _inventory_primary_category: String = InventoryQuery.PRIMARY_ALL
 ## 背包全部主分类按钮；默认运行时创建，同时展示武器和资源并隐藏类型专属二级入口。
 var _inventory_primary_all_button: Button
@@ -135,6 +143,14 @@ var _inventory_primary_resources_button: Button
 var _inventory_filter_stones_button: Button
 ## 背包道具筛选按钮；默认运行时追加到资源筛选栏，点击后只显示修复包等道具。
 var _inventory_filter_items_button: Button
+## 背包头部装备筛选按钮；默认运行时追加到二级分类栏，仅在装备主分类显示。
+var _inventory_filter_equipment_head_button: Button
+## 背包躯干装备筛选按钮；默认运行时追加到二级分类栏，仅在装备主分类显示。
+var _inventory_filter_equipment_body_button: Button
+## 背包腿部装备筛选按钮；默认运行时追加到二级分类栏，仅在装备主分类显示。
+var _inventory_filter_equipment_legs_button: Button
+## 背包脚部装备筛选按钮；默认运行时追加到二级分类栏，仅在装备主分类显示。
+var _inventory_filter_equipment_feet_button: Button
 ## 背包关键词搜索框；默认空字符串，按名称、说明和强化词条实时筛选。
 var _inventory_search_edit: LineEdit
 ## 背包排序下拉框；默认获得时间，可切换物品价值降序。
@@ -1433,6 +1449,18 @@ func _bind_inventory_filter_buttons() -> void:
 		_inventory_filter_items_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_inventory_filter_items_button.pressed.connect(_on_inventory_filter_items_pressed)
 		filter_parent.add_child(_inventory_filter_items_button)
+		# 头部装备按钮；装备主分类激活时按固定部位筛选背包装备。
+		_inventory_filter_equipment_head_button = _create_inventory_subcategory_button("头部", INVENTORY_FILTER_EQUIPMENT_HEAD)
+		filter_parent.add_child(_inventory_filter_equipment_head_button)
+		# 躯干装备按钮；装备主分类激活时按固定部位筛选背包装备。
+		_inventory_filter_equipment_body_button = _create_inventory_subcategory_button("躯干", INVENTORY_FILTER_EQUIPMENT_BODY)
+		filter_parent.add_child(_inventory_filter_equipment_body_button)
+		# 腿部装备按钮；装备主分类激活时按固定部位筛选背包装备。
+		_inventory_filter_equipment_legs_button = _create_inventory_subcategory_button("腿部", INVENTORY_FILTER_EQUIPMENT_LEGS)
+		filter_parent.add_child(_inventory_filter_equipment_legs_button)
+		# 脚部装备按钮；装备主分类激活时按固定部位筛选背包装备。
+		_inventory_filter_equipment_feet_button = _create_inventory_subcategory_button("脚部", INVENTORY_FILTER_EQUIPMENT_FEET)
+		filter_parent.add_child(_inventory_filter_equipment_feet_button)
 
 		# 背包内容容器；查询栏和一级分类栏会插入现有二级分类栏之前。
 		var backpack_content: VBoxContainer = filter_parent.get_parent() as VBoxContainer
@@ -1513,6 +1541,16 @@ func _bind_inventory_filter_buttons() -> void:
 			if inventory_scroll_control != null:
 				inventory_scroll_control.custom_minimum_size = Vector2(0.0, 210.0)
 	_refresh_inventory_filter_buttons()
+
+
+func _create_inventory_subcategory_button(button_text: String, filter_name: String) -> Button:
+	# 二级分类按钮；统一使用可扩展宽度和切换模式，具体筛选值通过绑定参数传递。
+	var filter_button: Button = Button.new()
+	filter_button.text = button_text
+	filter_button.toggle_mode = true
+	filter_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	filter_button.pressed.connect(Callable(self, "_set_inventory_filter").bind(filter_name))
+	return filter_button
 
 
 func _build_inventory_item_action_menu() -> void:
@@ -1702,8 +1740,18 @@ func _refresh_inventory_filter_buttons() -> void:
 		_inventory_filter_stones_button.set_pressed_no_signal(_inventory_filter == INVENTORY_FILTER_STONES)
 	if _inventory_filter_items_button != null:
 		_inventory_filter_items_button.set_pressed_no_signal(_inventory_filter == INVENTORY_FILTER_ITEMS)
+	if _inventory_filter_equipment_head_button != null:
+		_inventory_filter_equipment_head_button.set_pressed_no_signal(_inventory_filter == INVENTORY_FILTER_EQUIPMENT_HEAD)
+	if _inventory_filter_equipment_body_button != null:
+		_inventory_filter_equipment_body_button.set_pressed_no_signal(_inventory_filter == INVENTORY_FILTER_EQUIPMENT_BODY)
+	if _inventory_filter_equipment_legs_button != null:
+		_inventory_filter_equipment_legs_button.set_pressed_no_signal(_inventory_filter == INVENTORY_FILTER_EQUIPMENT_LEGS)
+	if _inventory_filter_equipment_feet_button != null:
+		_inventory_filter_equipment_feet_button.set_pressed_no_signal(_inventory_filter == INVENTORY_FILTER_EQUIPMENT_FEET)
 	# 二级分类可见性；全部主分类只保留聚合“全部”，武器和资源分别显示各自专属入口。
 	var weapon_category_visible: bool = _inventory_primary_category == InventoryQuery.PRIMARY_WEAPONS
+	# 装备分类可见状态；仅装备页展示头部、躯干、腿部和脚部入口。
+	var equipment_category_visible: bool = _inventory_primary_category == InventoryQuery.PRIMARY_EQUIPMENT
 	# 资源分类可见状态；仅资源页展示强化石、道具和属性筛选，聚合页不会误套用资源条件。
 	var resource_category_visible: bool = _inventory_primary_category == InventoryQuery.PRIMARY_RESOURCES
 	_inventory_filter_melee_button.visible = weapon_category_visible
@@ -1712,6 +1760,14 @@ func _refresh_inventory_filter_buttons() -> void:
 		_inventory_filter_stones_button.visible = resource_category_visible
 	if _inventory_filter_items_button != null:
 		_inventory_filter_items_button.visible = resource_category_visible
+	if _inventory_filter_equipment_head_button != null:
+		_inventory_filter_equipment_head_button.visible = equipment_category_visible
+	if _inventory_filter_equipment_body_button != null:
+		_inventory_filter_equipment_body_button.visible = equipment_category_visible
+	if _inventory_filter_equipment_legs_button != null:
+		_inventory_filter_equipment_legs_button.visible = equipment_category_visible
+	if _inventory_filter_equipment_feet_button != null:
+		_inventory_filter_equipment_feet_button.visible = equipment_category_visible
 	if _inventory_stone_attribute_option != null:
 		_inventory_stone_attribute_option.visible = resource_category_visible
 	if _inventory_stone_attribute_clear_button != null:
@@ -1728,6 +1784,14 @@ func _get_inventory_filter_label() -> String:
 		return "资源 · 强化石"
 	if _inventory_filter == INVENTORY_FILTER_ITEMS:
 		return "资源 · 道具"
+	if _inventory_filter == INVENTORY_FILTER_EQUIPMENT_HEAD:
+		return "装备 · 头部"
+	if _inventory_filter == INVENTORY_FILTER_EQUIPMENT_BODY:
+		return "装备 · 躯干"
+	if _inventory_filter == INVENTORY_FILTER_EQUIPMENT_LEGS:
+		return "装备 · 腿部"
+	if _inventory_filter == INVENTORY_FILTER_EQUIPMENT_FEET:
+		return "装备 · 脚部"
 	if _inventory_primary_category == InventoryQuery.PRIMARY_RESOURCES:
 		return "资源 · 全部"
 	if _inventory_primary_category == InventoryQuery.PRIMARY_EQUIPMENT:
@@ -2552,6 +2616,12 @@ func _refresh_inventory_stone_attribute_filter_display() -> void:
 		return
 	_inventory_stone_attribute_option.set_item_text(0, "强化筛选（%d）" % _inventory_stone_attribute_filter.size())
 	_inventory_stone_attribute_option.select(0)
+	# 勾选状态同步；切回摘要项后重新应用全部多选条件，避免弹出菜单中的复选框被清空而看不出当前筛选。
+	for item_index in range(1, _inventory_stone_attribute_option.item_count):
+		# 当前筛选键；分隔项元数据为空，仅真实属性方向选项参与同步。
+		var filter_key: String = str(_inventory_stone_attribute_option.get_item_metadata(item_index))
+		if not filter_key.is_empty():
+			_inventory_stone_attribute_option.get_popup().set_item_checked(item_index, filter_key in _inventory_stone_attribute_filter)
 	if _inventory_stone_attribute_clear_button != null:
 		_inventory_stone_attribute_clear_button.disabled = _inventory_stone_attribute_filter.is_empty()
 

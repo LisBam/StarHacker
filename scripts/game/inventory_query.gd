@@ -22,6 +22,14 @@ const SUBCATEGORY_RANGED: String = "ranged"
 const SUBCATEGORY_ENHANCEMENT_STONES: String = "enhancement_stones"
 ## 道具资源子分类；当前匹配 item_kind 为 repair_kit，后续可扩展为更多主动道具。
 const SUBCATEGORY_ITEMS: String = "items"
+## 头部装备子分类；只匹配 equipment_slot 为 head 的装备。
+const SUBCATEGORY_EQUIPMENT_HEAD: String = "head"
+## 躯干装备子分类；只匹配 equipment_slot 为 body 的装备。
+const SUBCATEGORY_EQUIPMENT_BODY: String = "body"
+## 腿部装备子分类；只匹配 equipment_slot 为 legs 的装备。
+const SUBCATEGORY_EQUIPMENT_LEGS: String = "legs"
+## 脚部装备子分类；只匹配 equipment_slot 为 feet 的装备。
+const SUBCATEGORY_EQUIPMENT_FEET: String = "feet"
 ## 获得时间排序；默认按 acquired_at 与 acquisition_sequence 从新到旧排列。
 const SORT_ACQUIRED_TIME: String = "acquired_time"
 ## 物品价值排序；按单价乘堆叠数量从高到低排列，相同价值时回退获得时间。

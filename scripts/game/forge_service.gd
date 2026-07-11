@@ -1,7 +1,7 @@
 extends RefCounted
 class_name ForgeService
 
-## 锻造服务集中计算主武器价值倍率、牺牲材料费用、耐久恢复预览和最终强化结果。
+## 锻造服务集中计算主物品价值倍率、牺牲材料费用、耐久恢复预览和最终强化结果。
 ## 服务不持有 UI 节点或槽位状态，调用方传入来源条目即可复用于其他锻造界面或自动化测试。
 
 ## 主武器价值换算单位；默认每 100 金币价值提高一次倍率增量。
@@ -40,17 +40,17 @@ func _init(global_inventory: Node) -> void:
 
 
 func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary]) -> Dictionary:
-	# 主物品；武器进入原有修复强化流程，可升阶强化石进入同品质合成流程。
+	# 主物品；武器或装备进入耐久修复与强化流程，可升阶强化石进入同品质合成流程。
 	var main_weapon: Resource = main_entry.get("resource") as Resource
 	if _is_enhancement_stone(main_weapon):
 		return _build_stone_upgrade_preview(main_entry, sacrifice_entries)
 	if not _is_weapon(main_weapon):
-		return _build_invalid_preview("请先放入主锻造武器或可升阶强化石")
+		return _build_invalid_preview("请先放入主锻造武器、装备或可升阶强化石")
 	# 强化前耐久；预览和结果弹窗共同使用，取值限制在 0 到最大耐久。
 	var durability_before: float = maxf(float(main_weapon.get("current_durability")), 0.0)
 	# 最大耐久；支持未来不同武器拥有不同上限。
 	var maximum_durability: float = maxf(float(main_weapon.get("max_durability")), 1.0)
-	# 剩余可恢复耐久；牺牲武器依次提供当前耐久的 10%，超过上限的部分不收费也不计入结果。
+	# 剩余可恢复耐久；牺牲武器或装备依次提供当前耐久的 10%，超过上限的部分不收费也不计入结果。
 	var remaining_durability_capacity: float = maxf(maximum_durability - durability_before, 0.0)
 	# 实际预计恢复耐久；默认 0，按牺牲槽顺序累加并限制到缺失耐久。
 	var durability_restored: float = 0.0
@@ -65,10 +65,10 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 	# 无效牺牲材料；任一非空槽不能产生锻造效果时整次锻造禁用，UI 会将对应槽位标为红色。
 	var invalid_sacrifice_entries: Array[Dictionary] = []
 	for sacrifice_entry in sacrifice_entries:
-		# 牺牲资源；武器提供耐久，强化石提供随机强化，其他资源不参与锻造。
+		# 牺牲资源；武器和装备提供耐久，匹配主物品类型的强化石提供随机强化，其他资源不参与锻造。
 		var sacrifice_resource: Resource = sacrifice_entry.get("resource") as Resource
 		if _is_weapon(sacrifice_resource):
-			# 可提供耐久；使用牺牲武器当前耐久的 10%，已损坏武器不会产生恢复或费用。
+			# 可提供耐久；使用牺牲武器或装备当前耐久的 10%，已损坏物品不会产生恢复或费用。
 			var offered_durability: float = maxf(float(sacrifice_resource.get("current_durability")), 0.0) * SACRIFICE_WEAPON_DURABILITY_RATIO
 			# 本槽实际恢复量；主武器即将满耐久时只计算剩余缺口。
 			var applied_durability: float = minf(offered_durability, remaining_durability_capacity)
@@ -91,7 +91,7 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 	if not invalid_sacrifice_entries.is_empty():
 		return _build_invalid_preview("牺牲槽中存在无法用于当前主物品的材料", invalid_sacrifice_entries)
 	if effective_material_count <= 0:
-		return _build_invalid_preview("当前材料无法为主武器提供有效锻造效果")
+		return _build_invalid_preview("当前材料无法为主物品提供有效锻造效果")
 	# 主武器当前价值；强化与耐久共同影响有效售价，价值越高最终锻造倍率越高。
 	var main_weapon_value: int = int(main_weapon.call("get_effective_sell_price")) if main_weapon.has_method("get_effective_sell_price") else maxi(int(main_weapon.get("sell_price")), 0)
 	# 主武器价值倍率；连续按价值比例计算，例如价值 250 金币时倍率为 1 + 2.5×0.4 = 2.0。
@@ -185,7 +185,7 @@ func execute_forge(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 
 
 func can_use_as_main(item_resource: Resource) -> bool:
-	# 主槽允许武器或仍有下一品质的强化石；极品强化石不能作为升阶主石，但仍可保留为武器强化材料。
+	# 主槽允许武器、装备或仍有下一品质的强化石；极品强化石不能作为升阶主石，但仍可作为对应物品的强化材料。
 	if _is_weapon(item_resource):
 		return true
 	if not _is_enhancement_stone(item_resource):
@@ -202,7 +202,7 @@ func can_use_as_sacrifice(main_resource: Resource, candidate_resource: Resource)
 	if not _is_weapon(main_resource):
 		return false
 	if _is_weapon(candidate_resource):
-		# 牺牲武器必须仍有耐久且主武器存在耐久缺口，否则放入后不会产生任何效果。
+		# 牺牲武器或装备必须仍有耐久且主物品存在耐久缺口；两类耐久物品允许跨类型互相作为牺牲品。
 		var main_maximum_durability: float = maxf(float(main_resource.get("max_durability")), 1.0)
 		return float(main_resource.get("current_durability")) < main_maximum_durability and float(candidate_resource.get("current_durability")) > 0.0
 	return _is_enhancement_stone(candidate_resource) and bool(candidate_resource.call("can_apply_to_weapon", main_resource))
@@ -343,7 +343,8 @@ func _build_invalid_preview(message: String, invalid_sacrifice_entries: Array[Di
 
 
 func _is_weapon(item_resource: Resource) -> bool:
-	return item_resource != null and str(item_resource.get("weapon_type")) in ["ranged", "melee"]
+	# 可锻造耐久物品；保留历史函数名以避免改动既有调用，实际同时识别武器和四部位装备。
+	return item_resource != null and (str(item_resource.get("weapon_type")) in ["ranged", "melee"] or str(item_resource.get("item_kind")) == "equipment")
 
 
 func _is_enhancement_stone(item_resource: Resource) -> bool:

@@ -104,8 +104,15 @@ static func build_bbcode(item_resource: Resource, quantity: int = 1, price_label
 
 
 static func _append_equipment_lines(detail_lines: Array[String], item_resource: Resource) -> void:
-	# 装备属性顺序；与强化规则和玩家属性聚合保持一致。
-	var stat_names: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance", "move_speed", "vision_range", "critical_chance", "critical_damage"]
+	# 当前耐久；取值限制在 0 到最大耐久，与武器详情使用相同的“当前 / 最大”格式。
+	var current_durability: float = maxf(float(item_resource.get("current_durability")), 0.0)
+	# 最大耐久；取值至少为 1，确保装备详情始终明确显示耐久上限。
+	var max_durability: float = maxf(float(item_resource.get("max_durability")), 1.0)
+	detail_lines.append("耐久：%.1f / %.1f" % [current_durability, max_durability])
+	if item_resource.has_method("is_broken") and bool(item_resource.call("is_broken")):
+		detail_lines.append("[color=%s]状态：损坏，全部装备属性失效[/color]" % NEGATIVE_COLOR)
+	# 装备属性顺序；耐久已在摘要中显示，后续只列出实际战斗属性，避免最大耐久重复出现两次。
+	var stat_names: Array[String] = ["attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance", "move_speed", "vision_range", "critical_chance", "critical_damage"]
 	detail_lines.append("[b]装备属性[/b]")
 	for stat_name in stat_names:
 		var value: float = float(item_resource.call("get_effective_stat", stat_name)) if item_resource.has_method("get_effective_stat") else float(item_resource.get(stat_name))

@@ -46,21 +46,17 @@ var _quantity_spin_box: SpinBox
 var _total_price_label: Label
 ## 数量说明标签；默认运行时创建，显示当前物品名称和最大可出售数量。
 var _description_label: Label
+## 界面是否已经完成初始化；默认 false，公开展示接口可能早于 `_ready()` 调用，因此通过幂等初始化避免访问空控件。
+var _interface_initialized: bool = false
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	transparent = true
-	unresizable = true
-	title = "选择出售数量"
-	get_ok_button().text = "出售"
-	get_cancel_button().text = "取消"
-	_apply_dialog_visual_style()
-	_build_interface()
-	confirmed.connect(_on_confirmed)
+	_ensure_interface_initialized()
 
 
 func present(item_display_name: String, maximum_quantity: int, unit_sell_price: int) -> void:
+	_ensure_interface_initialized()
 	_display_mode = DISPLAY_MODE_SALE
 	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
 	_maximum_quantity = maxi(maximum_quantity, 1)
@@ -72,6 +68,7 @@ func present(item_display_name: String, maximum_quantity: int, unit_sell_price: 
 
 
 func present_transfer(item_display_name: String, maximum_quantity: int, source_display_name: String, target_display_name: String) -> void:
+	_ensure_interface_initialized()
 	_display_mode = DISPLAY_MODE_TRANSFER
 	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
 	_maximum_quantity = maxi(maximum_quantity, 1)
@@ -83,6 +80,7 @@ func present_transfer(item_display_name: String, maximum_quantity: int, source_d
 
 
 func present_discard(item_display_name: String, maximum_quantity: int) -> void:
+	_ensure_interface_initialized()
 	_display_mode = DISPLAY_MODE_DISCARD
 	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
 	_maximum_quantity = maxi(maximum_quantity, 1)
@@ -94,6 +92,7 @@ func present_discard(item_display_name: String, maximum_quantity: int) -> void:
 
 
 func present_shipping(item_display_name: String, maximum_quantity: int, unit_item_value: int, shipping_remaining_value: int, shipping_fee_ratio: float = 0.20) -> void:
+	_ensure_interface_initialized()
 	_display_mode = DISPLAY_MODE_SHIPPING
 	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
 	_maximum_quantity = maxi(maximum_quantity, 1)
@@ -105,6 +104,21 @@ func present_shipping(item_display_name: String, maximum_quantity: int, unit_ite
 	get_ok_button().text = "送回仓库"
 	_description_label.text = "%s · 最多可选择 %d 个" % [_item_display_name, _maximum_quantity]
 	_present_current_configuration()
+
+
+func _ensure_interface_initialized() -> void:
+	## 初始化数量弹窗的固定控件和信号；允许宿主在弹窗加入场景树的同一帧立即调用展示接口。
+	if _interface_initialized:
+		return
+	_interface_initialized = true
+	transparent = true
+	unresizable = true
+	title = "选择出售数量"
+	get_ok_button().text = "出售"
+	get_cancel_button().text = "取消"
+	_apply_dialog_visual_style()
+	_build_interface()
+	confirmed.connect(_on_confirmed)
 
 
 func _present_current_configuration() -> void:

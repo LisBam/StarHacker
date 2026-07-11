@@ -15,6 +15,8 @@ signal combat_failure_losses_recorded(lost_entries: Array)
 const SAVE_PATH: String = "user://global_inventory.json"
 ## 当前库存存档版本；默认 7，版本 7 起支持可堆叠修复包的独立数据恢复。
 const SAVE_VERSION: int = 8
+## 强化公式存档版本；版本 2 起暴击率、暴击伤害和闪避率的累计值按直接百分点保存。
+const ENHANCEMENT_FORMULA_VERSION: int = 2
 ## 旧版耐久上限；固定 100.0，用于把版本 5 的当前耐久按比例迁移到新版上限。
 const LEGACY_DURABILITY_MAX: float = 100.0
 ## 默认远程槽数量；当前项目使用双远程武器，修改需要同步玩家输入可直接选择的槽位数量。
@@ -844,7 +846,7 @@ func use_repair_kit_with_result(repair_kit_resource: Resource, source_location: 
 	# 当前耐久；限制到非负数，用于计算可修复缺口。
 	var durability_before: float = maxf(float(weapon_resource.get("current_durability")), 0.0)
 	# 最大耐久；至少为 1，避免异常旧武器出现无效修复计算。
-	var maximum_durability: float = maxf(float(weapon_resource.get("max_durability")), 1.0)
+	var maximum_durability: float = _get_resource_maximum_durability(weapon_resource)
 	# 修复包标称恢复量；取值至少为 0，实际恢复量仍会受武器耐久缺口限制。
 	var configured_repair_amount: float = maxf(float(repair_kit_resource.get("repair_amount")), 0.0)
 	# 实际恢复量；满耐久武器不会消耗修复包。
@@ -1400,6 +1402,13 @@ func _get_resource_sell_price(item_resource: Resource) -> int:
 	return maxi(int(item_resource.get("sell_price")), 0)
 
 
+func _get_resource_maximum_durability(item_resource: Resource) -> float:
+	if item_resource == null:
+		return 1.0
+	# 有效耐久上限；装备通过统一接口返回耐久词条结算值，旧资源回退原始导出字段。
+	return maxf(float(item_resource.call("get_maximum_durability")), 1.0) if item_resource.has_method("get_maximum_durability") else maxf(float(item_resource.get("max_durability")), 1.0)
+
+
 func _get_stack_signature(item_resource: Resource) -> String:
 	if not _is_stackable_resource(item_resource):
 		return ""
@@ -1923,13 +1932,16 @@ func _serialize_record(record: Dictionary) -> Dictionary:
 		serialized_record["repair_amount"] = maxf(float(item_resource.get("repair_amount")), 0.0)
 	elif _is_equipment_resource(item_resource):
 		# 防具运行时字段；保存耐久和强化累计值，基础属性继续由项目模板提供。
+		serialized_record["enhancement_formula_version"] = ENHANCEMENT_FORMULA_VERSION
 		serialized_record["enhancement_modifiers"] = (item_resource.get("enhancement_modifiers") as Dictionary).duplicate(true)
 		serialized_record["current_durability"] = maxf(float(item_resource.get("current_durability")), 0.0)
-		serialized_record["max_durability"] = maxf(float(item_resource.get("max_durability")), 1.0)
+		serialized_record["max_durability"] = _get_resource_maximum_durability(item_resource)
 	elif item_resource.has_method("get_enhancement_ratio"):
+		# 武器强化公式版本；与装备共用版本号，旧存档可按基础值迁移加算属性而不改变既有最终值。
+		serialized_record["enhancement_formula_version"] = ENHANCEMENT_FORMULA_VERSION
 		serialized_record["enhancement_modifiers"] = (item_resource.get("enhancement_modifiers") as Dictionary).duplicate(true)
 		serialized_record["current_durability"] = maxf(float(item_resource.get("current_durability")), 0.0)
-		serialized_record["max_durability"] = maxf(float(item_resource.get("max_durability")), 1.0)
+		serialized_record["max_durability"] = _get_resource_maximum_durability(item_resource)
 	return serialized_record
 
 
@@ -1975,14 +1987,12 @@ func _deserialize_record(serialized_record: Dictionary) -> Dictionary:
 		item_resource = _load_weapon_resource(weapon_id, resource_path)
 	if item_resource == null:
 		return {}
-	if _is_weapon_resource(item_resource) and serialized_record.get("enhancement_modifiers") is Dictionary:
-		item_resource.set("enhancement_modifiers", (serialized_record.get("enhancement_modifiers") as Dictionary).duplicate(true))
-	if _is_equipment_resource(item_resource) and serialized_record.get("enhancement_modifiers") is Dictionary:
-		item_resource.set("enhancement_modifiers", (serialized_record.get("enhancement_modifiers") as Dictionary).duplicate(true))
+	if (_is_weapon_resource(item_resource) or _is_equipment_resource(item_resource)) and serialized_record.get("enhancement_modifiers") is Dictionary:
+		_restore_enhancement_modifiers(item_resource, serialized_record)
 	if _is_weapon_resource(item_resource):
 		# 恢复耐久；旧存档缺少字段时按模板最大耐久恢复满值，避免升级后全部旧武器意外损坏。
 		# 模板最大耐久；当前所有武器默认 1000.0，后续单独修改上限时仍作为本次加载的最终上限。
-		var template_max_durability: float = maxf(float(item_resource.get("max_durability")), 1.0)
+		var template_max_durability: float = _get_resource_maximum_durability(item_resource)
 		# 存档最大耐久；版本 5 只保存当前耐久，缺失上限时按旧系统 100.0 推断并保持原耐久比例。
 		var saved_max_durability: float = maxf(float(serialized_record.get("max_durability", LEGACY_DURABILITY_MAX)), 1.0)
 		# 存档当前耐久；更旧存档完全缺失耐久时直接恢复为当前模板满耐久。
@@ -1995,7 +2005,7 @@ func _deserialize_record(serialized_record: Dictionary) -> Dictionary:
 			item_resource.set("current_durability", restored_durability)
 	if _is_equipment_resource(item_resource):
 		# 防具耐久恢复；使用与武器相同的按比例迁移规则。
-		var equipment_max_durability: float = maxf(float(item_resource.get("max_durability")), 1.0)
+		var equipment_max_durability: float = _get_resource_maximum_durability(item_resource)
 		var saved_equipment_max_durability: float = maxf(float(serialized_record.get("max_durability", equipment_max_durability)), 1.0)
 		var saved_equipment_current_durability: float = float(serialized_record.get("current_durability", saved_equipment_max_durability))
 		item_resource.call("set_current_durability", equipment_max_durability * clampf(saved_equipment_current_durability / saved_equipment_max_durability, 0.0, 1.0))
@@ -2006,6 +2016,24 @@ func _deserialize_record(serialized_record: Dictionary) -> Dictionary:
 	record["quantity"] = clampi(int(serialized_record.get("quantity", 1)), 1, MAX_STACK_QUANTITY)
 	_acquisition_sequence = maxi(_acquisition_sequence, int(record["acquisition_sequence"]))
 	return record
+
+
+func _restore_enhancement_modifiers(item_resource: Resource, serialized_record: Dictionary) -> void:
+	if item_resource == null or not (serialized_record.get("enhancement_modifiers") is Dictionary):
+		return
+	# 存档强化词典；新版本直接恢复，旧版本会先把加算属性从基础值比例转换为等效百分点。
+	var restored_modifiers: Dictionary = (serialized_record.get("enhancement_modifiers") as Dictionary).duplicate(true)
+	# 存档公式版本；缺失视为旧乘算版本，商店快照和库存记录都可使用同一迁移入口。
+	var formula_version: int = int(serialized_record.get("enhancement_formula_version", 1))
+	if formula_version < ENHANCEMENT_FORMULA_VERSION:
+		# 加算属性基础值；只读取迁移所需字段，避免存档服务了解武器或装备的其他内部属性。
+		var additive_base_values: Dictionary = {}
+		for raw_stat_name in EnhancementRules.ADDITIVE_POINT_STATS.keys():
+			# 加算属性名；固定来自规则目录，转换为 String 后用于调用资源统一基础属性接口。
+			var stat_name: String = str(raw_stat_name)
+			additive_base_values[stat_name] = float(item_resource.call("get_base_stat", stat_name)) if item_resource.has_method("get_base_stat") else float(item_resource.get(stat_name))
+		restored_modifiers = EnhancementRules.convert_legacy_enhancement_modifiers(restored_modifiers, additive_base_values)
+	item_resource.set("enhancement_modifiers", restored_modifiers)
 
 
 func _load_weapon_resource(weapon_id: String, preferred_path: String = "") -> Resource:

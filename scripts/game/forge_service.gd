@@ -49,7 +49,7 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 	# 强化前耐久；预览和结果弹窗共同使用，取值限制在 0 到最大耐久。
 	var durability_before: float = maxf(float(main_weapon.get("current_durability")), 0.0)
 	# 最大耐久；支持未来不同武器拥有不同上限。
-	var maximum_durability: float = maxf(float(main_weapon.get("max_durability")), 1.0)
+	var maximum_durability: float = _get_maximum_durability(main_weapon)
 	# 剩余可恢复耐久；牺牲武器或装备依次提供当前耐久的 10%，超过上限的部分不收费也不计入结果。
 	var remaining_durability_capacity: float = maxf(maximum_durability - durability_before, 0.0)
 	# 实际预计恢复耐久；默认 0，按牺牲槽顺序累加并限制到缺失耐久。
@@ -180,6 +180,8 @@ func execute_forge(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 				(combined_result["beneficial_changes"] as Array).append_array(stone_result.get("beneficial_changes", []) as Array)
 				(combined_result["detrimental_changes"] as Array).append_array(stone_result.get("detrimental_changes", []) as Array)
 				combined_result["success"] = true
+	# 实际锻造后耐久；耐久值词条可能改变装备上限并限制当前耐久，结果弹窗必须读取最终资源状态。
+	combined_result["durability_after"] = maxf(float(main_weapon.get("current_durability")), 0.0)
 	combined_result["sell_price_after"] = int(main_weapon.call("get_effective_sell_price")) if main_weapon.has_method("get_effective_sell_price") else sell_price_before
 	_global_inventory.call("notify_weapon_runtime_state_changed", main_weapon)
 	return combined_result
@@ -204,7 +206,7 @@ func can_use_as_sacrifice(main_resource: Resource, candidate_resource: Resource)
 		return false
 	if _is_weapon(candidate_resource):
 		# 牺牲武器或装备必须仍有耐久且主物品存在耐久缺口；两类耐久物品允许跨类型互相作为牺牲品。
-		var main_maximum_durability: float = maxf(float(main_resource.get("max_durability")), 1.0)
+		var main_maximum_durability: float = _get_maximum_durability(main_resource)
 		return float(main_resource.get("current_durability")) < main_maximum_durability and float(candidate_resource.get("current_durability")) > 0.0
 	return _is_enhancement_stone(candidate_resource) and bool(candidate_resource.call("can_apply_to_weapon", main_resource))
 
@@ -350,3 +352,10 @@ func _is_weapon(item_resource: Resource) -> bool:
 
 func _is_enhancement_stone(item_resource: Resource) -> bool:
 	return item_resource != null and str(item_resource.get("item_kind")) == "enhancement_stone"
+
+
+func _get_maximum_durability(item_resource: Resource) -> float:
+	if item_resource == null:
+		return 1.0
+	# 有效耐久上限；装备读取强化后的耐久值，旧资源和武器回退导出字段。
+	return maxf(float(item_resource.call("get_maximum_durability")), 1.0) if item_resource.has_method("get_maximum_durability") else maxf(float(item_resource.get("max_durability")), 1.0)

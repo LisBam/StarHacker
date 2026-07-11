@@ -236,6 +236,7 @@ func _consume_weapon_durability(weapon_data: Resource) -> void:
 	if _should_skip_weapon_durability_consumption() or weapon_data == null or not weapon_data.has_method("consume_durability"):
 		return
 	# 是否实际消耗耐久；耐久消耗为 0 或武器已损坏时不触发持久化和 UI 刷新。
+	# 固定消耗补充：现行武器成功使用统一扣除 1 点，此返回值只用于识别损坏武器等未发生变化的情况。
 	var durability_changed: bool = bool(weapon_data.call("consume_durability"))
 	if not durability_changed:
 		return

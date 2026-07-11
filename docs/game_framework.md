@@ -108,15 +108,15 @@
 
 ### 武器强化与强化石
 
-`WeaponData` 将原有导出字段作为永久基础值，强化结果单独保存在 `enhancement_modifiers` 累计比例词典中。战斗组件不再直接把基础字段当作最终值，而是统一调用 `get_effective_stat()` 读取 `基础值 × (1 + 累计强化比例)`。内部继续保留 `ranged_damage`、`melee_damage`、`ranged_cooldown` 和 `melee_cooldown` 以兼容现有 `.tres`，所有 UI 统一显示为“伤害”和“冷却”。
+`WeaponData` 与 `EquipmentData` 将原有导出字段作为永久基础值，强化结果单独保存在 `enhancement_modifiers` 词典中。伤害、冷却、能耗、弹体和装备数值等乘算属性读取 `基础值 × (1 + 累计比例)`；暴击率、暴击伤害和闪避率读取 `基础值 + 累计百分点`。战斗组件不直接把基础字段当作最终值，统一调用 `get_effective_stat()`；内部继续保留 `ranged_damage`、`melee_damage`、`ranged_cooldown` 和 `melee_cooldown` 以兼容现有 `.tres`，所有 UI 统一显示为“伤害”和“冷却”。旧强化存档会把三类加算属性从历史基础值比例迁移为等效百分点，保持既有最终数值。
 
-强化石由 `res://scripts/data/enhancement_stone_data.gd` 定义，`item_kind` 固定为 `enhancement_stone`，`quality_id` 区分 low、medium、high、supreme，`modifiers` 只保存属性的 `+1/-1` 方向。掉落品质权重为 40% 初级、30% 中级、20% 高级、10% 极品；初级增强 10%–20% 且 80% 带 10%–20% 削弱，中级增强 20%–40%、10% 额外增强、40% 带 5%–20% 削弱，高级增强 30%–50%、20% 额外增强、10% 带 5%–10% 削弱，极品增强 40%–60%、30% 额外增强且永不附带削弱。每颗石头必定至少一条增强，词条不重复；具体幅度在每颗石头用于武器锻造时按品质重新随机。只有品质、属性和方向全部一致时才堆叠，旧存档中的具体百分比读取后只保留方向。
+强化石由 `res://scripts/data/enhancement_stone_data.gd` 定义，`item_kind` 固定为 `enhancement_stone`，`quality_id` 区分 low、medium、high、supreme，`modifiers` 只保存属性的 `+1/-1` 方向。掉落品质权重为 40% 初级、30% 中级、20% 高级、10% 极品；每颗石头必定至少一条增强，词条不重复，额外增强与削弱出现概率继续由品质配置决定。具体幅度在每颗石头用于锻造时根据属性公式、属性幅度组、品质和方向重新随机：乘算属性分为一级、二级、三级幅度组，暴击率、暴击伤害和闪避率分别拥有独立的加算百分点区间。只有品质、属性和方向全部一致时才堆叠，幅度不参与签名；旧强化石存档中的具体百分比读取后只保留方向。所有区间端点与最终上限以 `docs/游戏机制与玩法内容.md` 为唯一权威数值表。
 
 武器悬停详情只在属性确实发生强化变化时使用“总值（基础值±强化值）”格式；未变化属性只显示最终值，不显示“（100+0）”。强化石详情只显示属性与方向，增强词条全部排在削弱词条之前；颜色严格表达玩法收益，增强为绿色、削弱为红色，因此冷却-、能量消耗-、扩散-和后坐力-均显示绿色，对应反方向显示红色。强化成功后的共用弹窗会按同一规则着色，并展示使用时随机出的百分比、武器基础值、本次变化值、强化后数值和售价变化。
 
-每把武器默认最大耐久与初始当前耐久均为 1000.0。每次成功使用按该武器的浮点属性 `durability_cost_per_use` 扣除耐久；训练场固定不消耗，正式战斗可通过开发者开关临时禁用。耐久售价倍率按 `0.1 + 0.9 × 当前耐久比例` 线性计算，满耐久为强化后有效售价的 100%，零耐久损坏武器仍可出售且售价为同强化状态满耐久售价的 10%；原始售价大于 0 时四舍五入后的最低结果为 1 金币。版本 6 存档同时保存当前耐久和保存时上限；版本 5 的 100 上限耐久按比例迁移到 1000.0，避免旧满耐久武器变为 10%。
+每把武器默认最大耐久与初始当前耐久均为 1000.0。每次成功使用固定扣除 1 点耐久，武器资源不再声明或保存独立的 `durability_cost_per_use` 属性；训练场固定不消耗，正式战斗可通过开发者开关临时禁用。耐久售价倍率按 `0.1 + 0.9 × 当前耐久比例` 线性计算，满耐久为强化后有效售价的 100%，零耐久损坏武器仍可出售且售价为同强化状态满耐久售价的 10%；原始售价大于 0 时四舍五入后的最低结果为 1 金币。版本 6 存档同时保存当前耐久和保存时上限；版本 5 的 100 上限耐久按比例迁移到 1000.0，避免旧满耐久武器变为 10%。
 
-默认耐久消耗：量子手枪 1.0、脉冲步枪 0.8、离子冲锋枪 0.5、磁轨炮 3.0、散射爆能枪 2.0、相位刃 1.5、量子短刃 0.75。物品悬停信息会显示当前/最大耐久与单次耐久消耗；悬停背景使用透明度 0.68 的深色框，并绘制 2 像素白色边框和 6 像素圆角。
+所有远程与近战武器的单次成功使用耐久消耗统一为 1 点。物品悬停信息只显示当前/最大耐久，不显示固定消耗值；悬停背景使用透明度 0.68 的深色框，并绘制 2 像素白色边框和 6 像素圆角。
 
 当前通用玩家预制体默认装备两把远程武器和一把近战武器：
 
@@ -124,9 +124,9 @@
 - 远程槽 2：脉冲步枪
 - 近战槽：相位刃
 
-远程攻击流程为：玩家输入左键 -> `PlayerController` 读取当前远程武器并拒绝损坏武器 -> 检查能量 -> 成功生成弹体 -> 扣除能量；非训练场且未开启调试免消耗时，再按武器 `durability_cost_per_use` 扣除耐久。
+远程攻击流程为：玩家输入左键 -> `PlayerController` 读取当前远程武器并拒绝损坏武器 -> 检查能量 -> 成功生成弹体 -> 扣除能量；非训练场且未开启调试免消耗时，再固定扣除 1 点武器耐久。
 
-近战攻击流程为：玩家输入右键 -> `PlayerController` 读取当前近战武器并拒绝损坏武器 -> 检查能量 -> 成功开启命中框 -> 扣除能量；非训练场且未开启调试免消耗时，再按武器 `durability_cost_per_use` 扣除耐久。
+近战攻击流程为：玩家输入右键 -> `PlayerController` 读取当前近战武器并拒绝损坏武器 -> 检查能量 -> 成功开启命中框 -> 扣除能量；非训练场且未开启调试免消耗时，再固定扣除 1 点武器耐久。
 
 战斗反馈流程为：玩家成功使用武器后，`PlayerController` 会按武器 `recoil_force * fire_shake_per_recoil` 和 `front_recoil_force * fire_shake_per_recoil * 0.5` 向 `CombatCamera` 累加屏幕震动；后坐力与受击击退的累计速度上限为 720，按每秒 1800 衰减，撞墙后会立即移除压向墙体的法线分量并保留沿墙分量。玩家受到伤害时，会先检查 `damage_interval`，默认受伤后的 0.2 秒内忽略新的伤害、击退和受伤震动，再按伤害值和 `minimum_damage_shake` 计算本次受击震动。玩家和怪物受击时生成短促 `CombatBurstEffect`，生命归零时生成更大的死亡爆发特效。
 
@@ -160,7 +160,7 @@
 
 正式战斗失败结算由 `GlobalInventory.combat_failure_losses_recorded` 发送实际遗失条目的只读快照，`ShopService` 将其加入灰市并只保留最近 5 次失败。灰市武器按当前强化状态的满耐久有效价值估价，强化石按单颗有效价值估价，最终购买价为 `满耐久或单颗价值 × 实际遗失数量 × 4 至 8 倍随机倍率`；回购物品保留失败时的实际耐久、强化状态和堆叠数量。
 
-`ForgePanel` 维护一个主锻造槽、五个牺牲槽、来源查询、多选词条筛选和动画状态，真实规则集中在无 UI 依赖的 `ForgeService`。主锻造槽、牺牲槽与来源列表全部固定复用 160×72 像素 `ItemCardView`，旧 `forge_slot_size` 参数仅保留调用兼容，不能再改变物品卡片尺寸；选择背包来源时下方区域使用左右分栏，左侧独立滚动装备栏复用 `EquipmentStorageSlotControl` 的真实点击和拖拽协议，右侧独立显示背包物品，仓库来源则隐藏左栏并使用完整宽度。装备来源通过 `ranged_N`、`melee` 和 `armor_部位` 稳定标识参与与背包、仓库相同的所有权校验和原子消费；合法装备保持标准原色，只有不兼容装备使用灰色遮罩，不再显示绿色目标高亮。来源列表使用居中流式布局按可用宽度自动换行；顶部中心牺牲槽额外上移 16 像素，右下与左下两个牺牲槽额外下移 24 像素，避免与主锻造槽重叠。槽位仅保存资源实例与原来源引用。主锻造槽可放武器或装备，两类物品可跨类型互相作为耐久牺牲品并提供当前耐久的 10%；耐久溢出部分不恢复、不计费但不会把正耐久牺牲品判为无效。武器强化石只强化武器，装备强化石只强化装备，初级、中级、高级、极品强化石基础费用为 2、5、10、20 金币，总费用按主物品价值倍率计算。主锻造槽放初级、中级或高级强化石时进入升阶模式，牺牲槽只接受同品质强化石，每颗提供 20% 成功率，最高 100%，不收取金币；成功按“初级→中级→高级→极品”替换一颗主石，失败消耗全部牺牲石并保留主石。主锻造槽确定后，背包、装备栏、仓库候选和槽内失效牺牲品都使用统一灰色遮罩且禁用开始按钮；仓库、战斗背包和锻造来源列表的“强化筛选”都在切回摘要项后按筛选集合重新同步复选框，已选属性方向始终可见。锻造结果弹窗统一展示属性、耐久和售价前后变化。
+`ForgePanel` 维护一个主锻造槽、五个牺牲槽、来源查询、多选词条筛选和动画状态，真实规则集中在无 UI 依赖的 `ForgeService`。主锻造槽、牺牲槽与来源列表全部固定复用 160×72 像素 `ItemCardView`，旧 `forge_slot_size` 参数仅保留调用兼容，不能再改变物品卡片尺寸；选择背包来源时下方区域使用左右分栏，左侧独立滚动装备栏复用 `EquipmentStorageSlotControl` 的真实点击和拖拽协议，右侧独立显示背包物品，仓库来源则隐藏左栏并使用完整宽度。装备来源通过 `ranged_N`、`melee` 和 `armor_部位` 稳定标识参与与背包、仓库相同的所有权校验和原子消费；合法装备保持标准原色，只有不兼容装备使用灰色遮罩，不再显示绿色目标高亮。来源列表使用居中流式布局按可用宽度自动换行；顶部中心牺牲槽额外上移 16 像素，右下与左下两个牺牲槽额外下移 24 像素，避免与主锻造槽重叠。槽位仅保存资源实例与原来源引用。主锻造槽可放武器或装备，两类物品可跨类型互相作为耐久牺牲品并提供当前耐久的 10%；耐久溢出部分不恢复、不计费但不会把正耐久牺牲品判为无效。武器强化石只强化武器，装备强化石只强化装备，初级、中级、高级、极品强化石基础费用为 2、5、10、20 金币，总费用按主物品价值倍率计算。使用强化石时，每条兼容词条按规则目录调用乘算或加算公式，不兼容词条跳过；结果弹窗分别用百分比或百分点展示实际幅度。装备耐久值词条改变有效耐久上限，锻造修复和结果读取同一最终上限。主锻造槽放初级、中级或高级强化石时进入升阶模式，牺牲槽只接受同品质强化石，每颗提供 20% 成功率，最高 100%，不收取金币；成功按“初级→中级→高级→极品”替换一颗主石，高级升极品时移除原削弱词条并按剩余词条数重算售价，失败消耗全部牺牲石并保留主石。主锻造槽确定后，背包、装备栏、仓库候选和槽内失效牺牲品都使用统一灰色遮罩且禁用开始按钮；仓库、战斗背包和锻造来源列表的“强化筛选”都在切回摘要项后按筛选集合重新同步复选框，已选属性方向始终可见。锻造结果弹窗统一展示属性、耐久和售价前后变化。
 
 ## 暂停与设置
 
@@ -261,12 +261,12 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 - 怪物：`max_health`、`current_health`、`weapon_drop_chance`、`attack_damage`、`toughness`、`attack_impact_force`、`move_speed`、`move_speed_random_multiplier_min`、`move_speed_random_multiplier_max`、`vision_range`、`attack_range`、`attack_cooldown`、`attack_cooldown_random_multiplier_min`、`attack_cooldown_random_multiplier_max`、`lose_target_range_multiplier`、`vision_requires_line_of_sight`、`vision_line_of_sight_collision_mask`、`vision_loss_grace_duration`、`target_memory_duration`、`target_prediction_time`、`target_prediction_max_distance`、`occlusion_break_forget_count`、`medium_memory_duration`、`long_term_region_radius`、`solid_wall_group`、`ai_update_interval`、`hide_when_simulation_inactive`、`disable_collision_when_simulation_inactive`、`tactical_search_near_radius`、`tactical_search_middle_radius`、`tactical_search_far_radius`、`search_points_before_ambush`、`patrol_route_path`、`patrol_route_loop`、`wander_radius`、`wander_speed_multiplier`、`pathfinding_enabled`、`pathfinding_cell_size`、`pathfinding_agent_radius`、`path_recalculation_min_interval`、`path_recalculation_max_interval`、`stuck_detection_time`、`knockback_decay`、`perception_component_path`、`movement_component_path`、`tactical_component_path`、`hit_effect_color`、`death_effect_color`
 - 远程怪物：`projectile_scene`、`shoot_range`、`keep_distance`、`ranged_projectile_speed`、`ranged_projectile_damage`、`ranged_projectile_range`、`ranged_projectile_impact_force`、`ranged_projectile_spread_degrees`、`shoot_cooldown`、`shoot_cooldown_random_multiplier_min`、`shoot_cooldown_random_multiplier_max`、`muzzle_offset`、`line_of_sight_collision_mask`、`projectile_parent_path`
 - 战斗地图：`grid_size`、`grid_extent`、`map_seed`、`base_floor_color`、`grid_color`、`axis_color`、`player_camera_path`、`exploration_cell_size`、`exploration_radius`、`exploration_update_interval`、`exploration_update_distance`、`boundary_wall_thickness`、`boundary_wall_color`、`extraction_spawn_time_seconds`、`extraction_map_marker_time_seconds`、`extraction_hold_duration_seconds`、`extraction_radius`、`extraction_spawn_edge_margin`、`extraction_spawn_min_distance_from_player`、`extraction_spawn_attempt_count`、`extraction_fill_color`、`extraction_ring_color`
-- 强化石掉落：`enhancement_stone_drop_chance`、`enhancement_stone_base_sell_price`、`EnhancementRules.QUALITY_WEIGHTS`、`EnhancementRules.QUALITY_CONFIGS`；`enhancement_stone_min_modifier_count`、`enhancement_stone_max_modifier_count`、`enhancement_stone_negative_modifier_chance` 仅保留旧扩展调用兼容，品质规则不再读取它们。
+- 强化石掉落：`enhancement_stone_drop_chance`、`enhancement_stone_base_sell_price`、`EnhancementRules.QUALITY_WEIGHTS`、`EnhancementRules.QUALITY_CONFIGS`、`EnhancementRules.MULTIPLICATIVE_MAGNITUDE_RANGES`、`EnhancementRules.ADDITIVE_POINT_MAGNITUDE_RANGES`；`enhancement_stone_min_modifier_count`、`enhancement_stone_max_modifier_count`、`enhancement_stone_negative_modifier_chance` 仅保留旧扩展调用兼容，品质规则不再读取它们。
 - 敌人生成与加载：`monster_scene`、`monster_scenes`、`monster_spawn_count`、`monster_spawn_min_distance`、`monster_spawn_max_distance`、`monster_spawn_across_full_map`、`monster_spawn_edge_margin`、`monster_minimum_alive_count`、`monster_population_first_milestone_seconds`、`monster_population_five_minute_count`、`monster_population_second_milestone_seconds`、`monster_population_ten_minute_count`、`monster_replenish_interval`、`monster_replenish_batch_size`、`monster_spawn_variation_ratio`、`monster_parent_path`、`monster_simulation_manager_path`、`active_radius`、`sleep_hysteresis`、`update_interval`、`monsters_per_update`、`materializations_per_update`、`max_materialized_monsters`
 - 掉落物：`drop_parent_path`、`weapon_drop_scene`、`weapon_drop_table`、`dropped_weapon_scatter_radius`、`monster_drop_launch_duration_min`、`monster_drop_launch_duration_max`、`monster_drop_launch_arc_height_min`、`monster_drop_launch_arc_height_max`、`weapon_data`、`pickup_radius`、`bob_amplitude`、`bob_speed`
 - 环境生成：`environment_parent_path`、`obstacle_scenes`、`obstacle_spawn_count`、`obstacle_spawn_min_distance_from_player`、`obstacle_spawn_edge_margin`、`obstacle_spawn_min_spacing`、`obstacle_spawn_attempts_per_item`、`obstacle_scale_min`、`obstacle_scale_max`
 - 角色占位属性：`stelle_max_health`、`stelle_max_energy`、`stelle_move_speed`、`caelus_max_health`、`caelus_max_energy`、`caelus_move_speed`、`silver_wolf_max_health`、`silver_wolf_max_energy`、`silver_wolf_move_speed`
-- 武器数据：`weapon_type`、`sell_price`、`max_durability`、`current_durability`、`durability_cost_per_use`、`energy_cost`、`projectile_speed`、`bullet_range`、`ranged_damage`、`ranged_cooldown`、`spread_degrees`、`recoil_force`、`front_recoil_force`、`impact_force`、`melee_damage`、`melee_cooldown`、`melee_active_duration`
+- 武器数据：`weapon_type`、`sell_price`、`max_durability`、`current_durability`、`energy_cost`、`projectile_speed`、`bullet_range`、`ranged_damage`、`ranged_cooldown`、`spread_degrees`、`recoil_force`、`front_recoil_force`、`impact_force`、`melee_damage`、`melee_cooldown`、`melee_active_duration`
 - 主菜单入口：`character_select_scene_path`、`WarehouseButton`、`ShopButton`、`ForgeButton`、`DEVELOPER_UNLOCK_SEQUENCE`
 - 全局仓库：`SAVE_PATH`、`DEFAULT_RANGED_SLOT_COUNT`、`WEAPON_RESOURCE_PATHS`、`DEFAULT_BACKPACK_WEAPON_IDS`、`DEFAULT_RANGED_WEAPON_IDS`、`DEFAULT_MELEE_WEAPON_ID`、`DEFAULT_STARTING_COINS`
 - 仓库与开发者面板：`panel_minimum_size`、`dialog_width`、`dialog_height`、`dialog_background_alpha`、`combat_panel_height`、`coin_step`、`enhancement_stone_grant_count`

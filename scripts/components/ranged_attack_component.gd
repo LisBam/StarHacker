@@ -82,7 +82,8 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	if projectile.has_method("set_impact_force"):
 		projectile.call("set_impact_force", selected_impact_force)
 	if projectile.has_method("configure_combat_attributes"):
-		projectile.call("configure_combat_attributes", _get_owner_attack_power(), _get_weapon_float(weapon_data, "critical_chance", 0.0) + _get_stats_float("get_equipment_critical_chance", 0.0), _get_weapon_float(weapon_data, "critical_damage", 1.5) + _get_stats_float("get_equipment_critical_damage", 0.0))
+		# 最终暴击率；武器与装备百分点相加后统一限制到 0% 至 100%，超过上限的部分不参与判定。
+		projectile.call("configure_combat_attributes", _get_owner_attack_power(), clampf(_get_weapon_float(weapon_data, "critical_chance", 0.0) + _get_stats_float("get_equipment_critical_chance", 0.0), 0.0, EnhancementRules.CRITICAL_CHANCE_MAXIMUM), _get_weapon_float(weapon_data, "critical_damage", 1.5) + _get_stats_float("get_equipment_critical_damage", 0.0))
 
 	projectile.global_position = spawn_position
 	projectile.global_rotation = resolved_direction.angle()

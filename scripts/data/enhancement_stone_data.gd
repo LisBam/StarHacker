@@ -6,6 +6,9 @@ class_name EnhancementStoneData
 ## 品质化强化石使用“品质 + 属性 + 实际百分比”作为堆叠条件，增强词条始终排在削弱词条之前。
 ## 方向化重构后堆叠条件改为“品质 + 属性 + 方向”，同组每颗强化石使用时都会重新随机具体幅度。
 
+## 单词条标准售价；固定 30 金币，生成和升阶都按最终词条数量重新计算总售价。
+const SELL_PRICE_PER_MODIFIER: int = 30
+
 ## 物品类型；固定为 enhancement_stone，供库存、分类和 UI 与武器资源解耦识别。
 @export var item_kind: String = "enhancement_stone"
 ## 强化石品质标识；取值为 low、medium、high 或 supreme，默认 low 用于旧存档迁移。
@@ -19,7 +22,7 @@ class_name EnhancementStoneData
 ## 强化石图标文本；默认菱形符号，地面掉落和资源方格共用该简写。
 @export var icon_text: String = "◆"
 ## 单颗基础售价；取值大于等于 0，实际出售整组时会乘以堆叠数量。
-@export_range(0, 999999, 1) var sell_price: int = 30
+@export_range(0, 999999, 1) var sell_price: int = SELL_PRICE_PER_MODIFIER
 ## 强化方向词典；键为统一属性名，值只使用 +1 或 -1，旧存档百分比会按正负号自动归一化。
 @export var modifiers: Dictionary = {}
 
@@ -87,6 +90,17 @@ func create_upgraded_copy() -> EnhancementStoneData:
 	if upgraded_stone == null:
 		return null
 	upgraded_stone.quality_id = next_quality_id
+	if next_quality_id == EnhancementRules.QUALITY_SUPREME:
+		# 极品词条；移除主石原有削弱方向，确保升阶生成的极品强化石同样遵守“无削弱”规则。
+		var supreme_modifiers: Dictionary = upgraded_stone.get_normalized_modifiers()
+		for raw_stat_name in supreme_modifiers.keys():
+			# 属性名；来自规则目录，用于按玩法利弊识别并移除削弱词条。
+			var stat_name: String = str(raw_stat_name)
+			if not EnhancementRules.is_direction_beneficial(stat_name, supreme_modifiers.get(stat_name, 1)):
+				supreme_modifiers.erase(stat_name)
+		upgraded_stone.modifiers = supreme_modifiers
+	# 升阶售价；严格保持“30 × 最终词条数量”，移除极品削弱词条后不会保留旧的高售价。
+	upgraded_stone.sell_price = SELL_PRICE_PER_MODIFIER * upgraded_stone.get_normalized_modifiers().size()
 	upgraded_stone.display_name = _build_display_name(next_quality_id, upgraded_stone.get_resolved_target_kind())
 	return upgraded_stone
 
@@ -116,7 +130,7 @@ func get_pickup_preview_name() -> String:
 	return "%s（%s）" % [display_name, " ".join(preview_labels)]
 
 
-static func create_random(random_source: RandomNumberGenerator, minimum_modifier_count: int = 1, maximum_modifier_count: int = 3, detrimental_modifier_chance: float = 0.28, base_sell_price: int = 30, requested_target_kind: String = "") -> EnhancementStoneData:
+static func create_random(random_source: RandomNumberGenerator, minimum_modifier_count: int = 1, maximum_modifier_count: int = 3, detrimental_modifier_chance: float = 0.28, base_sell_price: int = SELL_PRICE_PER_MODIFIER, requested_target_kind: String = "") -> EnhancementStoneData:
 	if random_source == null:
 		return null
 	# 兼容参数快照；保留旧调用签名以避免扩展脚本失效，当前词条数和削弱概率完全由品质规则决定。

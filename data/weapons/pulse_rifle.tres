@@ -10,7 +10,6 @@ display_name = "脉冲步枪"
 description = "射速更快但能量消耗更高的远程武器。"
 icon_text = "R"
 sell_price = 120
-durability_cost_per_use = 0.8
 energy_cost = 9.0
 projectile_scene = ExtResource("2_projectile")
 projectile_speed = 1120.0

@@ -201,15 +201,16 @@ func get_defense_power() -> float:
 
 
 func get_dodge_chance() -> float:
-	return clampf(_equipment_dodge_chance, 0.0, 1.0)
+	return clampf(_equipment_dodge_chance, 0.0, EnhancementRules.DODGE_CHANCE_MAXIMUM)
 
 
 func get_equipment_critical_chance() -> float:
-	return maxf(_equipment_critical_chance, 0.0)
+	return clampf(_equipment_critical_chance, 0.0, EnhancementRules.CRITICAL_CHANCE_MAXIMUM)
 
 
 func get_equipment_critical_damage() -> float:
-	return maxf(_equipment_critical_damage, 0.0)
+	# 暴击伤害增量允许为负且不设置上限，使装备削弱词条能正确降低武器暴击倍率。
+	return _equipment_critical_damage
 
 
 func apply_equipment_attributes(attributes: Dictionary) -> void:
@@ -221,9 +222,10 @@ func apply_equipment_attributes(attributes: Dictionary) -> void:
 	_equipment_defense_power = maxf(float(attributes.get("defense_power", 0.0)), 0.0)
 	_equipment_max_health = maxf(float(attributes.get("max_health", 0.0)), 0.0)
 	_equipment_health_regeneration_per_five_seconds = maxf(float(attributes.get("health_regeneration_per_five_seconds", 0.0)), 0.0)
-	_equipment_dodge_chance = clampf(float(attributes.get("dodge_chance", 0.0)), 0.0, 1.0)
-	_equipment_critical_chance = maxf(float(attributes.get("critical_chance", 0.0)), 0.0)
-	_equipment_critical_damage = maxf(float(attributes.get("critical_damage", 0.0)), 0.0)
+	_equipment_dodge_chance = clampf(float(attributes.get("dodge_chance", 0.0)), 0.0, EnhancementRules.DODGE_CHANCE_MAXIMUM)
+	_equipment_critical_chance = clampf(float(attributes.get("critical_chance", 0.0)), 0.0, EnhancementRules.CRITICAL_CHANCE_MAXIMUM)
+	# 装备暴击伤害增量；保留负值且不设置上限，最终与武器暴击伤害直接相加。
+	_equipment_critical_damage = float(attributes.get("critical_damage", 0.0))
 	max_health = base_max_health + _equipment_max_health
 	current_health = clampf(current_health * max_health / old_max_health, 0.0, max_health)
 	_emit_all_stats_changed()

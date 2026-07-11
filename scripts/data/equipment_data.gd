@@ -3,6 +3,7 @@ class_name EquipmentData
 
 ## 装备数据资源描述头部、躯干、腿部和脚部装备的耐久与战斗属性。
 ## 所有数值通过统一有效属性接口读取，强化只累计百分比而不修改基础字段。
+## 公式分类补充：暴击率、暴击伤害和闪避率累计直接百分点，其余属性累计乘算比例，基础字段仍保持不变。
 
 ## 物品类型；固定为 equipment，供库存、装备槽和存档识别。
 @export var item_kind: String = "equipment"
@@ -41,6 +42,7 @@ class_name EquipmentData
 ## 暴击伤害倍率增量；默认 0，0.1 表示在基础 150% 上增加 10 个百分点。
 @export_range(0.0, 9.0, 0.01, "or_greater") var critical_damage: float = 0.0
 ## 累计强化百分比；键为统一属性名，值为相对基础值的小数比例。
+## 加算属性补充：暴击率、暴击伤害和闪避率的值表示直接百分点偏移，例如 0.015 表示 1.5 个百分点。
 @export var enhancement_modifiers: Dictionary = {}
 
 ## 装备通用强化属性；所有部位均可应用。
@@ -59,8 +61,14 @@ func get_enhancement_ratio(stat_name: String) -> float:
 	return float(enhancement_modifiers.get(stat_name, 0.0))
 
 
+func get_maximum_durability() -> float:
+	# 装备耐久上限；读取耐久值乘算词条后的最终结果，最低保持 1，供损耗、修复、锻造和显示统一使用。
+	return maxf(get_effective_stat("max_durability"), 1.0)
+
+
 func get_effective_stat(stat_name: String) -> float:
-	return maxf(get_base_stat(stat_name) * (1.0 + get_enhancement_ratio(stat_name)), 0.0)
+	# 分类公式；暴击率、暴击伤害与闪避率直接加算百分点，其余装备属性继续按基础值乘算。
+	return EnhancementRules.calculate_effective_stat(get_base_stat(stat_name), stat_name, get_enhancement_ratio(stat_name))
 
 
 func can_apply_enhancement(modifiers: Dictionary) -> bool:
@@ -85,9 +93,13 @@ func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
 		# 强化前后数值；始终以基础属性为百分比换算基准。
 		var base_value: float = get_base_stat(stat_name)
 		var before_value: float = get_effective_stat(stat_name)
-		enhancement_modifiers[stat_name] = snappedf(float(enhancement_modifiers.get(stat_name, 0.0)) + modifier_ratio, 0.01)
+		# 累计精度；0.001 可准确保存 0.3 至 0.5 个百分点等加算词条端点。
+		enhancement_modifiers[stat_name] = snappedf(float(enhancement_modifiers.get(stat_name, 0.0)) + modifier_ratio, EnhancementRules.MODIFIER_VALUE_PRECISION)
+		if stat_name == "max_durability":
+			# 当前耐久同步；耐久上限降低时立即限制现值，上限提高时不免费补充新增耐久。
+			set_current_durability(current_durability)
 		var after_value: float = get_effective_stat(stat_name)
-		var change_entry: Dictionary = {"stat_name": stat_name, "modifier_ratio": modifier_ratio, "base_value": base_value, "before_value": before_value, "change_value": after_value - before_value, "after_value": after_value}
+		var change_entry: Dictionary = {"stat_name": stat_name, "modifier_ratio": modifier_ratio, "calculation_mode": EnhancementRules.get_calculation_mode(stat_name), "base_value": base_value, "before_value": before_value, "change_value": after_value - before_value, "after_value": after_value}
 		if EnhancementRules.is_direction_beneficial(stat_name, modifier_ratio):
 			(result["beneficial_changes"] as Array).append(change_entry)
 		else:
@@ -106,13 +118,13 @@ func get_effective_sell_price() -> int:
 	for raw_ratio in enhancement_modifiers.values():
 		modifier_total += float(raw_ratio)
 	# 耐久售价倍率；零耐久保留满耐久有效售价的 10%。
-	var durability_ratio: float = clampf(current_durability / maxf(max_durability, 1.0), 0.0, 1.0)
+	var durability_ratio: float = clampf(current_durability / get_maximum_durability(), 0.0, 1.0)
 	return maxi(roundi(float(sell_price) * maxf(1.0 + modifier_total, 0.1) * lerpf(0.1, 1.0, durability_ratio)), 1) if sell_price > 0 else 0
 
 
 func get_durability_ratio() -> float:
 	# 当前耐久比例；与 WeaponData 使用同一计算规则，供耐久条、售价和通用 UI 读取稳定的 0 到 1 数值。
-	return clampf(current_durability / maxf(max_durability, 1.0), 0.0, 1.0)
+	return clampf(current_durability / get_maximum_durability(), 0.0, 1.0)
 
 
 func is_broken() -> bool:
@@ -120,7 +132,7 @@ func is_broken() -> bool:
 
 
 func set_current_durability(value: float) -> void:
-	current_durability = clampf(value, 0.0, maxf(max_durability, 1.0))
+	current_durability = clampf(value, 0.0, get_maximum_durability())
 
 
 func _is_stat_supported(stat_name: String) -> bool:

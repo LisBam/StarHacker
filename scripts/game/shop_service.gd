@@ -341,7 +341,7 @@ func _apply_random_second_hand_durability(item_resource: Resource) -> void:
 	# 本次消耗比例；默认 10% 至 90%，因此最终剩余耐久为最大值的 10% 至 90%。
 	var consumed_ratio: float = _random.randf_range(minimum_consumption, maximum_consumption)
 	# 最大耐久；武器与装备读取各自模板上限，保证不同耐久规格都按比例随机。
-	var maximum_durability: float = maxf(float(item_resource.get("max_durability")), 1.0)
+	var maximum_durability: float = float(item_resource.call("get_maximum_durability")) if item_resource.has_method("get_maximum_durability") else maxf(float(item_resource.get("max_durability")), 1.0)
 	item_resource.call("set_current_durability", maximum_durability * (1.0 - consumed_ratio))
 
 
@@ -351,7 +351,7 @@ func _repair_invalid_second_hand_durability(item_resource: Resource, is_second_h
 	# 当前耐久；旧商店存档可能已经带二手标记，但仍保存模板满耐久，需要在加载时补齐随机状态。
 	var current_durability: float = maxf(float(item_resource.get("current_durability")), 0.0)
 	# 最大耐久；只修复达到满耐久的异常二手商品，正常随机商品保持原值并继续跨刷新周期稳定保存。
-	var maximum_durability: float = maxf(float(item_resource.get("max_durability")), 1.0)
+	var maximum_durability: float = float(item_resource.call("get_maximum_durability")) if item_resource.has_method("get_maximum_durability") else maxf(float(item_resource.get("max_durability")), 1.0)
 	if current_durability >= maximum_durability or is_equal_approx(current_durability, maximum_durability):
 		_apply_random_second_hand_durability(item_resource)
 		_loaded_state_was_repaired = true
@@ -450,7 +450,7 @@ func _get_full_durability_value(item_resource: Resource) -> int:
 		var valuation_weapon: Resource = item_resource.duplicate(true) as Resource
 		if valuation_weapon == null:
 			return 0
-		valuation_weapon.call("set_current_durability", float(valuation_weapon.get("max_durability")))
+		valuation_weapon.call("set_current_durability", float(valuation_weapon.call("get_maximum_durability")) if valuation_weapon.has_method("get_maximum_durability") else float(valuation_weapon.get("max_durability")))
 		return int(valuation_weapon.call("get_effective_sell_price"))
 	return int(item_resource.call("get_effective_sell_price")) if item_resource.has_method("get_effective_sell_price") else maxi(int(item_resource.get("sell_price")), 0)
 

@@ -506,7 +506,7 @@ func _is_pending_item_usable_on_weapon(weapon_resource: Resource) -> bool:
 		# 当前耐久；修复包只应高亮仍有耐久缺口的武器，满耐久武器不提供无效选择。
 		var current_durability: float = maxf(float(weapon_resource.get("current_durability")), 0.0)
 		# 最大耐久；至少为 1，兼容旧资源字段缺失时的安全读取。
-		var maximum_durability: float = maxf(float(weapon_resource.get("max_durability")), 1.0)
+		var maximum_durability: float = float(weapon_resource.call("get_maximum_durability")) if weapon_resource.has_method("get_maximum_durability") else maxf(float(weapon_resource.get("max_durability")), 1.0)
 		return current_durability < maximum_durability
 	return _pending_stone_resource != null
 

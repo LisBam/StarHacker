@@ -243,6 +243,9 @@ static func _get_entry_durability_ratio(entry: Dictionary) -> float:
 	var item_resource: Resource = entry.get("resource") as Resource
 	if item_resource == null or item_resource.get("current_durability") == null or item_resource.get("max_durability") == null:
 		return -1.0
+	if item_resource.has_method("get_durability_ratio"):
+		# 有效耐久比例；装备接口会纳入耐久上限强化，避免排序仍按模板上限计算。
+		return clampf(float(item_resource.call("get_durability_ratio")), 0.0, 1.0)
 	# 最大耐久；异常非正数按无耐久处理，避免除零并防止损坏数据排到有效物品前方。
 	var maximum_durability: float = float(item_resource.get("max_durability"))
 	if maximum_durability <= 0.0:

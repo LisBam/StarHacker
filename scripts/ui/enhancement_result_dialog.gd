@@ -107,7 +107,10 @@ func _format_change_line(change: Dictionary) -> String:
 	# 强化后数值；包含所有历史强化累计并已应用属性下限。
 	var after_value: float = float(change.get("after_value", 0.0))
 	# 带符号百分比；使用整数百分点对齐强化石生成精度。
-	var percentage_text: String = "%s%d%%" % ["+" if modifier_ratio >= 0.0 else "-", roundi(absf(modifier_ratio) * 100.0)]
+	# 公式类型；加算属性用“百分点”展示，乘算属性继续显示百分比，避免两种幅度被误读为同一公式。
+	var calculation_mode: String = str(change.get("calculation_mode", EnhancementRules.get_calculation_mode(stat_name)))
+	# 带符号幅度；加算区间保留 0.1 个百分点，乘算区间按整数百分比展示。
+	var percentage_text: String = ("%s%.1f 个百分点" % ["+" if modifier_ratio >= 0.0 else "-", absf(modifier_ratio) * 100.0]) if calculation_mode == EnhancementRules.CALCULATION_ADDITIVE_POINTS else ("%s%d%%" % ["+" if modifier_ratio >= 0.0 else "-", roundi(absf(modifier_ratio) * 100.0)])
 	# 带符号变化值；正数显式加号，负数保留减号。
 	var change_text: String = "%s%s" % ["+" if change_value >= 0.0 else "", _format_number(change_value)]
 	# 玩法收益；冷却、能量消耗、扩散和后坐力降低等负方向收益同样使用绿色。

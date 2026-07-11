@@ -6,10 +6,10 @@ class_name ItemActionPopup
 
 signal action_pressed(action_id: int)
 
-## 弹窗固定宽度；默认 116 像素，为上一版紧凑规格的一半，最大限度减少物品界面遮挡。
-@export_range(96.0, 480.0, 1.0) var popup_width: float = 116.0
-## 单个功能按钮最小高度；默认 18 像素，为上一版紧凑规格的一半，适用于短功能文本。
-@export_range(16.0, 72.0, 1.0) var action_button_height: float = 18.0
+## 弹窗固定宽度；默认 104 像素，比上一版进一步缩短横向长度，减少对相邻物品卡片的遮挡。
+@export_range(92.0, 480.0, 1.0) var popup_width: float = 104.0
+## 单个功能按钮最小高度；默认 27 像素，比上一版提高 50%，增强文字可读性和点击稳定性。
+@export_range(20.0, 72.0, 1.0) var action_button_height: float = 27.0
 ## 按钮悬停缩放；默认 1.025，仅提供轻量视觉反馈，不改变弹窗整体布局。
 @export_range(1.0, 1.12, 0.005) var hover_scale: float = 1.025
 ## 按钮按压缩放；默认 0.97，用于确认点击已经被接收。
@@ -50,10 +50,10 @@ func add_action(action_text: String, action_id: int, disabled: bool = false, des
 	var action_button: Button = Button.new()
 	action_button.text = action_text
 	action_button.disabled = disabled
-	action_button.custom_minimum_size = Vector2(popup_width - 8.0, action_button_height)
+	action_button.custom_minimum_size = Vector2(popup_width - 12.0, action_button_height)
 	action_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	action_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	action_button.add_theme_font_size_override("font_size", 8)
+	action_button.add_theme_font_size_override("font_size", 12)
 	_apply_button_styles(action_button, destructive)
 	action_button.mouse_entered.connect(_on_button_mouse_entered.bind(action_button))
 	action_button.mouse_exited.connect(_on_button_mouse_exited.bind(action_button))
@@ -68,8 +68,8 @@ func add_action(action_text: String, action_id: int, disabled: bool = false, des
 func popup_at(screen_position: Vector2) -> void:
 	if _action_count <= 0:
 		return
-	# 弹窗高度；上下边距合计 7 像素，按钮间距每项 2 像素，整体约为上一版的一半。
-	var popup_height: float = 7.0 + float(_action_count) * action_button_height + float(maxi(_action_count - 1, 0)) * 2.0
+	# 弹窗高度；上下边距合计 11 像素，按钮间距每项 3 像素，与按钮尺寸同步提高约 50%。
+	var popup_height: float = 11.0 + float(_action_count) * action_button_height + float(maxi(_action_count - 1, 0)) * 3.0
 	size = Vector2i(roundi(popup_width), roundi(popup_height))
 	position = Vector2i(screen_position)
 	popup()
@@ -81,20 +81,20 @@ func _build_interface() -> void:
 	popup_style.bg_color = Color(0.035, 0.055, 0.075, 0.98)
 	popup_style.border_color = Color(0.38, 0.72, 0.86, 0.95)
 	popup_style.set_border_width_all(2)
-	popup_style.set_corner_radius_all(4)
+	popup_style.set_corner_radius_all(6)
 	popup_style.shadow_color = Color(0.0, 0.0, 0.0, 0.48)
-	popup_style.shadow_size = 3
+	popup_style.shadow_size = 5
 	add_theme_stylebox_override("panel", popup_style)
 	# 外层边距；防止功能按钮紧贴弹窗边框，并为缩放动效保留少量空间。
 	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 4)
-	margin.add_theme_constant_override("margin_top", 3)
-	margin.add_theme_constant_override("margin_right", 4)
-	margin.add_theme_constant_override("margin_bottom", 4)
+	margin.add_theme_constant_override("margin_left", 6)
+	margin.add_theme_constant_override("margin_top", 5)
+	margin.add_theme_constant_override("margin_right", 6)
+	margin.add_theme_constant_override("margin_bottom", 6)
 	add_child(margin)
 	# 操作列表；功能按钮仅纵向排列，避免不同界面自行决定尺寸或间距。
 	_action_list = VBoxContainer.new()
-	_action_list.add_theme_constant_override("separation", 2)
+	_action_list.add_theme_constant_override("separation", 3)
 	margin.add_child(_action_list)
 
 
@@ -121,9 +121,9 @@ func _create_button_style(background_color: Color, border_color: Color) -> Style
 	button_style.bg_color = background_color
 	button_style.border_color = border_color
 	button_style.set_border_width_all(1)
-	button_style.set_corner_radius_all(3)
-	button_style.content_margin_left = 4.0
-	button_style.content_margin_right = 4.0
+	button_style.set_corner_radius_all(5)
+	button_style.content_margin_left = 6.0
+	button_style.content_margin_right = 6.0
 	return button_style
 
 

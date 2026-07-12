@@ -316,6 +316,14 @@ func _build_interface() -> void:
 	equipment_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	equipment_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	equipment_columns.add_child(equipment_scroll)
+	# 装备卡牌悬浮安全边距；避免一列装备卡牌放大时被滚动区顶部、底部或侧边裁剪。
+	var equipment_scroll_margin: MarginContainer = MarginContainer.new()
+	equipment_scroll_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	equipment_scroll_margin.add_theme_constant_override("margin_left", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	equipment_scroll_margin.add_theme_constant_override("margin_top", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	equipment_scroll_margin.add_theme_constant_override("margin_right", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	equipment_scroll_margin.add_theme_constant_override("margin_bottom", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	equipment_scroll.add_child(equipment_scroll_margin)
 	# 背包装备栏网格；一列展示真实装备槽控件，保持装备来源和交互语义清晰。
 	_equipment_grid = HFlowContainer.new()
 	_equipment_grid.alignment = FlowContainer.ALIGNMENT_CENTER
@@ -323,7 +331,7 @@ func _build_interface() -> void:
 	_equipment_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_equipment_grid.add_theme_constant_override("h_separation", 8)
 	_equipment_grid.add_theme_constant_override("v_separation", 6)
-	equipment_scroll.add_child(_equipment_grid)
+	equipment_scroll_margin.add_child(_equipment_grid)
 	# 右侧物品滚动网格；背包或仓库候选始终在独立区域展示，已选武器隐藏，强化石按剩余数量显示。
 	# 流式布局补充：当前按可用宽度自动换行并逐行居中，不再限制双列。
 	var inventory_scroll: ScrollContainer = ScrollContainer.new()
@@ -332,13 +340,21 @@ func _build_interface() -> void:
 	inventory_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	inventory_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_inventory_split.add_child(inventory_scroll)
+	# 来源物品悬浮安全边距；为仓库与背包候选卡牌统一保留四周放大空间。
+	var inventory_scroll_margin: MarginContainer = MarginContainer.new()
+	inventory_scroll_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	inventory_scroll_margin.add_theme_constant_override("margin_left", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	inventory_scroll_margin.add_theme_constant_override("margin_top", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	inventory_scroll_margin.add_theme_constant_override("margin_right", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	inventory_scroll_margin.add_theme_constant_override("margin_bottom", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	inventory_scroll.add_child(inventory_scroll_margin)
 	_item_grid = HFlowContainer.new()
 	_item_grid.alignment = FlowContainer.ALIGNMENT_CENTER
 	_item_grid.last_wrap_alignment = FlowContainer.LAST_WRAP_ALIGNMENT_CENTER
 	_item_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_item_grid.add_theme_constant_override("h_separation", 8)
 	_item_grid.add_theme_constant_override("v_separation", 6)
-	inventory_scroll.add_child(_item_grid)
+	inventory_scroll_margin.add_child(_item_grid)
 	_status_label = Label.new()
 	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

@@ -36,7 +36,12 @@ var _selected_stock_id: String = "quantum_arms"
 ## 股票列表控件；键为股票标识，值为承载标准 ItemCardView 的可点击按钮。
 var _stock_buttons: Dictionary = {}
 ## 持仓卡片容器；行情或交易变化时清空并按五只股票稳定顺序重建。
+## 原位刷新补充：当前容器中的卡片按股票标识长期复用，行情变化只更新文本和视觉状态，不再清空重建。
 var _holdings_container: HBoxContainer
+## 持仓卡片按钮表；键为稳定股票标识，值为长期复用的透明按钮宿主，数量归零时只隐藏不释放。
+var _holding_buttons: Dictionary = {}
+## 空持仓提示标签；默认创建后按可见持仓数量切换，不与持仓卡片反复销毁重建。
+var _empty_holdings_label: Label
 ## 当前股票标题；显示名称和对应玩法模块。
 var _selected_title_label: Label
 ## 当前行情摘要；显示单价、最近涨跌幅和当前大盘状态。
@@ -246,9 +251,21 @@ func _build_interface() -> void:
 	holdings_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	holdings_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	root_content.add_child(holdings_scroll)
+	# 持仓悬浮安全边距；四周预留标准 4 像素空间，避免滚动容器裁剪 1.03 倍放大后的卡牌边缘。
+	var holdings_margin: MarginContainer = MarginContainer.new()
+	holdings_margin.add_theme_constant_override("margin_left", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	holdings_margin.add_theme_constant_override("margin_top", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	holdings_margin.add_theme_constant_override("margin_right", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	holdings_margin.add_theme_constant_override("margin_bottom", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	holdings_scroll.add_child(holdings_margin)
 	_holdings_container = HBoxContainer.new()
 	_holdings_container.add_theme_constant_override("separation", 8)
-	holdings_scroll.add_child(_holdings_container)
+	holdings_margin.add_child(_holdings_container)
+	_empty_holdings_label = Label.new()
+	_empty_holdings_label.text = "当前没有股票持仓"
+	_empty_holdings_label.custom_minimum_size = Vector2(260.0, 72.0)
+	_empty_holdings_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_holdings_container.add_child(_empty_holdings_label)
 	_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as ConfirmationDialog
 	_quantity_dialog.connect("quantity_confirmed", Callable(self, "_on_trade_quantity_confirmed"))
 	_quantity_dialog.canceled.connect(_on_trade_canceled)
@@ -306,6 +323,27 @@ func _create_stock_card_button(stock_id: String) -> Button:
 	button.add_child(card)
 	_stock_buttons[stock_id] = button
 	return button
+
+
+func _create_holding_card_button(stock_id: String) -> Button:
+	## 创建一次可长期复用的持仓按钮；实时行情只更新其内部卡牌内容，避免鼠标悬浮状态随节点重建丢失。
+	# 持仓按钮宿主；自身透明，只负责选择股票、鼠标悬浮和标准卡牌交互动画。
+	var host: Button = Button.new()
+	host.name = "Holding_%s" % stock_id
+	host.custom_minimum_size = CARD_SIZE
+	host.flat = true
+	host.focus_mode = Control.FOCUS_NONE
+	host.pressed.connect(_on_stock_selected.bind(stock_id))
+	host.mouse_entered.connect(_on_holding_card_hovered.bind(host, true))
+	host.mouse_exited.connect(_on_holding_card_hovered.bind(host, false))
+	# 持仓标准卡牌；空资源展示模式允许股数、成本、现价和浮动盈亏按实时行情原位刷新。
+	var card: Control = ITEM_CARD_VIEW_SCRIPT.new() as Control
+	card.name = "Card"
+	card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.add_child(card)
+	_holding_buttons[stock_id] = host
+	_holdings_container.add_child(host)
+	return host
 
 
 func _refresh_all() -> void:
@@ -399,17 +437,28 @@ func _refresh_selected_stock() -> void:
 
 
 func _refresh_holdings() -> void:
-	for child in _holdings_container.get_children():
-		child.queue_free()
+	# 已创建持仓按钮；刷新开始时统一隐藏，随后只重新显示当前数量大于 0 的股票。
+	# 可见性稳定补充：当前不再执行统一隐藏，已有正持仓卡牌在每秒刷新前后始终保持 visible=true，避免触发鼠标离开。
+	# 可见持仓数量；用于控制空状态提示，不依赖容器子节点总数。
+	var visible_holding_count: int = 0
 	# 股票静态目录；按服务稳定顺序筛选非空持仓并建立底部卡片。
 	var definitions: Dictionary = _stock_market_service.call("get_stock_definitions") as Dictionary
 	for stock_id in definitions.keys():
 		# 当前遍历股票持仓；数量为 0 时不创建空卡片。
 		var holding: Dictionary = _get_holding(str(stock_id))
+		# 当前股票持仓按钮；首次刷新即按股票目录顺序创建，未持有时保持隐藏以稳定后续显示顺序。
+		var host: Button = _holding_buttons.get(str(stock_id)) as Button
+		if host == null:
+			host = _create_holding_card_button(str(stock_id))
 		# 当前遍历持股数量；只展示正整数持仓。
 		var quantity: int = int(holding.get("quantity", 0))
-		if quantity <= 0:
+		# 当前卡牌目标可见性；只在持仓跨越 0 边界时修改，实时价格与盈亏刷新期间不会反复隐藏和显示。
+		var should_show_holding: bool = quantity > 0
+		if host.visible != should_show_holding:
+			host.visible = should_show_holding
+		if not should_show_holding:
 			continue
+		visible_holding_count += 1
 		# 当前遍历股票快照；提供名称和最新价格。
 		var snapshot: Dictionary = _stock_market_service.call("get_stock_snapshot", str(stock_id)) as Dictionary
 		# 当前遍历加权成本；包含买入手续费。
@@ -423,28 +472,16 @@ func _refresh_holdings() -> void:
 		# 当前遍历盈亏颜色；与右侧持仓摘要保持一致。
 		var profit_color: String = "green" if profit > 0.0 else ("red" if profit < 0.0 else "white")
 		# 持仓卡片按钮；透明宿主只负责点击切换、悬浮动画和键盘焦点隔离，不直接执行买卖。
-		var host: Button = Button.new()
-		host.custom_minimum_size = CARD_SIZE
-		host.flat = true
-		host.focus_mode = Control.FOCUS_NONE
-		host.pressed.connect(_on_stock_selected.bind(str(stock_id)))
-		host.mouse_entered.connect(_on_holding_card_hovered.bind(host, true))
-		host.mouse_exited.connect(_on_holding_card_hovered.bind(host, false))
+		# 原位复用补充：首次持有时创建按钮，后续每秒行情刷新继续使用同一节点和当前缩放状态。
 		# 持仓标准卡片；通过空资源模式展示价格、数量、成本和盈亏。
-		var card: Control = ITEM_CARD_VIEW_SCRIPT.new() as Control
-		card.name = "Card"
-		card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		host.add_child(card)
+		var card: Control = host.get_node_or_null("Card") as Control
 		card.call("configure", null, 1, "%s · %d股" % [str(snapshot.get("name", "股票")), quantity], "成本 %.2f  [color=%s]%+.2f / %+.2f%%[/color]" % [average_cost, profit_color, profit, profit_ratio * 100.0], "%.2f 证券币" % current_price)
 		card.call("set_visual_state", str(stock_id) == _selected_stock_id, false)
-		_holdings_container.add_child(host)
-	if _holdings_container.get_child_count() == 0:
+	if visible_holding_count == 0:
 		# 空持仓提示；在没有任何股票时替代卡片列表。
-		var empty_label: Label = Label.new()
-		empty_label.text = "当前没有股票持仓"
-		empty_label.custom_minimum_size = Vector2(260.0, 72.0)
-		empty_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		_holdings_container.add_child(empty_label)
+		_empty_holdings_label.visible = true
+	else:
+		_empty_holdings_label.visible = false
 
 
 func _get_holding(stock_id: String) -> Dictionary:

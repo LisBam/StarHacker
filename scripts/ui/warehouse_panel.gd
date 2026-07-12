@@ -304,6 +304,8 @@ func _build_storage_interface() -> void:
 
 	_warehouse_scroll = ScrollContainer.new()
 	_warehouse_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_warehouse_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_warehouse_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_ALWAYS
 	content.add_child(_warehouse_scroll)
 	_warehouse_drop_area = STORAGE_DROP_AREA_SCRIPT.new() as PanelContainer
 	_warehouse_drop_area.custom_minimum_size = Vector2(0.0, 220.0)
@@ -322,6 +324,7 @@ func _build_storage_interface() -> void:
 	_backpack_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_backpack_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_backpack_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_backpack_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_ALWAYS
 	content.add_child(_backpack_scroll)
 	_backpack_section = VBoxContainer.new()
 	_backpack_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -359,6 +362,8 @@ func _build_storage_interface() -> void:
 	var carried_scroll: ScrollContainer = ScrollContainer.new()
 	carried_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	carried_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	carried_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	carried_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_ALWAYS
 	carried_columns.add_child(carried_scroll)
 	_carried_drop_area = STORAGE_DROP_AREA_SCRIPT.new() as PanelContainer
 	_carried_drop_area.custom_minimum_size = Vector2(0.0, 215.0)

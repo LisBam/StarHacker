@@ -28,6 +28,8 @@ const STORAGE_DROP_AREA_SCRIPT: Script = preload("res://scripts/ui/storage_drop_
 const ITEM_ACTION_POPUP_SCRIPT: Script = preload("res://scripts/ui/item_action_popup.gd")
 ## 数量选择弹窗脚本；堆叠物品部分丢弃时复用战斗背包相同数量输入界面。
 const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
+## 角色属性面板脚本；共享背包在主菜单和战斗中复用同一三值属性展示组件。
+const CHARACTER_STATS_PANEL_SCRIPT: Script = preload("res://scripts/ui/character_stats_panel.gd")
 ## 装备操作编号；背包武器或装备点击后按类型进入对应装备槽。
 const ACTION_EQUIP: int = 1
 ## 远程装备槽一操作编号；远程武器可明确选择第一个远程槽。
@@ -50,6 +52,20 @@ const ACTION_USE_REPAIR_KIT: int = 7
 var _global_inventory: Node
 ## 左侧装备栏列表；每次装备变化后完整重建，保持槽位顺序稳定。
 var _equipment_list: VBoxContainer
+## 左侧装备页滚动容器；切换到角色页时隐藏，垂直滚动条始终可拖动。
+var _equipment_scroll: ScrollContainer
+## 左侧角色属性页；展示总值、基础值和装备贡献，切换到装备页时隐藏。
+var _character_stats_panel: CharacterStatsPanel
+## 左侧角色页滚动容器；窄栏文本换行后仍可拖动查看全部九项属性。
+var _character_scroll: ScrollContainer
+## 角色页签按钮；用于显示角色属性并同步按钮禁用状态。
+var _character_tab_button: Button
+## 装备页签按钮；默认选中并显示现有装备槽列表。
+var _equipment_tab_button: Button
+## 战斗属性组件；默认空表示主菜单上下文，由 CombatHud 在加入场景树前注入。
+var _runtime_stats_component: Node
+## 战斗装备组件；默认空表示主菜单上下文，由 CombatHud 在加入场景树前注入。
+var _runtime_equipment_component: Node
 ## 右侧背包物品网格；按真实背包顺序显示全部物品。
 var _item_grid: HFlowContainer
 ## 背包拖放区域；接收装备拖到右侧空白处的卸下操作和背包内部排序。
@@ -115,6 +131,14 @@ func _ready() -> void:
 func configure_context(context_mode: String) -> void:
 	# 上下文模式；只接受主菜单或战斗两个稳定值，异常输入回退主菜单安全策略。
 	_context_mode = context_mode if context_mode in [CONTEXT_MAIN_MENU, CONTEXT_COMBAT] else CONTEXT_MAIN_MENU
+
+
+func configure_runtime_character_components(stats_component: Node, equipment_component: Node) -> void:
+	## 注入战斗中的实时角色组件；主菜单不调用并自动读取角色档案与全局装备。
+	_runtime_stats_component = stats_component
+	_runtime_equipment_component = equipment_component
+	if _character_stats_panel != null:
+		_character_stats_panel.configure_runtime_components(_runtime_stats_component, _runtime_equipment_component)
 
 
 func refresh() -> void:
@@ -221,9 +245,29 @@ func _build_interface() -> void:
 	var equipment_panel: PanelContainer = PanelContainer.new()
 	equipment_panel.custom_minimum_size = Vector2(196.0, 0.0)
 	split.add_child(equipment_panel)
-	var equipment_scroll: ScrollContainer = ScrollContainer.new()
-	equipment_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	equipment_panel.add_child(equipment_scroll)
+	# 左侧页面根容器；页签固定在滚动内容上方，切换页面不会改变左右分栏结构。
+	var equipment_pages: VBoxContainer = VBoxContainer.new()
+	equipment_pages.add_theme_constant_override("separation", 6)
+	equipment_panel.add_child(equipment_pages)
+	# 左侧页签栏；“装备”默认选中，保持首次打开背包时与旧版一致。
+	var equipment_tabs: HBoxContainer = HBoxContainer.new()
+	equipment_tabs.alignment = BoxContainer.ALIGNMENT_CENTER
+	equipment_pages.add_child(equipment_tabs)
+	_character_tab_button = Button.new()
+	_character_tab_button.text = "角色"
+	_character_tab_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_character_tab_button.pressed.connect(_show_character_page)
+	equipment_tabs.add_child(_character_tab_button)
+	_equipment_tab_button = Button.new()
+	_equipment_tab_button.text = "装备"
+	_equipment_tab_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_equipment_tab_button.pressed.connect(_show_equipment_page)
+	equipment_tabs.add_child(_equipment_tab_button)
+	_equipment_scroll = ScrollContainer.new()
+	_equipment_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_equipment_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_equipment_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_ALWAYS
+	equipment_pages.add_child(_equipment_scroll)
 	# 左侧装备卡牌悬浮安全边距；滚动容器四周预留 4 像素，确保 1.03 倍放大不会被装备栏边框裁剪。
 	var equipment_scroll_margin: MarginContainer = MarginContainer.new()
 	equipment_scroll_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -231,16 +275,35 @@ func _build_interface() -> void:
 	equipment_scroll_margin.add_theme_constant_override("margin_top", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
 	equipment_scroll_margin.add_theme_constant_override("margin_right", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
 	equipment_scroll_margin.add_theme_constant_override("margin_bottom", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
-	equipment_scroll.add_child(equipment_scroll_margin)
+	_equipment_scroll.add_child(equipment_scroll_margin)
 	_equipment_list = VBoxContainer.new()
 	_equipment_list.alignment = BoxContainer.ALIGNMENT_CENTER
 	_equipment_list.add_theme_constant_override("separation", 6)
 	equipment_scroll_margin.add_child(_equipment_list)
+	_character_scroll = ScrollContainer.new()
+	_character_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_character_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_character_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_ALWAYS
+	_character_scroll.visible = false
+	equipment_pages.add_child(_character_scroll)
+	_character_stats_panel = CHARACTER_STATS_PANEL_SCRIPT.new() as CharacterStatsPanel
+	_character_stats_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_character_stats_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_character_stats_panel.configure_runtime_components(_runtime_stats_component, _runtime_equipment_component)
+	_character_scroll.add_child(_character_stats_panel)
+	_show_equipment_page()
+	# 背包物品滚动区；滚动条始终显示，可用鼠标直接拖动浏览大量物品。
+	var backpack_scroll: ScrollContainer = ScrollContainer.new()
+	backpack_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	backpack_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	backpack_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	backpack_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_ALWAYS
+	split.add_child(backpack_scroll)
 	_backpack_drop_area = STORAGE_DROP_AREA_SCRIPT.new() as PanelContainer
 	_backpack_drop_area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_backpack_drop_area.call("configure", "backpack", 4)
 	_backpack_drop_area.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
-	split.add_child(_backpack_drop_area)
+	backpack_scroll.add_child(_backpack_drop_area)
 	# 物品网格；由通用拖放区域内部创建，整个右侧空白都可接收装备卸下。
 	_item_grid = _backpack_drop_area.call("get_content_container") as HFlowContainer
 	_action_popup = ITEM_ACTION_POPUP_SCRIPT.new() as ItemActionPopup
@@ -254,6 +317,23 @@ func _build_interface() -> void:
 	content.add_child(_status_label)
 
 
+func _show_character_page() -> void:
+	## 显示角色属性页并刷新当前快照；选中的页签禁用，明确当前页面状态。
+	_equipment_scroll.visible = false
+	_character_scroll.visible = true
+	_character_tab_button.disabled = true
+	_equipment_tab_button.disabled = false
+	_character_stats_panel.refresh()
+
+
+func _show_equipment_page() -> void:
+	## 显示现有装备槽列表；首次打开背包默认进入此页。
+	_equipment_scroll.visible = true
+	_character_scroll.visible = false
+	_character_tab_button.disabled = false
+	_equipment_tab_button.disabled = true
+
+
 func _connect_inventory_signals() -> void:
 	if _global_inventory == null:
 		return
@@ -265,6 +345,8 @@ func _connect_inventory_signals() -> void:
 func _refresh_all() -> void:
 	_rebuild_equipment()
 	_rebuild_items()
+	if _character_stats_panel != null:
+		_character_stats_panel.refresh()
 
 
 func _rebuild_equipment() -> void:

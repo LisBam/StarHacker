@@ -64,6 +64,12 @@ func get_character_profile(character_id: String) -> Dictionary:
 			"max_health": 150.0,
 			"max_energy": 95.0,
 			"move_speed": 300.0,
+			"attack_power": 95.0,
+			"defense_power": 10.0,
+			"health_regeneration_per_five_seconds": 0.0,
+			"vision_range": 1.0,
+			"dodge_chance": 0.0,
+			"energy_regeneration": 18.0,
 			"passive": "被动技能：待配置",
 			"active": "主动技能：待配置"
 		}
@@ -76,6 +82,12 @@ func get_character_profile(character_id: String) -> Dictionary:
 			"max_health": 105.0,
 			"max_energy": 155.0,
 			"move_speed": 355.0,
+			"attack_power": 110.0,
+			"defense_power": 2.0,
+			"health_regeneration_per_five_seconds": 0.0,
+			"vision_range": 1.0,
+			"dodge_chance": 0.0,
+			"energy_regeneration": 18.0,
 			"passive": "被动技能：待配置",
 			"active": "主动技能：待配置"
 		}
@@ -88,6 +100,12 @@ func get_character_profile(character_id: String) -> Dictionary:
 		"max_health": 130.0,
 		"max_energy": 110.0,
 		"move_speed": 320.0,
+		"attack_power": 100.0,
+		"defense_power": 5.0,
+		"health_regeneration_per_five_seconds": 0.0,
+		"vision_range": 1.0,
+		"dodge_chance": 0.0,
+		"energy_regeneration": 18.0,
 		"passive": "被动技能：待配置",
 		"active": "主动技能：待配置"
 	}

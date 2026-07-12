@@ -546,6 +546,7 @@ func _build_shared_backpack_panel() -> void:
 	if shared_panel == null:
 		return
 	shared_panel.configure_context(SharedBackpackPanel.CONTEXT_COMBAT)
+	shared_panel.configure_runtime_character_components(_stats_component, _equipment_component)
 	shared_panel.anchor_left = 0.5
 	shared_panel.anchor_top = 0.5
 	shared_panel.anchor_right = 0.5

@@ -587,6 +587,17 @@ func adjust_coins(amount: int) -> int:
 	return _coins
 
 
+func set_coins(amount: int) -> int:
+	## 直接设置局外金币余额；开发者数值工具使用该原子接口，负数统一限制为 0，并立即触发存档与界面刷新。
+	var resolved_coins: int = maxi(amount, 0)
+	if resolved_coins == _coins:
+		return _coins
+	_coins = resolved_coins
+	_queue_save_inventory()
+	coins_changed.emit()
+	return _coins
+
+
 func purchase_resource_to_warehouse(item_resource: Resource, purchase_price: int, quantity: int = 1) -> bool:
 	if item_resource == null or purchase_price < 0 or quantity <= 0 or _coins < purchase_price:
 		return false

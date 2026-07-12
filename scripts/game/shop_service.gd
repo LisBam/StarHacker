@@ -9,8 +9,8 @@ signal refresh_state_changed
 
 ## 商店独立存档路径；保存当前库存、刷新截止时间和最近五次失败灰市批次。
 const SAVE_PATH: String = "user://shop_state.json"
-## 商店存档版本；版本 1 保存普通库存、手动刷新次数和灰市滚动批次。
-const SAVE_VERSION: int = 1
+## 商店存档版本；版本 2 在新增稀有强化词条后重建旧版普通商品池，同时保留灰市与刷新状态。
+const SAVE_VERSION: int = 2
 ## 强化石随机生成的单词条基础售价；默认 30 金币，与战斗掉落规则一致。
 const STONE_BASE_SELL_PRICE: int = 30
 ## 强化石随机生成兼容最少词条数；实际词条数由品质规则决定，该值用于保持统一调用签名。
@@ -508,6 +508,8 @@ func _load_state() -> bool:
 		return false
 	# 商店存档字典；当前版本只读取已知字段，新增字段可向后兼容。
 	var save_data: Dictionary = parsed_data as Dictionary
+	# 已保存版本；版本 1 的普通库存创建于新稀有词条加入前，需要在完成灰市恢复后触发一次正常库存重建。
+	var saved_version: int = maxi(int(save_data.get("version", 1)), 1)
 	_next_automatic_refresh_unix = int(save_data.get("next_automatic_refresh_unix", 0))
 	_manual_refresh_count = maxi(int(save_data.get("manual_refresh_count", 0)), 0)
 	_entry_sequence = maxi(int(save_data.get("entry_sequence", 0)), 0)
@@ -530,7 +532,7 @@ func _load_state() -> bool:
 					restored_group_entries.append(restored_entry)
 		if not restored_group_entries.is_empty():
 			_gray_market_failure_groups.append({"group_id": str((raw_group as Dictionary).get("group_id", _create_unique_id("failure"))), "entries": restored_group_entries})
-	return not _shop_stock.is_empty()
+	return not _shop_stock.is_empty() and saved_version >= SAVE_VERSION
 
 
 func _serialize_stock_entry(entry: Dictionary) -> Dictionary:

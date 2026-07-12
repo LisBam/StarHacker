@@ -17,7 +17,8 @@ signal combat_failure_losses_recorded(lost_entries: Array)
 const SAVE_PATH: String = "user://global_inventory.json"
 ## 当前库存存档版本；默认 7，版本 7 起支持可堆叠修复包的独立数据恢复。
 ## 版本 9 补充；当前值升级为 9，用于保存股票持仓数量和加权平均成本，旧存档自动初始化为空持仓。
-const SAVE_VERSION: int = 9
+## 星内容精简补充：当前值升级为 10，用于在旧内容资源移除后为旧存档补齐星扩展包的可用初始装备。
+const SAVE_VERSION: int = 10
 ## 强化公式存档版本；版本 2 起暴击率、暴击伤害和闪避率的累计值按直接百分点保存。
 const ENHANCEMENT_FORMULA_VERSION: int = 2
 ## 旧版耐久上限；固定 100.0，用于把版本 5 的当前耐久按比例迁移到新版上限。
@@ -26,16 +27,8 @@ const LEGACY_DURABILITY_MAX: float = 100.0
 const DEFAULT_RANGED_SLOT_COUNT: int = 2
 ## 默认武器资源路径表；键为稳定 weapon_id，值为可重新加载的项目资源路径。
 const WEAPON_RESOURCE_PATHS: Dictionary = {
-	"quantum_pistol": "res://data/weapons/quantum_pistol.tres",
-	"pulse_rifle": "res://data/weapons/pulse_rifle.tres",
-	"ion_smg": "res://data/weapons/ion_smg.tres",
-	"scatter_blaster": "res://data/weapons/scatter_blaster.tres",
-	"rail_cannon": "res://data/weapons/rail_cannon.tres",
-	"prism_scatter_gun": "res://data/weapons/prism_scatter_gun.tres",
-	"phase_piercer": "res://data/weapons/phase_piercer.tres",
-	"pulse_combo_rifle": "res://data/weapons/pulse_combo_rifle.tres",
-	"phase_blade": "res://data/weapons/phase_blade.tres",
-	"quantum_dagger": "res://data/weapons/quantum_dagger.tres",
+	"as_ive_written": "res://data/weapons/stelle/as_ive_written.tres",
+	"galactic_baseball_bat": "res://data/weapons/stelle/galactic_baseball_bat.tres",
 }
 ## 修复包资源路径表；键为稳定 item_id，值为项目内模板路径，用于存档恢复和未来扩展。
 const REPAIR_KIT_RESOURCE_PATHS: Dictionary = {
@@ -45,18 +38,21 @@ const REPAIR_KIT_RESOURCE_PATHS: Dictionary = {
 }
 ## 装备资源路径表；键为稳定 equipment_id，值用于存档恢复与开发者默认发放。
 const EQUIPMENT_RESOURCE_PATHS: Dictionary = {
-	"basic_headgear": "res://data/equipment/basic_headgear.tres",
-	"basic_body_armor": "res://data/equipment/basic_body_armor.tres",
-	"basic_leg_armor": "res://data/equipment/basic_leg_armor.tres",
-	"basic_boots": "res://data/equipment/basic_boots.tres",
+	"trailblazer_hat": "res://data/equipment/stelle/trailblazer_hat.tres",
+	"trailblazer_coat": "res://data/equipment/stelle/trailblazer_coat.tres",
+	"trailblazer_pants": "res://data/equipment/stelle/trailblazer_pants.tres",
+	"trailblazer_boots": "res://data/equipment/stelle/trailblazer_boots.tres",
 }
 ## 默认背包武器标识；首次建立存档时放入未装备武器，顺序会按获得时间默认排序。
 ## 永久仓库初始化补充：常量名称为旧存档兼容保留，当前首次存档会把这些未装备武器放入永久仓库。
-const DEFAULT_BACKPACK_WEAPON_IDS: Array[String] = ["ion_smg", "rail_cannon", "scatter_blaster", "prism_scatter_gun", "phase_piercer", "pulse_combo_rifle", "quantum_dagger"]
+## 星内容精简补充：当前没有额外初始仓库武器，两把星扩展包武器分别直接进入远程与近战装备槽。
+const DEFAULT_BACKPACK_WEAPON_IDS: Array[String] = []
 ## 默认远程装备标识；首次建立存档时依次装入两个远程槽。
-const DEFAULT_RANGED_WEAPON_IDS: Array[String] = ["quantum_pistol", "pulse_rifle"]
+## 星内容精简补充：当前只装备一把“如我所书”，第二个远程槽保持为空且不会复制同一模板。
+const DEFAULT_RANGED_WEAPON_IDS: Array[String] = ["as_ive_written"]
 ## 默认近战装备标识；首次建立存档时装入近战槽。
-const DEFAULT_MELEE_WEAPON_ID: String = "phase_blade"
+## 星内容精简补充：当前近战初始武器为“银河球棒”。
+const DEFAULT_MELEE_WEAPON_ID: String = "galactic_baseball_bat"
 ## 默认局外金币数量；首次建立存档时为 0，金币只能通过出售永久仓库物品增加且不会进入战斗。
 const DEFAULT_STARTING_COINS: int = 0
 ## 战斗失败默认保留比例；默认 0.5，使背包内每件武器和每颗资源长期平均各保留 50%。
@@ -135,6 +131,8 @@ var _random: RandomNumberGenerator = RandomNumberGenerator.new()
 var _coins: int = DEFAULT_STARTING_COINS
 ## 股票持仓表；键为稳定股票标识，值包含非负整数 quantity 与非负浮点 average_cost。
 var _stock_holdings: Dictionary = {}
+## 已读取存档是否完成内容精简迁移；默认 false，版本 10 之前补齐星扩展包装备后置为 true，并在启动阶段立即回写避免重复发放。
+var _loaded_inventory_requires_resave: bool = false
 
 
 func _ready() -> void:
@@ -142,6 +140,8 @@ func _ready() -> void:
 	_initialize_equipment_slots()
 	if not _load_inventory():
 		_initialize_default_inventory()
+		_save_inventory()
+	elif _loaded_inventory_requires_resave:
 		_save_inventory()
 
 
@@ -1534,10 +1534,12 @@ func _initialize_default_inventory() -> void:
 			_ranged_equipment_records[slot_index] = _create_record(ranged_resource)
 
 	# 默认近战资源；取值为相位刃模板深拷贝，加载失败时保持空槽。
+	# 星内容精简补充：当前默认标识指向银河球棒，仍保持相同的深拷贝与空槽容错规则。
 	var melee_resource: Resource = _load_weapon_resource(DEFAULT_MELEE_WEAPON_ID)
 	if melee_resource != null:
 		_melee_equipment_record = _create_record(melee_resource)
 	# 默认防具；首次存档为四个部位各装备一件基础装备，便于直接体验完整属性链路。
+	# 星内容精简补充：当前装备路径表只包含四件开拓者套装，因此新存档会直接装备完整套装。
 	for equipment_id in EQUIPMENT_RESOURCE_PATHS.keys():
 		var equipment_resource: Resource = _load_equipment_resource(str(equipment_id))
 		if equipment_resource == null:
@@ -2106,6 +2108,8 @@ func _load_inventory() -> bool:
 		return false
 	# 存档字典；包含背包、装备和排序元数据。
 	var save_data: Dictionary = parsed_data
+	# 存档版本；取值为非负整数，版本 10 之前需要清理已删除内容造成的空装备并补齐星扩展包初始装备。
+	var saved_version: int = maxi(int(save_data.get("version", 0)), 0)
 	_initialize_equipment_slots()
 	_warehouse_records.clear()
 	_backpack_records.clear()
@@ -2189,7 +2193,8 @@ func _load_inventory() -> bool:
 				if not restored_armor_record.is_empty() and _does_resource_match_equipment_location(restored_armor_record.get("resource") as Resource, EQUIPMENT_LOCATION_ARMOR_PREFIX + armor_slot):
 					_armor_equipment_records[armor_slot] = restored_armor_record
 	# 旧存档迁移；版本 8 之前没有防具槽，为四个空部位发放并装备基础防具。
-	if int(save_data.get("version", 0)) < 8:
+	# 星内容精简补充：版本 10 之前的已删除基础防具会恢复为空，因此所有空部位改为补齐对应开拓者套装部件。
+	if saved_version < SAVE_VERSION:
 		for equipment_id in EQUIPMENT_RESOURCE_PATHS.keys():
 			var migrated_equipment: Resource = _load_equipment_resource(str(equipment_id))
 			if migrated_equipment == null:
@@ -2197,6 +2202,19 @@ func _load_inventory() -> bool:
 			var migrated_slot: String = str(migrated_equipment.get("equipment_slot"))
 			if migrated_slot in ARMOR_SLOT_IDS and (_armor_equipment_records.get(migrated_slot, {}) as Dictionary).is_empty():
 				_armor_equipment_records[migrated_slot] = _create_record(migrated_equipment)
+		# 迁移远程武器；旧远程模板删除后若全部槽位为空，只补入一把如我所书并保留第二槽为空。
+		if _find_first_equipped_ranged_slot() < 0 and not DEFAULT_RANGED_WEAPON_IDS.is_empty():
+			# 迁移远程资源；加载失败时保持空槽，避免损坏清单阻断其余存档恢复。
+			var migrated_ranged_weapon: Resource = _load_weapon_resource(DEFAULT_RANGED_WEAPON_IDS[0])
+			if migrated_ranged_weapon != null:
+				_ranged_equipment_records[0] = _create_record(migrated_ranged_weapon)
+		# 迁移近战武器；只有旧资源已失效并留下空槽时才补入银河球棒，不覆盖仍可恢复的专属内容。
+		if _melee_equipment_record.is_empty():
+			# 迁移近战资源；加载失败时保持空槽并允许玩家之后从商店或掉落重新获得。
+			var migrated_melee_weapon: Resource = _load_weapon_resource(DEFAULT_MELEE_WEAPON_ID)
+			if migrated_melee_weapon != null:
+				_melee_equipment_record = _create_record(migrated_melee_weapon)
+		_loaded_inventory_requires_resave = true
 	if not has_separate_warehouse:
 		_sort_warehouse_default()
 	return true

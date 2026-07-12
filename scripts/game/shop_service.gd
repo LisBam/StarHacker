@@ -11,7 +11,8 @@ signal refresh_state_changed
 const SAVE_PATH: String = "user://shop_state.json"
 ## 商店存档版本；版本 2 在新增稀有强化词条后重建旧版普通商品池，同时保留灰市与刷新状态。
 ## 扩展包内容补充：版本 3 重建旧普通商品池，使已默认解锁的角色扩展包内容进入下一份库存。
-const SAVE_VERSION: int = 3
+## 星内容精简补充：当前值升级为 4，删除旧资源后重建普通商品池并继续保留已经读取的灰市失败批次。
+const SAVE_VERSION: int = 4
 ## 强化石随机生成的单词条基础价值；默认 30 金币，与战斗掉落规则一致。
 const STONE_BASE_SELL_PRICE: int = 30
 ## 强化石随机生成兼容最少词条数；实际词条数由品质规则决定，该值用于保持统一调用签名。
@@ -63,23 +64,16 @@ const STONE_DETRIMENTAL_CHANCE: float = 0.28
 @export_range(1, 20, 1) var gray_market_failure_limit: int = 5
 ## 可刷新武器资源路径；每次按等概率抽取并复制为独立商品实例，允许同轮出现同类多件武器。
 @export var weapon_resource_paths: PackedStringArray = PackedStringArray([
-	"res://data/weapons/quantum_pistol.tres",
-	"res://data/weapons/pulse_rifle.tres",
-	"res://data/weapons/ion_smg.tres",
-	"res://data/weapons/scatter_blaster.tres",
-	"res://data/weapons/rail_cannon.tres",
-	"res://data/weapons/prism_scatter_gun.tres",
-	"res://data/weapons/phase_piercer.tres",
-	"res://data/weapons/pulse_combo_rifle.tres",
-	"res://data/weapons/phase_blade.tres",
-	"res://data/weapons/quantum_dagger.tres",
+	"res://data/weapons/stelle/as_ive_written.tres",
+	"res://data/weapons/stelle/galactic_baseball_bat.tres",
 ])
 ## 可刷新装备资源路径；每次刷新从四部位基础装备中等概率复制独立商品。
+## 星内容精简补充：当前隔离场景兜底只使用开拓者套装四部位，正常启动仍由内容目录按扩展包状态复核。
 @export var equipment_resource_paths: PackedStringArray = PackedStringArray([
-	"res://data/equipment/basic_headgear.tres",
-	"res://data/equipment/basic_body_armor.tres",
-	"res://data/equipment/basic_leg_armor.tres",
-	"res://data/equipment/basic_boots.tres",
+	"res://data/equipment/stelle/trailblazer_hat.tres",
+	"res://data/equipment/stelle/trailblazer_coat.tres",
+	"res://data/equipment/stelle/trailblazer_pants.tres",
+	"res://data/equipment/stelle/trailblazer_boots.tres",
 ])
 ## 可刷新道具资源路径；当前包含初级、中级和高级修复包，生成时等概率抽取并复制独立实例。
 @export var item_resource_paths: PackedStringArray = PackedStringArray([

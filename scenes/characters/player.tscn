@@ -1,4 +1,4 @@
-[gd_scene load_steps=22 format=3 uid="uid://b8ap3osklnsmt"]
+[gd_scene load_steps=14 format=3 uid="uid://b8ap3osklnsmt"]
 
 [ext_resource type="Script" uid="uid://mkfqfypf8jpw" path="res://scripts/player/player_controller.gd" id="1_player_controller"]
 [ext_resource type="Script" uid="uid://dy2ap8k4mwko" path="res://scripts/components/player_input_component.gd" id="2_player_input"]
@@ -9,17 +9,9 @@
 [ext_resource type="Script" uid="uid://c4nua6h4h6v0j" path="res://scripts/components/combat_stats_component.gd" id="7_stats"]
 [ext_resource type="Script" uid="uid://bnptom72jfqpo" path="res://scripts/components/inventory_component.gd" id="8_inventory"]
 [ext_resource type="Script" uid="uid://xouhfg5s44n0" path="res://scripts/components/equipment_component.gd" id="9_equipment"]
-[ext_resource type="Resource" path="res://data/weapons/quantum_pistol.tres" id="10_quantum_pistol"]
-[ext_resource type="Resource" path="res://data/weapons/pulse_rifle.tres" id="11_pulse_rifle"]
-[ext_resource type="Resource" path="res://data/weapons/phase_blade.tres" id="12_phase_blade"]
-[ext_resource type="Resource" path="res://data/weapons/ion_smg.tres" id="13_ion_smg"]
-[ext_resource type="Resource" path="res://data/weapons/rail_cannon.tres" id="14_rail_cannon"]
-[ext_resource type="Resource" path="res://data/weapons/scatter_blaster.tres" id="15_scatter_blaster"]
-[ext_resource type="Resource" path="res://data/weapons/quantum_dagger.tres" id="16_quantum_dagger"]
+[ext_resource type="Resource" path="res://data/weapons/stelle/as_ive_written.tres" id="10_as_ive_written"]
+[ext_resource type="Resource" path="res://data/weapons/stelle/galactic_baseball_bat.tres" id="12_galactic_baseball_bat"]
 [ext_resource type="Script" path="res://scripts/camera/combat_camera.gd" id="17_combat_camera"]
-[ext_resource type="Resource" path="res://data/weapons/prism_scatter_gun.tres" id="18_prism_scatter_gun"]
-[ext_resource type="Resource" path="res://data/weapons/phase_piercer.tres" id="19_phase_piercer"]
-[ext_resource type="Resource" path="res://data/weapons/pulse_combo_rifle.tres" id="20_pulse_combo_rifle"]
 [ext_resource type="Script" path="res://scripts/components/equipment_set_component.gd" id="21_equipment_set"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_body"]
@@ -60,15 +52,15 @@ script = ExtResource("7_stats")
 
 [node name="InventoryComponent" type="Node" parent="." unique_id=990293600]
 script = ExtResource("8_inventory")
-initial_items = Array[Resource]([ExtResource("10_quantum_pistol"), ExtResource("11_pulse_rifle"), ExtResource("12_phase_blade"), ExtResource("13_ion_smg"), ExtResource("14_rail_cannon"), ExtResource("15_scatter_blaster"), ExtResource("16_quantum_dagger"), ExtResource("18_prism_scatter_gun"), ExtResource("19_phase_piercer"), ExtResource("20_pulse_combo_rifle")])
+initial_items = Array[Resource]([ExtResource("10_as_ive_written"), ExtResource("12_galactic_baseball_bat")])
 
 [node name="EquipmentSetComponent" type="Node" parent="."]
 script = ExtResource("21_equipment_set")
 
 [node name="EquipmentComponent" type="Node" parent="." unique_id=1247807795]
 script = ExtResource("9_equipment")
-starting_ranged_weapons = Array[Resource]([ExtResource("10_quantum_pistol"), ExtResource("11_pulse_rifle")])
-starting_melee_weapon = ExtResource("12_phase_blade")
+starting_ranged_weapons = Array[Resource]([ExtResource("10_as_ive_written")])
+starting_melee_weapon = ExtResource("12_galactic_baseball_bat")
 
 [node name="RangedAttackComponent" type="Node2D" parent="." unique_id=948818008]
 script = ExtResource("4_ranged_attack")

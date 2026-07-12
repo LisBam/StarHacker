@@ -4,9 +4,14 @@ class_name WeaponDurabilityBar
 ## 武器耐久条是只读显示组件，负责把 WeaponData 的当前耐久比例绘制在物品 UI 最底部。
 ## 组件不修改武器状态，可复用于战斗装备槽、战斗背包、仓库、局外装备栏和结算卡片。
 ## 通用耐久补充：组件现按耐久属性而非武器类型工作，也供穿戴装备、锻造、商店和后续耐久物品复用。
+## 边框内缩补充：宿主存在独立边框时可配置水平与底部内缩，使耐久条只占用边框内部区域。
 
 ## 耐久条高度；默认 5 像素，贴在父物品 UI 底部并保持与父控件等宽。
 @export_range(2.0, 16.0, 1.0) var bar_height: float = 5.0
+## 水平内缩距离；默认 0 像素保持通用等宽行为，标准物品卡片运行时传入 2 像素边框宽度，修改会同时缩进左右两侧。
+@export_range(0.0, 32.0, 1.0) var horizontal_inset: float = 0.0
+## 底部内缩距离；默认 0 像素贴住父控件底部，标准物品卡片运行时传入 2 像素边框宽度，修改会整体上移耐久条。
+@export_range(0.0, 32.0, 1.0) var bottom_inset: float = 0.0
 ## 耐久条背景颜色；默认半透明深灰，用于显示已损失耐久的空缺区域。
 @export var background_color: Color = Color(0.03, 0.04, 0.05, 0.92)
 ## 高耐久颜色；默认绿色，耐久比例高于 50% 时使用。
@@ -28,12 +33,29 @@ var _weapon_resource: Resource
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	offset_left = 0.0
-	offset_top = -bar_height
-	offset_right = 0.0
-	offset_bottom = 0.0
+	_apply_layout()
 	queue_redraw()
+
+
+func set_layout_insets(requested_horizontal_inset: float, requested_bottom_inset: float) -> void:
+	## 配置宿主边框内缩；参数单位为像素，负值会限制为 0，运行时修改会立即更新控件位置与宽度。
+	horizontal_inset = maxf(requested_horizontal_inset, 0.0)
+	bottom_inset = maxf(requested_bottom_inset, 0.0)
+	if is_node_ready():
+		_apply_layout()
+		queue_redraw()
+
+
+func _apply_layout() -> void:
+	# 实际水平内缩；左右使用相同数值，保证耐久填充仍以卡片中心对称布局。
+	var resolved_horizontal_inset: float = maxf(horizontal_inset, 0.0)
+	# 实际底部内缩；用于避开宿主底部边框，同时保持耐久条自身高度不变。
+	var resolved_bottom_inset: float = maxf(bottom_inset, 0.0)
+	set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	offset_left = resolved_horizontal_inset
+	offset_top = -(bar_height + resolved_bottom_inset)
+	offset_right = -resolved_horizontal_inset
+	offset_bottom = -resolved_bottom_inset
 
 
 func configure(weapon_resource: Resource) -> void:
@@ -52,7 +74,7 @@ func _draw() -> void:
 		return
 	# 当前耐久比例；取值限制在 0 到 1，旧资源缺少接口时按满耐久显示以保证兼容。
 	var durability_ratio: float = _get_durability_ratio()
-	# 完整背景矩形；宽度始终等于父物品 UI，满足所有物品界面统一贴底展示的要求。
+	# 完整背景矩形；宽度等于布局内缩后的可用区域，默认无内缩时仍与父物品 UI 等宽。
 	var full_rect: Rect2 = Rect2(Vector2.ZERO, size)
 	draw_rect(full_rect, background_color, true)
 	# 填充矩形；从左向右表示剩余耐久，耐久归零时宽度为 0。

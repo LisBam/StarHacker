@@ -18,6 +18,8 @@ const CONTEXT_COMBAT: String = "combat"
 
 ## 仓库物品卡片脚本；随身物品复用完整详情、耐久条、点击和悬停交互。
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
+## 通用物品卡片视图；左侧装备栏读取其悬浮安全留白，避免放大后的装备卡牌被滚动区裁剪。
+const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
 ## 装备槽控件脚本；远程、近战和四部位装备复用游戏内背包左侧卡片布局。
 const EQUIPMENT_STORAGE_SLOT_SCRIPT: Script = preload("res://scripts/ui/equipment_storage_slot_control.gd")
 ## 背包空白拖放区域脚本；装备可拖到右侧空白处卸下，背包物品也可通过拖放调整顺序。
@@ -222,10 +224,18 @@ func _build_interface() -> void:
 	var equipment_scroll: ScrollContainer = ScrollContainer.new()
 	equipment_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	equipment_panel.add_child(equipment_scroll)
+	# 左侧装备卡牌悬浮安全边距；滚动容器四周预留 4 像素，确保 1.03 倍放大不会被装备栏边框裁剪。
+	var equipment_scroll_margin: MarginContainer = MarginContainer.new()
+	equipment_scroll_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	equipment_scroll_margin.add_theme_constant_override("margin_left", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	equipment_scroll_margin.add_theme_constant_override("margin_top", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	equipment_scroll_margin.add_theme_constant_override("margin_right", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	equipment_scroll_margin.add_theme_constant_override("margin_bottom", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	equipment_scroll.add_child(equipment_scroll_margin)
 	_equipment_list = VBoxContainer.new()
 	_equipment_list.alignment = BoxContainer.ALIGNMENT_CENTER
 	_equipment_list.add_theme_constant_override("separation", 6)
-	equipment_scroll.add_child(_equipment_list)
+	equipment_scroll_margin.add_child(_equipment_list)
 	_backpack_drop_area = STORAGE_DROP_AREA_SCRIPT.new() as PanelContainer
 	_backpack_drop_area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_backpack_drop_area.call("configure", "backpack", 4)

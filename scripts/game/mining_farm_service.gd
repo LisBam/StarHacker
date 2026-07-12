@@ -5,6 +5,8 @@ extends Node
 
 signal balance_changed(balance: int, delta: int)
 signal production_changed(production_per_second: int)
+## 产出结算完成信号；参数为本次实际收益和覆盖的完整秒数，UI 可逐次播放收益飘字。
+signal production_settled(earned: int, settled_seconds: int)
 signal assets_changed
 signal buffs_changed
 
@@ -280,6 +282,7 @@ func _settle_production(whole_seconds: int) -> void:
 	if earned <= 0:
 		return
 	_change_balance(earned)
+	production_settled.emit(earned, maxi(whole_seconds, 0))
 
 
 func _change_balance(delta: int) -> void:

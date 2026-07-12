@@ -185,7 +185,7 @@ show_percentage = false
 [node name="AttackValueLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent/StatsPanel/StatsMargin/StatsContent"]
 unique_name_in_owner = true
 layout_mode = 2
-text = "攻击力  100"
+text = "攻击力  10"
 
 [node name="DefenseValueLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent/StatsPanel/StatsMargin/StatsContent"]
 unique_name_in_owner = true

@@ -218,8 +218,8 @@ const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, 
 @export_range(1.0, 9999.0, 1.0, "or_greater") var stelle_max_energy: float = 110.0
 ## 星的固定移动速度；取值应大于 0，默认 320，切换角色时会写入玩家移动组件。
 @export_range(1.0, 2000.0, 1.0, "or_greater") var stelle_move_speed: float = 320.0
-## 星的固定攻击力；默认 100 保持武器基础伤害不变，切换角色时写入战斗属性组件。
-@export_range(0.0, 99999.0, 1.0, "or_greater") var stelle_attack_power: float = 100.0
+## 星的固定攻击力；默认 10，切换角色时写入战斗属性组件并参与伤害公式。
+@export_range(0.0, 99999.0, 1.0, "or_greater") var stelle_attack_power: float = 10.0
 ## 星的固定防御力；默认 5，切换角色时写入战斗属性组件并参与承伤公式。
 @export_range(0.0, 99999.0, 1.0, "or_greater") var stelle_defense_power: float = 5.0
 ## 穹的固定生命上限；取值应大于 0，默认 150，切换角色时直接应用，不再随机。
@@ -228,8 +228,8 @@ const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, 
 @export_range(1.0, 9999.0, 1.0, "or_greater") var caelus_max_energy: float = 95.0
 ## 穹的固定移动速度；取值应大于 0，默认 300，切换角色时会写入玩家移动组件。
 @export_range(1.0, 2000.0, 1.0, "or_greater") var caelus_move_speed: float = 300.0
-## 穹的固定攻击力；默认 95，较低输出与较高生存能力形成角色差异。
-@export_range(0.0, 99999.0, 1.0, "or_greater") var caelus_attack_power: float = 95.0
+## 穹的固定攻击力；默认 9，较低输出与较高生存能力形成角色差异。
+@export_range(0.0, 99999.0, 1.0, "or_greater") var caelus_attack_power: float = 9.0
 ## 穹的固定防御力；默认 10，为三名角色中最高基础防御。
 @export_range(0.0, 99999.0, 1.0, "or_greater") var caelus_defense_power: float = 10.0
 ## 银狼的固定生命上限；取值应大于 0，默认 105，切换角色时直接应用，不再随机。
@@ -238,8 +238,8 @@ const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, 
 @export_range(1.0, 9999.0, 1.0, "or_greater") var silver_wolf_max_energy: float = 155.0
 ## 银狼的固定移动速度；取值应大于 0，默认 355，切换角色时会写入玩家移动组件。
 @export_range(1.0, 2000.0, 1.0, "or_greater") var silver_wolf_move_speed: float = 355.0
-## 银狼的固定攻击力；默认 110，为三名角色中最高基础攻击。
-@export_range(0.0, 99999.0, 1.0, "or_greater") var silver_wolf_attack_power: float = 110.0
+## 银狼的固定攻击力；默认 11，为三名角色中最高基础攻击。
+@export_range(0.0, 99999.0, 1.0, "or_greater") var silver_wolf_attack_power: float = 11.0
 ## 银狼的固定防御力；默认 2，以较低防御平衡高攻击、能量和移速。
 @export_range(0.0, 99999.0, 1.0, "or_greater") var silver_wolf_defense_power: float = 2.0
 

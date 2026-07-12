@@ -172,7 +172,7 @@ func _get_character_profile() -> Dictionary:
 		# 当前角色标识；优先使用公开入口，避免直接依赖自动加载字段。
 		var character_id: String = str(_session_state.call("get_selected_character_id")) if _session_state.has_method("get_selected_character_id") else "stelle"
 		return _session_state.call("get_character_profile", character_id) as Dictionary
-	return {"display_name": "星", "max_health": 130.0, "max_energy": 110.0, "move_speed": 320.0, "attack_power": 100.0, "defense_power": 5.0, "health_regeneration_per_five_seconds": 0.0, "vision_range": 1.0, "dodge_chance": 0.0, "energy_regeneration": 18.0}
+	return {"display_name": "星", "max_health": 130.0, "max_energy": 110.0, "move_speed": 320.0, "attack_power": 10.0, "defense_power": 5.0, "health_regeneration_per_five_seconds": 0.0, "vision_range": 1.0, "dodge_chance": 0.0, "energy_regeneration": 18.0}
 
 
 func _build_value_snapshot(base_value: float, equipment_value: float) -> Dictionary:

@@ -19,8 +19,8 @@
 
 | 服务 | 核心职责 | 持久化 |
 | --- | --- | --- |
-| `ContentCatalog` | 启动时扫描角色、武器、装备、道具和怪物目录，提供去重后的内容清单 | 无 |
-| `SessionState` | 保存当前游戏模式和已确认角色 | 仅运行期 |
+| `ContentCatalog` | 启动时扫描角色、武器、装备、道具、怪物和扩展包清单，按角色解锁状态过滤内容池 | 无 |
+| `SessionState` | 保存当前游戏模式、已确认角色与永久角色/扩展包解锁状态 | `user://character_unlocks.json`；模式和当前选择仅运行期 |
 | `InputBindings` | 管理默认与自定义输入映射 | `user://input_bindings.cfg` |
 | `DebugSettings` | 管理开发者调试选项 | `user://debug_settings.cfg` |
 | `GlobalInventory` | 拥有金币、仓库、随身背包、装备槽、持仓和战斗结算数据 | `user://global_inventory.json` |
@@ -35,7 +35,8 @@
 
 ### 3.1 数据层
 
-- `CharacterData`、`WeaponData`、`EquipmentData` 和 `RepairKitData` 描述可保存、可复制的内容资源。
+- `CharacterData`、`WeaponData`、`EquipmentData` 和 `RepairKitData` 描述可保存、可复制的单项内容资源。
+- `ContentPackData` 只声明一个角色扩展包拥有的武器、装备、道具与怪物路径；`EquipmentSetData` 只声明共享套装门槛、显示原文、属性加成与特殊效果参数。
 - `EnhancementStoneData` 保存强化石品质、目标类型和词条方向；强化幅度与兼容规则集中在 `EnhancementRules`。
 - `.tres` 保存单个内容的基础数值。脚本默认值只作为缺省值，场景或资源覆盖值优先。
 - 新内容通过 `ContentCatalog` 自动注册，创建流程见 `docs/content_authoring.md`。
@@ -50,6 +51,7 @@
 | `RangedAttackComponent` | 校验攻击条件、处理散射/连击并生成玩家弹体 |
 | `MeleeAttackComponent` | 管理近战命中框、命中去重、冲击和敌方弹体清除 |
 | `EquipmentComponent` | 代理装备槽并聚合有效战斗属性 |
+| `EquipmentSetComponent` | 按套装稳定 ID 统计未损坏穿戴件、汇总档位属性并结算世界特殊效果 |
 | `InventoryComponent` | 代理随身背包操作；全局服务缺失时才使用本地回退 |
 | `DamageReceiverComponent` | 统一可受伤目标的伤害接收入口 |
 | `CombatDamageCalculator` | 统一伤害、攻防和暴击计算 |
@@ -83,6 +85,8 @@ UI 不得通过字符串 `call()` 猜测已知组件接口，也不得复制服�
 ```text
 约定目录中的资源或场景
         -> ContentCatalog 启动扫描与稳定 ID 去重
+        -> ContentPackData 建立内容路径与所属角色关系
+        -> SessionState 永久角色解锁状态过滤专属内容
         -> 商店 / 掉落 / 开发者工具 / 角色列表查询
         -> 业务系统复制实例或实例化场景
 ```
@@ -119,6 +123,7 @@ ContentCatalog 模板
 ## 5. 存档边界
 
 - 每个服务只写入自己拥有的文件；跨服务交易先完成业务校验，再分别持久化相关资产。
+- `SessionState` 只把已解锁角色稳定 ID 写入 `user://character_unlocks.json`；角色档案中的 `unlocked_by_default` 每次启动都会补入，旧存档不能回锁默认角色。
 - 资源实例同时保存稳定 ID、资源路径和运行时字段，以支持内容重命名与旧记录恢复。
 - 存档版本常量与迁移代码位于对应服务脚本。文档只保留仍会被读取的迁移规则，不维护已经失效的历史流水账。
 - 普通高频变化可合并写入；货币兑换、股票成交等跨资产操作应立即保存，缩短文件间状态不一致窗口。
@@ -152,7 +157,14 @@ ContentCatalog 模板
 - 新实心障碍必须同时满足碰撞层、`environment_obstacles` 分组和导航障碍缓存要求。
 - 动态障碍发生变化后必须使导航与地图缓存失效，避免视觉、碰撞和寻路状态分离。
 
-### 7.4 依赖约束
+### 7.4 角色扩展包与装备套装
+
+- 新角色默认保持锁定；永久解锁统一调用 `SessionState.unlock_character()`，内容消费者只查询 `ContentCatalog` 的已过滤清单，不直接读取解锁存档。
+- 一个角色对应一个 `ContentPackData` 清单。基础内容不写入清单并始终可用；专属内容必须同时位于标准扫描目录并被扩展包清单引用。
+- 套装装备共享一份 `EquipmentSetData`。`EquipmentSetComponent` 只读取装备快照并返回结果，`EquipmentComponent` 负责把套装属性并入战斗属性，`GameWorld` 只消费宝箱额外数量接口。
+- 局外角色属性与 `ItemDetailFormatter` 复用套装组件的纯统计接口。损坏装备既不提供普通属性，也不计入套装门槛，保证 UI 颜色、角色面板与战斗结果一致。
+
+### 7.5 依赖约束
 
 - 组件通过明确接口和信号通信，不直接访问无关面板或服务内部字段。
 - 聚合脚本可通过 `NodePath` 获取可替换组件；动态返回值应显式标注局部变量类型。

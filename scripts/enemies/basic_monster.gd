@@ -31,6 +31,8 @@ const TARGET_AI_STATE_BLOCKADE: int = 3
 ## 玩家物理层位掩码；固定为第 1 层，用于从怪物碰撞掩码中移除玩家并建立双向碰撞例外。
 const PLAYER_PHYSICS_LAYER_MASK: int = 1
 
+## 怪物显示名称；默认“基础怪物”用于内容识别与后续图鉴界面，新怪物场景应填写设计文档中的正式名称。
+@export var display_name: String = "基础怪物"
 ## 最大血量；取值应大于 0，默认 60 用于训练场怪物强度，运行时修改会影响怪物承伤能力。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var max_health: float = 60.0
 ## 当前血量；取值会被限制在 0 到 max_health，默认 60 表示满血生成，运行时修改会影响怪物当前生存状态。

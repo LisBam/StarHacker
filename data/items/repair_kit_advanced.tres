@@ -6,7 +6,7 @@
 script = ExtResource("1_repair_kit")
 item_id = "repair_kit_advanced"
 display_name = "高级修复包"
-description = "只能对武器使用，恢复 500 点耐久。"
+description = "耐久+250"
 icon_text = "+"
-value = 90
-repair_amount = 500.0
+value = 40
+repair_amount = 250.0

@@ -4,6 +4,9 @@ class_name CharacterStatsPanel
 ## 角色属性面板统一展示角色基础值、有效装备加成与最终总值。
 ## 战斗中读取运行时组件快照，主菜单中读取角色档案与全局装备，保证共享背包在两种上下文下均可复用。
 
+## 装备套装组件脚本；局外属性页调用其纯统计接口，确保套装属性与战斗组件使用同一触发规则。
+const EQUIPMENT_SET_COMPONENT_SCRIPT: Script = preload("res://scripts/components/equipment_set_component.gd")
+
 ## 属性行显示顺序；键用于读取快照，名称用于生成长期稳定的中文界面。
 const ATTRIBUTE_ROWS: Array[Dictionary] = [
 	{"key": "max_energy", "label": "能量上限", "percent": false},
@@ -163,6 +166,13 @@ func _get_menu_equipment_attributes() -> Dictionary:
 			# 有效装备属性；优先走强化后的统一取值接口。
 			var equipment_value: float = float(equipment_data.call("get_effective_stat", attribute_key)) if equipment_data.has_method("get_effective_stat") else float(equipment_data.get(attribute_key))
 			attributes[attribute_key] = float(attributes.get(attribute_key, 0.0)) + equipment_value
+	# 套装属性加成；局外与战斗都只统计已穿戴且未损坏部件，并只合并角色面板已支持的属性键。
+	var set_attribute_bonuses: Dictionary = EQUIPMENT_SET_COMPONENT_SCRIPT.call("calculate_active_attribute_bonuses", armor_equipment) as Dictionary
+	for raw_attribute_key in set_attribute_bonuses.keys():
+		# 套装属性键；未知特殊效果不进入数值面板，由其负责组件单独消费。
+		var attribute_key: String = str(raw_attribute_key)
+		if attributes.has(attribute_key):
+			attributes[attribute_key] = float(attributes.get(attribute_key, 0.0)) + float(set_attribute_bonuses.get(raw_attribute_key, 0.0))
 	return attributes
 
 
@@ -172,7 +182,7 @@ func _get_character_profile() -> Dictionary:
 		# 当前角色标识；优先使用公开入口，避免直接依赖自动加载字段。
 		var character_id: String = str(_session_state.call("get_selected_character_id")) if _session_state.has_method("get_selected_character_id") else "stelle"
 		return _session_state.call("get_character_profile", character_id) as Dictionary
-	return {"display_name": "星", "max_health": 130.0, "max_energy": 110.0, "move_speed": 106.6667, "attack_power": 10.0, "defense_power": 5.0, "health_regeneration_per_five_seconds": 0.0, "vision_range": 1.0, "dodge_chance": 0.0, "energy_regeneration": 18.0}
+	return {"display_name": "星", "max_health": 100.0, "max_energy": 100.0, "move_speed": 100.0, "attack_power": 100.0, "defense_power": 100.0, "health_regeneration_per_five_seconds": 0.0, "vision_range": 1.0, "dodge_chance": 0.0, "energy_regeneration": 18.0}
 
 
 func _build_value_snapshot(base_value: float, equipment_value: float) -> Dictionary:

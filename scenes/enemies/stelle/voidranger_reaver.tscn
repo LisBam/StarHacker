@@ -1,0 +1,46 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/enemies/basic_monster.gd" id="1_monster"]
+[ext_resource type="Script" path="res://scripts/components/enemy_perception_component.gd" id="2_perception"]
+[ext_resource type="Script" path="res://scripts/components/enemy_movement_component.gd" id="3_movement"]
+[ext_resource type="Script" path="res://scripts/components/enemy_tactical_component.gd" id="4_tactical"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_body"]
+radius = 17.0
+
+[node name="VoidrangerReaver" type="CharacterBody2D"]
+collision_layer = 2
+collision_mask = 16
+script = ExtResource("1_monster")
+display_name = "虚卒·掠夺者"
+max_health = 50.0
+current_health = 50.0
+drop_multiplier = 1.0
+attack_damage = 20.0
+attack_power = 50.0
+defense_power = 50.0
+toughness = 0.0
+move_speed = 110.0
+vision_range = 500.0
+attack_range = 45.0
+attack_cooldown = 0.8
+
+[node name="Body" type="Polygon2D" parent="."]
+color = Color(0.956863, 0.286275, 0.360784, 1)
+polygon = PackedVector2Array(0, -22, 17, -8, 14, 14, 0, 22, -14, 14, -17, -8)
+
+[node name="Core" type="Polygon2D" parent="."]
+color = Color(1, 0.780392, 0.494118, 1)
+polygon = PackedVector2Array(0, -8, 7, 0, 0, 8, -7, 0)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_body")
+
+[node name="EnemyPerceptionComponent" type="Node" parent="."]
+script = ExtResource("2_perception")
+
+[node name="EnemyMovementComponent" type="Node" parent="."]
+script = ExtResource("3_movement")
+
+[node name="EnemyTacticalComponent" type="Node" parent="."]
+script = ExtResource("4_tactical")

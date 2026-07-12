@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="EquipmentData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/equipment_data.gd" id="1_equipment"]
+[ext_resource type="Resource" path="res://data/equipment_sets/trailblazer_set.tres" id="2_equipment_set"]
+
+[resource]
+script = ExtResource("1_equipment")
+equipment_id = "trailblazer_boots"
+display_name = "开拓之靴"
+equipment_slot = "feet"
+equipment_set = ExtResource("2_equipment_set")
+icon_text = "F"
+value = 50
+max_durability = 500.0
+current_durability = 500.0
+attack_power = 25.0
+defense_power = 25.0
+max_health = 25.0
+health_regeneration_per_five_seconds = 5.0
+dodge_chance = 0.025
+move_speed = 0.1

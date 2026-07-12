@@ -1,0 +1,79 @@
+extends Resource
+class_name EquipmentSetData
+
+## 装备套装数据资源集中定义同一套装的显示文本、触发件数、属性加成与特殊效果参数。
+## 每件装备只引用本资源，运行时组件按稳定 set_id 聚合，避免套装文本和数值在四件装备中重复维护。
+
+## 套装稳定标识；必须使用唯一英文 ID，默认空字符串表示不参与套装统计，发布后修改会使旧装备无法与新装备组成同套装。
+@export var set_id: String = ""
+## 套装显示名称；默认“未命名套装”，用于装备详情中的所属套装与效果标题，运行时通常不动态修改。
+@export var display_name: String = "未命名套装"
+## 两件套触发件数；默认 2，取值至少为 1，修改会影响详情激活颜色与属性生效门槛。
+@export_range(1, 64, 1) var two_piece_required_count: int = 2
+## 两件套效果原文；默认空字符串，填写后会在装备悬停详情中按当前触发状态显示绿色或灰色。
+@export_multiline var two_piece_description: String = ""
+## 两件套属性加成；键使用装备统一属性名，值为直接加到有效装备聚合结果的点数或比例，运行时不应动态修改。
+@export var two_piece_attribute_bonuses: Dictionary = {}
+## 四件套触发件数；默认 4，取值至少为 1，修改会影响详情激活颜色与特殊效果生效门槛。
+@export_range(1, 64, 1) var four_piece_required_count: int = 4
+## 四件套效果原文；默认空字符串，填写后会在装备悬停详情中按当前触发状态显示绿色或灰色。
+@export_multiline var four_piece_description: String = ""
+## 四件套属性加成；键和值语义与两件套一致，达到四件门槛后会与两件套加成累计。
+@export var four_piece_attribute_bonuses: Dictionary = {}
+## 主动长按开启宝箱时必定追加的物品数量；默认 0 表示没有该特殊效果，击毁宝箱始终不会读取此值。
+@export_range(0, 64, 1) var manual_chest_guaranteed_extra_drop_count: int = 0
+## 主动长按开启宝箱时再次追加掉落的概率；使用 0 到 1 小数，默认 0 表示不执行额外随机判定。
+@export_range(0.0, 1.0, 0.01) var manual_chest_additional_drop_chance: float = 0.0
+## 主动长按开启宝箱随机判定成功后追加的物品数量；默认 0，概率成功但数量为 0 时不会生成物品。
+@export_range(0, 64, 1) var manual_chest_additional_drop_count: int = 0
+
+
+func get_tier_definitions() -> Array[Dictionary]:
+	## 返回用于 UI 的稳定档位定义；效果文本保持资源原文，不由格式化器重新拼写机制描述。
+	return [
+		{
+			"required_count": maxi(two_piece_required_count, 1),
+			"description": two_piece_description,
+		},
+		{
+			"required_count": maxi(four_piece_required_count, 1),
+			"description": four_piece_description,
+		},
+	]
+
+
+func get_attribute_bonuses(active_piece_count: int) -> Dictionary:
+	## 根据当前有效穿戴件数返回累计属性加成；达到高档位时会同时保留低档位效果。
+	# 累计属性加成；键为装备聚合支持的统一属性名，值允许为普通点数或百分比小数。
+	var accumulated_bonuses: Dictionary = {}
+	if active_piece_count >= maxi(two_piece_required_count, 1):
+		_merge_attribute_bonuses(accumulated_bonuses, two_piece_attribute_bonuses)
+	if active_piece_count >= maxi(four_piece_required_count, 1):
+		_merge_attribute_bonuses(accumulated_bonuses, four_piece_attribute_bonuses)
+	return accumulated_bonuses
+
+
+func roll_manual_chest_extra_drop_count(active_piece_count: int, random_source: RandomNumberGenerator) -> int:
+	## 结算主动长按宝箱的额外掉落数量；未达到四件门槛或随机源缺失时只返回合法的确定部分。
+	if active_piece_count < maxi(four_piece_required_count, 1):
+		return 0
+	# 必定额外数量；限制为非负值，避免检查器异常数据减少宝箱原始掉落。
+	var extra_drop_count: int = maxi(manual_chest_guaranteed_extra_drop_count, 0)
+	# 再次追加概率；限制到 0 至 1，确保资源文本与运行时随机边界一致。
+	var additional_drop_chance: float = clampf(manual_chest_additional_drop_chance, 0.0, 1.0)
+	if random_source != null and additional_drop_chance > 0.0 and random_source.randf() < additional_drop_chance:
+		extra_drop_count += maxi(manual_chest_additional_drop_count, 0)
+	return extra_drop_count
+
+
+func _merge_attribute_bonuses(target_bonuses: Dictionary, source_bonuses: Dictionary) -> void:
+	## 把一个档位的属性加成累加到结果中；空键与零值安全跳过，避免生成无意义属性项。
+	# 属性名原始值；资源字典允许 StringName 等键，统一转换为 String 后聚合。
+	for raw_stat_name in source_bonuses.keys():
+		# 属性稳定名称；空白键不会进入装备组件，避免对不存在字段执行动态访问。
+		var stat_name: String = str(raw_stat_name).strip_edges()
+		# 属性加成值；直接使用有效点数或比例，正负值均可支持后续风险型套装设计。
+		var bonus_value: float = float(source_bonuses.get(raw_stat_name, 0.0))
+		if stat_name.is_empty() or is_zero_approx(bonus_value):
+			continue
+		target_bonuses[stat_name] = float(target_bonuses.get(stat_name, 0.0)) + bonus_value

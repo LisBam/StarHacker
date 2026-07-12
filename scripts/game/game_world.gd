@@ -224,15 +224,20 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 ## 物资撤离点边框颜色；默认亮金黄色，地图内始终可见但不代表战斗结束。
 @export var supply_extraction_ring_color: Color = Color(1.0, 0.72, 0.22, 0.92)
 ## 星的固定生命上限；取值应大于 0，默认 130，切换角色时直接应用，不再随机。
-@export_range(1.0, 9999.0, 1.0, "or_greater") var stelle_max_health: float = 130.0
+## 星扩展包数值补充：当前权威基础生命上限为 100，资源档案可继续覆盖该隔离场景兜底值。
+@export_range(1.0, 9999.0, 1.0, "or_greater") var stelle_max_health: float = 100.0
 ## 星的固定能量上限；取值应大于 0，默认 110，切换角色时直接应用，不再随机。
-@export_range(1.0, 9999.0, 1.0, "or_greater") var stelle_max_energy: float = 110.0
+## 星扩展包数值补充：当前权威基础能量上限为 100，资源档案可继续覆盖该隔离场景兜底值。
+@export_range(1.0, 9999.0, 1.0, "or_greater") var stelle_max_energy: float = 100.0
 ## 星的固定移动速度属性；默认 106.6667，按 1 点等于 3 像素/秒换算，切换角色时写入玩家移动组件。
-@export_range(1.0, 2000.0, 0.0001, "or_greater") var stelle_move_speed: float = 106.6667
+## 星扩展包数值补充：当前权威基础移速为 100 点，等效实际速度 300 像素/秒。
+@export_range(1.0, 2000.0, 0.0001, "or_greater") var stelle_move_speed: float = 100.0
 ## 星的固定攻击力；默认 10，切换角色时写入战斗属性组件并参与伤害公式。
-@export_range(0.0, 99999.0, 1.0, "or_greater") var stelle_attack_power: float = 10.0
+## 星扩展包数值补充：当前权威基础攻击力为 100，资源档案可继续覆盖该隔离场景兜底值。
+@export_range(0.0, 99999.0, 1.0, "or_greater") var stelle_attack_power: float = 100.0
 ## 星的固定防御力；默认 5，切换角色时写入战斗属性组件并参与承伤公式。
-@export_range(0.0, 99999.0, 1.0, "or_greater") var stelle_defense_power: float = 5.0
+## 星扩展包数值补充：当前权威基础防御力为 100，资源档案可继续覆盖该隔离场景兜底值。
+@export_range(0.0, 99999.0, 1.0, "or_greater") var stelle_defense_power: float = 100.0
 ## 穹的固定生命上限；取值应大于 0，默认 150，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var caelus_max_health: float = 150.0
 ## 穹的固定能量上限；取值应大于 0，默认 95，切换角色时直接应用，不再随机。
@@ -928,6 +933,11 @@ func _merge_automatically_discovered_content() -> void:
 	var content_catalog: Node = get_tree().root.get_node_or_null("ContentCatalog")
 	if content_catalog == null:
 		return
+	# 旧场景内容池过滤；扩展包接管既有资源时先移除未解锁模板，避免检查器兜底绕过目录可用性。
+	monster_scenes = _filter_available_scene_pool(monster_scenes, content_catalog)
+	weapon_drop_table = _filter_available_resource_pool(weapon_drop_table, content_catalog)
+	equipment_drop_table = _filter_available_resource_pool(equipment_drop_table, content_catalog)
+	repair_kit_drop_table = _filter_available_resource_pool(repair_kit_drop_table, content_catalog)
 	if content_catalog.has_method("get_enemy_scene_paths"):
 		for scene_path in content_catalog.call("get_enemy_scene_paths") as PackedStringArray:
 			# 怪物场景；只合并尚未存在的资源路径，避免原有检查器列表和目录扫描产生重复权重。
@@ -952,6 +962,38 @@ func _merge_automatically_discovered_content() -> void:
 			var item_template: Resource = load(item_path) as Resource
 			if item_template != null and not _resource_pool_has_path(repair_kit_drop_table, item_path):
 				repair_kit_drop_table.append(item_template)
+
+
+func _filter_available_scene_pool(scene_pool: Array[PackedScene], content_catalog: Node) -> Array[PackedScene]:
+	## 过滤场景检查器兜底池；运行时临时场景没有资源路径时保留，项目资源按扩展包状态判断。
+	if content_catalog == null or not content_catalog.has_method("is_content_path_available"):
+		return scene_pool.duplicate()
+	# 可用场景池；保持原权重顺序，锁定路径不进入随机生成。
+	var available_scenes: Array[PackedScene] = []
+	for scene_resource in scene_pool:
+		if scene_resource == null:
+			continue
+		# 场景资源路径；空路径代表运行时注入场景，不属于目录扩展包过滤范围。
+		var scene_path: String = scene_resource.resource_path
+		if scene_path.is_empty() or bool(content_catalog.call("is_content_path_available", scene_path)):
+			available_scenes.append(scene_resource)
+	return available_scenes
+
+
+func _filter_available_resource_pool(resource_pool: Array[Resource], content_catalog: Node) -> Array[Resource]:
+	## 过滤武器、装备和道具检查器兜底池；锁定扩展包模板不会进入怪物或宝箱掉落。
+	if content_catalog == null or not content_catalog.has_method("is_content_path_available"):
+		return resource_pool.duplicate()
+	# 可用资源池；保持检查器顺序与原抽取权重。
+	var available_resources: Array[Resource] = []
+	for content_resource in resource_pool:
+		if content_resource == null:
+			continue
+		# 内容资源路径；空路径代表运行时注入模板并继续保留。
+		var content_path: String = content_resource.resource_path
+		if content_path.is_empty() or bool(content_catalog.call("is_content_path_available", content_path)):
+			available_resources.append(content_resource)
+	return available_resources
 
 
 func _packed_scene_pool_has_path(scene_pool: Array[PackedScene], resource_path: String) -> bool:
@@ -1771,21 +1813,36 @@ func _is_loot_chest_position_valid(candidate_position: Vector2) -> bool:
 
 
 func _on_loot_chest_released(chest_position: Vector2, quality_id: String, drop_count: int, minimum_high_quality_count: int, broken_open: bool) -> void:
+	# 最终掉落数量；主动长按开启时允许已触发套装追加物品，击毁宝箱始终保持品质原始数量。
+	var resolved_drop_count: int = _get_resolved_loot_chest_drop_count(drop_count, broken_open)
 	# 宝箱掉落循环；极品前五件强制高品质，其余物品按当前宝箱品质对应概率独立判定。
-	for drop_index in range(maxi(drop_count, 0)):
+	for drop_index in range(resolved_drop_count):
 		# 是否为极品保底高品质物品；默认前五件为 true，其余按品质概率判定。
 		var force_high_quality: bool = drop_index < maxi(minimum_high_quality_count, 0)
 		# 本次掉落资源；从武器、装备、强化石和道具池中生成独立实例。
 		var item_resource: Resource = _create_random_loot_chest_item(quality_id, force_high_quality)
 		if item_resource != null:
 			# 掉落目标；手动开启使用紧凑扩散，击破使用更大的放射半径并播放飞出动画。
-			var drop_target: Vector2 = _get_loot_chest_drop_position(chest_position, drop_index, drop_count, broken_open)
+			var drop_target: Vector2 = _get_loot_chest_drop_position(chest_position, drop_index, resolved_drop_count, broken_open)
 			# 飞出时长；在配置范围内独立随机，避免所有物品完全同步落地。
 			var launch_duration: float = _random.randf_range(minf(loot_chest_launch_duration_min, loot_chest_launch_duration_max), maxf(loot_chest_launch_duration_min, loot_chest_launch_duration_max))
 			# 飞出弧高；在配置范围内独立随机，为多件物品提供自然高度差。
 			var launch_arc_height: float = _random.randf_range(minf(loot_chest_launch_arc_height_min, loot_chest_launch_arc_height_max), maxf(loot_chest_launch_arc_height_min, loot_chest_launch_arc_height_max))
 			# 开启方式只改变最终扩散半径；手动开启和击破统一从箱体中心播放同款抛物线动画。
 			spawn_item_drop(item_resource, drop_target, chest_position, launch_duration, launch_arc_height)
+
+
+func _get_resolved_loot_chest_drop_count(base_drop_count: int, broken_open: bool) -> int:
+	## 结算宝箱最终掉落数量；套装特殊效果只响应主动长按，不响应伤害击毁。
+	# 基础掉落数量；限制为非负值，异常宝箱配置不会导致负范围循环。
+	var resolved_drop_count: int = maxi(base_drop_count, 0)
+	if broken_open or _player == null:
+		return resolved_drop_count
+	# 套装组件；由玩家预制体提供，只公开本次主动宝箱的额外掉落结算接口。
+	var equipment_set_component: Node = _player.get_node_or_null("EquipmentSetComponent")
+	if equipment_set_component != null and equipment_set_component.has_method("roll_manual_chest_extra_drop_count"):
+		resolved_drop_count += maxi(int(equipment_set_component.call("roll_manual_chest_extra_drop_count", _random)), 0)
+	return resolved_drop_count
 
 
 func _get_loot_chest_drop_position(center_position: Vector2, drop_index: int, drop_count: int, broken_open: bool) -> Vector2:

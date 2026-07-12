@@ -10,7 +10,8 @@ signal refresh_state_changed
 ## 商店独立存档路径；保存当前库存、刷新截止时间和最近五次失败灰市批次。
 const SAVE_PATH: String = "user://shop_state.json"
 ## 商店存档版本；版本 2 在新增稀有强化词条后重建旧版普通商品池，同时保留灰市与刷新状态。
-const SAVE_VERSION: int = 2
+## 扩展包内容补充：版本 3 重建旧普通商品池，使已默认解锁的角色扩展包内容进入下一份库存。
+const SAVE_VERSION: int = 3
 ## 强化石随机生成的单词条基础价值；默认 30 金币，与战斗掉落规则一致。
 const STONE_BASE_SELL_PRICE: int = 30
 ## 强化石随机生成兼容最少词条数；实际词条数由品质规则决定，该值用于保持统一调用签名。
@@ -108,6 +109,10 @@ var _loaded_state_was_repaired: bool = false
 func _ready() -> void:
 	_random.randomize()
 	_merge_automatically_discovered_resource_paths()
+	# 内容目录；角色永久解锁新扩展包后重新合并可用路径，已有商品保留到正常刷新或手动刷新。
+	var content_catalog: Node = get_tree().root.get_node_or_null("ContentCatalog")
+	if content_catalog != null and content_catalog.has_signal("content_availability_changed"):
+		content_catalog.connect("content_availability_changed", Callable(self, "_on_content_availability_changed"))
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
 	if _global_inventory != null and _global_inventory.has_signal("combat_failure_losses_recorded"):
 		_global_inventory.connect("combat_failure_losses_recorded", Callable(self, "_on_combat_failure_losses_recorded"))
@@ -123,6 +128,10 @@ func _merge_automatically_discovered_resource_paths() -> void:
 	var content_catalog: Node = get_tree().root.get_node_or_null("ContentCatalog")
 	if content_catalog == null:
 		return
+	# 旧检查器路径过滤；扩展包接管既有内容时先移除当前未解锁路径，防止兼容数组绕过目录规则。
+	weapon_resource_paths = _filter_available_paths(weapon_resource_paths, content_catalog)
+	equipment_resource_paths = _filter_available_paths(equipment_resource_paths, content_catalog)
+	item_resource_paths = _filter_available_paths(item_resource_paths, content_catalog)
 	if content_catalog.has_method("get_weapon_paths"):
 		weapon_resource_paths = _merge_unique_paths(weapon_resource_paths, content_catalog.call("get_weapon_paths") as PackedStringArray)
 	if content_catalog.has_method("get_equipment_paths"):
@@ -138,6 +147,23 @@ func _merge_unique_paths(configured_paths: PackedStringArray, discovered_paths: 
 		if not result.has(resource_path):
 			result.append(resource_path)
 	return result
+
+
+func _filter_available_paths(configured_paths: PackedStringArray, content_catalog: Node) -> PackedStringArray:
+	## 过滤旧检查器路径；目录未提供可用性接口时原样保留，保证隔离测试和未迁移场景兼容。
+	if content_catalog == null or not content_catalog.has_method("is_content_path_available"):
+		return configured_paths.duplicate()
+	# 可用路径结果；保持原顺序，只排除当前锁定扩展包内容。
+	var available_paths: PackedStringArray = PackedStringArray()
+	for resource_path in configured_paths:
+		if bool(content_catalog.call("is_content_path_available", resource_path)):
+			available_paths.append(resource_path)
+	return available_paths
+
+
+func _on_content_availability_changed() -> void:
+	## 合并刚解锁扩展包的资源路径；商店库存按既有十分钟或付费刷新规则生成，不免费覆盖当前商品。
+	_merge_automatically_discovered_resource_paths()
 
 
 func get_shop_entries() -> Array[Dictionary]:

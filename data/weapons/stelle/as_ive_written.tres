@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/weapon_data.gd" id="1_weapon_data"]
+[ext_resource type="PackedScene" path="res://scenes/projectiles/player_projectile.tscn" id="2_projectile"]
+
+[resource]
+script = ExtResource("1_weapon_data")
+weapon_id = "as_ive_written"
+display_name = "如我所书"
+weapon_type = "ranged"
+icon_text = "W"
+value = 50
+max_durability = 500.0
+current_durability = 500.0
+energy_consumption = 5.0
+projectile_scene = ExtResource("2_projectile")
+projectile_speed = 500.0
+attack_distance = 340.0
+ranged_damage = 10.0
+cooldown = 0.2
+has_recoil = true
+recoil_force = 30.0
+impact_force = 180.0

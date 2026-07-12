@@ -1,4 +1,4 @@
-[gd_scene load_steps=21 format=3 uid="uid://b8ap3osklnsmt"]
+[gd_scene load_steps=22 format=3 uid="uid://b8ap3osklnsmt"]
 
 [ext_resource type="Script" uid="uid://mkfqfypf8jpw" path="res://scripts/player/player_controller.gd" id="1_player_controller"]
 [ext_resource type="Script" uid="uid://dy2ap8k4mwko" path="res://scripts/components/player_input_component.gd" id="2_player_input"]
@@ -20,6 +20,7 @@
 [ext_resource type="Resource" path="res://data/weapons/prism_scatter_gun.tres" id="18_prism_scatter_gun"]
 [ext_resource type="Resource" path="res://data/weapons/phase_piercer.tres" id="19_phase_piercer"]
 [ext_resource type="Resource" path="res://data/weapons/pulse_combo_rifle.tres" id="20_pulse_combo_rifle"]
+[ext_resource type="Script" path="res://scripts/components/equipment_set_component.gd" id="21_equipment_set"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_body"]
 radius = 18.0
@@ -60,6 +61,9 @@ script = ExtResource("7_stats")
 [node name="InventoryComponent" type="Node" parent="." unique_id=990293600]
 script = ExtResource("8_inventory")
 initial_items = Array[Resource]([ExtResource("10_quantum_pistol"), ExtResource("11_pulse_rifle"), ExtResource("12_phase_blade"), ExtResource("13_ion_smg"), ExtResource("14_rail_cannon"), ExtResource("15_scatter_blaster"), ExtResource("16_quantum_dagger"), ExtResource("18_prism_scatter_gun"), ExtResource("19_phase_piercer"), ExtResource("20_pulse_combo_rifle")])
+
+[node name="EquipmentSetComponent" type="Node" parent="."]
+script = ExtResource("21_equipment_set")
 
 [node name="EquipmentComponent" type="Node" parent="." unique_id=1247807795]
 script = ExtResource("9_equipment")

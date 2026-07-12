@@ -1,0 +1,52 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://scripts/enemies/ranged_monster.gd" id="1_monster"]
+[ext_resource type="PackedScene" path="res://scenes/projectiles/enemy_projectile.tscn" id="2_projectile"]
+[ext_resource type="Script" path="res://scripts/components/enemy_perception_component.gd" id="3_perception"]
+[ext_resource type="Script" path="res://scripts/components/enemy_movement_component.gd" id="4_movement"]
+[ext_resource type="Script" path="res://scripts/components/enemy_tactical_component.gd" id="5_tactical"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_body"]
+radius = 17.0
+
+[node name="VoidrangerEliminator" type="CharacterBody2D"]
+collision_layer = 2
+collision_mask = 16
+script = ExtResource("1_monster")
+display_name = "虚卒·抹消者"
+projectile_scene = ExtResource("2_projectile")
+max_health = 40.0
+current_health = 40.0
+drop_multiplier = 1.0
+attack_power = 80.0
+defense_power = 40.0
+move_speed = 90.0
+vision_range = 620.0
+shoot_range = 500.0
+keep_distance = 260.0
+ranged_projectile_speed = 600.0
+ranged_projectile_damage = 10.0
+ranged_projectile_max_distance = 550.0
+ranged_projectile_impact_force = 90.0
+ranged_projectile_deviation_degrees = 3.0
+cooldown = 1.0
+
+[node name="Body" type="Polygon2D" parent="."]
+color = Color(0.67451, 0.439216, 1, 1)
+polygon = PackedVector2Array(0, -22, 17, -8, 14, 14, 0, 22, -14, 14, -17, -8)
+
+[node name="Core" type="Polygon2D" parent="."]
+color = Color(1, 0.858824, 0.494118, 1)
+polygon = PackedVector2Array(0, -8, 7, 0, 0, 8, -7, 0)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_body")
+
+[node name="EnemyPerceptionComponent" type="Node" parent="."]
+script = ExtResource("3_perception")
+
+[node name="EnemyMovementComponent" type="Node" parent="."]
+script = ExtResource("4_movement")
+
+[node name="EnemyTacticalComponent" type="Node" parent="."]
+script = ExtResource("5_tactical")

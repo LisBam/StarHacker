@@ -13,6 +13,8 @@ const ENHANCEMENT_STEP_RATIO: float = 0.10
 const CALCULATION_MULTIPLICATIVE_RATIO: String = "multiplicative_ratio"
 ## 加算百分点公式标识；对应“基础值 + 累计百分点”，用于暴击率、暴击伤害与闪避率。
 const CALCULATION_ADDITIVE_POINTS: String = "additive_points"
+## 加算数值公式标识；对应“基础值 + 累计数值”，用于能量恢复和武器离散计数属性。
+const CALCULATION_ADDITIVE_VALUE: String = "additive_value"
 ## 一级乘算属性组标识；用于伤害、攻击力、防御力、最大生命值、视野和冷却的独立幅度配置。
 const MAGNITUDE_GROUP_PRIMARY: String = "primary"
 ## 二级乘算属性组标识；用于移速、能量消耗、扩散、坐力、冲击力和回血的独立幅度配置。
@@ -83,6 +85,44 @@ const ADDITIVE_POINT_STATS: Dictionary = {
 	"critical_chance": CALCULATION_ADDITIVE_POINTS,
 	"critical_damage": CALCULATION_ADDITIVE_POINTS,
 	"dodge_chance": CALCULATION_ADDITIVE_POINTS,
+}
+## 加算数值属性目录；这些属性直接累加实际点数，不按基础值百分比换算。
+const ADDITIVE_VALUE_STATS: Dictionary = {
+	"scatter_count": CALCULATION_ADDITIVE_VALUE,
+	"piercing_count": CALCULATION_ADDITIVE_VALUE,
+	"combo_count": CALCULATION_ADDITIVE_VALUE,
+	"energy_regeneration": CALCULATION_ADDITIVE_VALUE,
+}
+## 稀有属性相对常规属性的刷新权重；0.2 表示单项权重为常规属性的五分之一。
+const RARE_STAT_RELATIVE_WEIGHT: float = 0.20
+## 稀有属性目录；强化石、商店历史强化和其他复用随机生成器的系统统一读取该集合。
+const RARE_STAT_KEYS: Array[String] = ["scatter_count", "piercing_count", "combo_count", "move_speed", "vision_range", "energy_regeneration"]
+## 加算数值属性独立幅度；能量恢复严格使用品质区间，武器离散计数每次固定改变 1。
+const ADDITIVE_VALUE_MAGNITUDE_RANGES: Dictionary = {
+	"scatter_count": {
+		QUALITY_LOW: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 1.0, "detrimental_max": 1.0},
+		QUALITY_MEDIUM: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 1.0, "detrimental_max": 1.0},
+		QUALITY_HIGH: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 1.0, "detrimental_max": 1.0},
+		QUALITY_SUPREME: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 0.0, "detrimental_max": 0.0},
+	},
+	"piercing_count": {
+		QUALITY_LOW: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 1.0, "detrimental_max": 1.0},
+		QUALITY_MEDIUM: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 1.0, "detrimental_max": 1.0},
+		QUALITY_HIGH: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 1.0, "detrimental_max": 1.0},
+		QUALITY_SUPREME: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 0.0, "detrimental_max": 0.0},
+	},
+	"combo_count": {
+		QUALITY_LOW: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 1.0, "detrimental_max": 1.0},
+		QUALITY_MEDIUM: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 1.0, "detrimental_max": 1.0},
+		QUALITY_HIGH: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 1.0, "detrimental_max": 1.0},
+		QUALITY_SUPREME: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 0.0, "detrimental_max": 0.0},
+	},
+	"energy_regeneration": {
+		QUALITY_LOW: {"beneficial_min": 1.0, "beneficial_max": 2.0, "detrimental_min": 1.0, "detrimental_max": 2.0},
+		QUALITY_MEDIUM: {"beneficial_min": 2.0, "beneficial_max": 4.0, "detrimental_min": 2.0, "detrimental_max": 4.0},
+		QUALITY_HIGH: {"beneficial_min": 3.0, "beneficial_max": 5.0, "detrimental_min": 3.0, "detrimental_max": 5.0},
+		QUALITY_SUPREME: {"beneficial_min": 4.0, "beneficial_max": 6.0, "detrimental_min": 0.0, "detrimental_max": 0.0},
+	},
 }
 ## 乘算属性分组幅度；所有数值使用小数比例，增强与削弱按品质分别维护闭区间。
 const MULTIPLICATIVE_MAGNITUDE_RANGES: Dictionary = {
@@ -160,11 +200,15 @@ const STAT_KEYS: Array[String] = [
 	"dodge_chance",
 	"move_speed",
 	"vision_range",
+	"scatter_count",
+	"piercing_count",
+	"combo_count",
+	"energy_regeneration",
 ]
 ## 武器强化石属性池；只包含武器能够应用的属性。
-const WEAPON_STAT_KEYS: Array[String] = ["damage", "cooldown", "energy_cost", "projectile_speed", "bullet_range", "spread_degrees", "recoil_force", "front_recoil_force", "impact_force", "melee_active_duration", "critical_chance", "critical_damage", "max_durability"]
+const WEAPON_STAT_KEYS: Array[String] = ["damage", "cooldown", "energy_cost", "projectile_speed", "bullet_range", "spread_degrees", "recoil_force", "front_recoil_force", "impact_force", "melee_active_duration", "critical_chance", "critical_damage", "max_durability", "scatter_count", "piercing_count", "combo_count"]
 ## 装备强化石属性池；移速仅脚部可应用，视野仅头部可应用。
-const EQUIPMENT_STAT_KEYS: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance", "move_speed", "vision_range"]
+const EQUIPMENT_STAT_KEYS: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance", "move_speed", "vision_range", "energy_regeneration"]
 ## 属性中文名称；键为统一属性名，值用于强化石、搜索、筛选和武器详情。
 const STAT_LABELS: Dictionary = {
 	"damage": "伤害",
@@ -187,6 +231,10 @@ const STAT_LABELS: Dictionary = {
 	"dodge_chance": "闪避率",
 	"move_speed": "移速",
 	"vision_range": "视野",
+	"scatter_count": "散射",
+	"piercing_count": "穿透",
+	"combo_count": "连击",
+	"energy_regeneration": "能量恢复",
 }
 ## 每项属性的有利数值方向；1 表示数值增加是强化，-1 表示数值减少是强化。
 const BENEFICIAL_DIRECTIONS: Dictionary = {
@@ -210,6 +258,10 @@ const BENEFICIAL_DIRECTIONS: Dictionary = {
 	"dodge_chance": 1,
 	"move_speed": 1,
 	"vision_range": 1,
+	"scatter_count": 1,
+	"piercing_count": 1,
+	"combo_count": 1,
+	"energy_regeneration": 1,
 }
 
 
@@ -251,16 +303,24 @@ static func get_effect_ratio(direction: Variant) -> float:
 
 
 static func get_calculation_mode(stat_name: String) -> String:
-	return CALCULATION_ADDITIVE_POINTS if ADDITIVE_POINT_STATS.has(stat_name) else CALCULATION_MULTIPLICATIVE_RATIO
+	if ADDITIVE_POINT_STATS.has(stat_name):
+		return CALCULATION_ADDITIVE_POINTS
+	if ADDITIVE_VALUE_STATS.has(stat_name):
+		return CALCULATION_ADDITIVE_VALUE
+	return CALCULATION_MULTIPLICATIVE_RATIO
 
 
 static func is_additive_point_stat(stat_name: String) -> bool:
 	return get_calculation_mode(stat_name) == CALCULATION_ADDITIVE_POINTS
 
 
+static func is_additive_value_stat(stat_name: String) -> bool:
+	return get_calculation_mode(stat_name) == CALCULATION_ADDITIVE_VALUE
+
+
 static func calculate_effective_stat(base_value: float, stat_name: String, accumulated_modifier: float) -> float:
 	# 原始最终值；乘算属性把累计值视为基础值比例，加算属性把累计值视为直接百分点偏移。
-	var calculated_value: float = base_value + accumulated_modifier if is_additive_point_stat(stat_name) else base_value * (1.0 + accumulated_modifier)
+	var calculated_value: float = base_value + accumulated_modifier if is_additive_point_stat(stat_name) or is_additive_value_stat(stat_name) else base_value * (1.0 + accumulated_modifier)
 	if stat_name == "critical_chance":
 		return clampf(calculated_value, 0.0, CRITICAL_CHANCE_MAXIMUM)
 	if stat_name == "dodge_chance":
@@ -269,7 +329,23 @@ static func calculate_effective_stat(base_value: float, stat_name: String, accum
 		return calculated_value
 	if stat_name in ["cooldown", "melee_active_duration"]:
 		return maxf(calculated_value, MINIMUM_DURATION_VALUE)
+	if stat_name in ["scatter_count", "combo_count"]:
+		return maxf(roundf(calculated_value), 1.0)
+	if stat_name == "piercing_count":
+		return maxf(roundf(calculated_value), 0.0)
 	return maxf(calculated_value, 0.0)
+
+
+static func get_effect_value(stat_name: String, raw_value: Variant) -> float:
+	# 加算数值词条由随机器直接生成实际点数；其他词条继续兼容旧版方向值到比例的迁移规则。
+	return float(raw_value) if is_additive_value_stat(stat_name) else get_effect_ratio(raw_value)
+
+
+static func get_generation_weight(stat_name: String) -> float:
+	# 稀有词条使用常规词条五分之一权重；非法属性返回 0，防止进入随机池。
+	if stat_name not in STAT_KEYS:
+		return 0.0
+	return RARE_STAT_RELATIVE_WEIGHT if stat_name in RARE_STAT_KEYS else 1.0
 
 
 static func convert_legacy_enhancement_modifiers(modifiers: Dictionary, base_values: Dictionary) -> Dictionary:
@@ -307,6 +383,8 @@ static func build_modifier_token(stat_name: String, direction: Variant, include_
 	if not include_percentage:
 		return direction_text
 	# 可见幅度；加算属性与乘算属性都保留 0.1 精度，避免一级属性的小数百分比被显示为 0%。
+	if is_additive_value_stat(stat_name):
+		return "%s%d" % [direction_text, roundi(absf(float(direction)))]
 	return "%s%.1f 个百分点" % [direction_text, absf(modifier_ratio) * 100.0] if is_additive_point_stat(stat_name) else "%s%.1f%%" % [direction_text, absf(modifier_ratio) * 100.0]
 
 
@@ -326,7 +404,7 @@ static func roll_quality_modifier_ratio(random_source: RandomNumberGenerator, qu
 	if maximum_ratio <= 0.0:
 		return 0.0
 	# 随机步长；乘算属性和加算属性都使用 0.1% 精度，分别按比例与百分点语义结算。
-	var roll_step: float = ADDITIVE_POINT_ROLL_STEP if is_additive_point_stat(stat_name) else MULTIPLICATIVE_ROLL_STEP
+	var roll_step: float = 1.0 if is_additive_value_stat(stat_name) else (ADDITIVE_POINT_ROLL_STEP if is_additive_point_stat(stat_name) else MULTIPLICATIVE_ROLL_STEP)
 	# 最小随机单位；将浮点区间换算为整数单位，避免 randf 产生不可追踪精度。
 	var minimum_step: int = roundi(minf(minimum_ratio, maximum_ratio) / roll_step)
 	# 最大随机单位；与最小单位组成包含端点的闭区间。
@@ -336,7 +414,7 @@ static func roll_quality_modifier_ratio(random_source: RandomNumberGenerator, qu
 
 static func get_stat_magnitude_config(stat_name: String, quality_id: String) -> Dictionary:
 	# 属性级配置；加算属性直接读取自身区间，保证暴击率、暴击伤害和闪避率互不共用幅度。
-	var stat_configs: Dictionary = ADDITIVE_POINT_MAGNITUDE_RANGES.get(stat_name, {}) as Dictionary if is_additive_point_stat(stat_name) else {}
+	var stat_configs: Dictionary = ADDITIVE_POINT_MAGNITUDE_RANGES.get(stat_name, {}) as Dictionary if is_additive_point_stat(stat_name) else (ADDITIVE_VALUE_MAGNITUDE_RANGES.get(stat_name, {}) as Dictionary if is_additive_value_stat(stat_name) else {})
 	if stat_configs.is_empty():
 		# 乘算属性组；未登记属性返回空配置，使错误数据在使用时安全跳过而不是套用其他属性区间。
 		var magnitude_group: String = str(MULTIPLICATIVE_STAT_GROUPS.get(stat_name, ""))

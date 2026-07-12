@@ -31,6 +31,9 @@ const WEAPON_RESOURCE_PATHS: Dictionary = {
 	"ion_smg": "res://data/weapons/ion_smg.tres",
 	"scatter_blaster": "res://data/weapons/scatter_blaster.tres",
 	"rail_cannon": "res://data/weapons/rail_cannon.tres",
+	"prism_scatter_gun": "res://data/weapons/prism_scatter_gun.tres",
+	"phase_piercer": "res://data/weapons/phase_piercer.tres",
+	"pulse_combo_rifle": "res://data/weapons/pulse_combo_rifle.tres",
 	"phase_blade": "res://data/weapons/phase_blade.tres",
 	"quantum_dagger": "res://data/weapons/quantum_dagger.tres",
 }
@@ -49,7 +52,7 @@ const EQUIPMENT_RESOURCE_PATHS: Dictionary = {
 }
 ## 默认背包武器标识；首次建立存档时放入未装备武器，顺序会按获得时间默认排序。
 ## 永久仓库初始化补充：常量名称为旧存档兼容保留，当前首次存档会把这些未装备武器放入永久仓库。
-const DEFAULT_BACKPACK_WEAPON_IDS: Array[String] = ["ion_smg", "rail_cannon", "scatter_blaster", "quantum_dagger"]
+const DEFAULT_BACKPACK_WEAPON_IDS: Array[String] = ["ion_smg", "rail_cannon", "scatter_blaster", "prism_scatter_gun", "phase_piercer", "pulse_combo_rifle", "quantum_dagger"]
 ## 默认远程装备标识；首次建立存档时依次装入两个远程槽。
 const DEFAULT_RANGED_WEAPON_IDS: Array[String] = ["quantum_pistol", "pulse_rifle"]
 ## 默认近战装备标识；首次建立存档时装入近战槽。

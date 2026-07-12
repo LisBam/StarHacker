@@ -150,18 +150,15 @@ static func create_random(random_source: RandomNumberGenerator, minimum_modifier
 	# 削弱抽取结果；每颗石头只抽取一次，概率由品质规则决定。
 	var rolled_detrimental: bool = random_source.randf() < float(quality_config.get("detrimental_chance", 0.0))
 	modifier_count = clampi(1 + (1 if rolled_extra_beneficial else 0) + (1 if rolled_detrimental else 0), resolved_minimum_count, resolved_maximum_count)
-	# 随机属性顺序；先洗牌再截取，保证同一颗强化石不会出现重复属性。
+	# 随机属性候选池；抽中后立即移除，保证同一颗强化石不会出现重复属性。
 	# 适用类型；未指定时武器石与装备石等概率生成。
 	var generated_target_kind: String = requested_target_kind if requested_target_kind in ["weapon", "equipment"] else ("weapon" if random_source.randf() < 0.5 else "equipment")
 	# 对应属性池；不会生成另一类型的无效属性。
-	var shuffled_stats: Array[String] = (EnhancementRules.WEAPON_STAT_KEYS if generated_target_kind == "weapon" else EnhancementRules.EQUIPMENT_STAT_KEYS).duplicate()
-	for stat_index in range(shuffled_stats.size() - 1, 0, -1):
-		# 交换下标；Fisher-Yates 洗牌保证每种属性组合概率一致。
-		var swap_index: int = random_source.randi_range(0, stat_index)
-		# 临时属性；用于交换两个数组元素。
-		var temporary_stat: String = shuffled_stats[stat_index]
-		shuffled_stats[stat_index] = shuffled_stats[swap_index]
-		shuffled_stats[swap_index] = temporary_stat
+	var available_stats: Array[String] = (EnhancementRules.WEAPON_STAT_KEYS if generated_target_kind == "weapon" else EnhancementRules.EQUIPMENT_STAT_KEYS).duplicate()
+	# 随机属性顺序；逐项执行不放回加权抽取，稀有属性单项权重固定为常规属性的五分之一。
+	var shuffled_stats: Array[String] = []
+	while not available_stats.is_empty():
+		shuffled_stats.append(_take_weighted_stat(random_source, available_stats))
 
 	# 随机方向词典；每项只保存 +1 或 -1，不再生成具体百分比。
 	# 品质化数值补充；当前字典实际保存带方向的 0.05 至 0.60 比例，上述方向说明仅用于旧存档语义。
@@ -193,6 +190,25 @@ static func create_random(random_source: RandomNumberGenerator, minimum_modifier
 	enhancement_stone.sell_price = maxi(base_sell_price * modifier_count, 0)
 	enhancement_stone.modifiers = generated_modifiers
 	return enhancement_stone
+
+
+static func _take_weighted_stat(random_source: RandomNumberGenerator, available_stats: Array[String]) -> String:
+	# 总权重；常规属性贡献 1，稀有属性贡献 0.2，修改规则目录会自动影响所有强化石来源。
+	var total_weight: float = 0.0
+	for stat_name in available_stats:
+		total_weight += EnhancementRules.get_generation_weight(stat_name)
+	# 权重落点；范围为 0 到总权重，逐项扣减后确定本次抽中的唯一属性。
+	var weight_roll: float = random_source.randf() * total_weight
+	for stat_index in range(available_stats.size()):
+		# 候选属性；按规则目录权重参与抽取，抽中后从原数组移除。
+		var stat_name: String = available_stats[stat_index]
+		weight_roll -= EnhancementRules.get_generation_weight(stat_name)
+		if weight_roll <= 0.0:
+			available_stats.remove_at(stat_index)
+			return stat_name
+	# 浮点边界兜底属性；取最后一项并移除，确保候选池始终缩小。
+	var fallback_stat: String = available_stats.pop_back()
+	return fallback_stat
 
 
 static func _build_display_name(quality: String, stone_target_kind: String) -> String:

@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="WeaponData" format=3]
+
+[ext_resource type="Script" uid="uid://bnwiep4d7h6jo" path="res://scripts/data/weapon_data.gd" id="1_weapon_data"]
+[ext_resource type="PackedScene" path="res://scenes/projectiles/player_projectile.tscn" id="2_projectile"]
+
+[resource]
+script = ExtResource("1_weapon_data")
+weapon_id = "phase_piercer"
+display_name = "相位贯穿枪"
+description = "具有穿透属性的精确量子枪械，穿透数决定弹体可额外穿过的目标数量。"
+icon_text = "贯"
+sell_price = 180
+energy_cost = 15.0
+projectile_scene = ExtResource("2_projectile")
+projectile_speed = 1280.0
+bullet_range = 500.0
+ranged_damage = 26.0
+ranged_cooldown = 0.48
+spread_degrees = 1.0
+has_piercing = true
+piercing_count = 0
+recoil_force = 175.0
+impact_force = 390.0
+critical_chance = 0.1

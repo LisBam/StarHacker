@@ -38,6 +38,8 @@ class_name EquipmentData
 @export_range(0.0, 10.0, 0.01, "or_greater") var move_speed: float = 0.0
 ## 视野加成比例；使用 0 到 1 小数，默认 0，仅头部装备支持，数值越高相机视野越广。
 @export_range(0.0, 10.0, 0.01, "or_greater") var vision_range: float = 0.0
+## 每秒能量恢复加成；默认 0，仅躯干装备支持，每 1 点会让玩家每秒额外恢复 1 点能量。
+@export_range(0.0, 99999.0, 1.0, "or_greater") var energy_regeneration: float = 0.0
 ## 暴击率加成；使用 0 到 1 小数，默认 0，装备有效时与武器暴击率相加。
 @export_range(0.0, 1.0, 0.01) var critical_chance: float = 0.0
 ## 暴击伤害倍率增量；默认 0，0.1 表示在基础 150% 上增加 10 个百分点。
@@ -52,6 +54,8 @@ const COMMON_ENHANCEMENT_STATS: Array[String] = ["max_durability", "attack_power
 const FEET_ENHANCEMENT_STATS: Array[String] = ["move_speed"]
 ## 头部专属强化属性；其他部位不会消费视野词条。
 const HEAD_ENHANCEMENT_STATS: Array[String] = ["vision_range"]
+## 躯干专属强化属性；其他部位不会消费能量恢复词条。
+const BODY_ENHANCEMENT_STATS: Array[String] = ["energy_regeneration"]
 ## 仅基础装备可提供的属性；暴击率与暴击伤害可以保留资源基础配置，但装备强化石不会生成或应用对应词条。
 const BASE_ONLY_STATS: Array[String] = ["critical_chance", "critical_damage"]
 
@@ -90,7 +94,7 @@ func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
 		if not _is_stat_supported(stat_name):
 			continue
 		# 本次强化比例；品质规则已在消耗强化石时生成实际幅度。
-		var modifier_ratio: float = EnhancementRules.get_effect_ratio(modifiers.get(raw_stat_name, 0.0))
+		var modifier_ratio: float = EnhancementRules.get_effect_value(stat_name, modifiers.get(raw_stat_name, 0.0))
 		if is_zero_approx(modifier_ratio):
 			continue
 		# 强化前后数值；始终以基础属性为百分比换算基准。
@@ -140,7 +144,7 @@ func set_current_durability(value: float) -> void:
 
 
 func _is_stat_supported(stat_name: String) -> bool:
-	return stat_name in COMMON_ENHANCEMENT_STATS or (equipment_slot == "feet" and stat_name in FEET_ENHANCEMENT_STATS) or (equipment_slot == "head" and stat_name in HEAD_ENHANCEMENT_STATS)
+	return stat_name in COMMON_ENHANCEMENT_STATS or (equipment_slot == "feet" and stat_name in FEET_ENHANCEMENT_STATS) or (equipment_slot == "head" and stat_name in HEAD_ENHANCEMENT_STATS) or (equipment_slot == "body" and stat_name in BODY_ENHANCEMENT_STATS)
 
 
 func _is_stat_available(stat_name: String) -> bool:

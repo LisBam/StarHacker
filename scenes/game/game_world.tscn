@@ -1,4 +1,4 @@
-[gd_scene load_steps=28 format=3]
+[gd_scene load_steps=31 format=3]
 
 [ext_resource type="Script" path="res://scripts/game/game_world.gd" id="1_game_world"]
 [ext_resource type="PackedScene" path="res://scenes/characters/player.tscn" id="2_player"]
@@ -22,6 +22,9 @@
 [ext_resource type="Resource" path="res://data/weapons/rail_cannon.tres" id="20_rail_cannon"]
 [ext_resource type="Resource" path="res://data/weapons/phase_blade.tres" id="21_phase_blade"]
 [ext_resource type="Resource" path="res://data/weapons/quantum_dagger.tres" id="22_quantum_dagger"]
+[ext_resource type="Resource" path="res://data/weapons/prism_scatter_gun.tres" id="28_prism_scatter_gun"]
+[ext_resource type="Resource" path="res://data/weapons/phase_piercer.tres" id="29_phase_piercer"]
+[ext_resource type="Resource" path="res://data/weapons/pulse_combo_rifle.tres" id="30_pulse_combo_rifle"]
 [ext_resource type="Script" path="res://scripts/components/monster_simulation_manager.gd" id="23_monster_simulation_manager"]
 [ext_resource type="Resource" path="res://data/items/repair_kit_basic.tres" id="24_repair_kit_basic"]
 [ext_resource type="Resource" path="res://data/items/repair_kit_medium.tres" id="25_repair_kit_medium"]
@@ -34,7 +37,7 @@ monster_scene = ExtResource("5_basic_monster")
 monster_scenes = Array[PackedScene]([ExtResource("5_basic_monster"), ExtResource("14_ranged_monster")])
 obstacle_scenes = Array[PackedScene]([ExtResource("6_wall_ring_building"), ExtResource("7_compact_building"), ExtResource("8_wall_segment"), ExtResource("10_corridor_building"), ExtResource("11_cross_access_building"), ExtResource("12_l_wall"), ExtResource("13_l_building")])
 weapon_drop_scene = ExtResource("15_weapon_drop")
-weapon_drop_table = Array[Resource]([ExtResource("16_quantum_pistol"), ExtResource("17_pulse_rifle"), ExtResource("18_ion_smg"), ExtResource("19_scatter_blaster"), ExtResource("20_rail_cannon"), ExtResource("21_phase_blade"), ExtResource("22_quantum_dagger")])
+weapon_drop_table = Array[Resource]([ExtResource("16_quantum_pistol"), ExtResource("17_pulse_rifle"), ExtResource("18_ion_smg"), ExtResource("19_scatter_blaster"), ExtResource("20_rail_cannon"), ExtResource("21_phase_blade"), ExtResource("22_quantum_dagger"), ExtResource("28_prism_scatter_gun"), ExtResource("29_phase_piercer"), ExtResource("30_pulse_combo_rifle")])
 repair_kit_drop_table = Array[Resource]([ExtResource("24_repair_kit_basic"), ExtResource("25_repair_kit_medium"), ExtResource("26_repair_kit_advanced")])
 loot_chest_scene = ExtResource("27_loot_chest")
 

@@ -18,6 +18,8 @@ signal hit_area(area: Area2D, damage: float)
 @export_range(0.0, 9999.0, 1.0, "or_greater") var damage: float = 12.0
 ## 命中后是否销毁；取值为 true/false，默认 true 避免穿透，运行时修改会影响弹体能否连续命中。
 @export var destroy_on_hit: bool = true
+## 可额外穿过的目标数量；默认 0 表示首个目标后销毁，正数仅对可受伤目标生效，墙体始终阻挡弹体。
+@export_range(0, 100, 1, "or_greater") var piercing_count: int = 0
 ## 弹体冲击力；取值建议大于等于 0，默认 0 表示只造成伤害不击退，武器会在发射时覆盖该值。
 @export_range(0.0, 5000.0, 1.0, "or_greater") var impact_force: float = 0.0
 
@@ -33,6 +35,10 @@ var _attack_power: float = 100.0
 var _critical_chance: float = 0.0
 ## 弹体携带的暴击伤害倍率；默认 1.5 表示 150%。
 var _critical_damage: float = 1.5
+## 已命中目标实例编号集合；默认空，防止穿透弹体在重叠碰撞帧中重复伤害同一目标。
+var _hit_target_ids: Dictionary = {}
+## 已命中碰撞体 RID；默认只在发生穿透后追加，扫掠射线会排除它们以继续检测后方目标。
+var _excluded_collision_rids: Array[RID] = []
 
 
 func _ready() -> void:
@@ -74,6 +80,11 @@ func set_max_distance(value: float) -> void:
 
 func set_impact_force(value: float) -> void:
 	impact_force = maxf(value, 0.0)
+
+
+func set_piercing_count(value: int) -> void:
+	piercing_count = maxi(value, 0)
+	destroy_on_hit = piercing_count <= 0
 
 
 func configure_combat_attributes(new_attack_power: float, new_critical_chance: float, new_critical_damage: float) -> void:
@@ -120,7 +131,9 @@ func _on_area_entered(area: Area2D) -> void:
 
 func _handle_swept_collision(target_position: Vector2) -> bool:
 	# 射线查询参数；取值为当前位置到目标位置，默认使用弹体碰撞掩码检测怪物和环境。
-	var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(global_position, target_position, collision_mask, [get_rid()])
+	var excluded_rids: Array[RID] = [get_rid()]
+	excluded_rids.append_array(_excluded_collision_rids)
+	var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(global_position, target_position, collision_mask, excluded_rids)
 	query.collide_with_areas = true
 	query.collide_with_bodies = true
 	# 射线命中结果；取值为空字典或包含 collider/position，默认用于提前处理高速碰撞。
@@ -145,15 +158,22 @@ func _handle_swept_collision(target_position: Vector2) -> bool:
 	else:
 		if _apply_hit(collider):
 			hit_body.emit(collider, damage)
-
-	return true
+	return is_queued_for_deletion()
 
 
 func _apply_hit(target: Node) -> bool:
-	if target.has_method("apply_damage"):
-		target.call("apply_damage", damage, self)
-
-	if destroy_on_hit:
+	if target == null or _hit_target_ids.has(target.get_instance_id()):
+		return false
+	# 不可受伤碰撞体视为墙体或环境障碍；穿透只作用于目标，环境始终立即销毁弹体。
+	if not target.has_method("apply_damage"):
 		queue_free()
-
+		return false
+	_hit_target_ids[target.get_instance_id()] = true
+	target.call("apply_damage", damage, self)
+	if piercing_count <= 0 or destroy_on_hit:
+		queue_free()
+		return true
+	piercing_count -= 1
+	if target is CollisionObject2D:
+		_excluded_collision_rids.append((target as CollisionObject2D).get_rid())
 	return true

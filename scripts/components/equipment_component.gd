@@ -334,7 +334,7 @@ func _sync_from_global_inventory() -> void:
 
 func _apply_armor_attributes() -> void:
 	# 聚合属性；损坏装备不提供任何加成，避免零耐久仍持续生效。
-	var attributes: Dictionary = {"attack_power": 0.0, "defense_power": 0.0, "max_health": 0.0, "health_regeneration_per_five_seconds": 0.0, "dodge_chance": 0.0, "move_speed": 0.0, "vision_range": 0.0, "critical_chance": 0.0, "critical_damage": 0.0}
+	var attributes: Dictionary = {"attack_power": 0.0, "defense_power": 0.0, "max_health": 0.0, "health_regeneration_per_five_seconds": 0.0, "energy_regeneration": 0.0, "dodge_chance": 0.0, "move_speed": 0.0, "vision_range": 0.0, "critical_chance": 0.0, "critical_damage": 0.0}
 	for armor_slot in ["head", "body", "legs", "feet"]:
 		var equipment_data: Resource = get_armor_equipment(armor_slot)
 		if equipment_data == null or (equipment_data.has_method("is_broken") and bool(equipment_data.call("is_broken"))):

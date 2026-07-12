@@ -29,6 +29,18 @@ signal fired(projectile: Node2D)
 var _cooldown_remaining: float = 0.0
 ## 当前射击冷却总时长；取值大于等于 0，默认 0 表示无冷却基准，修改会影响 HUD 冷却覆盖比例。
 var _cooldown_duration: float = 0.0
+## 连击剩余轮数；取值大于等于 0，默认 0 表示当前没有正在执行的连击。
+var _combo_rounds_remaining: int = 0
+## 下一轮连击等待时间；取值大于等于 0，默认 0，归零时生成下一轮全部散射弹体。
+var _combo_interval_remaining: float = 0.0
+## 当前连击轮次间隔；默认 0.08 秒，由武器资源在攻击开始时覆盖。
+var _active_combo_interval: float = 0.08
+## 当前连击结束后的武器冷却；默认使用组件冷却，只有末轮成功执行后才写入正式冷却计时。
+var _active_combo_cooldown: float = 0.0
+## 当前连击固定攻击方向；默认向右，整次连击沿首次攻击请求方向执行。
+var _active_combo_direction: Vector2 = Vector2.RIGHT
+## 当前连击武器资源；默认 null，连击结束后清空，保证中途切换装备不会改变已经开始的攻击参数。
+var _active_combo_weapon: Resource
 ## 弹体扩散随机源；默认启动时随机化，每次开火独立生成对称角度偏移。
 var _spread_random: RandomNumberGenerator = RandomNumberGenerator.new()
 
@@ -42,6 +54,18 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_cooldown_remaining = maxf(_cooldown_remaining - delta, 0.0)
+	if _combo_rounds_remaining <= 0:
+		return
+	_combo_interval_remaining = maxf(_combo_interval_remaining - delta, 0.0)
+	if _combo_interval_remaining > 0.0:
+		return
+	_fire_round(_active_combo_direction, _active_combo_weapon)
+	_combo_rounds_remaining -= 1
+	if _combo_rounds_remaining > 0:
+		_combo_interval_remaining = _active_combo_interval
+		return
+	_start_cooldown(_active_combo_cooldown)
+	_active_combo_weapon = null
 
 
 func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
@@ -59,50 +83,87 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	var selected_impact_force: float = _get_weapon_float(weapon_data, "impact_force", 0.0)
 	# 本次使用的扩散角度；取值来自武器数据，默认 0 度表示弹体严格沿瞄准方向发射。
 	var selected_spread_degrees: float = maxf(_get_weapon_float(weapon_data, "spread_degrees", 0.0), 0.0)
+	# 本次每轮散射弹体数；未持有散射属性的武器固定为 1，避免默认字段让普通武器获得额外弹体。
+	var selected_scatter_count: int = maxi(roundi(_get_weapon_float(weapon_data, "scatter_count", 1.0)), 1) if _weapon_has_attribute(weapon_data, "has_scatter") else 1
+	# 本次连击轮数；未持有连击属性的武器固定为 1，完整轮次结束后才进入正式冷却。
+	var selected_combo_count: int = maxi(roundi(_get_weapon_float(weapon_data, "combo_count", 1.0)), 1) if _weapon_has_attribute(weapon_data, "has_combo") else 1
+	# 本次穿透次数；表示每颗弹体在首个目标之后还能额外穿过的目标数量。
+	var selected_piercing_count: int = maxi(roundi(_get_weapon_float(weapon_data, "piercing_count", 0.0)), 0) if _weapon_has_attribute(weapon_data, "has_piercing") else 0
 
-	if selected_projectile_scene == null or _cooldown_remaining > 0.0 or direction.is_zero_approx():
+	if selected_projectile_scene == null or _cooldown_remaining > 0.0 or _combo_rounds_remaining > 0 or direction.is_zero_approx():
 		return false
-	# 本次实际发射方向；在瞄准方向两侧按扩散角度随机偏移，扩散越高偏移范围越大。
-	var resolved_direction: Vector2 = direction.normalized().rotated(deg_to_rad(_spread_random.randf_range(-selected_spread_degrees, selected_spread_degrees)))
-
-	# 本次弹体出生位置；取值为全局坐标 Vector2，默认由枪口或备用距离计算，修改会影响弹体出现地点。
-	var spawn_position: Vector2 = _get_spawn_position(resolved_direction)
-	if _is_spawn_blocked(resolved_direction, spawn_position):
+	# 连击运行参数；集中保存本次攻击数据，后续轮次无需依赖玩家当前装备槽状态。
+	weapon_data.set_meta("active_scatter_count", selected_scatter_count)
+	weapon_data.set_meta("active_piercing_count", selected_piercing_count)
+	weapon_data.set_meta("active_projectile_scene", selected_projectile_scene)
+	weapon_data.set_meta("active_projectile_speed", selected_projectile_speed)
+	weapon_data.set_meta("active_bullet_range", selected_bullet_range)
+	weapon_data.set_meta("active_projectile_damage", selected_projectile_damage)
+	weapon_data.set_meta("active_impact_force", selected_impact_force)
+	weapon_data.set_meta("active_spread_degrees", selected_spread_degrees)
+	if not _fire_round(direction.normalized(), weapon_data):
 		return false
-
-	# 本次射击生成的弹体实例；取值应为 Node2D 或 null，默认由 projectile_scene 实例化，修改会影响发射对象。
-	var projectile: Node2D = selected_projectile_scene.instantiate() as Node2D
-	if projectile == null:
-		return false
-
-	if projectile.has_method("set_damage"):
-		projectile.call("set_damage", selected_projectile_damage)
-	if projectile.has_method("set_max_distance"):
-		projectile.call("set_max_distance", selected_bullet_range)
-	if projectile.has_method("set_impact_force"):
-		projectile.call("set_impact_force", selected_impact_force)
-	if projectile.has_method("configure_combat_attributes"):
-		# 最终暴击率；武器与装备百分点相加后统一限制到 0% 至 100%，超过上限的部分不参与判定。
-		projectile.call("configure_combat_attributes", _get_owner_attack_power(), clampf(_get_weapon_float(weapon_data, "critical_chance", 0.0) + _get_stats_float("get_equipment_critical_chance", 0.0), 0.0, EnhancementRules.CRITICAL_CHANCE_MAXIMUM), _get_weapon_float(weapon_data, "critical_damage", 1.5) + _get_stats_float("get_equipment_critical_damage", 0.0))
-
-	projectile.global_position = spawn_position
-	projectile.global_rotation = resolved_direction.angle()
-
-	# 本次弹体挂载父节点；取值为有效 Node，默认当前场景或根节点，修改会影响弹体坐标系和生命周期组织。
-	var projectile_parent: Node = _resolve_projectile_parent()
-	projectile_parent.add_child(projectile)
-
-	# 加入场景树后再次写入全局坐标，确保父节点带变换时弹体仍从枪口出现。
-	projectile.global_position = spawn_position
-	projectile.global_rotation = resolved_direction.angle()
-
-	if projectile.has_method("launch"):
-		projectile.call("launch", resolved_direction, selected_projectile_speed)
-
-	_cooldown_remaining = selected_fire_cooldown
-	_cooldown_duration = selected_fire_cooldown
-	fired.emit(projectile)
+	_combo_rounds_remaining = selected_combo_count - 1
+	_active_combo_direction = direction.normalized()
+	_active_combo_weapon = weapon_data if _combo_rounds_remaining > 0 else null
+	_active_combo_interval = maxf(float(weapon_data.get("combo_interval")), 0.01)
+	_combo_interval_remaining = _active_combo_interval
+	_active_combo_cooldown = selected_fire_cooldown
+	if _combo_rounds_remaining <= 0:
+		_start_cooldown(selected_fire_cooldown)
 	return true
+
+
+func _fire_round(direction: Vector2, weapon_data: Resource) -> bool:
+	if weapon_data == null:
+		return false
+	# 当前轮成功弹体数量；至少一颗成功生成才把该轮视为有效攻击。
+	var spawned_projectile_count: int = 0
+	# 当前轮散射数量；每颗弹体独立抽取扩散角度，因此同轮弹道不会重叠锁死。
+	var scatter_count: int = maxi(int(weapon_data.get_meta("active_scatter_count", 1)), 1)
+	for _projectile_index in range(scatter_count):
+		# 本颗弹体方向；独立应用武器扩散范围，散射生成的每颗子弹都受扩散属性影响。
+		var spread_degrees: float = maxf(float(weapon_data.get_meta("active_spread_degrees", 0.0)), 0.0)
+		var resolved_direction: Vector2 = direction.rotated(deg_to_rad(_spread_random.randf_range(-spread_degrees, spread_degrees)))
+		# 本颗弹体出生位置；枪口或备用位置被墙体阻挡时只跳过该颗弹体。
+		var spawn_position: Vector2 = _get_spawn_position(resolved_direction)
+		if _is_spawn_blocked(resolved_direction, spawn_position):
+			continue
+		# 本颗弹体实例；资源异常时跳过，不影响同轮其他散射弹体继续生成。
+		var projectile_scene_resource: PackedScene = weapon_data.get_meta("active_projectile_scene") as PackedScene
+		var projectile: Node2D = projectile_scene_resource.instantiate() as Node2D if projectile_scene_resource != null else null
+		if projectile == null:
+			continue
+		if projectile.has_method("set_damage"):
+			projectile.call("set_damage", float(weapon_data.get_meta("active_projectile_damage", projectile_damage)))
+		if projectile.has_method("set_max_distance"):
+			projectile.call("set_max_distance", float(weapon_data.get_meta("active_bullet_range", 340.0)))
+		if projectile.has_method("set_impact_force"):
+			projectile.call("set_impact_force", float(weapon_data.get_meta("active_impact_force", 0.0)))
+		if projectile.has_method("set_piercing_count"):
+			projectile.call("set_piercing_count", int(weapon_data.get_meta("active_piercing_count", 0)))
+		if projectile.has_method("configure_combat_attributes"):
+			projectile.call("configure_combat_attributes", _get_owner_attack_power(), clampf(_get_weapon_float(weapon_data, "critical_chance", 0.0) + _get_stats_float("get_equipment_critical_chance", 0.0), 0.0, EnhancementRules.CRITICAL_CHANCE_MAXIMUM), _get_weapon_float(weapon_data, "critical_damage", 1.5) + _get_stats_float("get_equipment_critical_damage", 0.0))
+		projectile.global_position = spawn_position
+		projectile.global_rotation = resolved_direction.angle()
+		var projectile_parent: Node = _resolve_projectile_parent()
+		projectile_parent.add_child(projectile)
+		projectile.global_position = spawn_position
+		projectile.global_rotation = resolved_direction.angle()
+		if projectile.has_method("launch"):
+			projectile.call("launch", resolved_direction, float(weapon_data.get_meta("active_projectile_speed", projectile_speed)))
+		fired.emit(projectile)
+		spawned_projectile_count += 1
+	return spawned_projectile_count > 0
+
+
+func _start_cooldown(duration: float) -> void:
+	_cooldown_remaining = maxf(duration, 0.0)
+	_cooldown_duration = maxf(duration, 0.0)
+
+
+func _weapon_has_attribute(weapon_data: Resource, property_name: StringName) -> bool:
+	return weapon_data != null and bool(weapon_data.get(property_name))
 
 
 func _get_spawn_position(direction: Vector2) -> Vector2:

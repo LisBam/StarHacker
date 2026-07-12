@@ -512,7 +512,7 @@ func _on_quantity_confirmed(quantity: int) -> void:
 	# 二次确认内容；完整列出实际数量和服务公式计算的最终整数金额。
 	var message: String = _build_transaction_confirmation_message()
 	var action_name: String = _get_action_display_name()
-	_confirmation_dialog.present("确认%s" % action_name, message, "确认%s" % action_name, "取消", 480, 270, true)
+	_confirmation_dialog.present_adaptive("确认%s" % action_name, message, "确认%s" % action_name, "取消", true)
 
 
 func _confirm_quantity_action() -> void:

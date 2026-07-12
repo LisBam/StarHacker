@@ -79,8 +79,8 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	var selected_projectile_scene: PackedScene = _get_weapon_packed_scene(weapon_data, "projectile_scene", projectile_scene)
 	# 本次使用的弹体速度；取值来自武器数据或组件默认值，默认 projectile_speed，修改会影响本次弹体飞行速度。
 	var selected_projectile_speed: float = _get_weapon_float(weapon_data, "projectile_speed", projectile_speed)
-	# 本次使用的弹体射程；取值来自武器数据或弹体默认值，默认 340，修改会影响本次弹体飞行距离。
-	var selected_bullet_range: float = _get_weapon_float(weapon_data, "bullet_range", 340.0)
+	# 本次使用的攻击距离；远程武器以该值限制弹体最大飞行距离，默认 340 像素。
+	var selected_attack_distance: float = _get_weapon_float(weapon_data, "attack_distance", 340.0)
 	# 本次使用的弹体伤害；取值来自武器数据或组件默认值，默认 projectile_damage，修改会影响本次弹体命中伤害。
 	var selected_projectile_damage: float = _get_weapon_float(weapon_data, "ranged_damage", projectile_damage)
 	# 本次使用的冷却；取值来自武器数据或组件默认值，默认 cooldown，修改会影响下一次可攻击时间。
@@ -104,7 +104,7 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	weapon_data.set_meta("active_piercing_count", selected_piercing_count)
 	weapon_data.set_meta("active_projectile_scene", selected_projectile_scene)
 	weapon_data.set_meta("active_projectile_speed", selected_projectile_speed)
-	weapon_data.set_meta("active_bullet_range", selected_bullet_range)
+	weapon_data.set_meta("active_attack_distance", selected_attack_distance)
 	weapon_data.set_meta("active_projectile_damage", selected_projectile_damage)
 	weapon_data.set_meta("active_impact_force", selected_impact_force)
 	weapon_data.set_meta("active_deviation_degrees", selected_deviation_degrees)
@@ -149,7 +149,7 @@ func _fire_round(direction: Vector2, weapon_data: Resource) -> bool:
 		if projectile.has_method("set_damage"):
 			projectile.call("set_damage", float(weapon_data.get_meta("active_projectile_damage", projectile_damage)))
 		if projectile.has_method("set_max_distance"):
-			projectile.call("set_max_distance", float(weapon_data.get_meta("active_bullet_range", 340.0)))
+			projectile.call("set_max_distance", float(weapon_data.get_meta("active_attack_distance", 340.0)))
 		if projectile.has_method("set_impact_force"):
 			projectile.call("set_impact_force", float(weapon_data.get_meta("active_impact_force", 0.0)))
 		if projectile.has_method("set_piercing_count"):

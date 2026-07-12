@@ -238,7 +238,7 @@ func _build_searcher_destination(anchor_position: Vector2, escape_direction: Vec
 
 	# 单位是否远程；默认通过宿主能力接口判断，影响搜查半径和墙体保持距离。
 	var is_ranged: bool = _is_actor_ranged()
-	# 射程差异倍率；远程扩大扇形，近战收缩半径贴墙排查。
+	# 攻击距离差异倍率；远程扩大扇形，近战收缩半径贴墙排查。
 	var range_multiplier: float = ranged_search_radius_multiplier if is_ranged else melee_search_radius_multiplier
 	# 左右扇区序号；取值随搜查次数和职能序号变化，避免所有搜查单位走向同一拐角。
 	var fan_step_index: int = _visited_search_point_count / 3 + _role_slot_index
@@ -296,7 +296,7 @@ func _build_ambush_destination(anchor_position: Vector2, escape_direction: Vecto
 		var melee_reference: Vector2 = anchor_position + escape_direction * search_near_radius * alert_radius_multiplier
 		return _get_best_wall_corner_destination(melee_reference, anchor_position)
 
-	# 远程偏好距离；取值来自宿主攻击能力，至少使用中层半径以保持安全射程。
+	# 远程偏好距离；取值来自宿主攻击能力，至少使用中层半径以保持安全攻击距离。
 	var preferred_distance: float = maxf(_get_actor_preferred_distance(), search_middle_radius) * alert_radius_multiplier
 	# 远程伏击侧向符号；取值 -1 或 1，让多名远程单位分别覆盖不同露头线。
 	var ranged_side: float = -1.0 if _role_slot_index % 2 == 0 else 1.0

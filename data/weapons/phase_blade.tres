@@ -11,6 +11,7 @@ description = "短距离爆发近战武器。"
 icon_text = "B"
 value = 100
 energy_consumption = 14.0
+attack_distance = 91.0
 cooldown = 0.45
 has_front_recoil = true
 front_recoil_force = 140.0

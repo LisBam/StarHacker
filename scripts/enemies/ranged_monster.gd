@@ -6,7 +6,7 @@ class_name RangedMonster
 
 ## 敌方弹体场景；默认由远程怪物场景指定，必须实例化为 Node2D，修改会影响怪物发射对象。
 @export var projectile_scene: PackedScene
-## 射击距离；取值建议大于保持距离且不超过弹体射程，默认 500 像素，玩家进入该范围且无遮挡时怪物会开火。
+## 开火距离；取值建议大于保持距离且不超过弹体最大飞行距离，默认 500 像素，玩家进入该范围且无遮挡时怪物会开火。
 @export_range(1.0, 4000.0, 1.0, "or_greater") var shoot_range: float = 500.0
 ## 保持距离；取值建议大于攻击距离，默认 260 像素，玩家过近时怪物会后退。
 @export_range(1.0, 2000.0, 1.0, "or_greater") var keep_distance: float = 260.0
@@ -14,8 +14,8 @@ class_name RangedMonster
 @export_range(1.0, 3000.0, 1.0, "or_greater") var ranged_projectile_speed: float = 620.0
 ## 敌方弹体伤害；取值建议大于等于 0，默认 10，修改会影响玩家被命中后的生命损失。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var ranged_projectile_damage: float = 10.0
-## 敌方弹体射程；取值建议大于 0，默认 520 像素，修改会影响弹体自动销毁距离。
-@export_range(1.0, 12000.0, 1.0, "or_greater") var ranged_projectile_range: float = 520.0
+## 敌方弹体最大飞行距离；取值建议大于 0，默认 520 像素，修改会影响弹体自动销毁距离。
+@export_range(1.0, 12000.0, 1.0, "or_greater") var ranged_projectile_max_distance: float = 520.0
 ## 敌方弹体冲击力；取值建议大于等于 0，默认 90，命中玩家时会造成短距离击退。
 @export_range(0.0, 5000.0, 1.0, "or_greater") var ranged_projectile_impact_force: float = 90.0
 ## 敌方弹体偏移角度；取值大于等于 0，默认 4 度，每次射击会在瞄准方向两侧随机变化。
@@ -41,7 +41,7 @@ var _cooldown_multiplier: float = 1.0
 
 func apply_spawn_variation(size_multiplier: float, attribute_multiplier: float) -> void:
 	super.apply_spawn_variation(size_multiplier, attribute_multiplier)
-	# 标准化属性倍率；取值至少 0.1，用于远程专属伤害、射程和冷却波动。
+	# 标准化属性倍率；取值至少 0.1，用于远程专属伤害、开火距离和冷却波动。
 	var resolved_attribute_multiplier: float = maxf(attribute_multiplier, 0.1)
 	# 标准化尺寸倍率；取值至少 0.1，用于保持距离随体型变化。
 	var resolved_size_multiplier: float = maxf(size_multiplier, 0.1)
@@ -136,7 +136,7 @@ func _try_fire_projectile(direction: Vector2) -> void:
 	projectile.global_rotation = resolved_direction.angle()
 
 	if projectile.has_method("configure_projectile"):
-		projectile.call("configure_projectile", ranged_projectile_damage, ranged_projectile_impact_force, ranged_projectile_range)
+		projectile.call("configure_projectile", ranged_projectile_damage, ranged_projectile_impact_force, ranged_projectile_max_distance)
 	if projectile.has_method("set_attack_power"):
 		projectile.call("set_attack_power", attack_power)
 	if projectile.has_method("launch"):

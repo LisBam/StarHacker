@@ -16,6 +16,8 @@ signal area_hit(area: Area2D, damage: float)
 @export_range(0.01, 5.0, 0.01) var cooldown_duration: float = 0.45
 ## 近战命中框持续时长；取值应大于 0，默认 0.12 秒形成短促挥击窗口，运行时修改会影响命中判定宽容度。
 @export_range(0.01, 2.0, 0.01) var active_duration: float = 0.12
+## 默认攻击距离；默认 91 像素，对应原命中框最远端与玩家本体的距离，仅在未传入武器资源时使用。
+@export_range(1.0, 12000.0, 1.0, "or_greater") var attack_distance: float = 91.0
 ## 命中框碰撞形状路径；默认指向 HitboxShape，必须解析到 CollisionShape2D，修改会影响近战开启和关闭的碰撞区域。
 @export var collision_shape_path: NodePath = ^"HitboxShape"
 ## 命中框调试视觉路径；默认指向 HitboxVisual，可为空，修改会影响近战攻击时的可视提示。
@@ -43,6 +45,10 @@ var _current_attack_power: float = 100.0
 var _current_critical_chance: float = 0.0
 ## 当前挥击暴击伤害倍率；默认 1.5 表示 150%。
 var _current_critical_damage: float = 1.5
+## 命中框沿攻击方向的固定近端距离；默认 0，ready 时由场景碰撞框位置和宽度自动计算，强化不会改变近端。
+var _hitbox_near_distance: float = 0.0
+## 命中框垂直高度；默认 1，ready 时从矩形碰撞形状读取，攻击距离变化时保持不变。
+var _hitbox_height: float = 1.0
 
 ## 命中框碰撞形状缓存；默认按 collision_shape_path 获取，允许为空但无法碰撞，修改会影响近战判定开关。
 @onready var _collision_shape: CollisionShape2D = get_node_or_null(collision_shape_path) as CollisionShape2D
@@ -52,6 +58,7 @@ var _current_critical_damage: float = 1.5
 
 func _ready() -> void:
 	_current_damage = damage
+	_cache_hitbox_geometry()
 	monitoring = false
 	monitorable = false
 	body_entered.connect(_on_body_entered)
@@ -75,6 +82,8 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	var selected_cooldown: float = _get_weapon_float(weapon_data, "cooldown", cooldown_duration)
 	# 本次近战激活时长；取值来自武器数据或组件默认值，默认 active_duration，修改会影响命中框持续时间。
 	var selected_active_duration: float = _get_weapon_float(weapon_data, "melee_active_duration", active_duration)
+	# 本次近战攻击距离；表示判定区域沿攻击方向的最远端与玩家本体的距离，强化后会动态改变碰撞范围。
+	var selected_attack_distance: float = _get_weapon_float(weapon_data, "attack_distance", attack_distance)
 	# 本次近战冲击力；取值来自武器数据，默认 0 表示只造成伤害不击退。
 	var selected_impact_force: float = _get_weapon_float(weapon_data, "impact_force", 0.0)
 	# 本次武器暴击率；默认 0，不同近战武器可配置不同初始值。
@@ -92,6 +101,7 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	_current_attack_power = _get_owner_attack_power()
 	_current_critical_chance = selected_critical_chance
 	_current_critical_damage = selected_critical_damage
+	_apply_attack_distance(selected_attack_distance)
 	_hit_instances.clear()
 	_cooldown_remaining = selected_cooldown
 	_cooldown_duration = selected_cooldown
@@ -112,6 +122,46 @@ func _set_hitbox_enabled(enabled: bool) -> void:
 		_collision_shape.disabled = not enabled
 	if _visual != null:
 		_visual.visible = enabled
+
+
+func _cache_hitbox_geometry() -> void:
+	## 从场景中的矩形碰撞框读取固定近端和高度，并复制形状以避免运行时尺寸修改污染共享资源。
+	if _collision_shape == null or not (_collision_shape.shape is RectangleShape2D):
+		return
+	# 原始矩形形状；提供场景配置的宽度与高度，读取后复制为当前组件独占资源。
+	var original_shape: RectangleShape2D = _collision_shape.shape as RectangleShape2D
+	# 原始命中框宽度；最低为 1，避免异常场景资源产生零宽判定区域。
+	var original_width: float = maxf(original_shape.size.x, 1.0)
+	_hitbox_near_distance = _collision_shape.position.x - original_width * 0.5
+	_hitbox_height = maxf(original_shape.size.y, 1.0)
+	# 独占矩形形状；运行时只修改当前玩家实例，不改变场景子资源或其他实例。
+	var runtime_shape: RectangleShape2D = original_shape.duplicate() as RectangleShape2D
+	_collision_shape.shape = runtime_shape
+
+
+func _apply_attack_distance(resolved_attack_distance: float) -> void:
+	## 按“最远端到玩家本体的距离”重算近战判定框，保持场景定义的近端和高度不变。
+	if _collision_shape == null or not (_collision_shape.shape is RectangleShape2D):
+		return
+	# 安全攻击距离；最低为 1 像素，保证极端削弱后仍存在有效判定区域。
+	var safe_attack_distance: float = maxf(resolved_attack_distance, 1.0)
+	# 本次近端距离；优先保持场景原近端，攻击距离短于原近端时自动向玩家收缩以维持正宽度。
+	var resolved_near_distance: float = minf(_hitbox_near_distance, maxf(safe_attack_distance - 1.0, 0.0))
+	# 动态碰撞宽度；等于最远端减近端，使矩形右侧最远端精确落在攻击距离处。
+	var hitbox_width: float = safe_attack_distance - resolved_near_distance
+	# 动态碰撞形状；高度保持场景原值，只沿攻击方向伸缩。
+	var rectangle_shape: RectangleShape2D = _collision_shape.shape as RectangleShape2D
+	rectangle_shape.size = Vector2(hitbox_width, _hitbox_height)
+	_collision_shape.position.x = resolved_near_distance + hitbox_width * 0.5
+	if _visual is Polygon2D:
+		# 动态视觉区域；与碰撞框共享近端、最远端和高度，确保调试显示与真实判定完全一致。
+		var half_height: float = _hitbox_height * 0.5
+		(_visual as Polygon2D).polygon = PackedVector2Array([
+			Vector2(resolved_near_distance, -half_height),
+			Vector2(safe_attack_distance, -half_height),
+			Vector2(safe_attack_distance, half_height),
+			Vector2(resolved_near_distance, half_height),
+		])
 
 
 func _on_body_entered(body: Node) -> void:

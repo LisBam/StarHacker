@@ -36,8 +36,8 @@ const FIXED_DURABILITY_COST_PER_USE: float = 1.0
 @export var projectile_scene: PackedScene
 ## 远程弹体速度；取值建议大于 0，默认 900，修改会影响远程弹道速度。
 @export_range(1.0, 3000.0, 1.0, "or_greater") var projectile_speed: float = 900.0
-## 远程弹体射程；取值建议大于 0，默认 340 像素，远程武器专用，修改会影响弹体自动销毁距离。
-@export_range(1.0, 12000.0, 1.0, "or_greater") var bullet_range: float = 340.0
+## 武器攻击距离；取值应大于 0，默认 340 像素。远程武器表示弹体最大飞行距离，近战武器表示攻击判定区域沿攻击方向最远端到玩家本体的距离。
+@export_range(1.0, 12000.0, 1.0, "or_greater") var attack_distance: float = 340.0
 ## 远程弹体伤害；取值建议大于等于 0，默认 12，修改会影响弹体命中后的伤害值。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var ranged_damage: float = 12.0
 ## 武器冷却；取值应大于 0，远程默认 0.16 秒、近战资源应自行覆盖，修改会影响连续攻击频率。
@@ -95,9 +95,9 @@ const MINIMUM_DURABILITY_VALUE_MULTIPLIER: float = 0.1
 ## 冷却和判定时长最小有效值；默认 0.01 秒，防止负强化导致除零或无限攻击。
 const MINIMUM_DURATION_VALUE: float = 0.01
 ## 可应用于所有武器的统一强化属性；新增通用战斗字段时应同步详情格式化器。
-const COMMON_ENHANCEMENT_STATS: Array[String] = ["damage", "cooldown", "energy_consumption", "recoil_force", "front_recoil_force", "impact_force", "critical_chance", "critical_damage", "max_durability"]
+const COMMON_ENHANCEMENT_STATS: Array[String] = ["damage", "cooldown", "energy_consumption", "attack_distance", "recoil_force", "front_recoil_force", "impact_force", "critical_chance", "critical_damage", "max_durability"]
 ## 远程武器专属强化属性；只允许远程武器消费包含这些字段的强化石效果。
-const RANGED_ENHANCEMENT_STATS: Array[String] = ["projectile_speed", "bullet_range", "deviation_degrees", "scatter_count", "piercing_count", "combo_count"]
+const RANGED_ENHANCEMENT_STATS: Array[String] = ["projectile_speed", "deviation_degrees", "scatter_count", "piercing_count", "combo_count"]
 ## 近战武器专属强化属性；只允许近战武器消费包含这些字段的强化石效果。
 const MELEE_ENHANCEMENT_STATS: Array[String] = ["melee_active_duration"]
 

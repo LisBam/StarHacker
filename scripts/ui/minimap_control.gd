@@ -220,17 +220,16 @@ func _draw_extraction_marker(world_view_rect: Rect2) -> void:
 	if not _is_extraction_marker_visible():
 		return
 
-	# 撤离点世界坐标；取值来自 GameWorld，默认只在地图标记时间到达后使用。
+	# 撤离点世界坐标；达到 300 秒地图标记时间后直接使用，不再要求所在探索格已经发现。
 	var extraction_position: Vector2 = _get_extraction_marker_position()
-	if not _is_world_position_discovered(extraction_position):
-		return
-	if not world_view_rect.has_point(extraction_position):
-		return
-
-	# 撤离点小地图坐标；取值为撤离点世界坐标映射到控件本地空间。
-	var marker_position: Vector2 = _world_position_to_minimap_position(extraction_position, world_view_rect)
 	# 标记半径；取值至少为 2，默认让撤离点比玩家点更易识别。
 	var marker_radius: float = maxf(extraction_marker_radius, 2.0)
+	# 撤离点小地图坐标；完整地图映射真实位置，局部小地图范围外点位会夹取到边缘形成方向提示。
+	var marker_position: Vector2 = _world_position_to_minimap_position(extraction_position, world_view_rect)
+	# 标记边缘留白；保证范围外撤离点映射到小地图边缘时圆形与十字不会被边框裁掉。
+	var marker_margin: float = marker_radius * 1.9
+	marker_position.x = clampf(marker_position.x, marker_margin, maxf(size.x - marker_margin, marker_margin))
+	marker_position.y = clampf(marker_position.y, marker_margin, maxf(size.y - marker_margin, marker_margin))
 	draw_circle(marker_position, marker_radius, extraction_marker_color)
 	draw_line(marker_position + Vector2(-marker_radius * 1.7, 0.0), marker_position + Vector2(marker_radius * 1.7, 0.0), extraction_marker_color, 2.0)
 	draw_line(marker_position + Vector2(0.0, -marker_radius * 1.7), marker_position + Vector2(0.0, marker_radius * 1.7), extraction_marker_color, 2.0)

@@ -277,6 +277,8 @@ func _build_content() -> void:
 	_detail_label.add_theme_font_size_override("normal_font_size", 10)
 	content.add_child(_detail_label)
 	_durability_bar = DURABILITY_BAR_SCRIPT.new() as Control
+	# 耐久条边框内缩；左右与底部各避让 2 像素卡片边框，防止后绘制的子节点覆盖边界，同时保持 5 像素条高不变。
+	_durability_bar.call("set_layout_insets", BORDER_WIDTH, BORDER_WIDTH)
 	add_child(_durability_bar)
 	_disabled_overlay = ColorRect.new()
 	_disabled_overlay.color = DISABLED_OVERLAY_COLOR

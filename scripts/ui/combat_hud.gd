@@ -13,6 +13,8 @@ const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_p
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
 ## 通用物品卡片视图；战斗装备栏、背包与结算列表统一读取其固定尺寸，禁止场景内单独覆盖。
 const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
+## 通用物品详情格式器；结算标题复用其有效售价读取规则计算武器、装备和堆叠资源总价值。
+const ITEM_DETAIL_FORMATTER_SCRIPT: Script = preload("res://scripts/ui/item_detail_formatter.gd")
 ## 统一装备槽控件；四部位装备复用仓库武器槽的排版、耐久条、拖拽视觉与悬浮窗。
 const EQUIPMENT_STORAGE_SLOT_SCRIPT: Script = preload("res://scripts/ui/equipment_storage_slot_control.gd")
 ## 隐藏开发者菜单脚本；默认在暂停界面输入 LISBAM 后以战斗调试上下文显示。
@@ -3426,9 +3428,11 @@ func _on_settlement_subcategory_pressed(subcategory: String) -> void:
 
 
 func _build_settlement_section(section_name: String, entries: Array, empty_text: String, accent_color: Color) -> void:
-	# 分区标题；显示分类名称和数量，颜色区分战利品与丢失物品。
+	# 分区总价值；按每个条目的当前有效单价乘实际数量累计，与物品悬停详情和仓库售价保持一致。
+	var total_value: int = _calculate_settlement_entries_total_value(entries)
+	# 分区标题；显示分类名称、条目数量和总价值，颜色区分战利品与丢失物品。
 	var section_title: Label = Label.new()
-	section_title.text = "%s（%d）" % [section_name, entries.size()]
+	section_title.text = "%s（%d） 总价值：%d" % [section_name, entries.size(), total_value]
 	section_title.add_theme_font_size_override("font_size", 18)
 	section_title.add_theme_color_override("font_color", accent_color)
 	_death_settlement_list.add_child(section_title)
@@ -3474,3 +3478,23 @@ func _build_settlement_section(section_name: String, entries: Array, empty_text:
 			fallback_label.custom_minimum_size = ITEM_CARD_VIEW_SCRIPT.get_standard_size()
 			fallback_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			item_grid.add_child(fallback_label)
+
+
+func _calculate_settlement_entries_total_value(entries: Array) -> int:
+	## 计算结算分区全部物品的整数总价值；无资源的兼容条目按 0 处理，避免猜测缺失价格。
+	var total_value: int = 0
+	for raw_entry in entries:
+		if not (raw_entry is Dictionary):
+			continue
+		# 结构化结算条目；包含资源引用和实际数量，武器与装备通常为 1。
+		var entry: Dictionary = raw_entry as Dictionary
+		# 条目资源；缺失时无法读取有效售价，因此不会计入总价值。
+		var item_resource: Resource = entry.get("resource") as Resource
+		if item_resource == null:
+			continue
+		# 条目实际数量；堆叠资源按结算数量累计，异常数量至少按 1 处理。
+		var quantity: int = maxi(int(entry.get("quantity", 1)), 1)
+		# 单位有效售价；包含强化与耐久对武器、装备价值的实时影响。
+		var unit_value: int = int(ITEM_DETAIL_FORMATTER_SCRIPT.call("get_item_sell_price", item_resource))
+		total_value += maxi(unit_value, 0) * quantity
+	return maxi(total_value, 0)

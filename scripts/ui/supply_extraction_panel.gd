@@ -8,6 +8,8 @@ signal closed
 
 ## 仓库物品卡片脚本；背包和装备栏统一复用完整详情、灰色滤镜与点击协议。
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
+## 通用物品卡片视图；背包滚动区读取其悬浮安全留白，避免放大后的卡牌被裁剪。
+const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
 ## 标准物品操作弹窗脚本；送回操作与背包丢弃、仓库出售复用同一功能按钮视觉资源。
 const ITEM_ACTION_POPUP_SCRIPT: Script = preload("res://scripts/ui/item_action_popup.gd")
 ## 数量选择弹窗脚本；堆叠物品部分送回仓库时复用出售数量 UI。
@@ -153,12 +155,20 @@ func _build_interface() -> void:
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	content.add_child(scroll)
+	# 背包卡牌悬浮安全边距；四周预留标准放大空间，滚动区只裁剪边距之外的内容。
+	var backpack_scroll_margin: MarginContainer = MarginContainer.new()
+	backpack_scroll_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	backpack_scroll_margin.add_theme_constant_override("margin_left", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	backpack_scroll_margin.add_theme_constant_override("margin_top", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	backpack_scroll_margin.add_theme_constant_override("margin_right", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	backpack_scroll_margin.add_theme_constant_override("margin_bottom", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	scroll.add_child(backpack_scroll_margin)
 	_backpack_grid = GridContainer.new()
 	_backpack_grid.columns = 2
 	_backpack_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_backpack_grid.add_theme_constant_override("h_separation", 8)
 	_backpack_grid.add_theme_constant_override("v_separation", 6)
-	scroll.add_child(_backpack_grid)
+	backpack_scroll_margin.add_child(_backpack_grid)
 	_action_menu = ITEM_ACTION_POPUP_SCRIPT.new() as ItemActionPopup
 	_action_menu.action_pressed.connect(_on_action_menu_id_pressed)
 	add_child(_action_menu)

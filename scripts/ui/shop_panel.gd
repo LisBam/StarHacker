@@ -8,6 +8,8 @@ signal closed
 
 ## 商店商品卡片脚本；每个条目独立展示最终价格、倍率和二手说明。
 const SHOP_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/shop_item_control.gd")
+## 通用物品卡片视图；商品滚动区读取其悬浮安全留白，避免放大后的边缘被裁剪。
+const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
 ## 全局窗口样式指南；统一商店主窗口、频道标签、查询控件和状态区域视觉。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 普通商店通道标识；显示随机刷新武器与资源，并允许金币手动刷新。
@@ -204,13 +206,21 @@ func _build_interface() -> void:
 	_item_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_item_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	content.add_child(_item_scroll)
+	# 商品悬浮安全边距；滚动容器会裁剪越界内容，因此四周显式预留标准卡牌放大空间。
+	var item_scroll_margin: MarginContainer = MarginContainer.new()
+	item_scroll_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	item_scroll_margin.add_theme_constant_override("margin_left", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	item_scroll_margin.add_theme_constant_override("margin_top", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	item_scroll_margin.add_theme_constant_override("margin_right", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	item_scroll_margin.add_theme_constant_override("margin_bottom", ITEM_CARD_VIEW_SCRIPT.HOVER_SAFE_MARGIN)
+	_item_scroll.add_child(item_scroll_margin)
 	_item_grid = HFlowContainer.new()
 	_item_grid.alignment = FlowContainer.ALIGNMENT_CENTER
 	_item_grid.last_wrap_alignment = FlowContainer.LAST_WRAP_ALIGNMENT_CENTER
 	_item_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_item_grid.add_theme_constant_override("h_separation", 8)
 	_item_grid.add_theme_constant_override("v_separation", 8)
-	_item_scroll.add_child(_item_grid)
+	item_scroll_margin.add_child(_item_grid)
 	_status_label = Label.new()
 	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

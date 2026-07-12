@@ -22,6 +22,12 @@ const CORNER_RADIUS: float = 4.0
 const HOVER_SCALE: float = 1.03
 ## 标准悬浮动画时长；默认 0.12 秒，进入与离开使用相同缓动时间。
 const HOVER_DURATION: float = 0.12
+## 悬浮安全留白；默认 4 像素，滚动容器应在卡牌集合四周预留该空间，避免 1.03 倍放大被裁剪。
+const HOVER_SAFE_MARGIN: int = 4
+## 悬浮绘制层级增量；默认 20，确保放大卡牌绘制在相邻普通卡牌和分区边框上方。
+const HOVER_Z_INDEX_OFFSET: int = 20
+## 拖拽绘制层级增量；默认 30，高于悬浮卡牌以保持拖拽来源和预览反馈清晰。
+const DRAG_Z_INDEX_OFFSET: int = 30
 ## 标准点击按下缩放；默认 0.96，全部物品控件按下时使用相同收缩幅度。
 const CLICK_PRESS_SCALE: float = 0.96
 ## 标准点击按下动画时长；默认 0.07 秒，保证反馈清晰且不拖慢操作。
@@ -85,6 +91,12 @@ var _durability_bar: Control
 var _disabled_overlay: ColorRect
 ## 当前宿主交互动效补间；默认 null，悬浮和拖拽来源反馈共用以避免动画叠加。
 var _interaction_tween: Tween
+## 当前交互宿主；默认 null，首次悬浮、点击或拖拽时缓存，用于恢复原始绘制层级。
+var _interaction_host: Control
+## 当前宿主静止状态绘制层级；默认 0，按宿主首次接入时的真实 z_index 保存。
+var _host_resting_z_index: int = 0
+## 是否已经记录当前宿主静止层级；默认 false，卡牌被重新挂载到其他宿主时会重新捕获。
+var _host_z_index_captured: bool = false
 
 
 func _ready() -> void:
@@ -95,6 +107,7 @@ func _ready() -> void:
 	_bind_click_host()
 	_refresh_content()
 	queue_redraw()
+	call_deferred("_synchronize_host_hover_state")
 
 
 func configure(item_resource: Resource, quantity: int = 1, context_text: String = "", detail_bbcode: String = "", empty_text: String = "空", display_name_override: String = "") -> void:
@@ -130,6 +143,10 @@ func set_disabled_state(disabled: bool) -> void:
 		_disabled_overlay.visible = _disabled
 	if _disabled:
 		_stop_interaction_tween()
+		_hovered = false
+		if _interaction_host != null:
+			_interaction_host.scale = Vector2.ONE
+			_restore_host_z_index(_interaction_host)
 
 
 func play_hover(host_control: Control, hovered: bool) -> void:
@@ -137,15 +154,20 @@ func play_hover(host_control: Control, hovered: bool) -> void:
 	if host_control == null:
 		return
 	_hovered = hovered
+	_capture_host_z_index(host_control)
 	if _drag_source_active:
 		return
 	if _pressed:
 		return
 	_stop_interaction_tween()
 	host_control.pivot_offset = host_control.size * 0.5
+	if hovered and not _disabled:
+		_raise_host_z_index(host_control, HOVER_Z_INDEX_OFFSET)
 	var target_scale: Vector2 = Vector2.ONE * HOVER_SCALE if hovered and not _disabled else Vector2.ONE
 	_interaction_tween = host_control.create_tween()
 	_interaction_tween.tween_property(host_control, "scale", target_scale, HOVER_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if not hovered or _disabled:
+		_interaction_tween.tween_callback(_restore_host_z_index_if_inactive.bind(host_control))
 
 
 func play_click(host_control: Control, pressed: bool) -> void:
@@ -153,8 +175,11 @@ func play_click(host_control: Control, pressed: bool) -> void:
 	if host_control == null or _disabled or _drag_source_active:
 		return
 	_pressed = pressed
+	_capture_host_z_index(host_control)
 	_stop_interaction_tween()
 	host_control.pivot_offset = host_control.size * 0.5
+	if pressed or _hovered:
+		_raise_host_z_index(host_control, HOVER_Z_INDEX_OFFSET)
 	var target_scale: Vector2 = Vector2.ONE * CLICK_PRESS_SCALE if pressed else (Vector2.ONE * HOVER_SCALE if _hovered else Vector2.ONE)
 	var duration: float = CLICK_PRESS_DURATION if pressed else CLICK_RELEASE_DURATION
 	_interaction_tween = host_control.create_tween()
@@ -181,15 +206,22 @@ func play_drag_source(host_control: Control, active: bool) -> void:
 	if host_control == null:
 		return
 	_drag_source_active = active
+	_capture_host_z_index(host_control)
 	if active:
 		_pressed = false
 	_stop_interaction_tween()
 	host_control.pivot_offset = host_control.size * 0.5
-	var target_scale: Vector2 = Vector2.ONE * DRAG_SOURCE_SCALE if active else Vector2.ONE
+	if active:
+		_raise_host_z_index(host_control, DRAG_Z_INDEX_OFFSET)
+	elif _hovered:
+		_raise_host_z_index(host_control, HOVER_Z_INDEX_OFFSET)
+	var target_scale: Vector2 = Vector2.ONE * DRAG_SOURCE_SCALE if active else (Vector2.ONE * HOVER_SCALE if _hovered and not _disabled else Vector2.ONE)
 	var target_modulate: Color = Color(1.0, 1.0, 1.0, DRAG_SOURCE_OPACITY) if active else Color.WHITE
 	_interaction_tween = host_control.create_tween()
 	_interaction_tween.tween_property(host_control, "scale", target_scale, HOVER_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	_interaction_tween.parallel().tween_property(host_control, "modulate", target_modulate, HOVER_DURATION)
+	if not active and not _hovered:
+		_interaction_tween.tween_callback(_restore_host_z_index_if_inactive.bind(host_control))
 
 
 func play_drag_preview(preview_control: Control) -> void:
@@ -325,6 +357,57 @@ func _stop_interaction_tween() -> void:
 	if _interaction_tween != null and _interaction_tween.is_valid():
 		_interaction_tween.kill()
 	_interaction_tween = null
+
+
+func _synchronize_host_hover_state() -> void:
+	## 在卡牌创建或数据刷新后同步真实鼠标状态；复用节点和重建节点都不会把仍在鼠标下的卡牌错误恢复为普通大小。
+	# 按钮宿主；标准卡牌的可交互宿主均为 BaseButton，拖拽预览等纯 Control 不参与悬浮同步。
+	var host_button: BaseButton = get_parent() as BaseButton
+	if host_button == null or not is_instance_valid(host_button):
+		return
+	_capture_host_z_index(host_button)
+	# 当前真实悬浮状态；禁用、拖拽或按压期间不强制覆盖对应交互视觉。
+	var should_hover: bool = host_button.is_hovered() and not _disabled
+	_hovered = should_hover
+	if _drag_source_active or _pressed:
+		return
+	_stop_interaction_tween()
+	host_button.pivot_offset = host_button.size * 0.5
+	host_button.scale = Vector2.ONE * HOVER_SCALE if should_hover else Vector2.ONE
+	if should_hover:
+		_raise_host_z_index(host_button, HOVER_Z_INDEX_OFFSET)
+	else:
+		_restore_host_z_index(host_button)
+
+
+func _capture_host_z_index(host_control: Control) -> void:
+	# 宿主变化状态；卡牌被移动到新按钮时重新记录静止层级，避免沿用旧宿主的 z_index。
+	var host_changed: bool = _interaction_host != host_control
+	if host_changed:
+		_interaction_host = host_control
+		_host_z_index_captured = false
+	if _host_z_index_captured:
+		return
+	_host_resting_z_index = host_control.z_index
+	_host_z_index_captured = true
+
+
+func _raise_host_z_index(host_control: Control, z_index_offset: int) -> void:
+	_capture_host_z_index(host_control)
+	host_control.z_index = _host_resting_z_index + maxi(z_index_offset, 0)
+
+
+func _restore_host_z_index_if_inactive(host_control: Control) -> void:
+	if _hovered or _pressed or _drag_source_active:
+		return
+	_restore_host_z_index(host_control)
+
+
+func _restore_host_z_index(host_control: Control) -> void:
+	if host_control == null or not is_instance_valid(host_control):
+		return
+	_capture_host_z_index(host_control)
+	host_control.z_index = _host_resting_z_index
 
 
 func _bind_click_host() -> void:

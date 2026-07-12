@@ -57,6 +57,14 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 @export var player_path: NodePath = ^"Player"
 ## 玩家摄像机路径；默认指向 Player/Camera2D，探索系统读取其实际屏幕范围，运行时缩放或窗口变化会同步改变可发现区域。
 @export var player_camera_path: NodePath = ^"Player/Camera2D"
+## 玩家战斗属性组件相对路径；默认 StatsComponent，用于角色基础属性、被动倍率和生存状态，运行时通常不动态修改。
+@export var player_stats_component_path: NodePath = ^"StatsComponent"
+## 玩家被动技能组件相对路径；默认 PassiveSkillComponent，用于角色切换时装载全部被动行为。
+@export var player_passive_skill_component_path: NodePath = ^"PassiveSkillComponent"
+## 玩家主动技能组件相对路径；默认 ActiveSkillComponent，用于角色切换时装载前三个主动技能槽。
+@export var player_active_skill_component_path: NodePath = ^"ActiveSkillComponent"
+## 玩家装备组件相对路径；默认 EquipmentComponent，用于角色切换时同步基础移动速度。
+@export var player_equipment_component_path: NodePath = ^"EquipmentComponent"
 ## 环境物父节点路径；默认指向 Environment 容器，允许为空并回退到 GameWorld，修改会影响随机墙体和建筑层级。
 @export var environment_parent_path: NodePath = ^"Environment"
 ## 随机环境预制体列表；默认由场景指定墙体和建筑，元素必须能实例化为 Node2D，修改会影响地图障碍类型池。
@@ -324,6 +332,8 @@ var _monster_replenishment_paused_by_training_tools: bool = false
 var _navigation_marker_position: Vector2 = Vector2.ZERO
 ## 是否存在玩家导航标点；默认 false，大地图左键设置后由大小地图共同读取。
 var _has_navigation_marker: bool = false
+## 技能地图标记表；键为技能稳定标记 ID，值为包含 position 与 kind 的只读数据，独立于玩家导航点和撤离点。
+var _skill_map_markers: Dictionary = {}
 
 ## 玩家节点缓存；默认按 player_path 获取，允许为空并以世界原点作为生成中心。
 @onready var _player: Node2D = get_node_or_null(player_path) as Node2D
@@ -571,6 +581,32 @@ func has_navigation_marker() -> bool:
 
 func get_navigation_marker_position() -> Vector2:
 	return _navigation_marker_position
+
+
+func set_skill_map_marker(marker_id: String, marker_position: Vector2, marker_kind: String = "generic") -> void:
+	## 新增或覆盖一个技能专属地图标记；相同 ID 始终只保留一个，位置限制在当前地图边界内。
+	var normalized_marker_id: String = marker_id.strip_edges()
+	if normalized_marker_id.is_empty():
+		return
+	_skill_map_markers[normalized_marker_id] = {
+		"id": normalized_marker_id,
+		"position": _clamp_position_to_map(marker_position),
+		"kind": marker_kind.strip_edges() if not marker_kind.strip_edges().is_empty() else "generic",
+	}
+
+
+func remove_skill_map_marker(marker_id: String) -> void:
+	## 移除指定技能地图标记；不存在时保持幂等，不影响其他技能或玩家导航点。
+	_skill_map_markers.erase(marker_id.strip_edges())
+
+
+func get_skill_map_markers() -> Array[Dictionary]:
+	## 返回技能地图标记深拷贝；地图控件可以绘制但不能修改世界内部标记表。
+	var markers: Array[Dictionary] = []
+	for raw_marker in _skill_map_markers.values():
+		if raw_marker is Dictionary:
+			markers.append((raw_marker as Dictionary).duplicate(true))
+	return markers
 
 
 func teleport_player_to_nearest_clear_position() -> bool:
@@ -825,9 +861,20 @@ func _apply_selected_character() -> void:
 	# 当前角色档案；优先来自自动内容目录，旧场景缺少目录服务时继续使用现有导出参数。
 	var character_profile: Dictionary = _get_character_profile(_selected_character_id)
 	_player.set("player_display_name", str(character_profile.get("display_name", _get_character_display_name(_selected_character_id))))
+	# 玩家属性组件；先清空旧角色技能倍率，再重建被动，确保新被动首次计数使用新的角色基础数值。
+	var stats_component: Node = _player.get_node_or_null(player_stats_component_path)
+	if stats_component != null and stats_component.has_method("clear_skill_stat_multipliers"):
+		stats_component.call("clear_skill_stat_multipliers")
+	# 被动技能组件；角色切换前先重建全部被动行为，旧角色被动会通过 shutdown 精确清理地图标记和属性倍率。
+	var passive_skill_component: Node = _player.get_node_or_null(player_passive_skill_component_path)
+	if passive_skill_component != null and passive_skill_component.has_method("configure_skills"):
+		passive_skill_component.call("configure_skills", character_profile.get("passive_skills", []) as Array)
+	# 主动技能组件；按角色资源数组顺序写入技能一、二、三，多余项等待未来技能装备界面选择。
+	var active_skill_component: Node = _player.get_node_or_null(player_active_skill_component_path)
+	if active_skill_component != null and active_skill_component.has_method("configure_skills"):
+		active_skill_component.call("configure_skills", character_profile.get("active_skills", []) as Array)
 
 	# 玩家属性组件；默认从玩家子节点 StatsComponent 获取，缺失时跳过占位属性应用。
-	var stats_component: Node = _player.get_node_or_null("StatsComponent")
 	if stats_component != null and stats_component.has_method("configure_character_base_stats"):
 		# 固定生命上限；取值来自当前角色配置，默认用于进入场景或训练场切换角色时刷新生命。
 		var resolved_max_health: float = float(character_profile.get("max_health", _get_character_max_health(_selected_character_id)))
@@ -840,7 +887,7 @@ func _apply_selected_character() -> void:
 		stats_component.call("configure_character_base_stats", resolved_max_health, resolved_max_energy, resolved_attack_power, resolved_defense_power)
 
 	# 玩家移动组件；默认从玩家子节点 MovementComponent 获取，缺失时跳过速度应用。
-	var equipment_component: Node = _player.get_node_or_null("EquipmentComponent")
+	var equipment_component: Node = _player.get_node_or_null(player_equipment_component_path)
 	if equipment_component == null:
 		return
 
@@ -939,6 +986,9 @@ func _merge_automatically_discovered_content() -> void:
 	weapon_drop_table = _filter_available_resource_pool(weapon_drop_table, content_catalog)
 	equipment_drop_table = _filter_available_resource_pool(equipment_drop_table, content_catalog)
 	repair_kit_drop_table = _filter_available_resource_pool(repair_kit_drop_table, content_catalog)
+	# 单项怪物兜底过滤；当复数池为空时同样不得让已归属但未解锁的 monster_scene 绕过目录可用性。
+	if monster_scene != null and content_catalog.has_method("is_content_path_available") and not monster_scene.resource_path.is_empty() and not bool(content_catalog.call("is_content_path_available", monster_scene.resource_path)):
+		monster_scene = null
 	if content_catalog.has_method("get_enemy_scene_paths"):
 		for scene_path in content_catalog.call("get_enemy_scene_paths") as PackedStringArray:
 			# 怪物场景；只合并尚未存在的资源路径，避免原有检查器列表和目录扫描产生重复权重。
@@ -1274,7 +1324,7 @@ func _is_player_dead() -> bool:
 		return false
 
 	# 玩家属性组件；默认从玩家子节点 StatsComponent 获取，用于停止死亡后的存活计时和撤离进度。
-	var stats_component: Node = _player.get_node_or_null("StatsComponent")
+	var stats_component: Node = _player.get_node_or_null(player_stats_component_path)
 	if stats_component != null and stats_component.has_method("is_dead"):
 		return bool(stats_component.call("is_dead"))
 

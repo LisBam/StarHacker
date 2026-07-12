@@ -1,4 +1,4 @@
-[gd_scene load_steps=14 format=3 uid="uid://b8ap3osklnsmt"]
+[gd_scene load_steps=18 format=3 uid="uid://b8ap3osklnsmt"]
 
 [ext_resource type="Script" uid="uid://mkfqfypf8jpw" path="res://scripts/player/player_controller.gd" id="1_player_controller"]
 [ext_resource type="Script" uid="uid://dy2ap8k4mwko" path="res://scripts/components/player_input_component.gd" id="2_player_input"]
@@ -13,6 +13,10 @@
 [ext_resource type="Resource" path="res://data/weapons/stelle/galactic_baseball_bat.tres" id="12_galactic_baseball_bat"]
 [ext_resource type="Script" path="res://scripts/camera/combat_camera.gd" id="17_combat_camera"]
 [ext_resource type="Script" path="res://scripts/components/equipment_set_component.gd" id="21_equipment_set"]
+[ext_resource type="Script" path="res://scripts/components/active_skill_component.gd" id="22_active_skill"]
+[ext_resource type="Script" path="res://scripts/components/passive_skill_component.gd" id="23_passive_skill"]
+[ext_resource type="Script" path="res://scripts/components/skill_targeting_visual.gd" id="24_skill_targeting_visual"]
+[ext_resource type="Script" path="res://scripts/components/skill_charge_bar.gd" id="25_skill_charge_bar"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_body"]
 radius = 18.0
@@ -72,6 +76,22 @@ collision_mask = 34
 monitoring = false
 monitorable = false
 script = ExtResource("5_melee_attack")
+
+[node name="SkillTargetingVisual" type="Node2D" parent="."]
+visible = false
+z_index = 5
+script = ExtResource("24_skill_targeting_visual")
+
+[node name="SkillChargeBar" type="Node2D" parent="."]
+visible = false
+z_index = 20
+script = ExtResource("25_skill_charge_bar")
+
+[node name="ActiveSkillComponent" type="Node" parent="."]
+script = ExtResource("22_active_skill")
+
+[node name="PassiveSkillComponent" type="Node" parent="."]
+script = ExtResource("23_passive_skill")
 
 [node name="HitboxShape" type="CollisionShape2D" parent="MeleeAttackComponent" unique_id=1235241484]
 position = Vector2(56, 0)

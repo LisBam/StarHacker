@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="StelleFarthestChestSkillData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/stelle_farthest_chest_skill_data.gd" id="1_data"]
+[ext_resource type="Script" path="res://scripts/skills/stelle_farthest_chest_behavior.gd" id="2_behavior"]
+
+[resource]
+script = ExtResource("1_data")
+skill_id = "stelle_farthest_chest"
+display_name = "开拓！"
+description = "游戏开始时，地图上标记一个距离你最远的宝箱。"
+behavior_script = ExtResource("2_behavior")
+map_marker_id = "stelle_farthest_chest"
+map_marker_kind = "chest"
+chest_group = &"loot_chests"

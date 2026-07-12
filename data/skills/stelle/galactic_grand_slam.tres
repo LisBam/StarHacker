@@ -1,0 +1,36 @@
+[gd_resource type="Resource" script_class="StelleGalacticGrandSlamSkillData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/stelle_galactic_grand_slam_skill_data.gd" id="1_data"]
+[ext_resource type="Script" path="res://scripts/skills/stelle_galactic_grand_slam_behavior.gd" id="2_behavior"]
+
+[resource]
+script = ExtResource("1_data")
+skill_id = "stelle_galactic_grand_slam"
+display_name = "银河全垒打"
+description = "长按进行蓄力，朝指定方向挥出强力一击造成10（+20%攻击力）点威力的伤害，并造成100距离的击退。至多蓄力3秒提升80%的伤害与击退效果。"
+behavior_script = ExtResource("2_behavior")
+targeting_mode = 0
+directional_input_mode = 0
+cooldown_duration = 15.0
+energy_cost = 0.0
+cast_range = 180.0
+directional_half_angle_degrees = 45.0
+target_group = &"skill_targets"
+target_requires_damage_method = true
+target_requires_line_of_sight = false
+can_charge = true
+maximum_charge_duration = 3.0
+target_marker_radius = 18.0
+base_damage = 10.0
+attack_power_ratio = 0.2
+knockback_distance = 100.0
+maximum_charge_damage_bonus_ratio = 0.8
+maximum_charge_knockback_bonus_ratio = 0.8
+damage_formula_attack_power = 100.0
+blocked_by_environment = true
+environment_collision_mask = 16
+cast_effect_color = Color(1, 0.82, 0.34, 0.92)
+cast_effect_duration = 0.24
+cast_effect_segment_count = 32
+cast_effect_fill_opacity_ratio = 0.28
+cast_effect_outline_width = 3.0

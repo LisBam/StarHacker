@@ -33,9 +33,15 @@ class_name CharacterData
 ## 基础每秒能量恢复；默认 18，装备能量恢复会在该值上继续结算。
 @export_range(0.0, 99999.0, 0.1, "or_greater") var energy_regeneration: float = 18.0
 ## 被动技能说明；默认待配置，当前用于角色选择详情占位，未来可扩展为技能资源引用。
+## 兼容说明：该文本保留给旧角色和隔离场景，实际多被动行为优先读取 passive_skills 资源数组。
 @export var passive: String = "被动技能：待配置"
 ## 主动技能说明；默认待配置，当前用于角色选择详情占位，未来可扩展为技能资源引用。
+## 兼容说明：该文本保留给旧角色和隔离场景，实际三个主动技能槽优先读取 active_skills 资源数组。
 @export var active: String = "主动技能：待配置"
+## 被动技能资源数组；默认空表示没有运行时被动，每项应为 PassiveSkillData 兼容资源，角色进入战斗后会同时创建全部有效行为。
+@export var passive_skills: Array[Resource] = []
+## 主动技能资源数组；默认空表示三个技能槽都为空，最多按数组顺序把前三项配置到技能一、二、三。
+@export var active_skills: Array[Resource] = []
 
 
 func to_profile() -> Dictionary:
@@ -56,4 +62,6 @@ func to_profile() -> Dictionary:
 		"energy_regeneration": energy_regeneration,
 		"passive": passive,
 		"active": active,
+		"passive_skills": passive_skills.duplicate(),
+		"active_skills": active_skills.duplicate(),
 	}

@@ -44,8 +44,12 @@ func _ready() -> void:
 
 func configure_runtime_components(stats_component: Node, equipment_component: Node) -> void:
 	## 注入战斗中的角色组件；主菜单不调用此方法并自动使用角色档案与全局装备计算。
+	if _stats_component != null and _stats_component.has_signal("stats_changed") and _stats_component.is_connected("stats_changed", Callable(self, "refresh")):
+		_stats_component.disconnect("stats_changed", Callable(self, "refresh"))
 	_stats_component = stats_component
 	_equipment_component = equipment_component
+	if _stats_component != null and _stats_component.has_signal("stats_changed") and not _stats_component.is_connected("stats_changed", Callable(self, "refresh")):
+		_stats_component.connect("stats_changed", Callable(self, "refresh"))
 	if is_node_ready():
 		refresh()
 
@@ -79,12 +83,23 @@ func refresh() -> void:
 			continue
 		# 是否使用百分比；视野和闪避率将内部比例转换为玩家易读的百分点。
 		var is_percent: bool = bool(row_definition.get("percent", false))
-		value_label.text = "%s：%s（%s+%s）" % [
-			str(row_definition.get("label", attribute_key)),
-			_format_attribute_value(float(attribute_values.get("total", 0.0)), is_percent),
-			_format_attribute_value(float(attribute_values.get("base", 0.0)), is_percent),
-			_format_attribute_value(float(attribute_values.get("equipment", 0.0)), is_percent)
-		]
+		# 技能额外值；只有运行时被动实际提供非零增幅时才追加第三项，普通属性继续保持原两项格式。
+		var skill_value: float = float(attribute_values.get("skill", 0.0))
+		if not is_zero_approx(skill_value):
+			value_label.text = "%s：%s（%s+%s+技能%s）" % [
+				str(row_definition.get("label", attribute_key)),
+				_format_attribute_value(float(attribute_values.get("total", 0.0)), is_percent),
+				_format_attribute_value(float(attribute_values.get("base", 0.0)), is_percent),
+				_format_attribute_value(float(attribute_values.get("equipment", 0.0)), is_percent),
+				_format_attribute_value(skill_value, is_percent)
+			]
+		else:
+			value_label.text = "%s：%s（%s+%s）" % [
+				str(row_definition.get("label", attribute_key)),
+				_format_attribute_value(float(attribute_values.get("total", 0.0)), is_percent),
+				_format_attribute_value(float(attribute_values.get("base", 0.0)), is_percent),
+				_format_attribute_value(float(attribute_values.get("equipment", 0.0)), is_percent)
+			]
 
 
 func _build_interface() -> void:

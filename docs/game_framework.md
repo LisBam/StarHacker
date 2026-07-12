@@ -35,7 +35,7 @@
 
 ### 3.1 数据层
 
-- `CharacterData`、`WeaponData`、`EquipmentData` 和 `RepairKitData` 描述可保存、可复制的单项内容资源。
+- `CharacterData`、`ActiveSkillData`、`PassiveSkillData`、`WeaponData`、`EquipmentData` 和 `RepairKitData` 描述可保存、可复制的角色、技能与物品配置；技能详细协议见 `docs/skill_system.md`。
 - `ContentPackData` 只声明一个角色扩展包拥有的武器、装备、道具与怪物路径；`EquipmentSetData` 只声明共享套装门槛、显示原文、属性加成与特殊效果参数。
 - `EnhancementStoneData` 保存强化石品质、目标类型和词条方向；强化幅度与兼容规则集中在 `EnhancementRules`。
 - `.tres` 保存单个内容的基础数值。脚本默认值只作为缺省值，场景或资源覆盖值优先。
@@ -46,6 +46,10 @@
 | 组件 | 单一职责 |
 | --- | --- |
 | `PlayerInputComponent` | 把 InputMap 转换为移动、瞄准、攻击、疾跑和闪避意图 |
+| `ActiveSkillComponent` | 管理三个主动技能槽的按下、瞄准、锁定、蓄力、松手释放、能量与冷却 |
+| `PassiveSkillComponent` | 按角色资源同时创建多个被动行为，并在角色切换时清理各自长期状态 |
+| `SkillTargetingVisual` | 绘制方向、位置和锁定目标范围，不参与目标合法性或命中结算 |
+| `SkillChargeBar` | 显示角色头顶蓄力比例，不拥有蓄力时间 |
 | `TopDownMovementComponent` | 合成输入速度与外部击退并执行角色物理移动 |
 | `CombatStatsComponent` | 维护生命、能量、攻防、恢复和死亡状态 |
 | `RangedAttackComponent` | 校验攻击条件、处理散射/连击并生成玩家弹体 |
@@ -57,6 +61,8 @@
 | `CombatDamageCalculator` | 统一伤害、攻防和暴击计算 |
 
 `PlayerController` 是组合根，只协调组件、朝向和战斗反馈，不拥有库存、输入解析或攻击公式。新增角色优先替换数据和子组件，避免扩张聚合脚本。
+
+角色技能同样不进入 `PlayerController`。`GameWorld` 只负责把当前 `CharacterData` 的主动与被动资源数组注入技能组件；行为实例通过明确接口访问属性、目标和地图标记。
 
 ### 3.3 世界与敌人层
 
@@ -104,7 +110,20 @@ InputMap -> PlayerInputComponent -> PlayerController
 
 一次攻击的能量、耐久、冷却和坐力由攻击流程统一结算。弹体数量或连击轮数不得重复扣除单次成本。
 
-### 4.3 物品所有权
+### 4.3 角色技能
+
+```text
+CharacterData 主动/被动资源数组
+        -> GameWorld 注入玩家技能组件
+        -> InputMap C/V/B 或被动初始化
+        -> 通用瞄准、锁定、蓄力与冷却状态
+        -> 独立行为节点 -> 属性 / 目标 / 地图公开接口
+        -> SkillTargetingVisual / SkillChargeBar / ActiveSkillBar
+```
+
+主动行为只有明确成功后才扣能量并进入对应槽冷却。被动行为使用稳定来源 ID 写入长期状态，并必须在角色切换时精确清理；完整协议见 `docs/skill_system.md`。
+
+### 4.4 物品所有权
 
 ```text
 ContentCatalog 模板
@@ -116,9 +135,9 @@ ContentCatalog 模板
 
 `GlobalInventory` 是物品所有权的唯一来源。UI 查询结果只附加来源下标，不调整真实数组顺序。所有移动、购买、出售、装备、修复和锻造操作都必须由服务进行原子校验后再通知界面刷新。
 
-### 4.4 场景与输入
+### 4.5 场景与输入
 
-`InputBindings` 直接更新 Godot `InputMap`。玩家显式解除绑定后不得回退到默认物理键；只有动作缺失或尚未初始化时才允许组件兜底。默认操作及玩家可见规则以机制总表为准。
+`InputBindings` 直接更新 Godot `InputMap`，技能一、二、三与移动、武器和界面操作共用同一改键与持久化流程。玩家显式解除绑定后不得回退到默认物理键；只有动作缺失或尚未初始化时才允许组件兜底。默认操作及玩家可见规则以机制总表为准。
 
 ## 5. 存档边界
 
@@ -169,3 +188,11 @@ ContentCatalog 模板
 - 组件通过明确接口和信号通信，不直接访问无关面板或服务内部字段。
 - 聚合脚本可通过 `NodePath` 获取可替换组件；动态返回值应显式标注局部变量类型。
 - 新增变量必须遵守项目注释规范；不得改名或删除已有变量与注释来完成无关整理。
+
+### 7.6 角色技能
+
+- 一个角色可以同时配置任意数量被动；当前主动输入只装载资源数组前三项，空槽保持可见但不响应释放。
+- 通用索敌目标通过节点组和公开接口声明，技能行为不得按怪物名称、角色 ID 或固定场景路径扫描目标。
+- 方向、位置、锁定与无索敌的输入阶段进入 `ActiveSkillComponent`；具体伤害、移动、增益或地图效果进入独立行为节点。
+- 技能攻防倍率通过 `CombatStatsComponent` 的稳定来源接口写入；同来源覆盖、不同来源连乘，角色面板单独显示技能值。
+- 地图情报技能通过 `GameWorld` 的技能标记字典写入，不占用玩家唯一导航点。

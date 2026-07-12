@@ -35,6 +35,8 @@ const SUPPLY_EXTRACTION_PANEL_SCRIPT: Script = preload("res://scripts/ui/supply_
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 可视进度拖动条组件；为暂停设置主音量滑条绘制实时进度，不接管原生输入与音量换算。
 const PROGRESS_SLIDER_VISUAL_SCRIPT: Script = preload("res://scripts/ui/progress_slider_visual.gd")
+## 主动技能栏脚本；动态显示三个技能槽的实际按键、名称和冷却，不接管技能输入状态机。
+const ACTIVE_SKILL_BAR_SCRIPT: Script = preload("res://scripts/ui/active_skill_bar.gd")
 ## 战斗开发者模式解锁序列；默认六个英文字母，输入错误时按首字母重新开始匹配。
 const DEVELOPER_UNLOCK_SEQUENCE: String = "LISBAM"
 ## 背包全部分页标识；默认显示所有背包武器，修改会影响筛选按钮与背包网格过滤。
@@ -76,6 +78,14 @@ const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
 @export var player_path: NodePath = ^"../Player"
 ## 游戏世界节点路径；默认指向 HUD 父节点 GameWorld，必须解析到提供训练场测试接口的节点。
 @export var game_world_path: NodePath = ^".."
+## 玩家主动技能组件相对路径；默认 ActiveSkillComponent，技能栏通过该组件读取角色技能和冷却。
+@export var active_skill_component_path: NodePath = ^"ActiveSkillComponent"
+## 主动技能栏场景；默认使用独立 active_skill_bar.tscn，使槽位样式参数可在编辑器检查器中统一调整。
+@export var active_skill_bar_scene: PackedScene = preload("res://scenes/ui/active_skill_bar.tscn")
+## 主动技能栏相对底部中心的位置；默认 (-233, -204)，使 466 像素宽技能栏水平居中且位于武器栏上方。
+@export var active_skill_bar_position: Vector2 = Vector2(-233.0, -204.0)
+## 主动技能栏锚定尺寸；默认 466×58 像素，精确容纳三个 150 像素技能槽和两段 8 像素间距。
+@export var active_skill_bar_size: Vector2 = Vector2(466.0, 58.0)
 ## 背包开关输入动作名；默认 toggle_inventory 对应 E 键，运行时通常不修改，改名会影响背包打开/关闭。
 @export var toggle_inventory_action: StringName = &"toggle_inventory"
 ## 暂停输入动作名；默认 pause_game 对应 ESC，运行时通常不修改，改名会影响暂停菜单打开方式。
@@ -134,6 +144,10 @@ var _input_component: Node
 var _ranged_attack_component: Node
 ## 近战攻击组件缓存；默认从玩家子节点 MeleeAttackComponent 获取，允许为空但近战槽无法显示冷却覆盖。
 var _melee_attack_component: Node
+## 主动技能组件缓存；默认从玩家子节点 ActiveSkillComponent 获取，允许为空但不会显示角色主动技能或冷却。
+var _active_skill_component: Node
+## 主动技能栏缓存；默认运行时创建在武器栏上方，三个技能槽按技能一、二、三顺序显示。
+var _active_skill_bar: Control
 ## 远程槽控件缓存；元素为 WeaponSlotControl 实例，默认按装备槽数量动态创建，修改会影响 HUD 刷新目标。
 var _ranged_slot_controls: Array = []
 ## 近战槽控件缓存；取值为 WeaponSlotControl 或 null，默认动态创建，修改会影响近战装备显示目标。
@@ -415,6 +429,7 @@ func _ready() -> void:
 	_master_bus_index = AudioServer.get_bus_index("Master")
 	_bind_game_world()
 	_bind_player_components()
+	_build_active_skill_bar()
 	_build_shared_backpack_panel()
 	_bind_pause_menu()
 	_build_escape_confirmation_dialog()
@@ -517,6 +532,7 @@ func _bind_player_components() -> void:
 	_input_component = _player.get_node_or_null("InputComponent")
 	_ranged_attack_component = _player.get_node_or_null("RangedAttackComponent")
 	_melee_attack_component = _player.get_node_or_null("MeleeAttackComponent")
+	_active_skill_component = _player.get_node_or_null(active_skill_component_path)
 
 	if _stats_component != null:
 		_stats_component.connect("health_changed", Callable(self, "_on_health_changed"))
@@ -534,6 +550,30 @@ func _bind_player_components() -> void:
 
 	if _ranged_attack_component != null:
 		_ranged_attack_component.connect("fired", Callable(self, "_on_ranged_weapon_fired"))
+	if _active_skill_component != null and _active_skill_component.has_signal("skill_loadout_changed"):
+		_active_skill_component.connect("skill_loadout_changed", Callable(self, "_on_active_skill_loadout_changed"))
+
+
+func _build_active_skill_bar() -> void:
+	## 在底部武器栏上方创建主动技能栏；场景无需复制三个固定槽节点，角色切换后直接刷新同一组件。
+	# 主动技能栏实例；优先实例化检查器场景，缺失时使用脚本兜底以保持隔离场景兼容。
+	var skill_bar: Control = active_skill_bar_scene.instantiate() as Control if active_skill_bar_scene != null else ACTIVE_SKILL_BAR_SCRIPT.new() as Control
+	if skill_bar == null:
+		return
+	skill_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	skill_bar.position = active_skill_bar_position
+	skill_bar.size = active_skill_bar_size
+	skill_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root_control.add_child(skill_bar)
+	_active_skill_bar = skill_bar
+	if _active_skill_bar.has_method("configure"):
+		_active_skill_bar.call("configure", _active_skill_component)
+
+
+func _on_active_skill_loadout_changed() -> void:
+	## 角色切换后刷新技能名称与空槽状态；技能栏实例保持不变，避免 HUD 布局跳动。
+	if _active_skill_bar != null and _active_skill_bar.has_method("refresh"):
+		_active_skill_bar.call("refresh")
 
 
 func _refresh_all() -> void:

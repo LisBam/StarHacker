@@ -219,6 +219,10 @@ const PLAYER_PHYSICS_LAYER_MASK: int = 1
 @export var hit_effect_color: Color = Color(1.0, 0.45, 0.28, 0.95)
 ## 怪物死亡特效颜色；默认亮橙色，修改会影响怪物死亡时的爆发反馈。
 @export var death_effect_color: Color = Color(1.0, 0.82, 0.34, 1.0)
+## 通用主动技能目标组；默认 skill_targets，空值表示该怪物不能被锁定或范围技能枚举，运行时通常不动态修改。
+@export var active_skill_target_group: StringName = &"skill_targets"
+## 视野存在感技能计数组；默认 skill_presence_units，空值表示该怪物不参与此类被动计数，运行时通常不动态修改。
+@export var presence_skill_unit_group: StringName = &"skill_presence_units"
 
 ## 当前追击目标；取值为 Node2D 或 null，默认由 GameWorld 设置，修改会影响怪物追击和攻击对象。
 var _target: Node2D
@@ -280,6 +284,10 @@ func _ready() -> void:
 	collision_mask &= ~PLAYER_PHYSICS_LAYER_MASK
 	current_health = clampf(current_health, 0.0, max_health)
 	_random.randomize()
+	if not active_skill_target_group.is_empty():
+		add_to_group(active_skill_target_group)
+	if not presence_skill_unit_group.is_empty():
+		add_to_group(presence_skill_unit_group)
 	_randomize_individual_behavior()
 	_resolve_ai_components()
 	refresh_ai_configuration()
@@ -578,6 +586,16 @@ func get_critical_chance() -> float:
 
 func get_critical_damage_multiplier() -> float:
 	return 1.5
+
+
+func is_dead() -> bool:
+	## 返回当前怪物是否已经死亡；主动技能通用目标过滤通过该接口排除生命归零但尚未离树的节点。
+	return current_health <= 0.0
+
+
+func get_knockback_decay() -> float:
+	## 返回怪物当前击退速度衰减，距离型技能可据此把设计距离换算为初始击退速度。
+	return maxf(knockback_decay, 1.0)
 
 
 func _get_source_combat_value(source: Node, method_name: String, fallback_value: float) -> float:

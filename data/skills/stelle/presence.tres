@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="StellePresenceSkillData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/stelle_presence_skill_data.gd" id="1_data"]
+[ext_resource type="Script" path="res://scripts/skills/stelle_presence_behavior.gd" id="2_behavior"]
+
+[resource]
+script = ExtResource("1_data")
+skill_id = "stelle_presence"
+display_name = "开拓！！"
+description = "视野范围内每有一个其他单位或宝箱，你的攻击力与防御力便提高2%，至多以此法提高20%。"
+behavior_script = ExtResource("2_behavior")
+bonus_ratio_per_target = 0.02
+maximum_bonus_ratio = 0.2
+refresh_interval = 0.15
+unit_group = &"skill_presence_units"
+chest_group = &"loot_chests"
+fallback_view_size = Vector2(1280, 720)

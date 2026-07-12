@@ -54,6 +54,8 @@ var _equipment_critical_chance: float = 0.0
 var _equipment_critical_damage: float = 0.0
 ## 生命恢复累计时间；默认 0，达到 5 秒后结算装备回血。
 var _health_regeneration_elapsed: float = 0.0
+## 技能攻防倍率来源；键为技能稳定 ID，值为包含 attack 与 defense 比例的字典，多个被动来源分别连乘生效。
+var _skill_stat_multipliers: Dictionary = {}
 
 
 func _ready() -> void:
@@ -204,11 +206,60 @@ func is_dead() -> bool:
 
 
 func get_attack_power() -> float:
-	return maxf(attack_power + _equipment_attack_power, 0.0)
+	return maxf((attack_power + _equipment_attack_power) * _get_combined_skill_multiplier("attack"), 0.0)
 
 
 func get_defense_power() -> float:
-	return maxf(defense_power + _equipment_defense_power, 0.0)
+	return maxf((defense_power + _equipment_defense_power) * _get_combined_skill_multiplier("defense"), 0.0)
+
+
+func set_skill_stat_multiplier(source_id: String, attack_bonus_ratio: float, defense_bonus_ratio: float) -> void:
+	## 设置单个技能来源的攻防比例；相同来源覆盖旧值，不会与自身重复叠加，负值按 0 处理。
+	var normalized_source_id: String = source_id.strip_edges()
+	if normalized_source_id.is_empty():
+		return
+	# 新倍率来源；比例以 0.20 表示提高 20%，最终总倍率由所有来源的 1+比例连乘。
+	var new_multiplier: Dictionary = {
+		"attack": maxf(attack_bonus_ratio, 0.0),
+		"defense": maxf(defense_bonus_ratio, 0.0),
+	}
+	# 旧倍率来源；值完全相同时不派发刷新，避免高频视野计数持续重建角色面板。
+	var previous_multiplier: Dictionary = _skill_stat_multipliers.get(normalized_source_id, {}) as Dictionary
+	if previous_multiplier == new_multiplier:
+		return
+	_skill_stat_multipliers[normalized_source_id] = new_multiplier
+	stats_changed.emit()
+
+
+func remove_skill_stat_multiplier(source_id: String) -> void:
+	## 移除指定技能来源；不存在时保持幂等，角色切换只清理对应被动而不影响其他技能。
+	var normalized_source_id: String = source_id.strip_edges()
+	if normalized_source_id.is_empty() or not _skill_stat_multipliers.has(normalized_source_id):
+		return
+	_skill_stat_multipliers.erase(normalized_source_id)
+	stats_changed.emit()
+
+
+func clear_skill_stat_multipliers() -> void:
+	## 清空全部技能倍率；角色完整重配时使用，装备属性与角色基础值不会被修改。
+	if _skill_stat_multipliers.is_empty():
+		return
+	_skill_stat_multipliers.clear()
+	stats_changed.emit()
+
+
+func get_skill_stat_bonus_ratio(stat_name: String) -> float:
+	## 返回所有技能倍率相对 1 的综合增幅；例如单一 20% 来源返回 0.20，供角色属性面板归入技能值展示。
+	return maxf(_get_combined_skill_multiplier(stat_name) - 1.0, 0.0)
+
+
+func _get_combined_skill_multiplier(stat_name: String) -> float:
+	## 连乘全部技能来源；未知属性名没有来源值并保持 1 倍。
+	var combined_multiplier: float = 1.0
+	for raw_multiplier in _skill_stat_multipliers.values():
+		if raw_multiplier is Dictionary:
+			combined_multiplier *= 1.0 + maxf(float((raw_multiplier as Dictionary).get(stat_name, 0.0)), 0.0)
+	return maxf(combined_multiplier, 0.0)
 
 
 func get_character_attribute_snapshot() -> Dictionary:
@@ -219,8 +270,8 @@ func get_character_attribute_snapshot() -> Dictionary:
 		"current_health": current_health,
 		"max_health": _build_attribute_snapshot(base_max_health, _equipment_max_health),
 		"max_energy": _build_attribute_snapshot(max_energy, 0.0),
-		"attack_power": _build_attribute_snapshot(attack_power, _equipment_attack_power),
-		"defense_power": _build_attribute_snapshot(defense_power, _equipment_defense_power),
+		"attack_power": _build_skill_attribute_snapshot(attack_power, _equipment_attack_power, "attack"),
+		"defense_power": _build_skill_attribute_snapshot(defense_power, _equipment_defense_power, "defense"),
 		"health_regeneration_per_five_seconds": _build_attribute_snapshot(0.0, _equipment_health_regeneration_per_five_seconds),
 		"dodge_chance": _build_attribute_snapshot(0.0, _equipment_dodge_chance),
 		"energy_regeneration": _build_attribute_snapshot(energy_regeneration_per_second, _equipment_energy_regeneration)
@@ -233,6 +284,20 @@ func _build_attribute_snapshot(base_value: float, equipment_value: float) -> Dic
 		"base": base_value,
 		"equipment": equipment_value,
 		"total": maxf(base_value + equipment_value, 0.0)
+	}
+
+
+func _build_skill_attribute_snapshot(base_value: float, equipment_value: float, stat_name: String) -> Dictionary:
+	## 构建含技能倍率的四值结构；技能增幅独立保存，保证面板不会把被动效果误标为装备值。
+	# 技能倍率前数值；基础与装备先直接相加，再由全部被动比例连乘。
+	var pre_skill_value: float = maxf(base_value + equipment_value, 0.0)
+	# 技能额外值；用最终值减倍率前数值得出，面板兼容原“基础+额外”结构。
+	var skill_bonus_value: float = pre_skill_value * get_skill_stat_bonus_ratio(stat_name)
+	return {
+		"base": base_value,
+		"equipment": equipment_value,
+		"skill": skill_bonus_value,
+		"total": pre_skill_value + skill_bonus_value,
 	}
 
 

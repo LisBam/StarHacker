@@ -137,8 +137,24 @@ func _refresh_character_detail() -> void:
 	_health_preview_bar.value = clampf(max_health, 0.0, stat_bar_maximum)
 	_energy_preview_bar.value = clampf(max_energy, 0.0, stat_bar_maximum)
 	_speed_preview_bar.value = clampf(move_speed, 0.0, speed_bar_maximum)
-	_passive_label.text = str(profile.get("passive", "被动技能：待配置"))
-	_active_label.text = str(profile.get("active", "主动技能：待配置"))
+	_passive_label.text = _build_skill_detail_text("被动技能", profile.get("passive_skills", []) as Array, str(profile.get("passive", "被动技能：待配置")))
+	_active_label.text = _build_skill_detail_text("主动技能", profile.get("active_skills", []) as Array, str(profile.get("active", "主动技能：待配置")))
+
+
+func _build_skill_detail_text(section_name: String, skill_resources: Array, fallback_text: String) -> String:
+	## 把角色的多个技能资源格式化为长期详情文本；空数组继续显示旧档案说明以兼容未迁移角色。
+	var skill_lines: PackedStringArray = PackedStringArray()
+	for raw_skill_resource in skill_resources:
+		# 技能资源；有效项读取显示名称与说明，空资源不会生成占位行。
+		var skill_resource: Resource = raw_skill_resource as Resource
+		if skill_resource == null:
+			continue
+		# 技能名称；缺失时回退通用“未命名技能”，保证详情仍能识别资源槽数量。
+		var skill_name: String = str(skill_resource.get("display_name")).strip_edges()
+		# 技能说明；空说明只显示名称，不额外生成尾随分隔符。
+		var skill_description: String = str(skill_resource.get("description")).strip_edges()
+		skill_lines.append("%s：%s" % [skill_name if not skill_name.is_empty() else "未命名技能", skill_description] if not skill_description.is_empty() else (skill_name if not skill_name.is_empty() else "未命名技能"))
+	return "%s\n%s" % [section_name, "\n\n".join(skill_lines)] if not skill_lines.is_empty() else fallback_text
 
 
 func _get_session_state() -> Node:

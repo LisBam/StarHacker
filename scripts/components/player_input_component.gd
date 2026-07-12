@@ -5,6 +5,9 @@ class_name PlayerInputComponent
 ## 上层角色脚本只向它询问“移动方向、瞄准方向、是否攻击”，不直接依赖具体按键。
 ## 组件同时支持 InputMap 和物理键兜底，避免输入映射缺失时角色完全不可控。
 
+## 战斗输入开关变化信号；背包、地图、暂停或结算禁用输入时，主动技能组件可立即取消按住状态。
+signal combat_input_enabled_changed(enabled: bool)
+
 ## 左移输入动作名；默认 move_left 对应 A 键，必须存在于 InputMap 或依赖物理键兜底，修改会影响左移触发来源。
 @export var move_left_action: StringName = &"move_left"
 ## 右移输入动作名；默认 move_right 对应 D 键，必须存在于 InputMap 或依赖物理键兜底，修改会影响右移触发来源。
@@ -176,7 +179,10 @@ func consume_ranged_cycle_request() -> int:
 
 
 func set_combat_input_enabled(enabled: bool) -> void:
+	if _combat_input_enabled == enabled:
+		return
 	_combat_input_enabled = enabled
+	combat_input_enabled_changed.emit(_combat_input_enabled)
 	if _combat_input_enabled:
 		return
 
@@ -185,6 +191,11 @@ func set_combat_input_enabled(enabled: bool) -> void:
 	_dodge_requested = false
 	_ranged_slot_request = -1
 	_ranged_cycle_request = 0
+
+
+func is_combat_input_enabled() -> bool:
+	## 返回当前战斗输入开关；主动技能等独立组件通过该只读接口与背包、地图、暂停和结算状态保持一致。
+	return _combat_input_enabled
 
 
 func _is_action_pressed(action_name: StringName) -> bool:

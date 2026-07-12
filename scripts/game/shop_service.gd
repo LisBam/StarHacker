@@ -11,8 +11,9 @@ signal refresh_state_changed
 const SAVE_PATH: String = "user://shop_state.json"
 ## 商店存档版本；版本 2 在新增稀有强化词条后重建旧版普通商品池，同时保留灰市与刷新状态。
 ## 扩展包内容补充：版本 3 重建旧普通商品池，使已默认解锁的角色扩展包内容进入下一份库存。
-## 星内容精简补充：当前值升级为 4，删除旧资源后重建普通商品池并继续保留已经读取的灰市失败批次。
-const SAVE_VERSION: int = 4
+## 星内容精简补充：版本 4 删除旧资源后重建普通商品池并继续保留已经读取的灰市失败批次。
+## 解锁过滤补充：版本 5 重建普通商品池，确保历史商品不能在内容后来归入锁定扩展包后继续出现在普通商店。
+const SAVE_VERSION: int = 5
 ## 强化石随机生成的单词条基础价值；默认 30 金币，与战斗掉落规则一致。
 const STONE_BASE_SELL_PRICE: int = 30
 ## 强化石随机生成兼容最少词条数；实际词条数由品质规则决定，该值用于保持统一调用签名。
@@ -562,7 +563,7 @@ func _load_state() -> bool:
 	for raw_entry in save_data.get("shop_stock", []) as Array:
 		if raw_entry is Dictionary:
 			var restored_entry: Dictionary = _deserialize_stock_entry(raw_entry as Dictionary)
-			if not restored_entry.is_empty():
+			if not restored_entry.is_empty() and _is_normal_stock_entry_currently_available(restored_entry):
 				_shop_stock.append(restored_entry)
 	_gray_market_failure_groups.clear()
 	for raw_group in save_data.get("gray_market_failure_groups", []) as Array:
@@ -578,6 +579,43 @@ func _load_state() -> bool:
 		if not restored_group_entries.is_empty():
 			_gray_market_failure_groups.append({"group_id": str((raw_group as Dictionary).get("group_id", _create_unique_id("failure"))), "entries": restored_group_entries})
 	return not _shop_stock.is_empty() and saved_version >= SAVE_VERSION
+
+
+func _is_normal_stock_entry_currently_available(entry: Dictionary) -> bool:
+	## 复核历史普通商品的当前内容资格；玩家失败遗失形成的灰市物品不调用本方法，仍可按存档恢复例外购回。
+	# 商品资源；空资源没有可验证路径，按失效处理。
+	var item_resource: Resource = entry.get("resource") as Resource
+	if item_resource == null:
+		return false
+	# 内容目录；正常运行时按扩展包状态判断，隔离测试缺少服务时保持旧商品兼容。
+	var content_catalog: Node = get_tree().root.get_node_or_null("ContentCatalog")
+	if content_catalog == null or not content_catalog.has_method("is_content_path_available"):
+		return true
+	# 商品稳定路径；深拷贝资源可能没有 resource_path，因此还需通过稳定内容 ID 查询目录模板路径。
+	var resource_path: String = _resolve_normal_stock_catalog_path(item_resource, content_catalog)
+	# 无固定目录模板的强化石等运行时基础资源始终可用；只有可解析到项目内容路径的商品参与扩展包过滤。
+	return resource_path.is_empty() or bool(content_catalog.call("is_content_path_available", resource_path))
+
+
+func _resolve_normal_stock_catalog_path(item_resource: Resource, content_catalog: Node) -> String:
+	## 解析普通商品的目录模板路径；优先资源自身路径，再按物品类型和稳定 ID 查询，兼容深拷贝路径为空的商店快照。
+	if item_resource == null:
+		return ""
+	# 资源自身路径；直接加载的模板可立即返回，不需要额外稳定 ID 查询。
+	var resource_path: String = item_resource.resource_path.strip_edges()
+	if not resource_path.is_empty():
+		return resource_path
+	if content_catalog == null:
+		return ""
+	# 物品类型；决定稳定 ID 字段与 ContentCatalog 单项查询方法。
+	var item_kind: String = str(item_resource.get("item_kind"))
+	if item_kind == "weapon" and content_catalog.has_method("get_weapon_path"):
+		return str(content_catalog.call("get_weapon_path", str(item_resource.get("weapon_id"))))
+	if item_kind == "equipment" and content_catalog.has_method("get_equipment_path"):
+		return str(content_catalog.call("get_equipment_path", str(item_resource.get("equipment_id"))))
+	if content_catalog.has_method("get_item_path") and "item_id" in item_resource:
+		return str(content_catalog.call("get_item_path", str(item_resource.get("item_id"))))
+	return ""
 
 
 func _serialize_stock_entry(entry: Dictionary) -> Dictionary:

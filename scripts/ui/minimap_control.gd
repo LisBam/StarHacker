@@ -7,6 +7,10 @@ extends Control
 const DISPLAY_MODE_LOCAL: int = 0
 ## 完整大地图模式；默认用于 Q 键地图，显示整张地图并叠加探索迷雾。
 const DISPLAY_MODE_FULL: int = 1
+## 宝箱技能标记类型；固定 chest，与技能资源的 map_marker_kind 协议一致。
+const SKILL_MARKER_KIND_CHEST: String = "chest"
+## 通用技能标记类型；固定 generic，用于技能没有提供有效类型时的圆形兜底。
+const SKILL_MARKER_KIND_GENERIC: String = "generic"
 
 ## 游戏世界节点路径；默认从 BattleHUD/Root/MiniMap 回到 GameWorld，修改会影响地图边界和障碍数据来源。
 @export var game_world_path: NodePath = ^"../../.."
@@ -47,6 +51,26 @@ const DISPLAY_MODE_FULL: int = 1
 @export_range(2.0, 32.0, 0.5) var extraction_marker_radius: float = 6.0
 ## 玩家导航标点颜色；默认柔和绿色，大小地图共同使用以降低指引线对战斗画面的突兀感。
 @export var navigation_marker_color: Color = Color(0.30, 0.92, 0.48, 0.92)
+## 技能地图标记颜色；默认亮金色，星的最远宝箱标记使用该颜色并独立于玩家绿色导航点。
+@export var skill_marker_color: Color = Color(1.0, 0.78, 0.22, 0.96)
+## 技能地图标记基础半径；默认 7 像素，独立于玩家导航标点半径，可单独调整技能情报视觉。
+@export_range(1.0, 32.0, 0.5) var skill_marker_radius: float = 7.0
+## 技能地图标记最小半径；默认 3 像素，导航标点半径更小时仍保证技能图形可辨认。
+@export_range(1.0, 32.0, 0.5) var skill_marker_minimum_radius: float = 3.0
+## 技能标记边缘留白倍率；默认 1.8 倍半径，局部地图范围外标记会夹在该安全边界内。
+@export_range(1.0, 4.0, 0.05) var skill_marker_edge_margin_multiplier: float = 1.8
+## 宝箱技能标记菱形半径倍率；默认 1.35，使菱形轮廓略大于通用圆形标记。
+@export_range(0.5, 3.0, 0.05) var skill_chest_marker_radius_multiplier: float = 1.35
+## 宝箱技能标记填充透明度；默认 0.22，在金色轮廓内提供低遮挡填充。
+@export_range(0.0, 1.0, 0.01) var skill_chest_marker_fill_opacity: float = 0.22
+## 宝箱技能标记中心线半长倍率；默认 0.75 倍半径，用于形成可辨认箱体图形。
+@export_range(0.1, 2.0, 0.05) var skill_chest_marker_center_line_multiplier: float = 0.75
+## 通用技能标记填充透明度；默认 0.18，用于非宝箱类型的圆形标记。
+@export_range(0.0, 1.0, 0.01) var generic_skill_marker_fill_opacity: float = 0.18
+## 技能地图标记轮廓线宽；默认 2 像素，大小地图共用该视觉参数。
+@export_range(0.5, 12.0, 0.5) var skill_marker_outline_width: float = 2.0
+## 通用技能标记圆弧段数；默认 24 段，修改只影响圆环平滑度。
+@export_range(4, 128, 1) var generic_skill_marker_segment_count: int = 24
 ## 玩家导航指示线宽度；默认 2 像素，从玩家点持续连接到标点或局部小地图边缘。
 @export_range(0.5, 12.0, 0.5) var navigation_line_width: float = 2.0
 ## 玩家导航虚线单段长度；默认 10 像素，数值越大每段绿色指引线越长。
@@ -127,6 +151,7 @@ func _draw() -> void:
 	_draw_fog(world_view_rect)
 	_draw_extraction_marker(world_view_rect)
 	_draw_supply_extraction_markers(world_view_rect)
+	_draw_skill_map_markers(world_view_rect)
 	_draw_navigation_marker(world_view_rect)
 	_draw_player_marker(world_view_rect)
 	draw_rect(minimap_rect, minimap_border_color, false, 2.0)
@@ -255,6 +280,52 @@ func _draw_supply_extraction_markers(world_view_rect: Rect2) -> void:
 		# 方形标记半径；略小于正式撤离点圆形标记，颜色和形状共同区分用途。
 		var marker_radius: float = maxf(extraction_marker_radius - 1.0, 2.0)
 		draw_rect(Rect2(marker_position - Vector2.ONE * marker_radius, Vector2.ONE * marker_radius * 2.0), supply_extraction_marker_color, false, 2.0)
+
+
+func _draw_skill_map_markers(world_view_rect: Rect2) -> void:
+	## 绘制所有技能专属地图标记；技能明确提供全局情报，因此不要求所在探索格已经发现。
+	if _game_world == null or not _game_world.has_method("get_skill_map_markers"):
+		return
+	for raw_marker in _game_world.call("get_skill_map_markers") as Array:
+		if not (raw_marker is Dictionary):
+			continue
+		# 技能标记数据；必须包含 Vector2 位置，类型只决定图形表现。
+		var marker: Dictionary = raw_marker as Dictionary
+		var raw_position: Variant = marker.get("position", Vector2.ZERO)
+		if not (raw_position is Vector2):
+			continue
+		# 技能标记世界位置；局部地图范围外时会夹到边缘提供方向提示。
+		var marker_world_position: Vector2 = raw_position
+		# 技能标记地图位置；完整地图显示真实点，局部地图提供边缘方向。
+		var marker_position: Vector2 = _world_position_to_minimap_position(marker_world_position, world_view_rect)
+		# 技能标记半径；复用导航点半径并至少保持 3 像素，确保宝箱菱形可辨认。
+		var marker_radius: float = maxf(skill_marker_radius, skill_marker_minimum_radius)
+		# 技能标记边缘留白；由半径和检查器倍率组成，横纵坐标共享同一安全距离。
+		var marker_edge_margin: float = marker_radius * skill_marker_edge_margin_multiplier
+		marker_position.x = clampf(marker_position.x, marker_edge_margin, maxf(size.x - marker_edge_margin, marker_edge_margin))
+		marker_position.y = clampf(marker_position.y, marker_edge_margin, maxf(size.y - marker_edge_margin, marker_edge_margin))
+		# 技能标记类型；chest 使用菱形箱体与中心横线，其他类型使用通用圆环。
+		var marker_kind: String = str(marker.get("kind", SKILL_MARKER_KIND_GENERIC))
+		if marker_kind == SKILL_MARKER_KIND_CHEST:
+			# 宝箱菱形半径；由通用标记半径与检查器倍率共同决定。
+			var chest_marker_radius: float = marker_radius * skill_chest_marker_radius_multiplier
+			# 宝箱菱形顶点；按上、右、下、左顺序组成闭合轮廓。
+			var diamond_points: PackedVector2Array = PackedVector2Array([
+				marker_position + Vector2(0.0, -chest_marker_radius),
+				marker_position + Vector2(chest_marker_radius, 0.0),
+				marker_position + Vector2(0.0, chest_marker_radius),
+				marker_position + Vector2(-chest_marker_radius, 0.0),
+			])
+			# 宝箱闭合轮廓点；重复首点供 draw_polyline 完整连接末端。
+			var diamond_outline: PackedVector2Array = PackedVector2Array([diamond_points[0], diamond_points[1], diamond_points[2], diamond_points[3], diamond_points[0]])
+			draw_colored_polygon(diamond_points, Color(skill_marker_color, skill_chest_marker_fill_opacity))
+			draw_polyline(diamond_outline, skill_marker_color, skill_marker_outline_width, true)
+			# 宝箱中心线半长；相对通用半径缩放，保持不同地图尺寸下图形比例一致。
+			var center_line_half_length: float = marker_radius * skill_chest_marker_center_line_multiplier
+			draw_line(marker_position + Vector2(-center_line_half_length, 0.0), marker_position + Vector2(center_line_half_length, 0.0), skill_marker_color, skill_marker_outline_width, true)
+		else:
+			draw_circle(marker_position, marker_radius, Color(skill_marker_color, generic_skill_marker_fill_opacity))
+			draw_arc(marker_position, marker_radius, 0.0, TAU, generic_skill_marker_segment_count, skill_marker_color, skill_marker_outline_width, true)
 
 
 func _is_world_position_discovered(world_position: Vector2) -> bool:

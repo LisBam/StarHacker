@@ -35,7 +35,7 @@
 
 ### 3.1 数据层
 
-- `CharacterData`、`ActiveSkillData`、`PassiveSkillData`、`WeaponData`、`EquipmentData` 和 `RepairKitData` 描述可保存、可复制的角色、技能与物品配置；技能详细协议见 `docs/skill_system.md`。
+- `CharacterData`、`ActiveSkillData`、`PassiveSkillData`、`WeaponData`、`EquipmentData`、`RepairKitData` 和 `ConsumableData` 描述可保存、可复制的角色、技能与物品配置；技能详细协议见 `docs/skill_system.md`。
 - `ContentPackData` 只声明一个角色扩展包拥有的武器、装备、道具与怪物路径；`EquipmentSetData` 只声明共享套装门槛、显示原文、属性加成与特殊效果参数。
 - `EnhancementStoneData` 保存强化石品质、目标类型和词条方向；强化幅度与兼容规则集中在 `EnhancementRules`。
 - `.tres` 保存单个内容的基础数值。脚本默认值只作为缺省值，场景或资源覆盖值优先。
@@ -50,6 +50,8 @@
 | `PassiveSkillComponent` | 按角色资源同时创建多个被动行为，并在角色切换时清理各自长期状态 |
 | `SkillTargetingVisual` | 绘制方向、位置和锁定目标范围，不参与目标合法性或命中结算 |
 | `SkillChargeBar` | 显示角色头顶蓄力比例，不拥有蓄力时间 |
+| `WeaponChargeComponent` | 维护可蓄力武器的时间、移动倍率与蓄力期间减伤，不执行攻击成本 |
+| `TemporaryBuffComponent` | 管理消耗品限时效果、同 ID 刷新和到期属性清理 |
 | `TopDownMovementComponent` | 合成输入速度与外部击退并执行角色物理移动 |
 | `CombatStatsComponent` | 维护生命、能量、攻防、恢复和死亡状态 |
 | `RangedAttackComponent` | 校验攻击条件、为普通或散射攻击构造弹体偏移并处理连击与弹体生成 |
@@ -103,12 +105,15 @@ UI 不得通过字符串 `call()` 猜测已知组件接口，也不得复制服�
 
 ```text
 InputMap -> PlayerInputComponent -> PlayerController
+         -> WeaponChargeComponent（仅显式蓄力武器）
          -> RangedAttackComponent / MeleeAttackComponent
          -> 弹体或命中框 -> DamageReceiverComponent
          -> CombatDamageCalculator -> 生命、击退与反馈
 ```
 
-一次攻击的能量、耐久、冷却和坐力由攻击流程统一结算。弹体数量或连击轮数不得重复扣除单次成本。
+一次攻击的能量、耐久、冷却和坐力由攻击流程统一结算。弹体数量或连击轮数不得重复扣除单次成本。`hybrid` 武器同时调用两个攻击组件，但能量、坐力和攻击成本仍只结算一次；普通武器耐久为 1 点，混合武器为 2 点且剩余 1 点时只扣 1 点。
+
+混合武器的远程与近战伤害、距离、冲击分别拥有独立基础值；`damage`、`attack_distance`、`impact_force` 强化各保存一份累计比例并由两个通道共同读取。武器效果通过显式能力字段启用，未持有效果的武器不会进入蓄力状态。
 
 ### 4.3 角色技能
 

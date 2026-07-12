@@ -83,23 +83,22 @@ func refresh() -> void:
 			continue
 		# 是否使用百分比；视野和闪避率将内部比例转换为玩家易读的百分点。
 		var is_percent: bool = bool(row_definition.get("percent", false))
-		# 技能额外值；只有运行时被动实际提供非零增幅时才追加第三项，普通属性继续保持原两项格式。
+		# 套装、技能与临时额外值；非零来源分别标注，避免百分比套装或消耗品被误归入装备点数。
+		var set_value: float = float(attribute_values.get("set", 0.0))
 		var skill_value: float = float(attribute_values.get("skill", 0.0))
+		var temporary_value: float = float(attribute_values.get("temporary", 0.0))
+		# 分项文本；基础与装备始终显示，其他运行时来源仅在非零时追加。
+		var value_parts: PackedStringArray = PackedStringArray([
+			_format_attribute_value(float(attribute_values.get("base", 0.0)), is_percent),
+			_format_attribute_value(float(attribute_values.get("equipment", 0.0)), is_percent),
+		])
+		if not is_zero_approx(set_value):
+			value_parts.append("套装%s" % _format_attribute_value(set_value, is_percent))
 		if not is_zero_approx(skill_value):
-			value_label.text = "%s：%s（%s+%s+技能%s）" % [
-				str(row_definition.get("label", attribute_key)),
-				_format_attribute_value(float(attribute_values.get("total", 0.0)), is_percent),
-				_format_attribute_value(float(attribute_values.get("base", 0.0)), is_percent),
-				_format_attribute_value(float(attribute_values.get("equipment", 0.0)), is_percent),
-				_format_attribute_value(skill_value, is_percent)
-			]
-		else:
-			value_label.text = "%s：%s（%s+%s）" % [
-				str(row_definition.get("label", attribute_key)),
-				_format_attribute_value(float(attribute_values.get("total", 0.0)), is_percent),
-				_format_attribute_value(float(attribute_values.get("base", 0.0)), is_percent),
-				_format_attribute_value(float(attribute_values.get("equipment", 0.0)), is_percent)
-			]
+			value_parts.append("技能%s" % _format_attribute_value(skill_value, is_percent))
+		if not is_zero_approx(temporary_value):
+			value_parts.append("临时%s" % _format_attribute_value(temporary_value, is_percent))
+		value_label.text = "%s：%s（%s）" % [str(row_definition.get("label", attribute_key)), _format_attribute_value(float(attribute_values.get("total", 0.0)), is_percent), "+".join(value_parts)]
 
 
 func _build_interface() -> void:
@@ -136,6 +135,16 @@ func _get_runtime_snapshot() -> Dictionary:
 		# 装备运行快照；移速已换算为实际点数，视野保留比例供百分比格式化。
 		var equipment_snapshot: Dictionary = _equipment_component.call("get_character_attribute_snapshot") as Dictionary
 		snapshot.merge(equipment_snapshot, true)
+	# 临时增益组件；移速饮料作用于装备结算后的有效移速，单独写入 temporary 供界面标注。
+	var temporary_buff_component: Node = _stats_component.get_parent().get_node_or_null("TemporaryBuffComponent") if _stats_component.get_parent() != null else null
+	if temporary_buff_component != null and temporary_buff_component.has_method("get_move_speed_multiplier") and snapshot.get("move_speed") is Dictionary:
+		# 移速快照；装备组件已经提供基础、装备和合计值，在其合计上应用消耗品倍率。
+		var move_speed_values: Dictionary = (snapshot.get("move_speed") as Dictionary).duplicate()
+		# 临时移速点数；倍率 1.1 表示当前基础与装备合计值的 10%。
+		var temporary_move_speed: float = float(move_speed_values.get("total", 0.0)) * (maxf(float(temporary_buff_component.call("get_move_speed_multiplier")), 0.0) - 1.0)
+		move_speed_values["temporary"] = temporary_move_speed
+		move_speed_values["total"] = maxf(float(move_speed_values.get("total", 0.0)) + temporary_move_speed, 0.0)
+		snapshot["move_speed"] = move_speed_values
 	return snapshot
 
 
@@ -157,6 +166,18 @@ func _get_menu_snapshot() -> Dictionary:
 		# 装备属性；由有效四部位装备直接加算。
 		var equipment_value: float = float(equipment_attributes.get(attribute_key, 0.0))
 		snapshot[attribute_key] = _build_value_snapshot(base_value, equipment_value)
+	# 局外套装最终倍率；与战斗属性组件使用同一纯计算入口，拾荒者两件套等百分比效果单独标注为套装值。
+	var armor_equipment: Dictionary = _global_inventory.call("get_armor_equipment_resources") as Dictionary if _global_inventory != null and _global_inventory.has_method("get_armor_equipment_resources") else {}
+	# 套装倍率字典；值为额外比例，例如 defense_power=0.2 表示基础与装备合计防御提高20%。
+	var set_multipliers: Dictionary = EQUIPMENT_SET_COMPONENT_SCRIPT.call("calculate_active_attribute_multipliers", armor_equipment) as Dictionary
+	for attribute_key in ["attack_power", "defense_power"]:
+		# 原属性快照；循环阶段已经保存基础、装备和未乘套装的合计值。
+		var attribute_values: Dictionary = (snapshot.get(attribute_key, {}) as Dictionary).duplicate()
+		# 套装额外值；只计算当前属性声明的最终倍率，未声明时保持0。
+		var set_value: float = float(attribute_values.get("total", 0.0)) * float(set_multipliers.get(attribute_key, 0.0))
+		attribute_values["set"] = set_value
+		attribute_values["total"] = maxf(float(attribute_values.get("total", 0.0)) + set_value, 0.0)
+		snapshot[attribute_key] = attribute_values
 	snapshot["max_energy"] = _build_value_snapshot(float(profile.get("max_energy", 0.0)), 0.0)
 	snapshot["move_speed"] = _build_value_snapshot(base_move_speed, equipment_move_speed)
 	snapshot["vision_range"] = _build_value_snapshot(float(profile.get("vision_range", 0.0)), float(equipment_attributes.get("vision_range", 0.0)))

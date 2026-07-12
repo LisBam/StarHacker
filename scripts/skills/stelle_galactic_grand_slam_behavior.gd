@@ -77,6 +77,10 @@ func execute(context: Dictionary) -> bool:
 	_current_critical_chance = float(_stats_component.call("get_equipment_critical_chance")) if _stats_component != null and _stats_component.has_method("get_equipment_critical_chance") else 0.0
 	_current_critical_damage_multiplier = maxf(BASE_CRITICAL_DAMAGE_MULTIPLIER + (float(_stats_component.call("get_equipment_critical_damage")) if _stats_component != null and _stats_component.has_method("get_equipment_critical_damage") else 0.0), 1.0)
 	_current_knockback_direction = cast_direction
+	# 本次技能前坐力距离；未蓄力为基础值，满蓄力达到资源上限，使用与武器相同的理论位移语义。
+	var front_recoil_distance: float = lerpf(maxf(float(_skill_data.get("base_front_recoil_distance")), 0.0), maxf(float(_skill_data.get("maximum_front_recoil_distance")), 0.0), charge_ratio)
+	if _caster.has_method("apply_front_recoil_distance"):
+		_caster.call("apply_front_recoil_distance", cast_direction, front_recoil_distance)
 	# 扇形半角；限制到 0 至 180 度，使用余弦避免逐目标计算反三角函数。
 	var half_angle_radians: float = deg_to_rad(clampf(float(_skill_data.get("directional_half_angle_degrees")), 0.0, MAXIMUM_HALF_ANGLE_DEGREES))
 	# 扇形边界余弦；目标方向与释放方向点积大于等于该值时位于扇形内。

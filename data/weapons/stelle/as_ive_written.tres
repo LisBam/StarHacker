@@ -16,5 +16,5 @@ ranged_damage = 10.0
 cooldown = 0.2
 deviation_degrees = 6.0
 has_recoil = true
-recoil_force = 30.0
-impact_force = 180.0
+recoil_force = 10.0
+impact_force = 20.0

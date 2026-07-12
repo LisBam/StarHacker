@@ -56,6 +56,12 @@ var _equipment_critical_damage: float = 0.0
 var _health_regeneration_elapsed: float = 0.0
 ## 技能攻防倍率来源；键为技能稳定 ID，值为包含 attack 与 defense 比例的字典，多个被动来源分别连乘生效。
 var _skill_stat_multipliers: Dictionary = {}
+## 消耗品临时闪避率；默认 0，使用 0 至 1 小数表示百分点，由 TemporaryBuffComponent 整体覆盖且不写入装备属性。
+var _temporary_dodge_chance: float = 0.0
+## 消耗品临时每秒能量恢复；默认 0，由 TemporaryBuffComponent 整体覆盖并与角色基础、装备恢复直接相加。
+var _temporary_energy_regeneration: float = 0.0
+## 装备套装最终属性倍率；键为角色属性名、值为额外比例，默认空字典，由装备组件整体覆盖且不写入基础或装备点数。
+var _equipment_set_stat_multipliers: Dictionary = {}
 
 
 func _ready() -> void:
@@ -80,7 +86,7 @@ func _process(delta: float) -> void:
 		return
 
 	# 当前每秒能量恢复；基础值与装备加成直接相加，每 1 点装备属性对应每秒额外恢复 1 点能量。
-	var effective_energy_regeneration: float = maxf(energy_regeneration_per_second + _equipment_energy_regeneration, 0.0)
+	var effective_energy_regeneration: float = maxf(energy_regeneration_per_second + _equipment_energy_regeneration + _temporary_energy_regeneration, 0.0)
 	if effective_energy_regeneration <= 0.0 or current_energy >= max_energy:
 		return
 
@@ -206,11 +212,22 @@ func is_dead() -> bool:
 
 
 func get_attack_power() -> float:
-	return maxf((attack_power + _equipment_attack_power) * _get_combined_skill_multiplier("attack"), 0.0)
+	return maxf((attack_power + _equipment_attack_power) * _get_equipment_set_stat_multiplier("attack_power") * _get_combined_skill_multiplier("attack"), 0.0)
 
 
 func get_defense_power() -> float:
-	return maxf((defense_power + _equipment_defense_power) * _get_combined_skill_multiplier("defense"), 0.0)
+	return maxf((defense_power + _equipment_defense_power) * _get_equipment_set_stat_multiplier("defense_power") * _get_combined_skill_multiplier("defense"), 0.0)
+
+
+func set_equipment_set_stat_multipliers(multipliers: Dictionary) -> void:
+	## 整体覆盖当前有效套装最终属性比例；装备变化时重新计算，损坏部件会立即使对应门槛失效。
+	_equipment_set_stat_multipliers = multipliers.duplicate(true)
+	stats_changed.emit()
+
+
+func _get_equipment_set_stat_multiplier(stat_name: String) -> float:
+	## 返回指定属性的最终套装倍率；字典值 0.2 转换为 1.2，异常低于-100%的配置限制到0倍。
+	return maxf(1.0 + float(_equipment_set_stat_multipliers.get(stat_name, 0.0)), 0.0)
 
 
 func set_skill_stat_multiplier(source_id: String, attack_bonus_ratio: float, defense_bonus_ratio: float) -> void:
@@ -273,36 +290,51 @@ func get_character_attribute_snapshot() -> Dictionary:
 		"attack_power": _build_skill_attribute_snapshot(attack_power, _equipment_attack_power, "attack"),
 		"defense_power": _build_skill_attribute_snapshot(defense_power, _equipment_defense_power, "defense"),
 		"health_regeneration_per_five_seconds": _build_attribute_snapshot(0.0, _equipment_health_regeneration_per_five_seconds),
-		"dodge_chance": _build_attribute_snapshot(0.0, _equipment_dodge_chance),
-		"energy_regeneration": _build_attribute_snapshot(energy_regeneration_per_second, _equipment_energy_regeneration)
+		"dodge_chance": _build_attribute_snapshot(0.0, _equipment_dodge_chance, _temporary_dodge_chance),
+		"energy_regeneration": _build_attribute_snapshot(energy_regeneration_per_second, _equipment_energy_regeneration, _temporary_energy_regeneration)
 	}
 
 
-func _build_attribute_snapshot(base_value: float, equipment_value: float) -> Dictionary:
-	## 构建统一的三值属性结构；装备削弱后的总值最低为 0，便于所有角色面板行复用。
+func _build_attribute_snapshot(base_value: float, equipment_value: float, temporary_value: float = 0.0) -> Dictionary:
+	## 构建统一属性结构；临时值单独保留，角色面板可准确标注消耗品贡献而不误归入装备。
 	return {
 		"base": base_value,
 		"equipment": equipment_value,
-		"total": maxf(base_value + equipment_value, 0.0)
+		"temporary": temporary_value,
+		"total": maxf(base_value + equipment_value + temporary_value, 0.0)
 	}
 
 
 func _build_skill_attribute_snapshot(base_value: float, equipment_value: float, stat_name: String) -> Dictionary:
-	## 构建含技能倍率的四值结构；技能增幅独立保存，保证面板不会把被动效果误标为装备值。
-	# 技能倍率前数值；基础与装备先直接相加，再由全部被动比例连乘。
-	var pre_skill_value: float = maxf(base_value + equipment_value, 0.0)
+	## 构建含套装与技能倍率的属性结构；两类乘算贡献独立保存，面板不会误标为装备点数。
+	# 套装属性名；技能内部使用 attack/defense，套装倍率字典使用完整角色属性名。
+	var equipment_set_stat_name: String = "attack_power" if stat_name == "attack" else "defense_power"
+	# 基础与装备合计；套装最终倍率在其上乘算，直接装备点数保持可追溯。
+	var base_and_equipment_value: float = maxf(base_value + equipment_value, 0.0)
+	# 套装额外值；由倍率后的结果减原合计得到，拾荒者两件套防御在此单独显示。
+	var equipment_set_bonus_value: float = base_and_equipment_value * (_get_equipment_set_stat_multiplier(equipment_set_stat_name) - 1.0)
+	# 技能倍率前数值；已经包含套装最终倍率，随后由全部被动技能比例连乘。
+	var pre_skill_value: float = base_and_equipment_value + equipment_set_bonus_value
 	# 技能额外值；用最终值减倍率前数值得出，面板兼容原“基础+额外”结构。
 	var skill_bonus_value: float = pre_skill_value * get_skill_stat_bonus_ratio(stat_name)
 	return {
 		"base": base_value,
 		"equipment": equipment_value,
+		"set": equipment_set_bonus_value,
 		"skill": skill_bonus_value,
 		"total": pre_skill_value + skill_bonus_value,
 	}
 
 
 func get_dodge_chance() -> float:
-	return clampf(_equipment_dodge_chance, 0.0, EnhancementRules.DODGE_CHANCE_MAXIMUM)
+	return clampf(_equipment_dodge_chance + _temporary_dodge_chance, 0.0, EnhancementRules.DODGE_CHANCE_MAXIMUM)
+
+
+func set_temporary_buff_attributes(dodge_chance_bonus: float, energy_regeneration_bonus: float) -> void:
+	## 整体覆盖消耗品提供的临时属性；持续时间由独立组件维护，归零时传入 0 即可恢复基础与装备结果。
+	_temporary_dodge_chance = clampf(dodge_chance_bonus, 0.0, EnhancementRules.DODGE_CHANCE_MAXIMUM)
+	_temporary_energy_regeneration = maxf(energy_regeneration_bonus, 0.0)
+	stats_changed.emit()
 
 
 func get_equipment_critical_chance() -> float:

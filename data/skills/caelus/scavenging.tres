@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="CaelusScavengingSkillData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/caelus_scavenging_skill_data.gd" id="1_data"]
+[ext_resource type="Script" path="res://scripts/skills/caelus_scavenging_behavior.gd" id="2_behavior"]
+
+[resource]
+script = ExtResource("1_data")
+skill_id = "caelus_scavenging"
+display_name = "拾荒"
+description = "成功撤离时，获得地图上掉落物总价值20%的金币。"
+behavior_script = ExtResource("2_behavior")
+world_drop_value_gold_ratio = 0.2

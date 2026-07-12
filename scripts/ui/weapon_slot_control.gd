@@ -156,7 +156,7 @@ func set_enhancement_target_highlight(enabled: bool) -> void:
 
 func set_weapon_target_selection_state(selection_active: bool, selectable: bool) -> void:
 	# 目标选择状态；空槽不参与选择表现，已有武器根据可用性显示绿色高亮或灰色滤镜。
-	var has_weapon: bool = weapon_data != null and str(weapon_data.get("weapon_type")) in ["ranged", "melee"]
+	var has_weapon: bool = weapon_data != null and str(weapon_data.get("weapon_type")) in ["ranged", "melee", "hybrid"]
 	is_enhancement_target_highlight = selection_active and selectable and has_weapon
 	_weapon_target_selection_blocked = selection_active and not selectable and has_weapon
 	if _weapon_target_selection_blocked or not is_enhancement_target_highlight:
@@ -235,9 +235,9 @@ func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
 		return source_context == "equipment" or source_context == "inventory"
 
 	if slot_kind == "ranged":
-		return str(dragged_weapon.get("weapon_type")) == "ranged"
+		return str(dragged_weapon.get("weapon_type")) in ["ranged", "hybrid"]
 	if slot_kind == "melee":
-		return str(dragged_weapon.get("weapon_type")) == "melee"
+		return str(dragged_weapon.get("weapon_type")) in ["melee", "hybrid"]
 
 	return false
 
@@ -526,6 +526,8 @@ func _get_weapon_type_label(target_weapon_data: Resource) -> String:
 		return "远程"
 	if weapon_type == "melee":
 		return "近战"
+	if weapon_type == "hybrid":
+		return "远程+近战"
 
 	return "未知"
 
@@ -565,7 +567,8 @@ func _get_weapon_tooltip_text() -> String:
 		tooltip_lines.append("后坐力：%d 像素" % roundi(recoil_force))
 	if bool(weapon_data.get("has_front_recoil")) and front_recoil_force > 0.0:
 		tooltip_lines.append("前坐力：%d 像素" % roundi(front_recoil_force))
-	tooltip_lines.append("冲击力：%d 像素" % roundi(impact_force))
+	if weapon_type != "hybrid":
+		tooltip_lines.append("冲击力：%d 像素" % roundi(impact_force))
 	tooltip_lines.append("暴击率：%.0f%%" % (critical_chance * 100.0))
 	tooltip_lines.append("暴击伤害：%.0f%%" % (critical_damage * 100.0))
 
@@ -573,17 +576,22 @@ func _get_weapon_tooltip_text() -> String:
 		_append_ranged_tooltip_lines(tooltip_lines)
 	elif weapon_type == "melee":
 		_append_melee_tooltip_lines(tooltip_lines)
+	elif weapon_type == "hybrid":
+		tooltip_lines.append("[远程攻击]")
+		_append_ranged_tooltip_lines(tooltip_lines)
+		tooltip_lines.append("[近战攻击]")
+		_append_melee_tooltip_lines(tooltip_lines)
 
 	return "\n".join(tooltip_lines)
 
 
 func _append_ranged_tooltip_lines(tooltip_lines: PackedStringArray) -> void:
 	# 远程伤害；取值来自资源 ranged_damage 字段，默认用于提示远程命中伤害。
-	var ranged_damage: float = maxf(float(weapon_data.get("ranged_damage")), 0.0)
+	var ranged_damage: float = _get_attack_channel_stat("damage", "ranged", "ranged_damage")
 	# 子弹速度；取值来自资源 projectile_speed 字段，默认用于提示弹体飞行速度。
 	var projectile_speed: float = maxf(float(weapon_data.get("projectile_speed")), 0.0)
 	# 攻击距离；远程武器以该值限制弹体最大飞行距离。
-	var attack_distance: float = maxf(float(weapon_data.get("attack_distance")), 0.0)
+	var attack_distance: float = _get_attack_channel_stat("attack_distance", "ranged", "attack_distance")
 	# 武器冷却；取值来自统一 cooldown 字段，默认用于提示连续攻击间隔。
 	var cooldown: float = maxf(float(weapon_data.get("cooldown")), 0.0)
 	# 武器偏移；取值来自资源 deviation_degrees 字段，表示弹体相对瞄准方向的最大随机角度。
@@ -592,19 +600,33 @@ func _append_ranged_tooltip_lines(tooltip_lines: PackedStringArray) -> void:
 	tooltip_lines.append("子弹速度：%d" % roundi(projectile_speed))
 	tooltip_lines.append("攻击距离：%d" % roundi(attack_distance))
 	tooltip_lines.append("偏移：%.1f°" % deviation_degrees)
-	tooltip_lines.append("冷却：%.2f 秒" % cooldown)
+	if str(weapon_data.get("weapon_type")) != "hybrid":
+		tooltip_lines.append("冷却：%.2f 秒" % cooldown)
+	if str(weapon_data.get("weapon_type")) == "hybrid":
+		tooltip_lines.append("远程冲击：%d 像素" % roundi(_get_attack_channel_stat("impact_force", "ranged", "ranged_impact_force")))
 
 
 func _append_melee_tooltip_lines(tooltip_lines: PackedStringArray) -> void:
 	# 近战伤害；取值来自资源 melee_damage 字段，默认用于提示挥击伤害。
-	var melee_damage: float = maxf(float(weapon_data.get("melee_damage")), 0.0)
+	var melee_damage: float = _get_attack_channel_stat("damage", "melee", "melee_damage")
 	# 武器冷却；取值来自统一 cooldown 字段，默认用于提示连续攻击间隔。
 	var cooldown: float = maxf(float(weapon_data.get("cooldown")), 0.0)
 	# 攻击距离；近战武器以该值控制判定区域最远端与玩家本体的距离。
-	var attack_distance: float = maxf(float(weapon_data.get("attack_distance")), 0.0)
+	var attack_distance: float = _get_attack_channel_stat("attack_distance", "melee", "attack_distance")
 	# 命中框持续时间；取值来自资源 melee_active_duration 字段，默认用于提示近战判定窗口。
 	var melee_active_duration: float = maxf(float(weapon_data.get("melee_active_duration")), 0.0)
 	tooltip_lines.append("伤害：%d" % roundi(melee_damage))
 	tooltip_lines.append("攻击距离：%d" % roundi(attack_distance))
 	tooltip_lines.append("冷却：%.2f 秒" % cooldown)
 	tooltip_lines.append("判定时长：%.2f 秒" % melee_active_duration)
+	if str(weapon_data.get("weapon_type")) == "hybrid":
+		tooltip_lines.append("近战冲击：%d 像素" % roundi(_get_attack_channel_stat("impact_force", "melee", "melee_impact_force")))
+
+
+func _get_attack_channel_stat(stat_name: String, attack_mode: String, fallback_property_name: String) -> float:
+	## 返回武器指定攻击通道的有效属性；混合武器读取共享强化结果，旧资源回退直接字段。
+	if weapon_data == null:
+		return 0.0
+	if weapon_data.has_method("get_effective_attack_stat"):
+		return maxf(float(weapon_data.call("get_effective_attack_stat", stat_name, attack_mode)), 0.0)
+	return maxf(float(weapon_data.get(fallback_property_name)), 0.0)

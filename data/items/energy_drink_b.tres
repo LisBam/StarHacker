@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ConsumableData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/consumable_data.gd" id="1_consumable"]
+
+[resource]
+script = ExtResource("1_consumable")
+item_id = "energy_drink_b"
+display_name = "B型能量饮料"
+description = "使用后提高5%的闪避率持续60s。"
+icon_text = "B"
+value = 40
+effect_stat = "dodge_chance"
+effect_amount = 0.05
+duration_seconds = 60.0

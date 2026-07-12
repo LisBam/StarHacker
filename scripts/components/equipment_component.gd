@@ -337,11 +337,11 @@ func _is_valid_ranged_slot(slot_index: int) -> bool:
 
 
 func _is_ranged_weapon(weapon_data: Resource) -> bool:
-	return weapon_data != null and str(weapon_data.get("weapon_type")) == "ranged"
+	return weapon_data != null and str(weapon_data.get("weapon_type")) in ["ranged", "hybrid"]
 
 
 func _is_melee_weapon(weapon_data: Resource) -> bool:
-	return weapon_data != null and str(weapon_data.get("weapon_type")) == "melee"
+	return weapon_data != null and str(weapon_data.get("weapon_type")) in ["melee", "hybrid"]
 
 
 func _emit_full_equipment_changed() -> void:
@@ -388,6 +388,10 @@ func _apply_armor_attributes() -> void:
 				attributes[stat_name] = float(attributes.get(stat_name, 0.0)) + float(set_attribute_bonuses.get(raw_stat_name, 0.0))
 	if _stats_component != null and _stats_component.has_method("apply_equipment_attributes"):
 		_stats_component.call("apply_equipment_attributes", attributes)
+	if _stats_component != null and _stats_component.has_method("set_equipment_set_stat_multipliers"):
+		# 套装最终属性倍率；与直接点数分开结算，使“提高20%防御力”作用于角色基础与全部装备防御合计值。
+		var set_attribute_multipliers: Dictionary = _equipment_set_component.call("get_active_attribute_multipliers", armor_equipment) as Dictionary if _equipment_set_component != null and _equipment_set_component.has_method("get_active_attribute_multipliers") else {}
+		_stats_component.call("set_equipment_set_stat_multipliers", set_attribute_multipliers)
 	_equipment_move_speed_ratio = maxf(float(attributes.get("move_speed", 0.0)), 0.0)
 	_equipment_vision_range_ratio = maxf(float(attributes.get("vision_range", 0.0)), 0.0)
 	_apply_movement_and_vision_attributes()

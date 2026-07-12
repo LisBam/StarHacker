@@ -12,8 +12,8 @@ class_name WeaponData
 @export var weapon_id: String = ""
 ## 武器显示名称；默认“未命名武器”用于兜底显示，运行时通常不修改，改名会影响 HUD 和背包文本。
 @export var display_name: String = "未命名武器"
-## 武器类型；取值为 ranged 或 melee，默认 ranged，修改会影响装备槽校验和攻击组件读取字段。
-@export_enum("ranged", "melee") var weapon_type: String = "ranged"
+## 武器类型；取值为 ranged、melee 或 hybrid，默认 ranged，hybrid 可放入任一武器槽且每次使用同时执行远程与近战攻击。
+@export_enum("ranged", "melee", "hybrid") var weapon_type: String = "ranged"
 ## 武器说明文本；默认空字符串，主要用于背包详情和调试展示，运行时通常不动态修改。
 @export_multiline var description: String = ""
 ## HUD 图标文本；默认问号用于未配置图标时兜底，建议保持 1 到 2 个字符，修改会影响装备栏显示。
@@ -78,12 +78,34 @@ const FIXED_DURABILITY_COST_PER_USE: float = 1.0
 @export_range(0.0, 5000.0, 1.0, "or_greater") var impact_force: float = 0.0
 ## 近战伤害；取值建议大于等于 0，默认 35，修改会影响近战命中后的伤害值。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var melee_damage: float = 35.0
+## 混合武器远程攻击距离；取值大于 0，默认 340 像素，仅 hybrid 使用，攻击距离强化会与近战距离同步按同一比例结算。
+@export_range(1.0, 12000.0, 1.0, "or_greater") var ranged_attack_distance: float = 340.0
+## 混合武器近战攻击距离；取值大于 0，默认 80 像素，仅 hybrid 使用，攻击距离强化会与远程距离同步按同一比例结算。
+@export_range(1.0, 12000.0, 1.0, "or_greater") var melee_attack_distance: float = 80.0
+## 混合武器远程冲击力；单位为理论位移像素，默认 0，仅 hybrid 使用，冲击力强化会与近战冲击同步按同一比例结算。
+@export_range(0.0, 5000.0, 1.0, "or_greater") var ranged_impact_force: float = 0.0
+## 混合武器近战冲击力；单位为理论位移像素，默认 0，仅 hybrid 使用，冲击力强化会与远程冲击同步按同一比例结算。
+@export_range(0.0, 5000.0, 1.0, "or_greater") var melee_impact_force: float = 0.0
 ## 武器暴击率；使用 0 到 1 小数，默认 0，每把武器资源可配置不同初始值并允许强化。
 @export_range(0.0, 1.0, 0.01) var critical_chance: float = 0.0
 ## 武器暴击伤害倍率；默认 1.5 表示造成 150% 伤害，允许强化石永久调整。
 @export_range(1.0, 10.0, 0.05, "or_greater") var critical_damage: float = 1.5
 ## 近战命中框激活时长；取值应大于 0，默认 0.12 秒，修改会影响近战判定窗口。
 @export_range(0.01, 2.0, 0.01) var melee_active_duration: float = 0.12
+## 是否拥有蓄力效果；默认 false，开启后按住对应攻击键蓄力、松开释放，未开启武器保持原有点击或连射逻辑。
+@export var has_charge_effect: bool = false
+## 武器最大蓄力时间；取值大于 0 秒，默认 1 秒，仅 has_charge_effect 开启时使用，达到上限后保持满蓄力直到松开。
+@export_range(0.01, 30.0, 0.01, "or_greater") var maximum_charge_duration: float = 1.0
+## 蓄力期间移动速度倍率；取值 0 至 1，默认 1 表示不减速，0.5 表示移动速度降低 50%，仅蓄力进行中生效。
+@export_range(0.0, 1.0, 0.01) var charge_movement_speed_multiplier: float = 1.0
+## 蓄力期间减伤比例；取值 0 至 1，默认 0 表示不减伤，0.1 表示最终受到伤害降低 10%，松开或取消后立即失效。
+@export_range(0.0, 1.0, 0.01) var charge_damage_reduction_ratio: float = 0.0
+## 满蓄力伤害提升比例；默认 0 表示不强化，0.5 表示远程与近战伤害在满蓄力时都提高 50%，中间进度线性插值。
+@export_range(0.0, 10.0, 0.01, "or_greater") var maximum_charge_damage_bonus_ratio: float = 0.0
+## 满蓄力冲击力提升比例；默认 0 表示不强化，hybrid 的远程与近战冲击会同时按该比例线性提高。
+@export_range(0.0, 10.0, 0.01, "or_greater") var maximum_charge_impact_bonus_ratio: float = 0.0
+## 满蓄力坐力提升比例；默认 0 表示不强化，前坐力或后坐力按蓄力比例线性提高且不改变武器持有的坐力类型。
+@export_range(0.0, 10.0, 0.01, "or_greater") var maximum_charge_recoil_bonus_ratio: float = 0.0
 ## 累计强化百分比词典；键使用 damage、cooldown 等统一属性名，值为相对基础值的小数比例，运行时由强化石永久累加。
 ## 加算属性补充：暴击率与暴击伤害的累计值表示直接百分点偏移，其余武器属性仍表示相对基础值比例。
 @export var enhancement_modifiers: Dictionary = {}
@@ -103,11 +125,16 @@ const MELEE_ENHANCEMENT_STATS: Array[String] = ["melee_active_duration"]
 
 
 func is_ranged() -> bool:
-	return weapon_type == "ranged"
+	return weapon_type in ["ranged", "hybrid"]
 
 
 func is_melee() -> bool:
-	return weapon_type == "melee"
+	return weapon_type in ["melee", "hybrid"]
+
+
+func is_hybrid() -> bool:
+	## 返回武器是否会在一次使用中同时触发远程和近战攻击；调用方不得用该结果重复结算能量、冷却或坐力。
+	return weapon_type == "hybrid"
 
 
 func get_maximum_durability() -> float:
@@ -132,12 +159,11 @@ func set_current_durability(value: float) -> void:
 	current_durability = clampf(value, 0.0, get_maximum_durability())
 
 
-func consume_durability() -> bool:
+func consume_durability(requested_amount: float = FIXED_DURABILITY_COST_PER_USE) -> bool:
 	if is_broken():
 		return false
-	# 实际消耗量；负数使用武器自身单次消耗配置，显式传值用于以后技能或特殊弹药扩展。
-	# 固定规则补充：现行接口不再接收外部消耗量，所有武器每次成功使用只扣除固定 1 点耐久。
-	var resolved_amount: float = FIXED_DURABILITY_COST_PER_USE
+	# 实际消耗量；普通武器固定传入 1，混合武器传入 2；当前耐久不足时只消耗剩余值，因此 1 点耐久仍可完成最后一次攻击。
+	var resolved_amount: float = minf(maxf(requested_amount, 0.0), current_durability)
 	if resolved_amount <= 0.0:
 		return false
 	# 消耗前耐久；用于判断本次调用是否实际改变了资源状态。
@@ -176,6 +202,23 @@ func get_effective_stat(stat_name: String) -> float:
 	# 统一属性名；持续时间保持正数，其余不能为负，避免异常强化破坏战斗组件。
 	# 边界规则补充；具体上下限已集中到 EnhancementRules，避免武器与装备产生不同解释。
 	return effective_value
+
+
+func get_effective_attack_stat(stat_name: String, attack_mode: String) -> float:
+	## 返回指定攻击通道的有效属性；混合武器保留各自基础值，但共享通用强化比例，普通武器继续读取原有统一字段。
+	# 通道基础属性名；只对混合武器的距离与冲击拆分，伤害字段原本已经按远近战独立保存。
+	var property_name: String = stat_name
+	if stat_name == "damage":
+		property_name = "ranged_damage" if attack_mode == "ranged" else "melee_damage"
+	elif is_hybrid() and stat_name == "attack_distance":
+		property_name = "ranged_attack_distance" if attack_mode == "ranged" else "melee_attack_distance"
+	elif is_hybrid() and stat_name == "impact_force":
+		property_name = "ranged_impact_force" if attack_mode == "ranged" else "melee_impact_force"
+	# 通道基础值；普通武器未拆分距离和冲击时仍使用原字段，避免改变既有资源与存档。
+	var base_value: float = float(get(property_name)) if get(property_name) != null else 0.0
+	# 共享强化键；三类双通道属性分别映射到 damage、attack_distance 与 impact_force 的唯一累计比例。
+	var canonical_stat_name: String = _resolve_canonical_stat_name(stat_name)
+	return EnhancementRules.calculate_effective_stat(base_value, canonical_stat_name, get_enhancement_ratio(canonical_stat_name))
 
 
 func can_apply_enhancement(modifiers: Dictionary) -> bool:
@@ -273,6 +316,8 @@ func get_effective_value() -> int:
 
 func _resolve_base_property_name(stat_name: String) -> String:
 	# 统一属性名；伤害根据武器类型映射，其他字段直接使用统一命名。
+	if stat_name in ["ranged_damage", "melee_damage", "ranged_attack_distance", "melee_attack_distance", "ranged_impact_force", "melee_impact_force"]:
+		return stat_name
 	var canonical_stat_name: String = _resolve_canonical_stat_name(stat_name)
 	if canonical_stat_name == "damage":
 		return "ranged_damage" if is_ranged() else "melee_damage"
@@ -283,6 +328,10 @@ func _resolve_canonical_stat_name(stat_name: String) -> String:
 	stat_name = EnhancementRules.canonicalize_stat_name(stat_name)
 	if stat_name in ["ranged_damage", "melee_damage"]:
 		return "damage"
+	if stat_name in ["ranged_attack_distance", "melee_attack_distance"]:
+		return "attack_distance"
+	if stat_name in ["ranged_impact_force", "melee_impact_force"]:
+		return "impact_force"
 	return stat_name
 
 
@@ -302,5 +351,8 @@ func _is_stat_supported(stat_name: String) -> bool:
 			return has_piercing
 		if canonical_stat_name == "combo_count":
 			return has_combo
-		return canonical_stat_name in RANGED_ENHANCEMENT_STATS and not is_zero_approx(get_base_stat(canonical_stat_name))
-	return canonical_stat_name in MELEE_ENHANCEMENT_STATS and not is_zero_approx(get_base_stat(canonical_stat_name))
+		if canonical_stat_name in RANGED_ENHANCEMENT_STATS:
+			return not is_zero_approx(get_base_stat(canonical_stat_name))
+	if is_melee() and canonical_stat_name in MELEE_ENHANCEMENT_STATS:
+		return not is_zero_approx(get_base_stat(canonical_stat_name))
+	return false

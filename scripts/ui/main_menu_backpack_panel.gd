@@ -392,7 +392,7 @@ func _rebuild_items() -> void:
 		item_control.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
 		item_control.connect("repair_kit_drop_requested", Callable(self, "_on_repair_kit_drop_requested"))
 		# 修复目标选择；背包武器与装备使用和左侧装备栏相同的可选与灰显规则。
-		var is_durable_item: bool = str(item_resource.get("weapon_type")) in ["ranged", "melee"] or str(item_resource.get("item_kind")) == "equipment"
+		var is_durable_item: bool = str(item_resource.get("weapon_type")) in ["ranged", "melee", "hybrid"] or str(item_resource.get("item_kind")) == "equipment"
 		item_control.call("set_weapon_target_selection_state", _pending_repair_kit_resource != null and is_durable_item, _can_repair_target(item_resource))
 		_item_grid.add_child(item_control)
 	if visible_entries.is_empty():
@@ -510,9 +510,9 @@ func _on_item_pressed(item_resource: Resource) -> void:
 	_action_equipment_location = ""
 	_action_quantity = int(_global_inventory.call("get_storage_resource_quantity", item_resource, "backpack")) if _global_inventory != null else 1
 	_action_popup.clear_actions()
-	if str(item_resource.get("item_kind")) == "equipment" or str(item_resource.get("weapon_type")) == "melee":
+	if str(item_resource.get("item_kind")) == "equipment" or str(item_resource.get("weapon_type")) in ["melee", "hybrid"]:
 		_action_popup.add_action("装备", ACTION_EQUIP)
-	elif str(item_resource.get("weapon_type")) == "ranged":
+	if str(item_resource.get("weapon_type")) in ["ranged", "hybrid"]:
 		_action_popup.add_action("装备1", ACTION_EQUIP_RANGED_ONE)
 		_action_popup.add_action("装备2", ACTION_EQUIP_RANGED_TWO)
 	elif str(item_resource.get("item_kind")) == "repair_kit":
@@ -532,7 +532,7 @@ func _on_action_pressed(action_id: int) -> void:
 		var target_location: String = ""
 		if str(_action_resource.get("item_kind")) == "equipment":
 			target_location = "armor_" + str(_action_resource.get("equipment_slot"))
-		elif str(_action_resource.get("weapon_type")) == "melee":
+		elif str(_action_resource.get("weapon_type")) in ["melee", "hybrid"] and action_id == ACTION_EQUIP:
 			target_location = "melee"
 		else:
 			target_location = "ranged_0" if action_id == ACTION_EQUIP_RANGED_ONE else "ranged_1"
@@ -609,7 +609,7 @@ func _apply_repair_kit(repair_kit_resource: Resource, source_location: String, w
 
 
 func _can_repair_target(item_resource: Resource) -> bool:
-	if item_resource == null or (str(item_resource.get("weapon_type")) not in ["ranged", "melee"] and str(item_resource.get("item_kind")) != "equipment"):
+	if item_resource == null or (str(item_resource.get("weapon_type")) not in ["ranged", "melee", "hybrid"] and str(item_resource.get("item_kind")) != "equipment"):
 		return false
 	# 最大耐久；装备优先读取耐久强化后的有效上限，旧资源回退导出字段。
 	var maximum_durability: float = float(item_resource.call("get_maximum_durability")) if item_resource.has_method("get_maximum_durability") else maxf(float(item_resource.get("max_durability")), 1.0)

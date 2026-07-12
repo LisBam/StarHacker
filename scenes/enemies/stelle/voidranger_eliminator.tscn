@@ -27,7 +27,7 @@ keep_distance = 260.0
 ranged_projectile_speed = 600.0
 ranged_projectile_damage = 10.0
 ranged_projectile_max_distance = 550.0
-ranged_projectile_impact_force = 90.0
+ranged_projectile_impact_force = 25.0
 ranged_projectile_deviation_degrees = 3.0
 cooldown = 1.0
 

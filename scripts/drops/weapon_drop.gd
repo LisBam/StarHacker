@@ -68,6 +68,11 @@ func get_weapon_data() -> Resource:
 	return _get_item_data()
 
 
+func get_item_data() -> Resource:
+	## 返回当前地面物品资源；结算被动与世界统计通过只读接口计价，不直接访问兼容字段。
+	return _get_item_data()
+
+
 func get_pickup_radius() -> float:
 	return pickup_radius
 

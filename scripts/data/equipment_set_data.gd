@@ -14,18 +14,28 @@ class_name EquipmentSetData
 @export_multiline var two_piece_description: String = ""
 ## 两件套属性加成；键使用装备统一属性名，值为直接加到有效装备聚合结果的点数或比例，运行时不应动态修改。
 @export var two_piece_attribute_bonuses: Dictionary = {}
+## 两件套最终属性倍率；键使用角色统一属性名，值为额外比例，0.2 表示对应基础与装备合计值提高 20%，运行时不应动态修改。
+@export var two_piece_attribute_multipliers: Dictionary = {}
 ## 四件套触发件数；默认 4，取值至少为 1，修改会影响详情激活颜色与特殊效果生效门槛。
 @export_range(1, 64, 1) var four_piece_required_count: int = 4
 ## 四件套效果原文；默认空字符串，填写后会在装备悬停详情中按当前触发状态显示绿色或灰色。
 @export_multiline var four_piece_description: String = ""
 ## 四件套属性加成；键和值语义与两件套一致，达到四件门槛后会与两件套加成累计。
 @export var four_piece_attribute_bonuses: Dictionary = {}
+## 四件套最终属性倍率；键和值语义与两件套倍率一致，达到四件门槛后与低档位比例直接相加。
+@export var four_piece_attribute_multipliers: Dictionary = {}
 ## 主动长按开启宝箱时必定追加的物品数量；默认 0 表示没有该特殊效果，击毁宝箱始终不会读取此值。
 @export_range(0, 64, 1) var manual_chest_guaranteed_extra_drop_count: int = 0
 ## 主动长按开启宝箱时再次追加掉落的概率；使用 0 到 1 小数，默认 0 表示不执行额外随机判定。
 @export_range(0.0, 1.0, 0.01) var manual_chest_additional_drop_chance: float = 0.0
 ## 主动长按开启宝箱随机判定成功后追加的物品数量；默认 0，概率成功但数量为 0 时不会生成物品。
 @export_range(0, 64, 1) var manual_chest_additional_drop_count: int = 0
+## 四件套附近掉落物检测半径；单位为世界像素，默认 0 表示没有该特殊效果，正值时仅检测半径内可拾取掉落物。
+@export_range(0.0, 6000.0, 1.0, "or_greater") var nearby_drop_detection_radius: float = 0.0
+## 朝附近掉落物移动时的移速提升比例；默认 0 表示不加速，0.4 表示提高 40%，仅达到四件门槛且移动方向指向目标时生效。
+@export_range(0.0, 10.0, 0.01, "or_greater") var nearby_drop_move_speed_bonus_ratio: float = 0.0
+## 朝附近掉落物移动时的减伤比例；默认 0 表示不减伤，0.15 表示受到伤害降低 15%，与其他来源按剩余伤害连乘。
+@export_range(0.0, 1.0, 0.01) var nearby_drop_damage_reduction_ratio: float = 0.0
 
 
 func get_tier_definitions() -> Array[Dictionary]:
@@ -53,6 +63,16 @@ func get_attribute_bonuses(active_piece_count: int) -> Dictionary:
 	return accumulated_bonuses
 
 
+func get_attribute_multipliers(active_piece_count: int) -> Dictionary:
+	## 根据当前有效穿戴件数返回累计最终属性比例；倍率与直接点数分离，避免“提高20%防御力”被误解为增加0.2点。
+	var accumulated_multipliers: Dictionary = {}
+	if active_piece_count >= maxi(two_piece_required_count, 1):
+		_merge_attribute_bonuses(accumulated_multipliers, two_piece_attribute_multipliers)
+	if active_piece_count >= maxi(four_piece_required_count, 1):
+		_merge_attribute_bonuses(accumulated_multipliers, four_piece_attribute_multipliers)
+	return accumulated_multipliers
+
+
 func roll_manual_chest_extra_drop_count(active_piece_count: int, random_source: RandomNumberGenerator) -> int:
 	## 结算主动长按宝箱的额外掉落数量；未达到四件门槛或随机源缺失时只返回合法的确定部分。
 	if active_piece_count < maxi(four_piece_required_count, 1):
@@ -64,6 +84,17 @@ func roll_manual_chest_extra_drop_count(active_piece_count: int, random_source: 
 	if random_source != null and additional_drop_chance > 0.0 and random_source.randf() < additional_drop_chance:
 		extra_drop_count += maxi(manual_chest_additional_drop_count, 0)
 	return extra_drop_count
+
+
+func get_nearby_drop_effect(active_piece_count: int) -> Dictionary:
+	## 返回达到四件门槛后的附近掉落物效果参数；未触发或半径为零时返回空词典，组件无需识别具体套装 ID。
+	if active_piece_count < maxi(four_piece_required_count, 1) or nearby_drop_detection_radius <= 0.0:
+		return {}
+	return {
+		"detection_radius": maxf(nearby_drop_detection_radius, 0.0),
+		"move_speed_bonus_ratio": maxf(nearby_drop_move_speed_bonus_ratio, 0.0),
+		"damage_reduction_ratio": clampf(nearby_drop_damage_reduction_ratio, 0.0, 1.0),
+	}
 
 
 func _merge_attribute_bonuses(target_bonuses: Dictionary, source_bonuses: Dictionary) -> void:

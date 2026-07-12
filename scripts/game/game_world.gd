@@ -2374,6 +2374,22 @@ func _is_position_near_existing_drop(candidate_position: Vector2) -> bool:
 	return false
 
 
+func get_world_drop_total_value() -> int:
+	## 返回地图上当前仍可拾取掉落物的总价值；每个 item_drops 节点按一件计价，飞出动画期间暂不在组内。
+	var total_value: int = 0
+	for raw_drop in get_tree().get_nodes_in_group("item_drops"):
+		# 掉落节点；必须提供只读资源接口，异常或正在删除的节点不计入成功撤离被动。
+		var drop_node: Node = raw_drop as Node
+		if drop_node == null or not is_instance_valid(drop_node) or drop_node.is_queued_for_deletion() or not drop_node.has_method("get_item_data"):
+			continue
+		# 地面物品资源；强化与耐久物品优先使用有效价值，普通堆叠道具使用单个基础价值。
+		var item_resource: Resource = drop_node.call("get_item_data") as Resource
+		if item_resource == null:
+			continue
+		total_value += maxi(int(item_resource.call("get_effective_value")) if item_resource.has_method("get_effective_value") else int(item_resource.get("value")), 0)
+	return total_value
+
+
 func _free_monster_node(monster_node: Node) -> void:
 	if monster_node == null or not is_instance_valid(monster_node):
 		return

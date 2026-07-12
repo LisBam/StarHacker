@@ -48,6 +48,15 @@ func get_passive_resources() -> Array[Resource]:
 	return _passive_resources.duplicate()
 
 
+func apply_successful_extraction_bonuses(global_inventory: Node, game_world: Node) -> int:
+	## 结算全部被动行为的成功撤离金币奖励；只有实现明确接口的行为参与，返回实际增加金币总数供结算展示扩展。
+	var total_bonus_coins: int = 0
+	for behavior_instance in _behavior_instances:
+		if is_instance_valid(behavior_instance) and behavior_instance.has_method("apply_successful_extraction_bonus"):
+			total_bonus_coins += maxi(int(behavior_instance.call("apply_successful_extraction_bonus", global_inventory, game_world)), 0)
+	return total_bonus_coins
+
+
 func _clear_behaviors() -> void:
 	for behavior_instance in _behavior_instances:
 		if not is_instance_valid(behavior_instance):

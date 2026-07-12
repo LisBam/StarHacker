@@ -513,7 +513,7 @@ func _get_item_detail_tooltip(item_resource: Resource) -> String:
 
 
 func _is_pending_item_usable_on_weapon(weapon_resource: Resource) -> bool:
-	if weapon_resource == null or (str(weapon_resource.get("weapon_type")) not in ["ranged", "melee"] and str(weapon_resource.get("item_kind")) != "equipment"):
+	if weapon_resource == null or (str(weapon_resource.get("weapon_type")) not in ["ranged", "melee", "hybrid"] and str(weapon_resource.get("item_kind")) != "equipment"):
 		return false
 	if _pending_repair_kit_resource != null:
 		# 当前耐久；修复包只应高亮仍有耐久缺口的武器，满耐久武器不提供无效选择。
@@ -714,11 +714,11 @@ func _on_item_action_requested(item_resource: Resource, source_location: String)
 		_item_action_menu.add_action("使用", ITEM_ACTION_USE_REPAIR_KIT)
 	elif source_location == "backpack" and str(item_resource.get("item_kind")) == "equipment":
 		_item_action_menu.add_action("装备", ITEM_ACTION_EQUIP)
-	elif source_location == "backpack" and str(item_resource.get("weapon_type")) in ["ranged", "melee"]:
-		if str(item_resource.get("weapon_type")) == "ranged":
+	elif source_location == "backpack" and str(item_resource.get("weapon_type")) in ["ranged", "melee", "hybrid"]:
+		if str(item_resource.get("weapon_type")) in ["ranged", "hybrid"]:
 			_item_action_menu.add_action("装备1", ITEM_ACTION_EQUIP_RANGED_1)
 			_item_action_menu.add_action("装备2", ITEM_ACTION_EQUIP_RANGED_2)
-		else:
+		if str(item_resource.get("weapon_type")) in ["melee", "hybrid"]:
 			_item_action_menu.add_action("装备", ITEM_ACTION_EQUIP)
 	_item_action_menu.present_at(get_viewport().get_mouse_position())
 
@@ -906,13 +906,13 @@ func _equip_backpack_weapon(weapon_resource: Resource, target_ranged_slot: int =
 	# 装备目标位置；远程目标由当前选中槽组成，近战目标使用稳定 melee 标识。
 	# 显式目标补充：远程分支使用菜单传入的槽位下标生成目标位置。
 	var target_location: String = "melee"
-	if weapon_type == "ranged":
+	if weapon_type in ["ranged", "hybrid"] and target_ranged_slot >= 0:
 		# 当前远程槽；取值来自全局装备服务，默认 0 用于缺少接口时的安全兜底。
 		# 菜单目标补充：当前实现不再读取当前远程槽，而是校验用户选择的 0/1 下标。
 		if target_ranged_slot < 0 or target_ranged_slot >= WAREHOUSE_RANGED_EQUIPMENT_SLOT_COUNT:
 			return
 		target_location = "ranged_%d" % target_ranged_slot
-	elif weapon_type != "melee":
+	elif weapon_type not in ["melee", "hybrid"]:
 		return
 	_global_inventory.call("transfer_storage_to_equipment", weapon_resource, "backpack", target_location)
 

@@ -76,7 +76,7 @@ const STONE_DETRIMENTAL_CHANCE: float = 0.28
 	"res://data/equipment/stelle/trailblazer_pants.tres",
 	"res://data/equipment/stelle/trailblazer_boots.tres",
 ])
-## 可刷新道具资源路径；当前包含初级、中级和高级修复包，生成时等概率抽取并复制独立实例。
+## 可刷新道具资源路径；场景只保存三种修复包兜底，正常启动会合并内容目录中的能量饮料等已解锁道具。
 @export var item_resource_paths: PackedStringArray = PackedStringArray([
 	"res://data/items/repair_kit_basic.tres",
 	"res://data/items/repair_kit_medium.tres",
@@ -298,7 +298,7 @@ func _refresh_normal_stock(reset_manual_refresh_count: bool) -> void:
 		if enhancement_stone != null:
 			_shop_stock.append(_create_normal_stock_entry(enhancement_stone))
 	for _item_index in range(maxi(item_stock_count, 1)):
-		# 随机道具商品；当前从三档修复包中抽取，加载失败时不影响其他商品。
+		# 随机道具商品；从内容目录当前可用修复包与消耗品中抽取，加载失败时不影响其他商品。
 		var item_resource: Resource = _create_random_item()
 		if item_resource != null:
 			_shop_stock.append(_create_normal_stock_entry(item_resource))
@@ -316,7 +316,9 @@ func _create_random_weapon(requested_weapon_type: String = "") -> Resource:
 		if not ResourceLoader.exists(configured_path):
 			continue
 		var configured_resource: Resource = load(configured_path) as Resource
-		if configured_resource != null and (requested_weapon_type.is_empty() or str(configured_resource.get("weapon_type")) == requested_weapon_type):
+		# 资源武器类型；混合武器同时进入近战与远程候选池，纯类型只进入自身候选池。
+		var configured_weapon_type: String = str(configured_resource.get("weapon_type")) if configured_resource != null else ""
+		if configured_resource != null and (requested_weapon_type.is_empty() or configured_weapon_type == requested_weapon_type or (configured_weapon_type == "hybrid" and requested_weapon_type in ["ranged", "melee"])):
 			candidate_paths.append(configured_path)
 	if candidate_paths.is_empty():
 		return null
@@ -494,7 +496,7 @@ func _on_combat_failure_losses_recorded(lost_entries: Array) -> void:
 func _get_full_durability_value(item_resource: Resource) -> int:
 	if item_resource == null:
 		return 0
-	if str(item_resource.get("weapon_type")) in ["ranged", "melee"]:
+	if str(item_resource.get("weapon_type")) in ["ranged", "melee", "hybrid"]:
 		# 估值副本；只在副本上恢复满耐久，灰市最终售卖的真实遗失武器仍保持丢失时耐久。
 		var valuation_weapon: Resource = item_resource.duplicate(true) as Resource
 		if valuation_weapon == null:

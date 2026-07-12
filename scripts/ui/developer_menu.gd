@@ -47,7 +47,7 @@ var _grant_weapons_button: Button
 var _grant_equipment_button: Button
 ## 随机强化石按钮；默认运行时创建，点击后向永久仓库发放 10 颗随机强化石。
 var _grant_stones_button: Button
-## 获取全部道具按钮；默认运行时创建，点击后向永久仓库各发放一件已知修复包。
+## 获取全部道具按钮；默认运行时创建，点击后向永久仓库各发放一件内容目录当前注册道具。
 var _grant_all_items_button: Button
 ## 修改金币按钮；点击后通过滑条或数字输入直接设置目标金币余额。
 var _modify_coins_button: Button
@@ -393,7 +393,7 @@ func _on_grant_stones_pressed() -> void:
 func _on_grant_all_items_pressed() -> void:
 	if _global_inventory == null or not _global_inventory.has_method("grant_all_repair_kits_to_warehouse"):
 		return
-	# 发放道具数量；当前应为初级、中级和高级修复包各一件，后续新增道具会由路径表自动纳入。
+	# 发放道具数量；当前包含三种修复包和三种能量饮料，后续新增道具由内容目录自动纳入。
 	var granted_count: int = int(_global_inventory.call("grant_all_repair_kits_to_warehouse"))
 	_status_label.text = "已向永久仓库发放 %d 种道具" % granted_count
 

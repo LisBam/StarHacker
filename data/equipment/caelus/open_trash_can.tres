@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="EquipmentData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/equipment_data.gd" id="1_equipment"]
+[ext_resource type="Resource" path="res://data/equipment_sets/scavenger_set.tres" id="2_set"]
+
+[resource]
+script = ExtResource("1_equipment")
+equipment_id = "open_trash_can"
+display_name = "没盖的垃圾桶"
+equipment_slot = "body"
+equipment_set = ExtResource("2_set")
+icon_text = "桶"
+value = 50
+max_durability = 500.0
+current_durability = 500.0
+attack_power = 20.0
+defense_power = 30.0
+max_health = 40.0
+health_regeneration_per_five_seconds = 1.0
+dodge_chance = 0.01
+energy_regeneration = 6.0

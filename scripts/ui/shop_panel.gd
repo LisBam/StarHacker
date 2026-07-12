@@ -32,8 +32,8 @@ var _current_channel: String = CHANNEL_NORMAL
 var _primary_category: String = InventoryQuery.PRIMARY_ALL
 ## 当前二级分类；默认全部，切换一级分类时自动重置。
 var _subcategory: String = InventoryQuery.SUBCATEGORY_ALL
-## 当前强化石属性筛选键；默认空字符串表示全部属性与方向。
-var _stone_attribute_filter: String = ""
+## 当前强化石属性筛选键集合；默认空数组表示全部属性与方向，多项条件按并集匹配。
+var _stone_attribute_filter: Array[String] = []
 ## 当前排序模式；默认按刷新列表原始顺序，查询器使用获得时间模式稳定保留下标顺序。
 var _sort_mode: String = InventoryQuery.SORT_ACQUIRED_TIME
 ## 普通商店通道按钮；选中时禁用以表示当前页面。
@@ -52,6 +52,8 @@ var _status_label: Label
 var _search_edit: LineEdit
 ## 强化属性筛选框；只在资源分类显示，规则与背包仓库一致。
 var _stone_attribute_option: OptionButton
+## 强化属性筛选清空按钮；默认只在资源分类显示，无已选条件时禁用。
+var _stone_attribute_clear_button: Button
 ## 一级分类按钮表；键为分类标识，值为对应按钮，用于同步禁用状态。
 var _primary_buttons: Dictionary = {}
 ## 二级分类按钮表；每次一级分类变化后重建。
@@ -177,15 +179,24 @@ func _build_interface() -> void:
 	query_bar.add_child(_search_edit)
 	_stone_attribute_option = OptionButton.new()
 	_stone_attribute_option.custom_minimum_size = Vector2(160.0, 36.0)
-	_stone_attribute_option.add_item("全部强化属性")
+	_stone_attribute_option.add_item("强化筛选（0）")
 	_stone_attribute_option.set_item_metadata(0, "")
 	for direction in InventoryQuery.STONE_FILTER_DIRECTIONS:
 		_stone_attribute_option.add_separator(InventoryQuery.get_stone_attribute_direction_group_label(direction))
 		for stat_name in EnhancementRules.STAT_KEYS:
 			_stone_attribute_option.add_item(InventoryQuery.get_stone_attribute_filter_label(stat_name, direction))
-			_stone_attribute_option.set_item_metadata(_stone_attribute_option.item_count - 1, InventoryQuery.build_stone_attribute_filter_key(stat_name, direction))
+			# 当前筛选项下标；用于写入稳定筛选键并启用可保持弹窗打开的多选勾选状态。
+			var filter_item_index: int = _stone_attribute_option.item_count - 1
+			_stone_attribute_option.set_item_metadata(filter_item_index, InventoryQuery.build_stone_attribute_filter_key(stat_name, direction))
+			_stone_attribute_option.get_popup().set_item_as_checkable(filter_item_index, true)
+	_stone_attribute_option.get_popup().hide_on_checkable_item_selection = false
 	_stone_attribute_option.item_selected.connect(_on_stone_attribute_selected)
 	query_bar.add_child(_stone_attribute_option)
+	_stone_attribute_clear_button = Button.new()
+	_stone_attribute_clear_button.text = "清空筛选"
+	_stone_attribute_clear_button.custom_minimum_size = Vector2(92.0, 36.0)
+	_stone_attribute_clear_button.pressed.connect(_clear_stone_attribute_filter)
+	query_bar.add_child(_stone_attribute_clear_button)
 	# 一级分类栏；与仓库相同显示全部、武器和资源。
 	var primary_bar: HBoxContainer = HBoxContainer.new()
 	primary_bar.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -283,6 +294,8 @@ func _refresh_category_buttons() -> void:
 	_normal_channel_button.disabled = _current_channel == CHANNEL_NORMAL
 	_gray_channel_button.disabled = _current_channel == CHANNEL_GRAY
 	_stone_attribute_option.visible = _primary_category == InventoryQuery.PRIMARY_RESOURCES
+	_stone_attribute_clear_button.visible = _primary_category == InventoryQuery.PRIMARY_RESOURCES
+	_refresh_stone_attribute_filter_display()
 	# 刷新栏；通过名称查找固定父节点，灰市通道不显示自动或手动刷新控制。
 	var refresh_bar: Control = _refresh_countdown_label.get_parent() as Control
 	if refresh_bar != null:
@@ -350,8 +363,7 @@ func _on_channel_pressed(channel_name: String) -> void:
 func _on_primary_category_pressed(category_name: String) -> void:
 	_primary_category = category_name
 	_subcategory = InventoryQuery.SUBCATEGORY_ALL
-	_stone_attribute_filter = ""
-	_stone_attribute_option.select(0)
+	_clear_stone_attribute_filter(false)
 	_rebuild_subcategory_buttons()
 	_rebuild_content()
 
@@ -366,8 +378,44 @@ func _on_search_changed(_new_text: String) -> void:
 
 
 func _on_stone_attribute_selected(item_index: int) -> void:
-	_stone_attribute_filter = str(_stone_attribute_option.get_item_metadata(item_index))
+	if item_index <= 0:
+		_stone_attribute_option.select(0)
+		return
+	# 选中筛选键；属性名与正负方向共同组成，多个键由查询器按并集匹配。
+	var filter_key: String = str(_stone_attribute_option.get_item_metadata(item_index))
+	if filter_key.is_empty():
+		return
+	# 本次切换后的选中状态；勾选项再次点击会取消，不关闭弹出列表。
+	var should_select: bool = filter_key not in _stone_attribute_filter
+	_stone_attribute_option.get_popup().set_item_checked(item_index, should_select)
+	if should_select:
+		_stone_attribute_filter.append(filter_key)
+	else:
+		_stone_attribute_filter.erase(filter_key)
+	_refresh_stone_attribute_filter_display()
 	_rebuild_content()
+
+
+func _clear_stone_attribute_filter(rebuild_content: bool = true) -> void:
+	_stone_attribute_filter.clear()
+	for item_index in range(1, _stone_attribute_option.item_count):
+		if not str(_stone_attribute_option.get_item_metadata(item_index)).is_empty():
+			_stone_attribute_option.get_popup().set_item_checked(item_index, false)
+	_refresh_stone_attribute_filter_display()
+	if rebuild_content:
+		_rebuild_content()
+
+
+func _refresh_stone_attribute_filter_display() -> void:
+	_stone_attribute_option.set_item_text(0, "强化筛选（%d）" % _stone_attribute_filter.size())
+	_stone_attribute_option.select(0)
+	for item_index in range(1, _stone_attribute_option.item_count):
+		# 当前项筛选键；分隔项元数据为空，不参与勾选同步。
+		var filter_key: String = str(_stone_attribute_option.get_item_metadata(item_index))
+		if not filter_key.is_empty():
+			_stone_attribute_option.get_popup().set_item_checked(item_index, filter_key in _stone_attribute_filter)
+	if _stone_attribute_clear_button != null:
+		_stone_attribute_clear_button.disabled = _stone_attribute_filter.is_empty()
 
 
 func _on_manual_refresh_pressed() -> void:

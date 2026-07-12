@@ -55,13 +55,15 @@ func configure(entry: Dictionary, is_gray_market: bool) -> void:
 		item_name = "【二手】%s" % item_name
 	# 价格显示文本；默认仅显示最终金币，开发者开启调试信息后才公开原价倍率。
 	var price_text: String = _build_price_text(purchase_price, price_multiplier)
-	# 商品顶部摘要；强化石与仓库卡片一致显示资源类型，属性方向和价格统一放在底部摘要。
+	# 商品顶部摘要；强化石第一行显示资源类型，第二行继续由通用卡片显示名称。
 	var context_text: String = item_type
-	# 商品底部摘要；强化石复用仓库的彩色方向词条结构，仅把“售价”替换为“价格”和实际购买金币。
-	var detail_text: String = _build_stone_shop_detail_text(purchase_price) if _is_enhancement_stone() else price_text
+	# 商品第三行摘要；强化石只显示彩色属性，普通商品继续显示金币价格。
+	var detail_text: String = _build_stone_shop_attribute_text() if _is_enhancement_stone() else price_text
+	# 商品第四行摘要；仅强化石显示独立金币价格，形成类型、名称、属性、金币四行排版。
+	var secondary_detail_text: String = price_text if _is_enhancement_stone() else ""
 	text = ""
 	_ensure_item_card_view()
-	_item_card_view.call("configure", _item_resource, _quantity, context_text, detail_text, "无效商品", item_name)
+	_item_card_view.call("configure", _item_resource, _quantity, context_text, detail_text, "无效商品", item_name, secondary_detail_text)
 	_item_card_view.call("set_visual_state", false, false)
 	tooltip_text = ITEM_DETAIL_FORMATTER.call("build_plain_text", _item_resource, _quantity, "价格", _purchase_price) if _item_resource != null else ""
 	disabled = _item_resource == null or _stock_id.is_empty()
@@ -125,7 +127,7 @@ func _build_stone_attribute_text() -> String:
 	return " ".join(attribute_tokens) if not attribute_tokens.is_empty() else "无属性"
 
 
-func _build_stone_shop_detail_text(purchase_price: int) -> String:
+func _build_stone_shop_attribute_text() -> String:
 	# 强化石词条；按仓库卡片相同顺序先显示增强、再显示削弱，并按玩法利弊分别着色。
 	var modifiers: Dictionary = EnhancementRules.normalize_modifiers(_item_resource.get("modifiers") as Dictionary)
 	# 彩色词条；每项包含独立 BBCode，通用物品卡片直接负责渲染。
@@ -137,8 +139,7 @@ func _build_stone_shop_detail_text(purchase_price: int) -> String:
 			# 词条颜色；与仓库强化石卡片保持一致，增强为绿色、削弱为红色。
 			var color_code: String = "#70e889" if beneficial else "#ff7070"
 			colored_tokens.append("[color=%s]%s[/color]" % [color_code, EnhancementRules.build_modifier_token(stat_name, modifiers.get(stat_name), false)])
-	# 价格文本；区别于仓库“售价”，商店统一显示“价格 xxx金币”。
-	return "%s · [color=%s]价格 %d金币[/color]" % [" ".join(colored_tokens) if not colored_tokens.is_empty() else "无词条", COIN_TEXT_COLOR, purchase_price]
+	return " ".join(colored_tokens) if not colored_tokens.is_empty() else "无词条"
 
 
 func _ensure_durability_bar() -> void:

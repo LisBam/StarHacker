@@ -13,15 +13,23 @@ signal map_vision_requested
 
 ## 全局窗口样式指南；统一主菜单与战斗开发者窗口、调试分区和高风险操作视觉。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+## 通用整数选择弹窗；开发者强化石数量和目标金币余额复用滑条与数字输入协议。
+const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
+## 通用信息确认弹窗脚本；清空仓库等不可逆调试操作统一使用白边信息确认样式。
+const COMMON_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/common_confirmation_dialog.gd")
 
 ## 菜单最小尺寸；默认 520x580，适合在主菜单中央显示资源操作和调试信息开关。
 @export var panel_minimum_size: Vector2 = Vector2(520.0, 640.0)
 ## 战斗调试上下文面板高度；默认 580 像素，用于容纳无限属性、地图视野和训练设置入口，运行时通常不动态修改。
 @export_range(360.0, 720.0, 1.0) var combat_panel_height: float = 580.0
-## 单次金币调整数量；默认 1000，对应增加和减少按钮的固定测试步长。
+## 旧版单次金币调整数量；默认 1000，仅保留历史场景兼容，现行菜单改为直接输入目标金币余额。
 @export_range(1, 9999999, 1) var coin_step: int = 1000
-## 单次随机强化石发放数量；默认 10，修改会同步按钮文案和实际永久仓库发放数量。
-@export_range(1, 999, 1) var enhancement_stone_grant_count: int = 10
+## 随机强化石数量默认值；默认 10，打开数量弹窗时作为初始选择，玩家可在 1 至最大值之间修改。
+@export_range(1, 9999, 1) var enhancement_stone_grant_count: int = 10
+## 随机强化石单次发放上限；默认 9999，限制开发者误输入造成的长时间生成和巨大存档。
+@export_range(1, 99999, 1) var enhancement_stone_grant_maximum: int = 9999
+## 可直接设置的金币余额上限；默认 9999999，避免调试输入超过项目整数经济显示范围。
+@export_range(1, 999999999, 1) var coin_value_maximum: int = 9999999
 
 ## 全局物品服务；默认从 AutoLoad 获取，缺失时禁用资源修改按钮。
 var _global_inventory: Node
@@ -39,10 +47,8 @@ var _grant_equipment_button: Button
 var _grant_stones_button: Button
 ## 获取全部道具按钮；默认运行时创建，点击后向永久仓库各发放一件已知修复包。
 var _grant_all_items_button: Button
-## 增加金币按钮；默认运行时创建，点击增加 coin_step。
-var _add_coins_button: Button
-## 减少金币按钮；默认运行时创建，金币最低限制为 0。
-var _remove_coins_button: Button
+## 修改金币按钮；点击后通过滑条或数字输入直接设置目标金币余额。
+var _modify_coins_button: Button
 ## 清空仓库按钮；默认运行时创建，点击后先弹出确认框再移除永久仓库中的全部物品。
 var _clear_warehouse_button: Button
 ## 全量行情刷新按钮；模拟一次正式对局结算级别刷新，但不修改玩家行为统计。
@@ -83,6 +89,10 @@ var _configured_infinite_energy: bool = false
 var _configured_weapon_durability_disabled: bool = false
 ## 清空仓库确认框；默认运行时创建，防止开发者调试时误触不可逆的永久仓库清理。
 var _clear_warehouse_confirmation: CommonConfirmationDialog
+## 开发者整数选择弹窗；强化石数量与目标金币余额共用，确认时按当前操作模式执行。
+var _developer_value_dialog: SellQuantityDialog
+## 当前开发者数值操作；取值为 stones 或 coins，默认空字符串表示没有待确认操作。
+var _pending_developer_value_action: String = ""
 
 
 func _ready() -> void:
@@ -173,7 +183,7 @@ func _build_interface() -> void:
 	_economy_controls.append(_grant_equipment_button)
 	_grant_stones_button = Button.new()
 	_grant_stones_button.custom_minimum_size = Vector2(0.0, 46.0)
-	_grant_stones_button.text = "随机获得%d颗强化石" % enhancement_stone_grant_count
+	_grant_stones_button.text = "获取指定数量强化石"
 	_grant_stones_button.pressed.connect(_on_grant_stones_pressed)
 	content.add_child(_grant_stones_button)
 	_economy_controls.append(_grant_stones_button)
@@ -183,19 +193,12 @@ func _build_interface() -> void:
 	_grant_all_items_button.pressed.connect(_on_grant_all_items_pressed)
 	content.add_child(_grant_all_items_button)
 	_economy_controls.append(_grant_all_items_button)
-	_add_coins_button = Button.new()
-	_add_coins_button.custom_minimum_size = Vector2(0.0, 46.0)
-	_add_coins_button.text = "一键增加 %d 金币" % coin_step
-	_add_coins_button.pressed.connect(_on_add_coins_pressed)
-	content.add_child(_add_coins_button)
-	_economy_controls.append(_add_coins_button)
-	_remove_coins_button = Button.new()
-	_remove_coins_button.custom_minimum_size = Vector2(0.0, 46.0)
-	_remove_coins_button.text = "一键减少 %d 金币" % coin_step
-	UI_STYLE_GUIDE.apply_danger_button(_remove_coins_button)
-	_remove_coins_button.pressed.connect(_on_remove_coins_pressed)
-	content.add_child(_remove_coins_button)
-	_economy_controls.append(_remove_coins_button)
+	_modify_coins_button = Button.new()
+	_modify_coins_button.custom_minimum_size = Vector2(0.0, 46.0)
+	_modify_coins_button.text = "修改金币数量"
+	_modify_coins_button.pressed.connect(_on_modify_coins_pressed)
+	content.add_child(_modify_coins_button)
+	_economy_controls.append(_modify_coins_button)
 	_clear_warehouse_button = Button.new()
 	_clear_warehouse_button.custom_minimum_size = Vector2(0.0, 46.0)
 	_clear_warehouse_button.text = "清空仓库物品"
@@ -244,6 +247,9 @@ func _build_interface() -> void:
 	_clear_warehouse_confirmation = COMMON_CONFIRMATION_DIALOG_SCRIPT.new() as CommonConfirmationDialog
 	_clear_warehouse_confirmation.confirmed.connect(_on_clear_warehouse_confirmed)
 	add_child(_clear_warehouse_confirmation)
+	_developer_value_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as SellQuantityDialog
+	_developer_value_dialog.quantity_confirmed.connect(_on_developer_value_confirmed)
+	add_child(_developer_value_dialog)
 
 	# 战斗调试容器；仅在 CombatHud 配置战斗上下文后显示，不访问具体玩家组件。
 	_combat_controls_container = VBoxContainer.new()
@@ -304,8 +310,7 @@ func _refresh_availability() -> void:
 	_grant_equipment_button.disabled = not service_available
 	_grant_stones_button.disabled = not service_available
 	_grant_all_items_button.disabled = not service_available
-	_add_coins_button.disabled = not service_available
-	_remove_coins_button.disabled = not service_available
+	_modify_coins_button.disabled = not service_available
 	_clear_warehouse_button.disabled = not service_available
 	# 股市服务可用性；决定行情刷新、事件和大盘按钮是否允许点击。
 	var stock_service_available: bool = _stock_market_service != null
@@ -377,11 +382,10 @@ func _on_grant_equipment_pressed() -> void:
 
 
 func _on_grant_stones_pressed() -> void:
-	if _global_inventory == null or not _global_inventory.has_method("grant_random_enhancement_stones_to_warehouse"):
+	if _global_inventory == null or _developer_value_dialog == null:
 		return
-	# 发放强化石数量；默认应为 10，随机同词条强化石可能在仓库中自动合并为同一堆叠。
-	var granted_count: int = int(_global_inventory.call("grant_random_enhancement_stones_to_warehouse", enhancement_stone_grant_count))
-	_status_label.text = "已向永久仓库发放 %d 颗随机强化石" % granted_count
+	_pending_developer_value_action = "stones"
+	_developer_value_dialog.present_developer_value("获取强化石", "选择要生成并存入永久仓库的随机强化石数量", 1, maxi(enhancement_stone_grant_maximum, 1), clampi(enhancement_stone_grant_count, 1, maxi(enhancement_stone_grant_maximum, 1)), "获取")
 
 
 func _on_grant_all_items_pressed() -> void:
@@ -392,12 +396,32 @@ func _on_grant_all_items_pressed() -> void:
 	_status_label.text = "已向永久仓库发放 %d 种道具" % granted_count
 
 
-func _on_add_coins_pressed() -> void:
-	_adjust_coins(coin_step)
+func _on_modify_coins_pressed() -> void:
+	if _global_inventory == null or _developer_value_dialog == null or not _global_inventory.has_method("get_coins"):
+		return
+	_pending_developer_value_action = "coins"
+	# 当前金币；作为弹窗初始值，玩家可拉条或输入 0 至配置上限的目标余额。
+	var current_coins: int = clampi(int(_global_inventory.call("get_coins")), 0, maxi(coin_value_maximum, 1))
+	_developer_value_dialog.present_developer_value("修改金币数量", "直接设置永久金币余额", 0, maxi(coin_value_maximum, 1), current_coins, "修改")
 
 
-func _on_remove_coins_pressed() -> void:
-	_adjust_coins(-coin_step)
+func _on_developer_value_confirmed(value: int) -> void:
+	if _global_inventory == null:
+		return
+	if _pending_developer_value_action == "stones":
+		if not _global_inventory.has_method("grant_random_enhancement_stones_to_warehouse"):
+			return
+		# 实际发放数量；每颗使用正式生成器，稀有词条仍保持常规词条五分之一权重。
+		var granted_count: int = int(_global_inventory.call("grant_random_enhancement_stones_to_warehouse", maxi(value, 1)))
+		_status_label.text = "已向永久仓库发放 %d 颗随机强化石" % granted_count
+	elif _pending_developer_value_action == "coins":
+		if not _global_inventory.has_method("set_coins"):
+			return
+		# 修改后金币；直接设置为目标余额，不再进行固定步长的增减运算。
+		var adjusted_coins: int = int(_global_inventory.call("set_coins", maxi(value, 0)))
+		_status_label.text = "金币数量已修改为 %d" % adjusted_coins
+		_refresh_coins()
+	_pending_developer_value_action = ""
 
 
 func _on_clear_warehouse_pressed() -> void:
@@ -454,15 +478,6 @@ func _on_clear_stock_holdings_pressed() -> void:
 	_status_label.text = "已清空全部持仓，共移除 %d 股，不返还金币" % cleared_quantity
 
 
-func _adjust_coins(amount: int) -> void:
-	if _global_inventory == null or not _global_inventory.has_method("adjust_coins"):
-		return
-	# 调整后金币；取值至少为 0，用于开发者操作完成后的即时反馈。
-	var adjusted_coins: int = int(_global_inventory.call("adjust_coins", amount))
-	_status_label.text = "金币已%s %d，当前为 %d" % ["增加" if amount >= 0 else "减少", absi(amount), adjusted_coins]
-	_refresh_coins()
-
-
 func _on_infinite_health_toggled(enabled: bool) -> void:
 	_configured_infinite_health = enabled
 	infinite_health_toggled.emit(enabled)
@@ -504,5 +519,3 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		if key_event.pressed and not key_event.echo and (key_event.keycode == KEY_ESCAPE or key_event.physical_keycode == KEY_ESCAPE):
 			closed.emit()
 			get_viewport().set_input_as_handled()
-## 通用信息确认弹窗脚本；清空仓库等不可逆调试操作统一使用白边信息确认样式。
-const COMMON_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/common_confirmation_dialog.gd")

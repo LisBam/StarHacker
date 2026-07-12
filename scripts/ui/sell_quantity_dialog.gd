@@ -26,6 +26,8 @@ const DISPLAY_MODE_SHIPPING: String = "shipping"
 const DISPLAY_MODE_STOCK_TRADE: String = "stock_trade"
 ## 矿场交易数量模式标识；复用同款滑条与数字输入，覆盖资产购买、出售、充值和提现。
 const DISPLAY_MODE_MINING_TRANSACTION: String = "mining_transaction"
+## 开发者数值模式标识；复用滑条与数字输入直接选择强化石数量或目标金币余额。
+const DISPLAY_MODE_DEVELOPER_VALUE: String = "developer_value"
 ## 矿场资产购买操作；数量表示购买台数，摘要显示总算力币成本。
 const MINING_ACTION_BUY: String = "buy"
 ## 矿场资产出售操作；数量表示出售台数，摘要显示按 60% 向上取整的返还。
@@ -45,6 +47,8 @@ const MINING_ACTION_WITHDRAW: String = "withdraw"
 
 ## 当前最大可出售数量；取值至少为 1，默认 1 用于弹窗尚未配置时的安全范围。
 var _maximum_quantity: int = 1
+## 当前最小可选数值；默认 1 保持出售、移动等既有模式不变，开发者金币模式允许为 0。
+var _minimum_quantity: int = 1
 ## 当前单件售价；取值大于等于 0，默认 0 用于即时计算出售总价。
 ## 股票交易价格精度补充；股票模式下该变量使用两位小数证券币，其他物品模式仍传入整数金币。
 var _unit_sell_price: float = 0.0
@@ -97,6 +101,7 @@ func _ready() -> void:
 func present(item_display_name: String, maximum_quantity: int, unit_sell_price: int) -> void:
 	_ensure_interface_initialized()
 	_display_mode = DISPLAY_MODE_SALE
+	_minimum_quantity = 1
 	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
 	_maximum_quantity = maxi(maximum_quantity, 1)
 	_unit_sell_price = float(maxi(unit_sell_price, 0))
@@ -109,6 +114,7 @@ func present(item_display_name: String, maximum_quantity: int, unit_sell_price: 
 func present_transfer(item_display_name: String, maximum_quantity: int, source_display_name: String, target_display_name: String) -> void:
 	_ensure_interface_initialized()
 	_display_mode = DISPLAY_MODE_TRANSFER
+	_minimum_quantity = 1
 	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
 	_maximum_quantity = maxi(maximum_quantity, 1)
 	_unit_sell_price = 0.0
@@ -121,6 +127,7 @@ func present_transfer(item_display_name: String, maximum_quantity: int, source_d
 func present_discard(item_display_name: String, maximum_quantity: int) -> void:
 	_ensure_interface_initialized()
 	_display_mode = DISPLAY_MODE_DISCARD
+	_minimum_quantity = 1
 	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
 	_maximum_quantity = maxi(maximum_quantity, 1)
 	_unit_sell_price = 0.0
@@ -133,6 +140,7 @@ func present_discard(item_display_name: String, maximum_quantity: int) -> void:
 func present_shipping(item_display_name: String, maximum_quantity: int, unit_item_value: int, shipping_remaining_value: int, shipping_fee_ratio: float = 0.20) -> void:
 	_ensure_interface_initialized()
 	_display_mode = DISPLAY_MODE_SHIPPING
+	_minimum_quantity = 1
 	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
 	_maximum_quantity = maxi(maximum_quantity, 1)
 	_unit_sell_price = 0.0
@@ -148,6 +156,7 @@ func present_shipping(item_display_name: String, maximum_quantity: int, unit_ite
 func present_stock_trade(stock_display_name: String, maximum_quantity: int, unit_price: float, is_buying: bool, available_coins: float = 0.0, fee_ratio: float = 0.005) -> void:
 	_ensure_interface_initialized()
 	_display_mode = DISPLAY_MODE_STOCK_TRADE
+	_minimum_quantity = 1
 	_item_display_name = stock_display_name if not stock_display_name.is_empty() else "股票"
 	_maximum_quantity = maxi(maximum_quantity, 1)
 	_unit_sell_price = maxf(snappedf(unit_price, 0.01), 0.01)
@@ -165,6 +174,7 @@ func present_mining_transaction(action: String, display_name: String, maximum_qu
 	## 使用股市同款滑条与数字输入展示矿场整数交易数量；最终结算仍由矿场服务重新校验。
 	_ensure_interface_initialized()
 	_display_mode = DISPLAY_MODE_MINING_TRANSACTION
+	_minimum_quantity = 1
 	_mining_action = action
 	_item_display_name = display_name if not display_name.is_empty() else "矿场交易"
 	_maximum_quantity = maxi(maximum_quantity, 1)
@@ -178,6 +188,19 @@ func present_mining_transaction(action: String, display_name: String, maximum_qu
 	get_ok_button().text = "下一步"
 	_description_label.text = "%s · 当前最多可%s %d" % [_item_display_name, action_name, _maximum_quantity]
 	_present_current_configuration()
+
+
+func present_developer_value(dialog_title: String, description: String, minimum_value: int, maximum_value: int, initial_value: int, confirm_text: String) -> void:
+	## 展示开发者整数选择弹窗；只返回选定数值，实际资源或金币修改仍由 DeveloperMenu 调用服务完成。
+	_ensure_interface_initialized()
+	_display_mode = DISPLAY_MODE_DEVELOPER_VALUE
+	_minimum_quantity = mini(minimum_value, maximum_value)
+	_maximum_quantity = maxi(minimum_value, maximum_value)
+	_item_display_name = description if not description.is_empty() else "开发者数值"
+	title = dialog_title if not dialog_title.is_empty() else "修改开发者数值"
+	get_ok_button().text = confirm_text if not confirm_text.is_empty() else "确认"
+	_description_label.text = "%s · 范围 %d–%d" % [_item_display_name, _minimum_quantity, _maximum_quantity]
+	_present_current_configuration(clampi(initial_value, _minimum_quantity, _maximum_quantity))
 
 
 func update_stock_trade(unit_price: float, maximum_quantity: int, available_coins: float = 0.0) -> void:
@@ -223,12 +246,16 @@ func _ensure_interface_initialized() -> void:
 	confirmed.connect(_on_confirmed)
 
 
-func _present_current_configuration() -> void:
+func _present_current_configuration(initial_value: int = 1) -> void:
+	_quantity_slider.min_value = _minimum_quantity
 	_quantity_slider.max_value = _maximum_quantity
+	_quantity_spin_box.min_value = _minimum_quantity
 	_quantity_spin_box.max_value = _maximum_quantity
-	_quantity_slider.set_value_no_signal(1.0)
-	_quantity_spin_box.set_value_no_signal(1.0)
-	_refresh_total_price(1)
+	# 初始数值；普通数量模式保持 1，开发者模式可传入当前金币或默认强化石数量。
+	var resolved_initial_value: int = clampi(initial_value, _minimum_quantity, _maximum_quantity)
+	_quantity_slider.set_value_no_signal(float(resolved_initial_value))
+	_quantity_spin_box.set_value_no_signal(float(resolved_initial_value))
+	_refresh_total_price(resolved_initial_value)
 	popup_centered(Vector2i(dialog_width, dialog_height))
 
 
@@ -297,21 +324,21 @@ func _apply_dialog_visual_style() -> void:
 
 func _on_slider_value_changed(value: float) -> void:
 	# 标准化数量；滑条只使用整数步长，仍显式取整以避免浮点回调误差。
-	var resolved_quantity: int = clampi(roundi(value), 1, _maximum_quantity)
+	var resolved_quantity: int = clampi(roundi(value), _minimum_quantity, _maximum_quantity)
 	_quantity_spin_box.set_value_no_signal(float(resolved_quantity))
 	_refresh_total_price(resolved_quantity)
 
 
 func _on_spin_box_value_changed(value: float) -> void:
 	# 标准化数量；直接输入会被限制在 1 到当前堆叠数量内。
-	var resolved_quantity: int = clampi(roundi(value), 1, _maximum_quantity)
+	var resolved_quantity: int = clampi(roundi(value), _minimum_quantity, _maximum_quantity)
 	_quantity_slider.set_value_no_signal(float(resolved_quantity))
 	_refresh_total_price(resolved_quantity)
 
 
 func _refresh_total_price(quantity: int) -> void:
 	# 有效数量；滑条和数字框始终限制在当前堆叠范围，摘要只读取该标准化结果。
-	var resolved_quantity: int = clampi(quantity, 1, _maximum_quantity)
+	var resolved_quantity: int = clampi(quantity, _minimum_quantity, _maximum_quantity)
 	get_ok_button().disabled = false
 	if _display_mode == DISPLAY_MODE_TRANSFER:
 		_total_price_label.text = "将移动 %d 个" % resolved_quantity
@@ -362,6 +389,9 @@ func _refresh_total_price(quantity: int) -> void:
 		else:
 			_total_price_label.text = "购买 %d 台 · 需要 %s 算力币" % [resolved_quantity, _format_mining_value(resolved_quantity * _mining_unit_value)]
 		return
+	if _display_mode == DISPLAY_MODE_DEVELOPER_VALUE:
+		_total_price_label.text = "当前选择：%d" % resolved_quantity
+		return
 	get_ok_button().disabled = false
 	# 出售总价；单价乘当前数量，用于确认前即时预览金币收益。
 	var total_sell_price: int = int(_unit_sell_price) * resolved_quantity
@@ -370,7 +400,7 @@ func _refresh_total_price(quantity: int) -> void:
 
 func _on_confirmed() -> void:
 	# 确认数量；从可直接输入的数字框读取，确保键盘最后一次修改被采用。
-	var confirmed_quantity: int = clampi(roundi(_quantity_spin_box.value), 1, _maximum_quantity)
+	var confirmed_quantity: int = clampi(roundi(_quantity_spin_box.value), _minimum_quantity, _maximum_quantity)
 	quantity_confirmed.emit(confirmed_quantity)
 
 

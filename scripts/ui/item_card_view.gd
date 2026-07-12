@@ -65,6 +65,8 @@ var _display_name_override: String = ""
 var _empty_text: String = "空"
 ## 当前底部摘要富文本；默认空字符串时仅保留类型与名称，价格、词条或能量等由调用方传入。
 var _detail_bbcode: String = ""
+## 当前第四行摘要富文本；默认空字符串并隐藏，仅商店强化石用于把金币价格与第三行属性分离。
+var _secondary_detail_bbcode: String = ""
 ## 当前卡片是否处于选中状态；默认 false，启用时使用统一青色边框。
 var _selected: bool = false
 ## 当前卡片是否处于合法目标高亮状态；默认 false，启用时叠加统一绿色背景。
@@ -85,6 +87,8 @@ var _context_label: Label
 var _name_label: Label
 ## 底部摘要标签缓存；默认在首次进入场景树时创建，支持价格与强化方向颜色。
 var _detail_label: RichTextLabel
+## 第四行摘要标签缓存；默认隐藏，启用时显示商店强化石金币且不改变其他物品三行结构。
+var _secondary_detail_label: RichTextLabel
 ## 耐久条缓存；默认在首次进入场景树时创建，无耐久属性物品会自动隐藏。
 var _durability_bar: Control
 ## 统一禁用遮罩缓存；默认在构建内容时创建并置于全部文字和耐久组件上方。
@@ -110,12 +114,13 @@ func _ready() -> void:
 	call_deferred("_synchronize_host_hover_state")
 
 
-func configure(item_resource: Resource, quantity: int = 1, context_text: String = "", detail_bbcode: String = "", empty_text: String = "空", display_name_override: String = "") -> void:
+func configure(item_resource: Resource, quantity: int = 1, context_text: String = "", detail_bbcode: String = "", empty_text: String = "空", display_name_override: String = "", secondary_detail_bbcode: String = "") -> void:
 	# 配置入口；所有系统只提供数据与上下文文本，不得自行创建差异化名称、摘要或耐久节点。
 	_item_resource = item_resource
 	_quantity = clampi(quantity, 1, 99)
 	_context_text = context_text
 	_detail_bbcode = detail_bbcode
+	_secondary_detail_bbcode = secondary_detail_bbcode
 	_empty_text = empty_text if not empty_text.is_empty() else "空"
 	_display_name_override = display_name_override
 	custom_minimum_size = STANDARD_CARD_SIZE
@@ -196,7 +201,7 @@ func create_drag_preview() -> Control:
 	var preview_card: Control = ItemCardView.new()
 	preview_card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	preview_host.add_child(preview_card)
-	preview_card.call("configure", _item_resource, _quantity, _context_text, _detail_bbcode, _empty_text, _display_name_override)
+	preview_card.call("configure", _item_resource, _quantity, _context_text, _detail_bbcode, _empty_text, _display_name_override, _secondary_detail_bbcode)
 	preview_card.call("set_visual_state", _selected, _highlighted)
 	return preview_host
 
@@ -308,6 +313,17 @@ func _build_content() -> void:
 	_detail_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_detail_label.add_theme_font_size_override("normal_font_size", 10)
 	content.add_child(_detail_label)
+	_secondary_detail_label = RichTextLabel.new()
+	_secondary_detail_label.bbcode_enabled = true
+	_secondary_detail_label.fit_content = true
+	_secondary_detail_label.scroll_active = false
+	_secondary_detail_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_secondary_detail_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_secondary_detail_label.custom_minimum_size = Vector2(0.0, 14.0)
+	_secondary_detail_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_secondary_detail_label.add_theme_font_size_override("normal_font_size", 9)
+	_secondary_detail_label.visible = false
+	content.add_child(_secondary_detail_label)
 	_durability_bar = DURABILITY_BAR_SCRIPT.new() as Control
 	# 耐久条边框内缩；左右与底部各避让 2 像素卡片边框，防止后绘制的子节点覆盖边界，同时保持 5 像素条高不变。
 	_durability_bar.call("set_layout_insets", BORDER_WIDTH, BORDER_WIDTH)
@@ -321,7 +337,7 @@ func _build_content() -> void:
 
 
 func _refresh_content() -> void:
-	if _context_label == null or _name_label == null or _detail_label == null:
+	if _context_label == null or _name_label == null or _detail_label == null or _secondary_detail_label == null:
 		return
 	# 类型或职责文本；调用方未指定上下文时自动使用统一格式化器的物品类型。
 	_context_label.text = _context_text if not _context_text.is_empty() else (_get_item_type_label() if _item_resource != null else "空槽")
@@ -330,6 +346,9 @@ func _refresh_content() -> void:
 	_name_label.text = "%s  x%d" % [display_name, _quantity] if _item_resource != null and _quantity > 1 else display_name
 	# 底部摘要；富文本由调用方提供，但字体、对齐和可用区域始终由通用卡片控制。
 	_detail_label.text = "[center]%s[/center]" % _detail_bbcode if not _detail_bbcode.is_empty() else ""
+	# 第四行摘要；只在调用方提供内容时占用布局高度，普通三行卡片继续保持原有视觉。
+	_secondary_detail_label.text = "[center]%s[/center]" % _secondary_detail_bbcode if not _secondary_detail_bbcode.is_empty() else ""
+	_secondary_detail_label.visible = not _secondary_detail_bbcode.is_empty()
 	_durability_bar.call("configure", _item_resource)
 	queue_redraw()
 

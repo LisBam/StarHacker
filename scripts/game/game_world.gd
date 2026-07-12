@@ -16,6 +16,14 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 const LOOT_CHEST_SCRIPT: Script = preload("res://scripts/environment/loot_chest.gd")
 ## 宝箱高品质掉落概率；普通、中级、高级和极品分别使用 10%、30%、55% 和 75%，极品另保证至少 5 件高品质物品。
 const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, "high": 0.55, "supreme": 0.75}
+## 宝箱武器类别权重；默认 0.25 表示每个掉落槽有 25% 概率选择武器。
+const CHEST_WEAPON_CATEGORY_WEIGHT: float = 0.25
+## 宝箱装备类别权重；默认 0.15 表示每个掉落槽有 15% 概率选择装备。
+const CHEST_EQUIPMENT_CATEGORY_WEIGHT: float = 0.15
+## 宝箱强化石类别权重；默认 0.35 表示每个掉落槽有 35% 概率选择强化石。
+const CHEST_ENHANCEMENT_STONE_CATEGORY_WEIGHT: float = 0.35
+## 宝箱道具类别权重；默认 0.25 表示每个掉落槽有 25% 概率选择道具，四类权重总和必须保持为 1.0。
+const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 
 ## 游戏世界场景负责提供当前关卡的基础承载环境。
 ## 玩家、敌人、掉落物、地图装饰都可以作为它的子节点存在。
@@ -114,9 +122,12 @@ const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, 
 @export var weapon_drop_scene: PackedScene
 ## 武器掉落随机池；元素为 WeaponData 资源，怪物死亡掉落时会从中随机复制一把作为独立掉落物。
 @export var weapon_drop_table: Array[Resource] = []
+## 装备死亡掉落概率；默认 0.03 表示每只被击杀怪物独立有 3% 基础概率生成一件随机装备，结算时还会乘怪物掉落倍率。
+@export_range(0.0, 1.0, 0.001) var equipment_drop_chance: float = 0.03
+## 装备掉落随机池；元素为 EquipmentData 资源，内容目录会自动补充所有合法装备，掉落时深拷贝为独立实例。
+@export var equipment_drop_table: Array[Resource] = []
 ## 强化石死亡掉落概率；默认 0.05 表示每只被击杀怪物独立有 5% 概率生成一颗随机强化石。
-## 当前掉落配置补充：默认值已提高为 0.10，即每次实际击杀独立有 10% 概率掉落强化石。
-@export_range(0.0, 1.0, 0.001) var enhancement_stone_drop_chance: float = 0.10
+@export_range(0.0, 1.0, 0.001) var enhancement_stone_drop_chance: float = 0.05
 ## 单颗强化石最少词条数量；默认 1，运行时随机数量会限制在最少与最多词条之间。
 @export_range(1, 9, 1) var enhancement_stone_min_modifier_count: int = 1
 ## 单颗强化石最多词条数量；默认 3，允许一颗强化石同时包含多种正负属性。
@@ -126,9 +137,9 @@ const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, 
 ## 强化石单词条基础价值；默认 30 金币，随机多词条会按词条数量增加单颗价值。
 @export_range(0, 999999, 1) var enhancement_stone_base_value: int = 30
 ## 品质规则兼容说明；词条数量与削弱概率现由 EnhancementRules.QUALITY_CONFIGS 统一决定，上述最小/最大词条和通用削弱概率只保留旧扩展调用兼容。
-## 修复包死亡掉落概率；默认 0.05 表示每只被击杀怪物独立有 5% 概率掉落一个随机修复包。
+## 道具死亡掉落概率；默认 0.05 表示每只被击杀怪物独立有 5% 基础概率掉落一个随机道具，结算时还会乘怪物掉落倍率；变量名为旧场景兼容保留。
 @export_range(0.0, 1.0, 0.001) var repair_kit_drop_chance: float = 0.05
-## 修复包掉落随机池；元素为 RepairKitData 资源，怪物死亡后会深拷贝其中一项形成独立掉落物。
+## 道具掉落随机池；内容目录会自动补充所有合法通用道具，怪物或宝箱掉落时会深拷贝其中一项；变量名为旧场景兼容保留。
 @export var repair_kit_drop_table: Array[Resource] = []
 ## 怪物掉落抛物线动画最短时长；默认 0.36 秒，每件击杀掉落独立随机，运行时通常无需动态修改。
 @export_range(0.05, 2.0, 0.01) var monster_drop_launch_duration_min: float = 0.36
@@ -929,11 +940,17 @@ func _merge_automatically_discovered_content() -> void:
 			var weapon_template: Resource = load(weapon_path) as Resource
 			if weapon_template != null and not _resource_pool_has_path(weapon_drop_table, weapon_path):
 				weapon_drop_table.append(weapon_template)
+	if content_catalog.has_method("get_equipment_paths"):
+		for equipment_path in content_catalog.call("get_equipment_paths") as PackedStringArray:
+			# 装备模板；合法自动资源会同时进入怪物与宝箱掉落池，实际掉落保持独立实例。
+			var equipment_template: Resource = load(equipment_path) as Resource
+			if equipment_template != null and not _resource_pool_has_path(equipment_drop_table, equipment_path):
+				equipment_drop_table.append(equipment_template)
 	if content_catalog.has_method("get_item_paths"):
 		for item_path in content_catalog.call("get_item_paths") as PackedStringArray:
-			# 修复包模板；当前掉落逻辑只接收 repair_kit，其他未来道具仍可先进入商店和库存目录。
+			# 道具模板；所有内容目录认可的通用道具都会进入怪物与宝箱池，不需要单独维护类型白名单。
 			var item_template: Resource = load(item_path) as Resource
-			if item_template != null and str(item_template.get("item_kind")) == "repair_kit" and not _resource_pool_has_path(repair_kit_drop_table, item_path):
+			if item_template != null and not _resource_pool_has_path(repair_kit_drop_table, item_path):
 				repair_kit_drop_table.append(item_template)
 
 
@@ -1758,7 +1775,7 @@ func _on_loot_chest_released(chest_position: Vector2, quality_id: String, drop_c
 	for drop_index in range(maxi(drop_count, 0)):
 		# 是否为极品保底高品质物品；默认前五件为 true，其余按品质概率判定。
 		var force_high_quality: bool = drop_index < maxi(minimum_high_quality_count, 0)
-		# 本次掉落资源；从枪械、强化石和修复包池中生成独立实例。
+		# 本次掉落资源；从武器、装备、强化石和道具池中生成独立实例。
 		var item_resource: Resource = _create_random_loot_chest_item(quality_id, force_high_quality)
 		if item_resource != null:
 			# 掉落目标；手动开启使用紧凑扩散，击破使用更大的放射半径并播放飞出动画。
@@ -1794,11 +1811,15 @@ func _create_random_loot_chest_item(quality_id: String, force_high_quality: bool
 	var high_quality_chance: float = clampf(float(CHEST_HIGH_QUALITY_CHANCES.get(quality_id, 0.10)), 0.0, 1.0)
 	# 是否使用高品质物品池；极品保底直接为 true，其余按当前品质概率随机。
 	var should_use_high_quality_pool: bool = force_high_quality or _random.randf() < high_quality_chance
-	# 类别抽取；枪械 50%、强化石 30%、修复包 20%，缺失资源池时由各分支回退其他现有池。
-	var category_roll: float = _random.randf()
-	if category_roll < 0.50:
+	# 类别总权重；默认总和为 1.0，集中参与抽取可确保以后调整常量时仍按相对权重结算。
+	var total_category_weight: float = CHEST_WEAPON_CATEGORY_WEIGHT + CHEST_EQUIPMENT_CATEGORY_WEIGHT + CHEST_ENHANCEMENT_STONE_CATEGORY_WEIGHT + CHEST_ITEM_CATEGORY_WEIGHT
+	# 类别抽取；武器 25%、装备 15%、强化石 35%、道具 25%，在四类总权重内均匀生成随机值。
+	var category_roll: float = _random.randf() * maxf(total_category_weight, 0.001)
+	if category_roll < CHEST_WEAPON_CATEGORY_WEIGHT:
 		return _get_random_chest_weapon(should_use_high_quality_pool)
-	if category_roll < 0.80:
+	if category_roll < CHEST_WEAPON_CATEGORY_WEIGHT + CHEST_EQUIPMENT_CATEGORY_WEIGHT:
+		return _get_random_chest_equipment(should_use_high_quality_pool)
+	if category_roll < CHEST_WEAPON_CATEGORY_WEIGHT + CHEST_EQUIPMENT_CATEGORY_WEIGHT + CHEST_ENHANCEMENT_STONE_CATEGORY_WEIGHT:
 		return _get_random_chest_stone(should_use_high_quality_pool)
 	return _get_random_chest_repair_kit(should_use_high_quality_pool)
 
@@ -1820,6 +1841,12 @@ func _get_random_chest_weapon(high_quality: bool) -> Resource:
 	return duplicated_weapon if duplicated_weapon != null else selected_weapon
 
 
+func _get_random_chest_equipment(high_quality: bool) -> Resource:
+	# 随机装备；高品质池选择当前基础价值最高的模板，普通池从全部合法装备中等概率抽取。
+	var selected_equipment: Resource = _duplicate_random_or_highest_value_resource(equipment_drop_table, high_quality)
+	return selected_equipment if selected_equipment != null else _get_random_chest_stone(high_quality)
+
+
 func _get_random_chest_stone(high_quality: bool) -> Resource:
 	# 高品质强化石；最多尝试 12 次抽取高级或极品，确保保底物品确实进入高品质池。
 	var selected_stone: EnhancementStoneData
@@ -1839,19 +1866,30 @@ func _get_random_chest_stone(high_quality: bool) -> Resource:
 
 
 func _get_random_chest_repair_kit(high_quality: bool) -> Resource:
-	if repair_kit_drop_table.is_empty():
-		return _get_random_chest_stone(high_quality)
-	# 高品质修复包；选择价值最高的模板，当前为恢复 500 耐久的高级修复包。
-	var selected_template: Resource = repair_kit_drop_table[0]
-	if high_quality:
-		for repair_template in repair_kit_drop_table:
-			if repair_template != null and int(repair_template.get("value")) > int(selected_template.get("value")):
-				selected_template = repair_template
+	# 随机道具；高品质池选择当前基础价值最高的模板，普通池从全部合法道具中等概率抽取。
+	var selected_item: Resource = _duplicate_random_or_highest_value_resource(repair_kit_drop_table, high_quality)
+	return selected_item if selected_item != null else _get_random_chest_stone(high_quality)
+
+
+func _duplicate_random_or_highest_value_resource(resource_pool: Array[Resource], use_highest_value: bool) -> Resource:
+	# 有效模板池；过滤空资源，避免内容目录中单个损坏资源中断其他合法掉落。
+	var valid_templates: Array[Resource] = []
+	for resource_template in resource_pool:
+		if resource_template != null:
+			valid_templates.append(resource_template)
+	if valid_templates.is_empty():
+		return null
+	# 选中模板；高品质请求选择基础价值最高项，普通请求在完整池中等概率抽取。
+	var selected_template: Resource = valid_templates[0]
+	if use_highest_value:
+		for resource_template in valid_templates:
+			if int(resource_template.get("value")) > int(selected_template.get("value")):
+				selected_template = resource_template
 	else:
-		selected_template = repair_kit_drop_table[_random.randi_range(0, repair_kit_drop_table.size() - 1)]
-	# 独立修复包实例；避免相同模板资源被多个地面掉落共享。
-	var duplicated_repair_kit: Resource = selected_template.duplicate(true) as Resource
-	return duplicated_repair_kit if duplicated_repair_kit != null else selected_template
+		selected_template = valid_templates[_random.randi_range(0, valid_templates.size() - 1)]
+	# 独立资源实例；武器以外物品也可能保存耐久或强化状态，深拷贝可隔离每件掉落。
+	var duplicated_resource: Resource = selected_template.duplicate(true) as Resource
+	return duplicated_resource if duplicated_resource != null else selected_template
 
 
 func _on_loot_chest_removed(chest: Node) -> void:
@@ -2045,6 +2083,7 @@ func _on_monster_died(monster_node: Node) -> void:
 	# 训练场只用于测试战斗，不生成任何怪物掉落，避免调试资源进入正式库存。
 	if not _is_training_mode:
 		_try_spawn_monster_weapon_drop(monster_node as Node2D)
+		_try_spawn_monster_equipment_drop(monster_node as Node2D)
 		_try_spawn_enhancement_stone_drop(monster_node as Node2D)
 		_try_spawn_repair_kit_drop(monster_node as Node2D)
 	if _monster_simulation_manager != null and _monster_simulation_manager.has_method("unregister_monster"):
@@ -2055,9 +2094,8 @@ func _try_spawn_monster_weapon_drop(monster_node: Node2D) -> void:
 	if weapon_drop_table.is_empty() or weapon_drop_scene == null:
 		return
 
-	# 怪物武器掉落概率；取值来自怪物 weapon_drop_chance，默认 0.03，修改会影响当前怪物死亡掉落判定。
-	# 当前默认补充：怪物未覆盖该参数时按 0.20 处理。
-	var drop_chance: float = _get_monster_weapon_drop_chance(monster_node)
+	# 怪物武器掉落概率；基础值默认 3%，统一乘当前怪物掉落倍率并限制到 100%。
+	var drop_chance: float = _get_effective_monster_drop_chance(monster_node, _get_monster_weapon_drop_chance(monster_node))
 	if drop_chance <= 0.0 or _random.randf() > drop_chance:
 		return
 
@@ -2076,7 +2114,7 @@ func _get_monster_weapon_drop_chance(monster_node: Node) -> float:
 	# 原始掉落概率；取值可能来自怪物导出属性，默认转为 0 到 1 范围。
 	var raw_drop_chance: Variant = monster_node.get("weapon_drop_chance")
 	if raw_drop_chance == null:
-		return 0.20
+		return 0.03
 
 	return clampf(float(raw_drop_chance), 0.0, 1.0)
 
@@ -2097,10 +2135,25 @@ func _get_random_weapon_drop_data() -> Resource:
 	return dropped_weapon if dropped_weapon != null else weapon_template
 
 
+func _try_spawn_monster_equipment_drop(monster_node: Node2D) -> void:
+	if monster_node == null or weapon_drop_scene == null or equipment_drop_table.is_empty():
+		return
+	# 怪物装备掉落概率；基础值默认 3%，统一乘当前怪物掉落倍率并限制到 100%。
+	var drop_chance: float = _get_effective_monster_drop_chance(monster_node, equipment_drop_chance)
+	if drop_chance <= 0.0 or _random.randf() > drop_chance:
+		return
+	# 掉落装备资源；从自动发现池等概率抽取并深拷贝，避免多个地面装备共享状态。
+	var dropped_equipment: Resource = _duplicate_random_or_highest_value_resource(equipment_drop_table, false)
+	if dropped_equipment != null:
+		_spawn_monster_drop_with_animation(dropped_equipment, monster_node.global_position)
+
+
 func _try_spawn_enhancement_stone_drop(monster_node: Node2D) -> void:
 	if monster_node == null or weapon_drop_scene == null:
 		return
-	if enhancement_stone_drop_chance <= 0.0 or _random.randf() > clampf(enhancement_stone_drop_chance, 0.0, 1.0):
+	# 怪物强化石掉落概率；基础值默认 5%，统一乘当前怪物掉落倍率并限制到 100%。
+	var drop_chance: float = _get_effective_monster_drop_chance(monster_node, enhancement_stone_drop_chance)
+	if drop_chance <= 0.0 or _random.randf() > drop_chance:
 		return
 
 	# 随机强化石；每次击杀独立创建资源实例，拾取后可按词条签名与库存已有堆叠合并。
@@ -2112,17 +2165,22 @@ func _try_spawn_enhancement_stone_drop(monster_node: Node2D) -> void:
 func _try_spawn_repair_kit_drop(monster_node: Node2D) -> void:
 	if monster_node == null or weapon_drop_scene == null or repair_kit_drop_table.is_empty():
 		return
-	if repair_kit_drop_chance <= 0.0 or _random.randf() > clampf(repair_kit_drop_chance, 0.0, 1.0):
+	# 怪物道具掉落概率；基础值默认 5%，统一乘当前怪物掉落倍率并限制到 100%。
+	var drop_chance: float = _get_effective_monster_drop_chance(monster_node, repair_kit_drop_chance)
+	if drop_chance <= 0.0 or _random.randf() > drop_chance:
 		return
-	# 修复包随机下标；在已配置道具池中等概率选择一个模板。
-	var repair_kit_index: int = _random.randi_range(0, repair_kit_drop_table.size() - 1)
-	# 修复包模板；空资源不会生成无效掉落，也不会影响同一次击杀的其他掉落判定。
-	var repair_kit_template: Resource = repair_kit_drop_table[repair_kit_index]
-	if repair_kit_template == null:
-		return
-	# 独立修复包；复制后保留该品质的固定耐久恢复量与价值，避免共享资源状态。
-	var repair_kit: Resource = repair_kit_template.duplicate(true) as Resource
-	_spawn_monster_drop_with_animation(repair_kit if repair_kit != null else repair_kit_template, monster_node.global_position)
+	# 独立道具；从自动发现池等概率抽取并深拷贝，单个空模板不会影响其他类别判定。
+	var dropped_item: Resource = _duplicate_random_or_highest_value_resource(repair_kit_drop_table, false)
+	if dropped_item != null:
+		_spawn_monster_drop_with_animation(dropped_item, monster_node.global_position)
+
+
+func _get_effective_monster_drop_chance(monster_node: Node, base_chance: float) -> float:
+	# 怪物掉落倍率；未实现该属性的扩展怪物回退 1.0，负值按 0 处理以禁用全部掉落。
+	var resolved_drop_multiplier: float = 1.0
+	if monster_node != null and "drop_multiplier" in monster_node:
+		resolved_drop_multiplier = maxf(float(monster_node.get("drop_multiplier")), 0.0)
+	return clampf(clampf(base_chance, 0.0, 1.0) * resolved_drop_multiplier, 0.0, 1.0)
 
 
 func _spawn_monster_drop_with_animation(item_data: Resource, monster_position: Vector2) -> bool:

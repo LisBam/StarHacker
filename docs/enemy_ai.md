@@ -33,8 +33,10 @@
 ## 死亡掉落
 
 - 真实怪物死亡后由 `GameWorld._on_monster_died()` 统一处理掉落和虚拟人口注销，怪物脚本不直接依赖库存或强化系统。
-- 武器继续读取怪物自身 `weapon_drop_chance`，默认 20%，并从 `weapon_drop_table` 随机复制独立武器实例。
-- 强化石使用世界级 `enhancement_stone_drop_chance`，默认 0.10，即每次击杀独立有 10% 概率掉落一颗。
+- 武器、装备、强化石和道具分别进行一次独立掉落判定，因此同一只怪物可以同时掉落多类物品；基础概率依次为 3%、3%、5%、5%。
+- 每只怪物公开 `drop_multiplier`，默认 1.0。四类最终概率均按 `clamp(基础概率 × 掉落倍率, 0, 1)` 计算；例如倍率 1.5 时，武器与装备各为 4.5%，强化石与道具各为 7.5%。
+- 武器基础概率继续读取怪物自身 `weapon_drop_chance`，默认 0.03；装备、强化石和道具基础概率分别读取世界级 `equipment_drop_chance = 0.03`、`enhancement_stone_drop_chance = 0.05` 和兼容字段 `repair_kit_drop_chance = 0.05`。
+- 武器、装备和道具池由 `ContentCatalog` 自动补充，实际掉落会深拷贝模板，避免不同地面物品共享耐久或强化状态。
 - 强化石品质权重为初级 40%、中级 30%、高级 20%、极品 10%。每颗必定 1 条增强；初级有 80% 概率附带 1 条削弱，中级有 10% 概率追加增强且 40% 概率附带削弱，高级对应概率为 20% 与 10%，极品有 30% 概率追加增强且无削弱。掉落时只保存属性方向，具体幅度在玩家使用时按属性幅度组与品质独立随机；乘算属性分为一级、二级、三级区间，暴击率、暴击伤害和闪避率使用各自的加算百分点区间。完整数值以 `docs/游戏机制与玩法内容.md` 的强化系统章节为准；地面拾取列表只显示品质和增强属性预览，不显示削弱属性。
 - 虚拟记录本身不会在远处自动死亡或生成地面掉落；只有玩家附近已经实例化且实际被击杀的怪物才执行死亡掉落，避免远距离模拟产生无法拾取的资源节点。
 
@@ -104,7 +106,7 @@
 ## 参数分组
 
 - 加载与错峰：`active_radius`、`sleep_hysteresis`、`update_interval`、`monsters_per_update`、`materializations_per_update`、`max_materialized_monsters`、`ai_update_interval`。
-- 死亡掉落：`weapon_drop_chance`、`enhancement_stone_drop_chance`、`enhancement_stone_min_modifier_count`、`enhancement_stone_max_modifier_count`、`enhancement_stone_negative_modifier_chance`、`enhancement_stone_base_value`、`EnhancementRules.ENHANCEMENT_STEP_RATIO`。
+- 死亡掉落：`weapon_drop_chance`、`drop_multiplier`、`equipment_drop_chance`、`enhancement_stone_drop_chance`、`repair_kit_drop_chance`、`weapon_drop_table`、`equipment_drop_table`、`repair_kit_drop_table`、`enhancement_stone_min_modifier_count`、`enhancement_stone_max_modifier_count`、`enhancement_stone_negative_modifier_chance`、`enhancement_stone_base_value`、`EnhancementRules.ENHANCEMENT_STEP_RATIO`。
 - 实心墙体视野：`vision_range`、`lose_target_range_multiplier`、`vision_requires_line_of_sight`、`vision_line_of_sight_collision_mask`、`vision_loss_grace_duration`、`solid_wall_group`、`line_of_sight_skip_limit`。
 - 短期线索：`target_memory_duration`、`target_prediction_time`、`target_prediction_max_distance`、`search_arrive_distance`、`lost_search_occlusion_offset`。
 - 中长期记忆：`medium_memory_duration`、`medium_hotspot_merge_distance`、`medium_hotspot_max_count`、`medium_recheck_trigger_radius`、`medium_recheck_duration`、`medium_recheck_cooldown`、`long_term_region_radius`、`long_term_alert_patrol_speed_multiplier`。

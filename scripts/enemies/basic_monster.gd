@@ -35,9 +35,10 @@ const PLAYER_PHYSICS_LAYER_MASK: int = 1
 @export_range(1.0, 9999.0, 1.0, "or_greater") var max_health: float = 60.0
 ## 当前血量；取值会被限制在 0 到 max_health，默认 60 表示满血生成，运行时修改会影响怪物当前生存状态。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var current_health: float = 60.0
-## 武器掉落概率；取值为 0 到 1，默认 0.03 表示 3% 概率掉落随机武器，运行时修改会影响该怪物死亡奖励。
-## 当前掉落配置补充：默认值已提高为 0.20，即每次实际击杀独立有 20% 概率掉落武器。
-@export_range(0.0, 1.0, 0.001) var weapon_drop_chance: float = 0.20
+## 武器基础掉落概率；取值为 0 到 1，默认 0.03 表示 3%，结算时还会乘该怪物的掉落倍率。
+@export_range(0.0, 1.0, 0.001) var weapon_drop_chance: float = 0.03
+## 掉落倍率；取值应大于等于 0，默认 1.0 不改变武器、装备、强化石和道具概率，1.5 表示每类概率均变为基础值的 1.5 倍，可在运行时动态修改。
+@export_range(0.0, 100.0, 0.05, "or_greater") var drop_multiplier: float = 1.0
 ## 攻击力；取值建议大于等于 0，默认 12 表示每次近身攻击造成的伤害，运行时修改会影响玩家受击压力。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var attack_damage: float = 12.0
 ## 敌人攻击力；默认 100，与玩家防御 0 组合时保持既有伤害不变，生成属性倍率会同步影响。

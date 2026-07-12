@@ -8,6 +8,8 @@ signal transfer_confirmed(amount: int, is_deposit: bool)
 
 ## 全局窗口样式指南；统一证券转账弹窗的按钮、输入、滑条和窗口描边视觉。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+## 可视进度拖动条组件；统一绘制证券币充值和提现金额的完整范围、当前进度与滑块位置。
+const PROGRESS_SLIDER_VISUAL_SCRIPT: Script = preload("res://scripts/ui/progress_slider_visual.gd")
 
 ## 弹窗默认宽度；默认 400 像素，与股票买卖数量窗口保持一致，运行时无需动态修改。
 @export_range(320, 640, 1) var dialog_width: int = 400
@@ -121,6 +123,7 @@ func _build_interface() -> void:
 	_amount_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_amount_slider.value_changed.connect(_on_amount_slider_changed)
 	amount_row.add_child(_amount_slider)
+	PROGRESS_SLIDER_VISUAL_SCRIPT.install(_amount_slider)
 	_amount_spin_box = SpinBox.new()
 	_amount_spin_box.min_value = 1.0
 	_amount_spin_box.max_value = 1.0

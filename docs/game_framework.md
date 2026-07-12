@@ -52,7 +52,7 @@
 | `SkillChargeBar` | 显示角色头顶蓄力比例，不拥有蓄力时间 |
 | `TopDownMovementComponent` | 合成输入速度与外部击退并执行角色物理移动 |
 | `CombatStatsComponent` | 维护生命、能量、攻防、恢复和死亡状态 |
-| `RangedAttackComponent` | 校验攻击条件、处理散射/连击并生成玩家弹体 |
+| `RangedAttackComponent` | 校验攻击条件、为普通或散射攻击构造弹体偏移并处理连击与弹体生成 |
 | `MeleeAttackComponent` | 管理近战命中框、命中去重、冲击和敌方弹体清除 |
 | `EquipmentComponent` | 代理装备槽并聚合有效战斗属性 |
 | `EquipmentSetComponent` | 按套装稳定 ID 统计未损坏穿戴件、汇总档位属性并结算世界特殊效果 |

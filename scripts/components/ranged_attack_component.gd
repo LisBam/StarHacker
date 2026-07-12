@@ -132,8 +132,12 @@ func _fire_round(direction: Vector2, weapon_data: Resource) -> bool:
 	var deviation_degrees: float = maxf(float(weapon_data.get_meta("active_deviation_degrees", 0.0)), 0.0)
 	# 是否为显式散射武器；散射武器保留瞄准附近主弹，普通武器继续使用单弹随机偏移。
 	var has_scatter: bool = bool(weapon_data.get_meta("active_has_scatter", false))
-	# 当前轮弹体角度表；元素为相对瞄准方向的随机角度，数量与本轮弹体数一致。
-	var projectile_offsets: Array[float] = _build_scatter_deviation_offsets_degrees(scatter_count, deviation_degrees) if has_scatter else [_deviation_random.randf_range(-deviation_degrees, deviation_degrees)]
+	# 当前轮弹体角度表；元素为相对瞄准方向的浮点随机角度，默认空表会按散射状态填入本轮全部弹体偏移。
+	var projectile_offsets: Array[float] = []
+	if has_scatter:
+		projectile_offsets = _build_scatter_deviation_offsets_degrees(scatter_count, deviation_degrees)
+	else:
+		projectile_offsets.append(_deviation_random.randf_range(-deviation_degrees, deviation_degrees))
 	for projectile_offset in projectile_offsets:
 		# 本颗弹体方向；散射武器使用分层随机偏移，普通武器使用完整区间随机偏移。
 		var resolved_direction: Vector2 = direction.rotated(deg_to_rad(projectile_offset))

@@ -241,7 +241,7 @@ var _movement_component: Node
 var _tactical_component: Node
 ## 出生尺寸倍率；取值通常为 0.7 到 1.3，默认 1，供调试和其他系统读取本敌人的体型波动。
 var _spawn_size_multiplier: float = 1.0
-## 出生属性倍率；取值通常为 0.7 到 1.3，默认 1，统一作用于生命、伤害、移速、射程和攻击节奏。
+## 出生属性倍率；取值通常为 0.7 到 1.3，默认 1，统一作用于生命、伤害、移速、攻击距离和攻击节奏。
 var _spawn_attribute_multiplier: float = 1.0
 ## AI 决策剩余时间；默认 0 表示首次物理帧立即决策，ready 后会随机错峰避免所有怪物同帧射线和寻路。
 var _ai_update_remaining: float = 0.0

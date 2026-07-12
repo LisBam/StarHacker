@@ -582,15 +582,15 @@ func _append_ranged_tooltip_lines(tooltip_lines: PackedStringArray) -> void:
 	var ranged_damage: float = maxf(float(weapon_data.get("ranged_damage")), 0.0)
 	# 子弹速度；取值来自资源 projectile_speed 字段，默认用于提示弹体飞行速度。
 	var projectile_speed: float = maxf(float(weapon_data.get("projectile_speed")), 0.0)
-	# 子弹射程；取值来自资源 bullet_range 字段，默认用于提示弹体最大飞行距离。
-	var bullet_range: float = maxf(float(weapon_data.get("bullet_range")), 0.0)
+	# 攻击距离；远程武器以该值限制弹体最大飞行距离。
+	var attack_distance: float = maxf(float(weapon_data.get("attack_distance")), 0.0)
 	# 武器冷却；取值来自统一 cooldown 字段，默认用于提示连续攻击间隔。
 	var cooldown: float = maxf(float(weapon_data.get("cooldown")), 0.0)
 	# 武器偏移；取值来自资源 deviation_degrees 字段，表示弹体相对瞄准方向的最大随机角度。
 	var deviation_degrees: float = maxf(float(weapon_data.get("deviation_degrees")), 0.0)
 	tooltip_lines.append("伤害：%d" % roundi(ranged_damage))
 	tooltip_lines.append("子弹速度：%d" % roundi(projectile_speed))
-	tooltip_lines.append("子弹射程：%d" % roundi(bullet_range))
+	tooltip_lines.append("攻击距离：%d" % roundi(attack_distance))
 	tooltip_lines.append("偏移：%.1f°" % deviation_degrees)
 	tooltip_lines.append("冷却：%.2f 秒" % cooldown)
 
@@ -600,8 +600,11 @@ func _append_melee_tooltip_lines(tooltip_lines: PackedStringArray) -> void:
 	var melee_damage: float = maxf(float(weapon_data.get("melee_damage")), 0.0)
 	# 武器冷却；取值来自统一 cooldown 字段，默认用于提示连续攻击间隔。
 	var cooldown: float = maxf(float(weapon_data.get("cooldown")), 0.0)
+	# 攻击距离；近战武器以该值控制判定区域最远端与玩家本体的距离。
+	var attack_distance: float = maxf(float(weapon_data.get("attack_distance")), 0.0)
 	# 命中框持续时间；取值来自资源 melee_active_duration 字段，默认用于提示近战判定窗口。
 	var melee_active_duration: float = maxf(float(weapon_data.get("melee_active_duration")), 0.0)
 	tooltip_lines.append("伤害：%d" % roundi(melee_damage))
+	tooltip_lines.append("攻击距离：%d" % roundi(attack_distance))
 	tooltip_lines.append("冷却：%.2f 秒" % cooldown)
 	tooltip_lines.append("判定时长：%.2f 秒" % melee_active_duration)

@@ -10,7 +10,7 @@ signal hit_body(body: Node, damage: float)
 @export_range(1.0, 3000.0, 1.0, "or_greater") var speed: float = 620.0
 ## 弹体最大存活时间；取值应大于 0，默认 3 秒，运行时修改会影响敌方子弹最远飞行时间。
 @export_range(0.01, 20.0, 0.01) var lifetime: float = 3.0
-## 弹体最大飞行距离；取值应大于 0，默认 520 像素，运行时修改会影响远程怪物射程。
+## 弹体最大飞行距离；取值应大于 0，默认 520 像素，运行时修改会影响远程怪物弹体回收位置。
 @export_range(1.0, 12000.0, 1.0, "or_greater") var max_distance: float = 520.0
 ## 弹体伤害；取值建议大于等于 0，默认 10，运行时修改会影响命中玩家后的生命损失。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var damage: float = 10.0

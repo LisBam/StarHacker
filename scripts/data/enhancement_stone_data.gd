@@ -118,7 +118,7 @@ func get_modifier_tokens(beneficial_only: bool = false) -> PackedStringArray:
 
 func get_pickup_preview_name() -> String:
 	# 正向属性预览；地面掉落不显示削弱词条，避免玩家需要在拾取列表阅读负面信息。
-	# 预览属性名称；按用户阅读需求省略方向符号，只显示“强化石（伤害 射程）”。
+	# 预览属性名称；按用户阅读需求省略方向符号，只显示“强化石（伤害 攻击距离）”。
 	var preview_labels: PackedStringArray = PackedStringArray()
 	# 归一化词典；预览只根据有利方向筛选属性，不显示百分比和任何削弱词条。
 	var normalized_modifiers: Dictionary = get_normalized_modifiers()

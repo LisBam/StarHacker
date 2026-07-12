@@ -215,11 +215,11 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 	_append_weapon_stat_line(detail_lines, item_resource, "damage", 1)
 	_append_weapon_stat_line(detail_lines, item_resource, "cooldown", 2, " 秒")
 	_append_weapon_stat_line(detail_lines, item_resource, "energy_consumption", 1)
+	_append_weapon_stat_line(detail_lines, item_resource, "attack_distance", 1)
 	# 暴击属性；与其他武器、装备属性共用统一颜色和括号变化明细，底层小数乘 100 后显示百分比。
 	_append_weapon_stat_line(detail_lines, item_resource, "critical_chance", 0, "%", 100.0)
 	_append_weapon_stat_line(detail_lines, item_resource, "critical_damage", 0, "%", 100.0)
 	if weapon_type == "ranged":
-		_append_weapon_stat_line(detail_lines, item_resource, "bullet_range", 1)
 		_append_weapon_stat_line(detail_lines, item_resource, "projectile_speed", 1)
 		_append_weapon_stat_line(detail_lines, item_resource, "deviation_degrees", 1, "°")
 		if bool(item_resource.get("has_scatter")):

@@ -2242,7 +2242,7 @@ func _serialize_record(record: Dictionary) -> Dictionary:
 	elif item_resource.has_method("get_enhancement_ratio"):
 		# 武器强化公式版本；与装备共用版本号，旧存档可按基础值迁移加算属性而不改变既有最终值。
 		serialized_record["enhancement_formula_version"] = ENHANCEMENT_FORMULA_VERSION
-		serialized_record["enhancement_modifiers"] = (item_resource.get("enhancement_modifiers") as Dictionary).duplicate(true)
+		serialized_record["enhancement_modifiers"] = EnhancementRules.migrate_stat_aliases(item_resource.get("enhancement_modifiers") as Dictionary)
 		serialized_record["current_durability"] = maxf(float(item_resource.get("current_durability")), 0.0)
 		serialized_record["max_durability"] = _get_resource_maximum_durability(item_resource)
 	return serialized_record
@@ -2325,7 +2325,7 @@ func _restore_enhancement_modifiers(item_resource: Resource, serialized_record: 
 	if item_resource == null or not (serialized_record.get("enhancement_modifiers") is Dictionary):
 		return
 	# 存档强化词典；新版本直接恢复，旧版本会先把加算属性从基础值比例转换为等效百分点。
-	var restored_modifiers: Dictionary = (serialized_record.get("enhancement_modifiers") as Dictionary).duplicate(true)
+	var restored_modifiers: Dictionary = EnhancementRules.migrate_stat_aliases(serialized_record.get("enhancement_modifiers") as Dictionary)
 	# 存档公式版本；缺失视为旧乘算版本，商店快照和库存记录都可使用同一迁移入口。
 	var formula_version: int = int(serialized_record.get("enhancement_formula_version", 1))
 	if formula_version < ENHANCEMENT_FORMULA_VERSION:

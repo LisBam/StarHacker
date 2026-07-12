@@ -18,8 +18,8 @@ class_name RangedMonster
 @export_range(1.0, 12000.0, 1.0, "or_greater") var ranged_projectile_range: float = 520.0
 ## 敌方弹体冲击力；取值建议大于等于 0，默认 90，命中玩家时会造成短距离击退。
 @export_range(0.0, 5000.0, 1.0, "or_greater") var ranged_projectile_impact_force: float = 90.0
-## 敌方弹体扩散角度；取值大于等于 0，默认 4 度，每次射击会在瞄准方向两侧随机偏移。
-@export_range(0.0, 45.0, 0.1, "or_greater") var ranged_projectile_spread_degrees: float = 4.0
+## 敌方弹体偏移角度；取值大于等于 0，默认 4 度，每次射击会在瞄准方向两侧随机变化。
+@export_range(0.0, 45.0, 0.1, "or_greater") var ranged_projectile_deviation_degrees: float = 4.0
 ## 射击冷却；取值应大于 0，默认 1.25 秒，修改会影响远程怪物连续开火频率。
 @export_range(0.05, 10.0, 0.05) var shoot_cooldown: float = 1.25
 ## 个体射击冷却最小倍率；取值建议 0.8 到 1，默认 0.85，让远程怪物射击间隔存在下限差异。
@@ -116,8 +116,8 @@ func _try_fire_projectile(direction: Vector2) -> void:
 		return
 	if not _has_line_of_sight_to_target():
 		return
-	# 实际发射方向；使用敌人独立随机源在配置扩散角度内偏移，避免所有远程敌人保持绝对精准。
-	var resolved_direction: Vector2 = direction.normalized().rotated(deg_to_rad(_random.randf_range(-maxf(ranged_projectile_spread_degrees, 0.0), maxf(ranged_projectile_spread_degrees, 0.0))))
+	# 实际发射方向；使用敌人独立随机源在配置偏移角度内变化，避免所有远程敌人保持绝对精准。
+	var resolved_direction: Vector2 = direction.normalized().rotated(deg_to_rad(_random.randf_range(-maxf(ranged_projectile_deviation_degrees, 0.0), maxf(ranged_projectile_deviation_degrees, 0.0))))
 
 	# 敌方弹体实例；取值为 Node2D 或 null，默认由 projectile_scene 实例化。
 	var projectile: Node2D = projectile_scene.instantiate() as Node2D

@@ -195,7 +195,7 @@ static func _append_stone_lines_by_benefit(detail_lines: Array[String], modifier
 		var modifier_direction: float = float(modifiers.get(modifier_key, 0.0))
 		if EnhancementRules.is_direction_beneficial(modifier_key, modifier_direction) != beneficial:
 			continue
-		# 词条颜色；按玩法利弊渲染，冷却-、能量消耗-、扩散-和后坐力-等降低型增益统一显示绿色。
+		# 词条颜色；按玩法利弊渲染，冷却-、能量消耗-、偏移-和后坐力-等降低型增益统一显示绿色。
 		var color_code: String = POSITIVE_COLOR if beneficial else NEGATIVE_COLOR
 		detail_lines.append("[color=%s]%s[/color]" % [color_code, EnhancementRules.build_modifier_token(modifier_key, modifier_direction, false)])
 
@@ -221,7 +221,7 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 	if weapon_type == "ranged":
 		_append_weapon_stat_line(detail_lines, item_resource, "bullet_range", 1)
 		_append_weapon_stat_line(detail_lines, item_resource, "projectile_speed", 1)
-		_append_weapon_stat_line(detail_lines, item_resource, "spread_degrees", 1, "°")
+		_append_weapon_stat_line(detail_lines, item_resource, "deviation_degrees", 1, "°")
 		if bool(item_resource.get("has_scatter")):
 			_append_weapon_stat_line(detail_lines, item_resource, "scatter_count", 0)
 		if bool(item_resource.get("has_piercing")):
@@ -245,7 +245,7 @@ static func _append_weapon_stat_line(detail_lines: Array[String], item_resource:
 	# 空属性跳过规则；装备只显示基础值、最终值或强化差值至少一项非零的有效属性，武器保持完整固定属性表。
 	if skip_zero_unmodified and is_zero_approx(base_value) and is_zero_approx(effective_value) and is_zero_approx(enhancement_value):
 		return
-	# 强化是否为玩法增益；数值降低不等于减益，冷却、能耗、扩散和后坐力降低均按规则目录判定为增益。
+	# 强化是否为玩法增益；数值降低不等于减益，冷却、能耗、偏移和后坐力降低均按规则目录判定为增益。
 	var enhancement_is_beneficial: bool = not is_zero_approx(enhancement_value) and EnhancementRules.is_direction_beneficial(stat_name, enhancement_value)
 	# 总值颜色；存在强化时按玩法收益显示绿色或红色，未变化时使用中性色。
 	var total_color: String = (POSITIVE_COLOR if enhancement_is_beneficial else NEGATIVE_COLOR) if not is_zero_approx(enhancement_value) else NEUTRAL_COLOR

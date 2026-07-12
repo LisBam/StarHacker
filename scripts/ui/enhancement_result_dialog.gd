@@ -119,7 +119,7 @@ func _format_change_line(change: Dictionary) -> String:
 	# 带符号百分比；使用整数百分点对齐强化石生成精度。
 	# 公式类型；加算属性用“百分点”展示，乘算属性继续显示百分比，避免两种幅度被误读为同一公式。
 	var calculation_mode: String = str(change.get("calculation_mode", EnhancementRules.get_calculation_mode(stat_name)))
-	# 玩法收益；冷却、能量消耗、扩散和后坐力降低等负方向收益同样使用绿色。
+	# 玩法收益；冷却、能量消耗、偏移和后坐力降低等负方向收益同样使用绿色。
 	var is_beneficial: bool = EnhancementRules.is_direction_beneficial(stat_name, modifier_ratio)
 	# 词条描述；乘算属性保留 0.1% 精度，避免缩放后的一级属性被四舍五入为 0%，加算属性直接显示带符号百分点。
 	var percentage_text: String = "%s%d 点" % ["+" if modifier_ratio >= 0.0 else "-", roundi(absf(modifier_ratio))] if calculation_mode == EnhancementRules.CALCULATION_ADDITIVE_VALUE else (("%s%.1f%%" % ["+" if modifier_ratio >= 0.0 else "-", absf(modifier_ratio) * 100.0]) if calculation_mode == EnhancementRules.CALCULATION_ADDITIVE_POINTS else ("%s%.1f%%" % ["提升" if is_beneficial else "削弱", absf(modifier_ratio) * 100.0]))
@@ -142,8 +142,8 @@ func _format_stat_value(stat_name: String, value: float, include_sign: bool = fa
 	var percentage_stats: Array[String] = ["critical_chance", "critical_damage", "dodge_chance", "move_speed", "vision_range"]
 	# 显示倍率；百分比属性乘 100，其他属性保持原始数值。
 	var display_multiplier: float = 100.0 if stat_name in percentage_stats else 1.0
-	# 单位后缀；持续时间使用秒、扩散使用角度、百分比属性使用百分号。
-	var suffix: String = "%" if stat_name in percentage_stats else (" 秒" if stat_name in ["cooldown", "melee_active_duration"] else ("°" if stat_name == "spread_degrees" else ""))
+	# 单位后缀；持续时间使用秒、偏移使用角度、百分比属性使用百分号。
+	var suffix: String = "%" if stat_name in percentage_stats else (" 秒" if stat_name in ["cooldown", "melee_active_duration"] else ("°" if stat_name == "deviation_degrees" else ""))
 	# 符号前缀；实际变化显式显示正号，前后总值不添加符号。
 	var sign_prefix: String = "+" if include_sign and value >= 0.0 else ""
 	return "%s%s%s" % [sign_prefix, _format_number(value * display_multiplier), suffix]

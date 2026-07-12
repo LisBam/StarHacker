@@ -42,8 +42,8 @@ const FIXED_DURABILITY_COST_PER_USE: float = 1.0
 @export_range(0.0, 9999.0, 1.0, "or_greater") var ranged_damage: float = 12.0
 ## 远程射击冷却；取值应大于 0，默认 0.16 秒，修改会影响连续射击频率。
 @export_range(0.01, 5.0, 0.01) var ranged_cooldown: float = 0.16
-## 武器扩散角度；取值大于等于 0，默认 0 度表示完全精准，数值越高每次弹体相对瞄准方向的随机偏移越明显。
-@export_range(0.0, 45.0, 0.1, "or_greater") var spread_degrees: float = 0.0
+## 武器偏移角度；取值大于等于 0，默认 0 度表示完全精准，数值越高每颗弹体相对瞄准方向的随机角度越大。
+@export_range(0.0, 45.0, 0.1, "or_greater") var deviation_degrees: float = 0.0
 ## 是否具有散射属性；默认 false，只有显式启用的远程武器才能发射多颗弹体并接受散射强化。
 @export var has_scatter: bool = false
 ## 每轮射击生成的弹体总数；默认 1 表示单弹体，只有 has_scatter 为 true 时参与战斗与强化结算。
@@ -87,7 +87,7 @@ const MINIMUM_DURATION_VALUE: float = 0.01
 ## 可应用于所有武器的统一强化属性；新增通用战斗字段时应同步详情格式化器。
 const COMMON_ENHANCEMENT_STATS: Array[String] = ["damage", "cooldown", "energy_cost", "recoil_force", "front_recoil_force", "impact_force", "critical_chance", "critical_damage", "max_durability"]
 ## 远程武器专属强化属性；只允许远程武器消费包含这些字段的强化石效果。
-const RANGED_ENHANCEMENT_STATS: Array[String] = ["projectile_speed", "bullet_range", "spread_degrees", "scatter_count", "piercing_count", "combo_count"]
+const RANGED_ENHANCEMENT_STATS: Array[String] = ["projectile_speed", "bullet_range", "deviation_degrees", "scatter_count", "piercing_count", "combo_count"]
 ## 近战武器专属强化属性；只允许近战武器消费包含这些字段的强化石效果。
 const MELEE_ENHANCEMENT_STATS: Array[String] = ["melee_active_duration"]
 
@@ -149,7 +149,9 @@ func get_base_stat(stat_name: String) -> float:
 func get_enhancement_ratio(stat_name: String) -> float:
 	# 统一属性名；允许战斗组件传入 ranged_damage 等旧字段名并映射到 damage 强化词条。
 	var canonical_stat_name: String = _resolve_canonical_stat_name(stat_name)
-	return float(enhancement_modifiers.get(canonical_stat_name, 0.0))
+	# 已迁移累计词典；历史 spread_degrees 强化会与现行 deviation_degrees 合并，保证旧存档最终值不变。
+	var migrated_modifiers: Dictionary = EnhancementRules.migrate_stat_aliases(enhancement_modifiers)
+	return float(migrated_modifiers.get(canonical_stat_name, 0.0))
 
 
 func get_enhancement_value(stat_name: String) -> float:
@@ -187,6 +189,8 @@ func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
 		"beneficial_changes": [],
 		"detrimental_changes": [],
 	}
+	# 已迁移累计强化；应用新词条前合并历史偏移键，确保旧武器继续强化时不会丢失原累计幅度。
+	enhancement_modifiers = EnhancementRules.migrate_stat_aliases(enhancement_modifiers)
 	# 是否实际应用词条；只有与当前武器兼容的字段会写入，避免远程专属属性污染近战武器。
 	var applied_any_modifier: bool = false
 	for raw_stat_name in modifiers.keys():
@@ -237,10 +241,12 @@ func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
 func get_effective_sell_price() -> int:
 	# 售价调整比例；按玩法利弊判断累计强化，增强提高售价、削弱降低售价。
 	var sell_price_ratio: float = 0.0
-	for raw_stat_name in enhancement_modifiers.keys():
+	# 已迁移累计词典；历史偏移键先合并到现行键，售价与实际有效属性读取同一份数据。
+	var migrated_modifiers: Dictionary = EnhancementRules.migrate_stat_aliases(enhancement_modifiers)
+	for raw_stat_name in migrated_modifiers.keys():
 		if _is_stat_supported(str(raw_stat_name)):
 			# 累计比例；正负号表示当前属性最终变化方向，绝对值表示累计强化幅度。
-			var accumulated_ratio: float = float(enhancement_modifiers.get(raw_stat_name, 0.0))
+			var accumulated_ratio: float = float(migrated_modifiers.get(raw_stat_name, 0.0))
 			if not is_zero_approx(accumulated_ratio):
 				# 累计方向；用于判断该属性最终变化对武器是增强还是削弱。
 				var accumulated_direction: int = EnhancementRules.normalize_direction(accumulated_ratio)
@@ -266,6 +272,7 @@ func _resolve_base_property_name(stat_name: String) -> String:
 
 
 func _resolve_canonical_stat_name(stat_name: String) -> String:
+	stat_name = EnhancementRules.canonicalize_stat_name(stat_name)
 	if stat_name in ["ranged_damage", "melee_damage"]:
 		return "damage"
 	if stat_name in ["ranged_cooldown", "melee_cooldown"]:

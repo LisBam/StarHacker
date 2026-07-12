@@ -17,7 +17,7 @@ const CALCULATION_ADDITIVE_POINTS: String = "additive_points"
 const CALCULATION_ADDITIVE_VALUE: String = "additive_value"
 ## 一级乘算属性组标识；用于伤害、攻击力、防御力、最大生命值、视野和冷却的独立幅度配置。
 const MAGNITUDE_GROUP_PRIMARY: String = "primary"
-## 二级乘算属性组标识；用于移速、能量消耗、扩散、坐力、冲击力和回血的独立幅度配置。
+## 二级乘算属性组标识；用于移速、能量消耗、偏移、坐力、冲击力和回血的独立幅度配置。
 const MAGNITUDE_GROUP_SECONDARY: String = "secondary"
 ## 三级乘算属性组标识；用于弹体速度、射程、判定时长和耐久值的独立幅度配置。
 ## 属性名称补充：max_durability 的现行玩家可见名称统一为“耐久”，含义是改变武器或装备耐久上限。
@@ -69,7 +69,7 @@ const MULTIPLICATIVE_STAT_GROUPS: Dictionary = {
 	"cooldown": MAGNITUDE_GROUP_PRIMARY,
 	"defense_power": MAGNITUDE_GROUP_PRIMARY,
 	"energy_cost": MAGNITUDE_GROUP_SECONDARY,
-	"spread_degrees": MAGNITUDE_GROUP_SECONDARY,
+	"deviation_degrees": MAGNITUDE_GROUP_SECONDARY,
 	"recoil_force": MAGNITUDE_GROUP_SECONDARY,
 	"front_recoil_force": MAGNITUDE_GROUP_SECONDARY,
 	"impact_force": MAGNITUDE_GROUP_SECONDARY,
@@ -185,7 +185,7 @@ const STAT_KEYS: Array[String] = [
 	"energy_cost",
 	"projectile_speed",
 	"bullet_range",
-	"spread_degrees",
+	"deviation_degrees",
 	"recoil_force",
 	"front_recoil_force",
 	"impact_force",
@@ -206,7 +206,7 @@ const STAT_KEYS: Array[String] = [
 	"energy_regeneration",
 ]
 ## 武器强化石属性池；只包含武器能够应用的属性。
-const WEAPON_STAT_KEYS: Array[String] = ["damage", "cooldown", "energy_cost", "projectile_speed", "bullet_range", "spread_degrees", "recoil_force", "front_recoil_force", "impact_force", "melee_active_duration", "critical_chance", "critical_damage", "max_durability", "scatter_count", "piercing_count", "combo_count"]
+const WEAPON_STAT_KEYS: Array[String] = ["damage", "cooldown", "energy_cost", "projectile_speed", "bullet_range", "deviation_degrees", "recoil_force", "front_recoil_force", "impact_force", "melee_active_duration", "critical_chance", "critical_damage", "max_durability", "scatter_count", "piercing_count", "combo_count"]
 ## 装备强化石属性池；移速仅脚部可应用，视野仅头部可应用。
 const EQUIPMENT_STAT_KEYS: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance", "move_speed", "vision_range", "energy_regeneration"]
 ## 属性中文名称；键为统一属性名，值用于强化石、搜索、筛选和武器详情。
@@ -216,7 +216,7 @@ const STAT_LABELS: Dictionary = {
 	"energy_cost": "能量消耗",
 	"projectile_speed": "弹体速度",
 	"bullet_range": "射程",
-	"spread_degrees": "扩散",
+	"deviation_degrees": "偏移",
 	"recoil_force": "后坐力",
 	"front_recoil_force": "前坐力",
 	"impact_force": "冲击力",
@@ -243,7 +243,7 @@ const BENEFICIAL_DIRECTIONS: Dictionary = {
 	"energy_cost": -1,
 	"projectile_speed": 1,
 	"bullet_range": 1,
-	"spread_degrees": -1,
+	"deviation_degrees": -1,
 	"recoil_force": -1,
 	"front_recoil_force": 1,
 	"impact_force": 1,
@@ -271,6 +271,22 @@ static func normalize_direction(raw_value: Variant) -> int:
 	return -1 if numeric_value < 0.0 else 1
 
 
+static func canonicalize_stat_name(stat_name: String) -> String:
+	## 把历史弹道属性名迁移为现行“偏移”属性名；旧字符串只作为存档兼容入口，不进入新随机池或玩家界面。
+	return "deviation_degrees" if stat_name == "spread_degrees" else stat_name
+
+
+static func migrate_stat_aliases(modifiers: Dictionary) -> Dictionary:
+	## 迁移任意属性词典的历史键并保留原始数值；适用于累计强化与强化石方向两种数据结构。
+	# 迁移结果；相同新旧键同时存在时直接累加，避免历史强化幅度被覆盖或丢失。
+	var migrated_modifiers: Dictionary = {}
+	for raw_stat_name in modifiers.keys():
+		# 现行属性名；旧 spread_degrees 统一映射为 deviation_degrees，其他键保持原样。
+		var stat_name: String = canonicalize_stat_name(str(raw_stat_name))
+		migrated_modifiers[stat_name] = float(migrated_modifiers.get(stat_name, 0.0)) + float(modifiers.get(raw_stat_name, 0.0))
+	return migrated_modifiers
+
+
 static func normalize_modifier_ratio(raw_value: Variant) -> float:
 	# 原始词条比例；新版使用 -0.60 到 0.60 左右的实际比例，旧版使用精确 +1/-1 方向值。
 	var numeric_value: float = float(raw_value)
@@ -283,6 +299,7 @@ static func normalize_modifier_ratio(raw_value: Variant) -> float:
 
 
 static func get_stat_label(stat_name: String) -> String:
+	stat_name = canonicalize_stat_name(stat_name)
 	return str(STAT_LABELS.get(stat_name, stat_name))
 
 
@@ -291,6 +308,7 @@ static func get_direction_symbol(direction: int) -> String:
 
 
 static func get_beneficial_direction(stat_name: String) -> int:
+	stat_name = canonicalize_stat_name(stat_name)
 	return int(BENEFICIAL_DIRECTIONS.get(stat_name, 1))
 
 
@@ -303,6 +321,7 @@ static func get_effect_ratio(direction: Variant) -> float:
 
 
 static func get_calculation_mode(stat_name: String) -> String:
+	stat_name = canonicalize_stat_name(stat_name)
 	if ADDITIVE_POINT_STATS.has(stat_name):
 		return CALCULATION_ADDITIVE_POINTS
 	if ADDITIVE_VALUE_STATS.has(stat_name):
@@ -319,6 +338,7 @@ static func is_additive_value_stat(stat_name: String) -> bool:
 
 
 static func calculate_effective_stat(base_value: float, stat_name: String, accumulated_modifier: float) -> float:
+	stat_name = canonicalize_stat_name(stat_name)
 	# 原始最终值；乘算属性把累计值视为基础值比例，加算属性把累计值视为直接百分点偏移。
 	var calculated_value: float = base_value + accumulated_modifier if is_additive_point_stat(stat_name) or is_additive_value_stat(stat_name) else base_value * (1.0 + accumulated_modifier)
 	if stat_name == "critical_chance":
@@ -337,11 +357,13 @@ static func calculate_effective_stat(base_value: float, stat_name: String, accum
 
 
 static func get_effect_value(stat_name: String, raw_value: Variant) -> float:
+	stat_name = canonicalize_stat_name(stat_name)
 	# 加算数值词条由随机器直接生成实际点数；其他词条继续兼容旧版方向值到比例的迁移规则。
 	return float(raw_value) if is_additive_value_stat(stat_name) else get_effect_ratio(raw_value)
 
 
 static func get_generation_weight(stat_name: String) -> float:
+	stat_name = canonicalize_stat_name(stat_name)
 	# 稀有词条使用常规词条五分之一权重；非法属性返回 0，防止进入随机池。
 	if stat_name not in STAT_KEYS:
 		return 0.0
@@ -350,7 +372,7 @@ static func get_generation_weight(stat_name: String) -> float:
 
 static func convert_legacy_enhancement_modifiers(modifiers: Dictionary, base_values: Dictionary) -> Dictionary:
 	# 迁移结果；旧版加算属性曾保存“相对基础值比例”，现转换为等效直接百分点，保持旧物品最终数值不突变。
-	var converted_modifiers: Dictionary = modifiers.duplicate(true)
+	var converted_modifiers: Dictionary = migrate_stat_aliases(modifiers)
 	for stat_name in ADDITIVE_POINT_STATS.keys():
 		if not converted_modifiers.has(stat_name):
 			continue
@@ -365,10 +387,12 @@ static func convert_legacy_enhancement_modifiers(modifiers: Dictionary, base_val
 static func normalize_modifiers(modifiers: Dictionary) -> Dictionary:
 	# 归一化词典；只保留规则目录已登记属性，并将旧百分比值转换为 +1 或 -1。
 	var normalized_modifiers: Dictionary = {}
+	# 已迁移词典；旧偏移属性键先转换为现行键，保证历史强化石不会丢失词条。
+	var migrated_modifiers: Dictionary = migrate_stat_aliases(modifiers)
 	for stat_name in STAT_KEYS:
-		if modifiers.has(stat_name):
+		if migrated_modifiers.has(stat_name):
 			# 实际词条比例；保留品质随机的幅度，同时忽略无效的 0% 词条。
-			var modifier_ratio: float = normalize_modifier_ratio(modifiers.get(stat_name, 0.0))
+			var modifier_ratio: float = normalize_modifier_ratio(migrated_modifiers.get(stat_name, 0.0))
 			if not is_zero_approx(modifier_ratio):
 				# 方向化强化石只持久化 +1 或 -1；旧存档中的具体百分比读取后仅保留方向，实际幅度延迟到使用瞬间生成。
 				normalized_modifiers[stat_name] = normalize_direction(modifier_ratio)
@@ -376,6 +400,7 @@ static func normalize_modifiers(modifiers: Dictionary) -> Dictionary:
 
 
 static func build_modifier_token(stat_name: String, direction: Variant, include_percentage: bool = false) -> String:
+	stat_name = canonicalize_stat_name(stat_name)
 	# 标准化比例；旧强化石会在此自动转换为 10%，新强化石保留实际整数百分点。
 	var modifier_ratio: float = normalize_modifier_ratio(direction)
 	# 方向文本；搜索可使用不带百分比版本，物品详情默认展示完整数值。
@@ -389,13 +414,14 @@ static func build_modifier_token(stat_name: String, direction: Variant, include_
 
 
 static func roll_quality_modifier_ratio(random_source: RandomNumberGenerator, quality_id: String, stat_name: String, direction: Variant) -> float:
+	stat_name = canonicalize_stat_name(stat_name)
 	if random_source == null or stat_name not in STAT_KEYS:
 		return 0.0
 	# 方向化词条；资源只保存正负方向，实际强化幅度在每次使用时根据品质重新抽取。
 	var modifier_direction: int = normalize_direction(direction)
 	# 品质配置；增强和削弱分别使用各品质独立区间，保证低级、中级、高级和极品的幅度差异集中维护。
 	var quality_config: Dictionary = get_stat_magnitude_config(stat_name, quality_id)
-	# 是否为玩法增强；冷却、扩散和后坐力的负方向仍属于增强，不按数值正负误判收益。
+	# 是否为玩法增强；冷却、偏移和后坐力的负方向仍属于增强，不按数值正负误判收益。
 	var beneficial: bool = is_direction_beneficial(stat_name, modifier_direction)
 	# 最小随机比例；由属性公式与幅度组共同决定，不再读取所有属性共用的品质区间。
 	var minimum_ratio: float = float(quality_config.get("beneficial_min" if beneficial else "detrimental_min", 0.0))
@@ -413,6 +439,7 @@ static func roll_quality_modifier_ratio(random_source: RandomNumberGenerator, qu
 
 
 static func get_stat_magnitude_config(stat_name: String, quality_id: String) -> Dictionary:
+	stat_name = canonicalize_stat_name(stat_name)
 	# 属性级配置；加算属性直接读取自身区间，保证暴击率、暴击伤害和闪避率互不共用幅度。
 	var stat_configs: Dictionary = ADDITIVE_POINT_MAGNITUDE_RANGES.get(stat_name, {}) as Dictionary if is_additive_point_stat(stat_name) else (ADDITIVE_VALUE_MAGNITUDE_RANGES.get(stat_name, {}) as Dictionary if is_additive_value_stat(stat_name) else {})
 	if stat_configs.is_empty():

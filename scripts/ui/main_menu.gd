@@ -1,8 +1,8 @@
 extends Control
 
 ## 主菜单负责项目启动后的第一个可交互界面。
-## 这里保留骇入、训练场、设置和退出四条清晰路径，避免把游戏流程逻辑写进具体按钮。
-## character_select_scene_path 暴露在检查器中，后续替换角色选择入口时无需修改脚本。
+## 这里保留骇入、训练场、角色系统、设置和退出等清晰路径，避免把游戏流程逻辑写进具体按钮。
+## 战斗入口直接使用 SessionState 当前角色；角色选择作为独立系统从底部“角色”按钮进入。
 
 ## 正式骇入模式标识；默认写入 SessionState，修改会影响骇入入口进入后的模式判定。
 const GAME_MODE_HACK: String = "hack"
@@ -30,20 +30,24 @@ const MINING_FARM_PANEL_SCRIPT: Script = preload("res://scripts/ui/mining_farm_p
 const DEVELOPER_MENU_SCRIPT: Script = preload("res://scripts/ui/developer_menu.gd")
 ## 开发者模式解锁序列；默认由六个英文字母组成，输入错误会按首字母重新匹配。
 const DEVELOPER_UNLOCK_SEQUENCE: String = "LISBAM"
-## 角色选择场景路径；默认进入独立角色选择场景，只允许填写 tscn 资源，运行时通常不动态修改，改错会导致入口无法继续。
+## 角色系统场景路径；默认由主菜单底部“角色”按钮进入，只允许填写 tscn 资源，运行时通常不动态修改。
 @export_file("*.tscn") var character_select_scene_path: String = "res://scenes/ui/character_select.tscn"
+## 游戏场景路径；骇入和训练场入口写入模式后直接进入该场景，当前角色由 SessionState 提供。
+@export_file("*.tscn") var game_scene_path: String = "res://scenes/game/game_world.tscn"
 
-## 骇入按钮缓存；默认绑定唯一名 StartButton，必须是 Button，修改节点名会导致正式入口无法进入角色选择。
+## 骇入按钮缓存；默认绑定唯一名 StartButton，必须是 Button，修改节点名会导致正式入口无法进入战斗。
 @onready var _start_button: Button = %StartButton
-## 训练场按钮缓存；默认绑定唯一名 TrainingButton，必须是 Button，修改节点名会导致训练场入口无法进入角色选择。
+## 训练场按钮缓存；默认绑定唯一名 TrainingButton，必须是 Button，修改节点名会导致训练场入口无法进入战斗。
 @onready var _training_button: Button = %TrainingButton
 ## 设置按钮缓存；默认绑定唯一名 SettingsButton，必须是 Button，修改节点名会导致主菜单无法打开设置。
 @onready var _settings_button: Button = %SettingsButton
 ## 退出按钮缓存；默认绑定唯一名 QuitButton，必须是 Button，修改节点名会导致主菜单无法退出程序。
 @onready var _quit_button: Button = %QuitButton
-## 仓库按钮缓存；默认固定在主菜单左下角，点击后打开全局背包与装备调整界面。
+## 仓库按钮缓存；默认位于主菜单底部功能栏第三位，点击后打开全局背包与装备调整界面。
 @onready var _warehouse_button: Button = %WarehouseButton
-## 背包按钮缓存；默认位于主菜单左下角首位，点击后打开游戏内同款装备栏与随身物品界面。
+## 角色按钮缓存；默认位于主菜单底部功能栏首位，点击后进入独立角色系统。
+@onready var _character_button: Button = %CharacterButton
+## 背包按钮缓存；默认位于角色按钮右侧，点击后打开游戏内同款装备栏与随身物品界面。
 @onready var _backpack_button: Button = %BackpackButton
 ## 商店按钮缓存；默认位于仓库按钮右侧，点击后打开普通商店与灰市界面。
 @onready var _shop_button: Button = %ShopButton
@@ -128,6 +132,7 @@ func _ready() -> void:
 	_training_button.pressed.connect(_on_training_button_pressed)
 	_settings_button.pressed.connect(_on_settings_button_pressed)
 	_quit_button.pressed.connect(_on_quit_button_pressed)
+	_character_button.pressed.connect(_on_character_button_pressed)
 	_warehouse_button.pressed.connect(_on_warehouse_button_pressed)
 	_backpack_button.pressed.connect(_on_backpack_button_pressed)
 	_shop_button.pressed.connect(_on_shop_button_pressed)
@@ -173,11 +178,16 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 
 func _on_start_button_pressed() -> void:
-	_open_character_select(GAME_MODE_HACK)
+	_start_game(GAME_MODE_HACK)
 
 
 func _on_training_button_pressed() -> void:
-	_open_character_select(GAME_MODE_TRAINING)
+	_start_game(GAME_MODE_TRAINING)
+
+
+func _on_character_button_pressed() -> void:
+	_settings_panel.visible = false
+	_change_scene_with_transition(character_select_scene_path)
 
 
 func _on_settings_button_pressed() -> void:
@@ -570,10 +580,11 @@ func _on_settings_back_button_pressed() -> void:
 	_settings_button.grab_focus()
 
 
-func _open_character_select(game_mode: String) -> void:
+func _start_game(game_mode: String) -> void:
+	## 写入本次模式并直接进入战斗；角色由独立角色系统最后确认的 SessionState 选择提供。
 	_settings_panel.visible = false
 	_set_session_game_mode(game_mode)
-	_change_scene_with_transition(character_select_scene_path)
+	_change_scene_with_transition(game_scene_path)
 
 
 func _change_scene_with_transition(scene_path: String) -> void:

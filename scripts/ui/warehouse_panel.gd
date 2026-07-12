@@ -303,6 +303,7 @@ func _build_storage_interface() -> void:
 	content.add_child(warehouse_title)
 
 	_warehouse_scroll = ScrollContainer.new()
+	_warehouse_scroll.name = "WarehouseItemScroll"
 	_warehouse_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_warehouse_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_warehouse_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_ALWAYS
@@ -321,6 +322,7 @@ func _build_storage_interface() -> void:
 	content.add_child(_storage_split_handle)
 
 	_backpack_scroll = ScrollContainer.new()
+	_backpack_scroll.name = "BackpackSectionScroll"
 	_backpack_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_backpack_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_backpack_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -360,6 +362,7 @@ func _build_storage_interface() -> void:
 
 	# 随身背包滚动区；默认填充双栏剩余宽度和高度，物品可点击快速转仓或拖拽调整。
 	var carried_scroll: ScrollContainer = ScrollContainer.new()
+	carried_scroll.name = "CarriedItemScroll"
 	carried_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	carried_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	carried_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED

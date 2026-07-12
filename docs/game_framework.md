@@ -7,21 +7,21 @@
 ## 场景入口
 
 - `res://scenes/ui/main_menu.tscn` 是项目主场景，由 `project.godot` 的 `run/main_scene` 指向。
-- 主菜单脚本 `res://scripts/ui/main_menu.gd` 通过 `character_select_scene_path` 加载独立角色选择场景，默认第一行按钮文案为“骇入”。主菜单同时保留“训练场”按钮，两者都会先写入当前模式，再进入 `res://scenes/ui/character_select.tscn`。
-- `res://scenes/ui/character_select.tscn` 是进入战斗前的角色选择场景。玩家在左侧选择“星”“穹”“银狼”，右侧会显示角色名称、定位、说明、固定生命上限、固定能量上限、固定速度和技能占位信息，点击确认后进入 `res://scenes/game/game_world.tscn`。
-- 主菜单提供“设置”入口，设置首页包含全局 Master 主音量和“按键绑定”入口；左下角固定提供“仓库”按钮，打开后可在纯永久仓库模式与仓库/背包联合模式间切换，出售安全物品并通过拖拽管理仓库、背包和装备槽。
+- 主菜单脚本 `res://scripts/ui/main_menu.gd` 通过 `game_scene_path` 直接进入战斗：点击“骇入”或“训练场”只写入对应模式，当前角色继续读取 `SessionState` 已确认的选择，不再经过角色选择前置场景。
+- `res://scenes/ui/character_select.tscn` 是独立角色系统，由主菜单底部第一个“角色”按钮通过 `character_select_scene_path` 打开。玩家在左侧查看“星”“穹”“银狼”，右侧显示定位、说明、生命、能量、攻防、速度和技能占位；“确认选择”写入 `SessionState` 后返回主菜单，“返回”直接返回且不修改角色。
+- 主菜单提供“设置”入口，设置首页包含全局 Master 主音量和“按键绑定”入口；底部“角色、背包、仓库、商店、锻造、炒股、矿场”使用一个左右各 24 像素边距的七列等宽 `HBoxContainer`。仓库可在纯永久仓库模式与仓库/背包联合模式间切换，出售安全物品并通过拖拽管理仓库、背包和装备槽。
 - 主菜单依次输入 `LISBAM` 会显示局外开发者菜单，提供资源、金币、仓库和股市调试；股市分组可触发全量刷新、小幅刷新、随机事件、大盘切换和不返还金币的清空持仓。战斗内打开 ESC 暂停菜单后同样可输入 `LISBAM`，此时显示战斗开发者菜单，可切换无限血量、无限能量并在正式模式打开训练场设置。
 - `res://scripts/game/session_state.gd` 通过 `project.godot` 自动加载为 `SessionState`，负责保存本次进入的模式和角色，避免把入口参数写进场景路径。
 - `res://scripts/game/global_inventory.gd` 通过 `project.godot` 自动加载为 `GlobalInventory`，分别保存随身背包、永久仓库、装备槽、局外金币、获得时间、上次撤离优先级和战斗结算，并写入 `user://global_inventory.json`。
 - `res://scripts/game/stock_market_service.gd` 通过 `project.godot` 自动加载为 `StockMarketService`，独立保存五只股票行情、动态价值中枢、大盘周期、随机事件和对局行为连续性；持仓与金币仍由 `GlobalInventory` 统一拥有。
 - `res://scripts/game/mining_farm_service.gd` 通过 `project.godot` 自动加载为 `MiningFarmService`，跨全部场景维护整数算力币、永久算力资产、在线产出与临时增益，并独立写入 `user://mining_farm_state.json`。矿场面板关闭后仅停止 UI 动效，服务继续以 5 秒周期批量结算。
-- `res://scripts/game/scene_transition.gd` 通过 `project.godot` 自动加载为 `SceneTransition`，统一接管主菜单、角色选择与战斗场景切换。完整黑屏过渡固定为 0.30 秒：前 0.15 秒淡至黑色并切换场景，后 0.15 秒恢复画面；暂停状态下也继续执行。
+- `res://scripts/game/scene_transition.gd` 通过 `project.godot` 自动加载为 `SceneTransition`，统一接管主菜单、独立角色系统与战斗场景切换。完整黑屏过渡固定为 0.30 秒：前 0.15 秒淡至黑色并切换场景，后 0.15 秒恢复画面；暂停状态下也继续执行。
 - `res://scenes/game/game_world.tscn` 是当前战斗承载场景，负责放置玩家、怪物、网格地图、随机墙体建筑和掉落物。它的脚本会在进入场景后生成大型网格地图，再随机摆放一批环境障碍和怪物。
 
 ## 玩家角色
 
-- `res://scenes/characters/player.tscn` 是当前通用玩家预制体，根节点为 `CharacterBody2D`。实际显示角色由独立角色选择场景决定。
-- 当前可选角色为“星”“穹”“银狼”。进入骇入、进入训练场或在训练场内切换角色时，会按固定配置设置生命上限、能量上限、攻击力、防御力和移动速度；角色选择页从同一档案展示这些值，主动技能和被动技能后续再接入。
+- `res://scenes/characters/player.tscn` 是当前通用玩家预制体，根节点为 `CharacterBody2D`。实际显示角色由独立角色系统保存到 `SessionState` 的当前选择决定。
+- 当前可选角色为“星”“穹”“银狼”。进入骇入、进入训练场或在训练场内切换角色时，会按固定配置设置生命上限、能量上限、攻击力、防御力和移动速度；独立角色系统从同一档案展示并保存当前选择，主动技能和被动技能后续再接入。
 - `res://scripts/player/player_controller.gd` 是聚合脚本，只负责调度输入、移动、远程攻击、近战攻击和瞄准朝向。聚合脚本通过节点路径获取组件，不直接强类型依赖自定义组件类，避免新项目或缓存刷新时出现全局类名解析顺序问题。
 - 玩家视觉、碰撞、摄像机、枪口、输入组件、移动组件、远程攻击组件和近战攻击组件都以子节点形式挂载，便于逐项替换。
 
@@ -110,7 +110,7 @@
 - `ion_smg.tres`：离子冲锋枪，远程测试武器，高射速、低单发伤害。
 - `rail_cannon.tres`：磁轨炮，远程测试武器，高伤害、长冷却。
 - `scatter_blaster.tres`：散射爆能枪，远程测试武器，中等射速和中等消耗。
-- `prism_scatter_gun.tres`：棱镜散射枪，显式具有散射属性，每轮全部弹体独立应用扩散。
+- `prism_scatter_gun.tres`：棱镜散射枪，显式具有散射属性，每轮保留中心弹并让其余弹体尽量铺满扩散扇区。
 - `phase_piercer.tres`：相位贯穿枪，显式具有穿透属性，基础穿透为 0 并可通过兼容强化石提升。
 - `pulse_combo_rifle.tres`：脉冲连击步枪，显式具有连击属性，相邻轮次间隔 0.08 秒且末轮后才进入冷却。
 - `quantum_dagger.tres`：量子短刃，近战测试武器，低消耗、短冷却，默认前坐力为 140。
@@ -135,7 +135,7 @@
 
 远程攻击流程为：玩家输入左键 -> `PlayerController` 读取当前远程武器并拒绝损坏武器 -> 检查能量 -> 成功生成弹体 -> 扣除能量；非训练场且未开启调试免消耗时，再固定扣除 1 点武器耐久。
 
-远程稀有属性由 `RangedAttackComponent` 独立执行：散射在每轮生成指定数量弹体并让每颗弹体独立抽取扩散；穿透把可额外穿过的目标数写入弹体，环境墙体仍立即销毁弹体且已命中目标不会重复受伤；连击在一次攻击内按武器 `combo_interval` 连续执行指定轮数，期间拒绝新攻击并在末轮结束后启动正式冷却。散射和连击不会额外触发能量、耐久或玩家后坐力结算。
+远程稀有属性由 `RangedAttackComponent` 独立执行：显式散射武器通过 `_build_scatter_offsets_degrees()` 固定生成 0 度中心弹，其余弹体在正负扩散边界内按两侧数量等距铺开，以最大化固定中心弹约束下的最小相邻角间距；奇数弹左右对称，偶数弹随机决定多出弹体的一侧。普通非散射武器仍只发射一颗并沿用原有随机扩散。穿透把可额外穿过的目标数写入弹体，环境墙体仍立即销毁弹体且已命中目标不会重复受伤；连击在一次攻击内按武器 `combo_interval` 连续执行指定轮数，期间拒绝新攻击并在末轮结束后启动正式冷却。散射和连击不会额外触发能量、耐久或玩家后坐力结算。
 
 近战攻击流程为：玩家输入右键 -> `PlayerController` 读取当前近战武器并拒绝损坏武器 -> 检查能量 -> 成功开启命中框 -> 扣除能量；非训练场且未开启调试免消耗时，再固定扣除 1 点武器耐久。
 
@@ -163,7 +163,7 @@
 
 ## 局外商店与锻造
 
-主菜单左下角依次提供背包、仓库、商店、锻造、炒股和矿场六个局外入口，每个入口使用独立全屏遮罩和可复用面板。`MainMenu` 只负责创建、显示和关闭面板，不直接执行购买、锻造、股票交易或矿场资产结算；隐藏面板不会响应 ESC，避免多个常驻面板同时消费同一输入事件。
+主菜单底部依次提供角色、背包、仓库、商店、锻造、炒股和矿场七个局外入口。角色使用独立场景系统，其余入口使用独立全屏遮罩和可复用面板；`MainMenu` 只负责场景导航或创建、显示和关闭面板，不直接执行购买、锻造、股票交易或矿场资产结算。隐藏面板不会响应 ESC，避免多个常驻面板同时消费同一输入事件。
 
 全项目窗口视觉由无业务依赖的 `UiStyleGuide` 统一生成。主菜单、角色选择、局外背包、仓库、商店、锻造、股市、矿场、战斗背包、暂停菜单、地图、物资撤离、结算和开发者菜单共享深蓝黑背景、青蓝描边、圆角、冷色按钮、深色输入框、青蓝滑条与滚动条；顶层窗口和内部子分区使用不同边框强度。所有玩家可操作滑条额外挂载 `ProgressSliderVisual`，以深色完整轨道、青蓝已完成轨道和圆形滑块明确显示当前比例。业务面板只选择主操作、危险操作或普通导航语义，不得复制整套 `StyleBoxFlat`。完整颜色值、尺寸和接入规则见 `docs/ui_style.md`。
 
@@ -286,7 +286,7 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 - 环境生成：`environment_parent_path`、`obstacle_scenes`、`obstacle_spawn_count`、`obstacle_spawn_min_distance_from_player`、`obstacle_spawn_edge_margin`、`obstacle_spawn_min_spacing`、`obstacle_spawn_attempts_per_item`、`obstacle_scale_min`、`obstacle_scale_max`
 - 角色占位属性：`stelle_max_health`、`stelle_max_energy`、`stelle_move_speed`、`caelus_max_health`、`caelus_max_energy`、`caelus_move_speed`、`silver_wolf_max_health`、`silver_wolf_max_energy`、`silver_wolf_move_speed`
 - 武器数据：`weapon_type`、`sell_price`、`max_durability`、`current_durability`、`energy_cost`、`projectile_speed`、`bullet_range`、`ranged_damage`、`ranged_cooldown`、`spread_degrees`、`recoil_force`、`front_recoil_force`、`impact_force`、`melee_damage`、`melee_cooldown`、`melee_active_duration`
-- 主菜单入口：`character_select_scene_path`、`WarehouseButton`、`ShopButton`、`ForgeButton`、`DEVELOPER_UNLOCK_SEQUENCE`
+- 主菜单入口：`character_select_scene_path`、`game_scene_path`、`CharacterButton`、`WarehouseButton`、`ShopButton`、`ForgeButton`、`DEVELOPER_UNLOCK_SEQUENCE`
 - 全局仓库：`SAVE_PATH`、`DEFAULT_RANGED_SLOT_COUNT`、`WEAPON_RESOURCE_PATHS`、`DEFAULT_BACKPACK_WEAPON_IDS`、`DEFAULT_RANGED_WEAPON_IDS`、`DEFAULT_MELEE_WEAPON_ID`、`DEFAULT_STARTING_COINS`
 - 仓库与开发者面板：`panel_minimum_size`、`dialog_width`、`dialog_height`、`dialog_background_alpha`、`combat_panel_height`、`coin_step`、`enhancement_stone_grant_count`
 - 商店：`automatic_refresh_interval_seconds`、`weapon_stock_count`、`melee_weapon_stock_count`、`ranged_weapon_stock_count`、`equipment_stock_count`、`resource_stock_count`、`item_stock_count`、`normal_price_multiplier_minimum`、`normal_price_multiplier_maximum`、`second_hand_firearm_chance`、`second_hand_durability_consumption_minimum`、`second_hand_durability_consumption_maximum`、`second_hand_enhancement_cumulative_chances`、`second_hand_stone_compatibility_attempts`、`manual_refresh_base_cost`、`manual_refresh_cost_growth`、`manual_refresh_maximum_cost`、`gray_market_price_multiplier_minimum`、`gray_market_price_multiplier_maximum`、`gray_market_failure_limit`、`weapon_resource_paths`、`equipment_resource_paths`、`item_resource_paths`
@@ -295,7 +295,7 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 - 拖动条 UI：`ProgressSliderVisual.minimum_slider_height`、`ProgressSliderVisual.track_width`、`ProgressSliderVisual.handle_radius`、`ProgressSliderVisual.track_background_color`、`ProgressSliderVisual.track_border_color`、`ProgressSliderVisual.progress_color`、`ProgressSliderVisual.progress_highlight_color`、`ProgressSliderVisual.handle_border_color`、`ProgressSliderVisual.handle_fill_color`、`ProgressSliderVisual.disabled_progress_color`
 - 宝箱：`loot_chest_spawn_count_min`、`loot_chest_spawn_count_max`、`loot_chest_near_building_chance`、`loot_chest_enclosed_building_weight`、`loot_chest_spawn_attempt_count`、`loot_chest_min_distance_from_player`、`loot_chest_clearance_radius`、`loot_chest_minimum_spacing`、`loot_chest_manual_drop_radius_min`、`loot_chest_manual_drop_radius_max`、`loot_chest_broken_drop_radius_min`、`loot_chest_broken_drop_radius_max`、`loot_chest_launch_duration_min`、`loot_chest_launch_duration_max`、`loot_chest_launch_arc_height_min`、`loot_chest_launch_arc_height_max`、`interaction_radius`、`minimum_hold_duration`、`LootChest.QUALITY_WEIGHTS`、`LootChest.QUALITY_CONFIGS`、`CHEST_HIGH_QUALITY_CHANCES`
 - 物资撤离：`supply_extraction_count_weights`、`supply_extraction_hold_duration_seconds`、`supply_extraction_radius`、`supply_extraction_spawn_edge_margin`、`supply_extraction_min_distance_from_player`、`supply_extraction_spawn_attempt_count`、`COMBAT_SHIPPING_VALUE_LIMIT`、`COMBAT_SHIPPING_FEE_RATIO`
-- 角色选择：`game_scene_path`、`main_menu_scene_path`、`stat_bar_maximum`、`speed_bar_maximum`
+- 独立角色系统：`main_menu_scene_path`、`stat_bar_maximum`、`speed_bar_maximum`
 - 输入绑定：`SAVE_PATH`、`EVENT_TYPE_UNBOUND`、`_action_entries`
 - HUD：`DROP_LIST_COMBAT_SUPPRESSION_DURATION`、`DEVELOPER_UNLOCK_SEQUENCE`、`ranged_slot_minimum_size`、`melee_slot_minimum_size`、`inventory_slot_minimum_size`、`inventory_click_press_scale`、`inventory_click_bounce_scale`、`inventory_click_press_duration`、`inventory_click_release_duration`、`inventory_drag_source_scale`、`inventory_drag_source_opacity`、`inventory_drag_preview_start_scale`、`inventory_drag_preview_pulse_scale`、`inventory_drag_preview_pulse_duration`、`inventory_drag_preview_tilt_radians`、`combat_developer_menu_half_size`、`toggle_inventory_action`、`toggle_large_map_action`、`pause_action`、`pickup_action`、`toggle_drop_list_action`、`extraction_action`、`nearby_drop_pickup_range`、`max_nearby_drop_buttons`、`nearby_drop_refresh_interval`、`nearby_drop_expanded_height`、`nearby_drop_collapsed_height`、`main_menu_scene_path`
 - 按键绑定面板：`title_text`、`list_minimum_height`

@@ -41,7 +41,7 @@ unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.721569, 0.894118, 1, 1)
 theme_override_font_sizes/font_size = 30
-text = "骇入 - 角色选择"
+text = "角色系统"
 horizontal_alignment = 1
 
 [node name="MainColumns" type="HBoxContainer" parent="RootMargin/RootContent"]
@@ -223,4 +223,4 @@ text = "返回"
 unique_name_in_owner = true
 custom_minimum_size = Vector2(180, 44)
 layout_mode = 2
-text = "进入骇入"
+text = "确认选择"

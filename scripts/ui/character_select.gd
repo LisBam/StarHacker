@@ -1,7 +1,7 @@
 extends Control
 
-## 角色选择场景负责在骇入或训练场开始前确认当前角色。
-## 左侧按钮只切换当前查看目标，右侧详情面板展示角色定位、说明、占位数值和后续技能入口。
+## 独立角色系统负责查看和确认当前角色，不再作为进入骇入或训练场的前置步骤。
+## 左侧按钮只切换当前查看目标，右侧详情面板展示角色定位、基础数值和后续技能入口。
 
 ## 星角色标识；默认与 SessionState 保持一致，修改会影响星按钮的选择目标。
 const CHARACTER_STELLE: String = "stelle"
@@ -12,8 +12,6 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 ## 全局窗口样式指南；统一角色列表、详情分区、属性条和底部操作按钮的视觉。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 
-## 游戏场景路径；默认进入当前战斗承载场景，只允许填写 tscn 资源，运行时通常不动态修改。
-@export_file("*.tscn") var game_scene_path: String = "res://scenes/game/game_world.tscn"
 ## 主菜单场景路径；默认返回项目主菜单，只允许填写 tscn 资源，运行时通常不动态修改。
 @export_file("*.tscn") var main_menu_scene_path: String = "res://scenes/ui/main_menu.tscn"
 ## 数值条显示上限；取值应大于 0，默认 200 覆盖当前占位生命和能量范围，修改会影响详情面板条形比例。
@@ -84,10 +82,8 @@ func _ready() -> void:
 
 
 func _refresh_title() -> void:
-	# 当前模式显示名；取值来自 SessionState，默认骇入，用于标题和确认按钮文案。
-	var mode_label: String = _get_session_game_mode_label()
-	_title_label.text = "%s - 角色选择" % mode_label
-	_confirm_button.text = "进入%s" % mode_label
+	_title_label.text = "角色系统"
+	_confirm_button.text = "确认选择"
 
 
 func _select_character(character_id: String) -> void:
@@ -149,21 +145,6 @@ func _get_session_selected_character_id() -> String:
 	return _normalize_character_id(str(session_state.get("selected_character_id")))
 
 
-func _get_session_game_mode_label() -> String:
-	# 会话状态节点；默认由自动加载提供，缺失时按骇入显示。
-	var session_state: Node = _get_session_state()
-	if session_state == null:
-		return "骇入"
-
-	if session_state.has_method("get_game_mode_label"):
-		return str(session_state.call("get_game_mode_label"))
-
-	if session_state.has_method("is_training_mode") and bool(session_state.call("is_training_mode")):
-		return "训练场"
-
-	return "骇入"
-
-
 func _get_character_profile(character_id: String) -> Dictionary:
 	# 会话状态节点；默认由自动加载提供，缺失时使用本地最小兜底档案。
 	var session_state: Node = _get_session_state()
@@ -222,7 +203,7 @@ func _on_silver_wolf_button_pressed() -> void:
 
 func _on_confirm_button_pressed() -> void:
 	_set_session_selected_character(_selected_character_id)
-	_change_scene_with_transition(game_scene_path)
+	_change_scene_with_transition(main_menu_scene_path)
 
 
 func _on_back_button_pressed() -> void:

@@ -72,6 +72,8 @@ const DIALOG_TITLE_FONT_SIZE: int = 14
 const DIALOG_TITLE_SIDE_PADDING: float = 34.0
 ## 自定义弹窗关闭按钮边长；默认 26 像素，在紧凑标题栏内保持清晰点击区域，运行时无需动态修改。
 const DIALOG_CLOSE_BUTTON_SIZE: float = 26.0
+## 滚动条可交互厚度；固定 14 像素，避免仅设置颜色样式时引擎把无图标滚动条压缩为 0 像素。
+const SCROLLBAR_THICKNESS: float = 14.0
 ## 自定义弹窗标题栏背景；固定完全不透明的深蓝色，避免最外层标题区域透出场景背景。
 const DIALOG_TITLE_BACKGROUND_COLOR: Color = Color(0.025, 0.045, 0.065, 1.0)
 
@@ -197,12 +199,19 @@ static func create_theme() -> Theme:
 	interface_theme.set_stylebox("slider", "HSlider", slider_track_style)
 	interface_theme.set_stylebox("grabber_area", "HSlider", slider_fill_style)
 	interface_theme.set_stylebox("grabber_area_highlight", "HSlider", _create_flat_style(Color(0.12, 0.62, 0.74, 1.0), Color.WHITE, 1, 3))
-	# 滚动条轨道；保持低对比，避免商品和物品列表被滚动条抢占注意力。
-	var scroll_track_style: StyleBoxFlat = _create_flat_style(Color(0.018, 0.032, 0.042, 0.72), Color.TRANSPARENT, 0, 4)
+	# 水平滚动条轨道；上下内容边距共同形成固定可交互高度。
+	var horizontal_scroll_track_style: StyleBoxFlat = _create_flat_style(Color(0.018, 0.032, 0.042, 0.72), Color.TRANSPARENT, 0, 4)
+	horizontal_scroll_track_style.content_margin_top = SCROLLBAR_THICKNESS * 0.5
+	horizontal_scroll_track_style.content_margin_bottom = SCROLLBAR_THICKNESS * 0.5
+	# 垂直滚动条轨道；左右内容边距共同形成固定可交互宽度，确保滑块可见且可直接拖动。
+	var vertical_scroll_track_style: StyleBoxFlat = _create_flat_style(Color(0.018, 0.032, 0.042, 0.72), Color.TRANSPARENT, 0, 4)
+	vertical_scroll_track_style.content_margin_left = SCROLLBAR_THICKNESS * 0.5
+	vertical_scroll_track_style.content_margin_right = SCROLLBAR_THICKNESS * 0.5
 	# 滚动条滑块；默认青灰色，悬停和按压时提高亮度。
 	var scroll_grabber_style: StyleBoxFlat = _create_flat_style(Color(0.18, 0.40, 0.48, 0.92), Color(0.28, 0.58, 0.68, 0.92), 1, 4)
+	interface_theme.set_stylebox("scroll", "HScrollBar", horizontal_scroll_track_style)
+	interface_theme.set_stylebox("scroll", "VScrollBar", vertical_scroll_track_style)
 	for scroll_type in ["HScrollBar", "VScrollBar"]:
-		interface_theme.set_stylebox("scroll", scroll_type, scroll_track_style)
 		interface_theme.set_stylebox("grabber", scroll_type, scroll_grabber_style)
 		interface_theme.set_stylebox("grabber_highlight", scroll_type, _create_flat_style(Color(0.24, 0.58, 0.68, 1.0), ACCENT_COLOR, 1, 4))
 		interface_theme.set_stylebox("grabber_pressed", scroll_type, _create_flat_style(Color(0.12, 0.34, 0.42, 1.0), ACCENT_COLOR, 1, 4))

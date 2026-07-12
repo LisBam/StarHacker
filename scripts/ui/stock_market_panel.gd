@@ -63,11 +63,11 @@ var _sell_button: Button
 ## 顶部事件滚动提示；收到事件信号后显示并在 3 秒内线性淡出。
 var _event_banner: Label
 ## 数量选择弹窗；同一实例在买入和卖出模式间复用。
-var _quantity_dialog: ConfirmationDialog
+var _quantity_dialog: SellQuantityDialog
 ## 最终交易确认弹窗；确认后调用服务执行原子交易。
-var _confirmation_dialog: ConfirmationDialog
+var _confirmation_dialog: CommonConfirmationDialog
 ## 证券币转账弹窗；同一实例复用充值和提现模式，实际资产变更由股市服务执行。
-var _securities_transfer_dialog: ConfirmationDialog
+var _securities_transfer_dialog: SecuritiesTransferDialog
 ## 当前待确认交易类型；取值 buy、sell 或空字符串。
 var _pending_trade_type: String = ""
 ## 当前待确认股票标识；数量选择时缓存，避免玩家切换卡片后交易目标变化。
@@ -266,15 +266,15 @@ func _build_interface() -> void:
 	_empty_holdings_label.custom_minimum_size = Vector2(260.0, 72.0)
 	_empty_holdings_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_holdings_container.add_child(_empty_holdings_label)
-	_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as ConfirmationDialog
+	_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as SellQuantityDialog
 	_quantity_dialog.connect("quantity_confirmed", Callable(self, "_on_trade_quantity_confirmed"))
 	_quantity_dialog.canceled.connect(_on_trade_canceled)
 	add_child(_quantity_dialog)
-	_confirmation_dialog = COMMON_CONFIRMATION_DIALOG_SCRIPT.new() as ConfirmationDialog
+	_confirmation_dialog = COMMON_CONFIRMATION_DIALOG_SCRIPT.new() as CommonConfirmationDialog
 	_confirmation_dialog.confirmed.connect(_on_trade_confirmed)
 	_confirmation_dialog.canceled.connect(_on_trade_canceled)
 	add_child(_confirmation_dialog)
-	_securities_transfer_dialog = SECURITIES_TRANSFER_DIALOG_SCRIPT.new() as ConfirmationDialog
+	_securities_transfer_dialog = SECURITIES_TRANSFER_DIALOG_SCRIPT.new() as SecuritiesTransferDialog
 	_securities_transfer_dialog.connect("transfer_confirmed", Callable(self, "_on_securities_transfer_confirmed"))
 	add_child(_securities_transfer_dialog)
 
@@ -547,7 +547,7 @@ func _on_securities_deposit_pressed() -> void:
 	if maximum_amount <= 0:
 		_show_event_banner("当前没有可充值的金币")
 		return
-	_securities_transfer_dialog.call("present_deposit", maximum_amount)
+	_securities_transfer_dialog.present_deposit(maximum_amount)
 
 
 func _on_securities_withdrawal_pressed() -> void:
@@ -563,7 +563,7 @@ func _on_securities_withdrawal_pressed() -> void:
 		return
 	# 当前提现手续费比例；由服务统一配置，输入弹窗只用于预览到账金币。
 	var withdrawal_fee_ratio: float = float(_stock_market_service.call("get_withdrawal_fee_ratio"))
-	_securities_transfer_dialog.call("present_withdrawal", maximum_amount, withdrawal_fee_ratio, minimum_amount)
+	_securities_transfer_dialog.present_withdrawal(maximum_amount, withdrawal_fee_ratio, minimum_amount)
 
 
 func _on_securities_transfer_confirmed(amount: int, is_deposit: bool) -> void:
@@ -589,7 +589,7 @@ func _begin_quantity_selection(trade_type: String, maximum_quantity: int) -> voi
 	var available_coins: float = float(_stock_market_service.call("get_securities_balance"))
 	# 股票手续费比例；由服务配置提供，确保数量弹窗预览与最终结算使用同一数值来源。
 	var fee_ratio: float = float(_stock_market_service.call("get_stock_trade_fee_ratio"))
-	_quantity_dialog.call("present_stock_trade", str(snapshot.get("name", "股票")), maximum_quantity, _pending_unit_price, trade_type == "buy", available_coins, fee_ratio)
+	_quantity_dialog.present_stock_trade(str(snapshot.get("name", "股票")), maximum_quantity, _pending_unit_price, trade_type == "buy", available_coins, fee_ratio)
 
 
 func _on_trade_quantity_confirmed(quantity: int) -> void:
@@ -605,7 +605,7 @@ func _on_trade_quantity_confirmed(quantity: int) -> void:
 	var action_name: String = "买入" if _pending_trade_type == "buy" else "卖出"
 	# 确认正文；完整列出股票、数量、实时单价、手续费、金额和支付状态。
 	var message: String = _build_trade_confirmation_message(snapshot, quote)
-	_confirmation_dialog.call("present", "确认%s" % action_name, message, "确认%s" % action_name, "取消", 480, trade_confirmation_dialog_height, bool(quote.get("executable", false)))
+	_confirmation_dialog.present("确认%s" % action_name, message, "确认%s" % action_name, "取消", 480, trade_confirmation_dialog_height, bool(quote.get("executable", false)))
 
 
 func _on_trade_confirmed() -> void:
@@ -645,7 +645,7 @@ func _refresh_pending_trade_dialog() -> void:
 	if _quantity_dialog != null and _quantity_dialog.visible:
 		# 数量弹窗实时上限；买入按当前价和余额计算，卖出按当前持仓计算。
 		var maximum_quantity: int = int(_stock_market_service.call("get_maximum_buy_quantity", _pending_stock_id)) if _pending_trade_type == "buy" else int(_get_holding(_pending_stock_id).get("quantity", 0))
-		_quantity_dialog.call("update_stock_trade", _pending_unit_price, maximum_quantity, available_coins)
+		_quantity_dialog.update_stock_trade(_pending_unit_price, maximum_quantity, available_coins)
 		return
 	if _confirmation_dialog == null or not _confirmation_dialog.visible or _pending_quantity <= 0:
 		return
@@ -653,7 +653,7 @@ func _refresh_pending_trade_dialog() -> void:
 	var quote: Dictionary = _stock_market_service.call("get_trade_quote", _pending_stock_id, _pending_quantity, _pending_trade_type) as Dictionary
 	# 待交易股票快照；提供稳定显示名称，交易目标始终使用缓存股票标识。
 	var snapshot: Dictionary = _stock_market_service.call("get_stock_snapshot", _pending_stock_id) as Dictionary
-	_confirmation_dialog.call("update_confirmation_message", _build_trade_confirmation_message(snapshot, quote), bool(quote.get("executable", false)))
+	_confirmation_dialog.update_confirmation_message(_build_trade_confirmation_message(snapshot, quote), bool(quote.get("executable", false)))
 
 
 func _build_trade_confirmation_message(snapshot: Dictionary, quote: Dictionary) -> String:

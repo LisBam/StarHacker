@@ -43,7 +43,7 @@ var _backpack_grid: GridContainer
 ## 标准物品操作弹窗；根据堆叠数量显示“送回仓库”或“全部/部分送回仓库”。
 var _action_menu: ItemActionPopup
 ## 数量选择弹窗；部分送回仓库时显示价值、运费和送回后剩余额度。
-var _quantity_dialog: ConfirmationDialog
+var _quantity_dialog: SellQuantityDialog
 ## 当前操作物品；默认 null，菜单关闭不会改变所有权。
 var _action_resource: Resource
 ## 当前操作来源；取值为 backpack、ranged_N 或 melee，默认空字符串。
@@ -172,7 +172,7 @@ func _build_interface() -> void:
 	_action_menu = ITEM_ACTION_POPUP_SCRIPT.new() as ItemActionPopup
 	_action_menu.action_pressed.connect(_on_action_menu_id_pressed)
 	add_child(_action_menu)
-	_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as ConfirmationDialog
+	_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as SellQuantityDialog
 	_quantity_dialog.connect("quantity_confirmed", Callable(self, "_on_quantity_confirmed"))
 	add_child(_quantity_dialog)
 
@@ -269,7 +269,7 @@ func _on_item_action_requested(item_resource: Resource, source_location: String,
 		_action_menu.add_action("部分送回仓库", ACTION_SEND_PARTIAL)
 	else:
 		_action_menu.add_action("送回仓库", ACTION_SEND_ALL)
-	_action_menu.popup_at(get_viewport().get_mouse_position())
+	_action_menu.present_at(get_viewport().get_mouse_position())
 
 
 func _on_action_menu_id_pressed(action_id: int) -> void:
@@ -286,7 +286,7 @@ func _on_action_menu_id_pressed(action_id: int) -> void:
 		_pending_partial_source_location = _action_source_location
 		# 单件物品价值；武器使用强化和耐久后的有效售价，资源使用固定售价。
 		var unit_value: int = int(_action_resource.call("get_effective_sell_price")) if _action_resource.has_method("get_effective_sell_price") else maxi(int(_action_resource.get("sell_price")), 0)
-		_quantity_dialog.call("present_shipping", str(_action_resource.get("display_name")), maximum_quantity, unit_value, int(_global_inventory.call("get_combat_shipping_remaining_value")), 0.20)
+		_quantity_dialog.present_shipping(str(_action_resource.get("display_name")), maximum_quantity, unit_value, int(_global_inventory.call("get_combat_shipping_remaining_value")), 0.20)
 
 
 func _get_maximum_shippable_quantity(item_resource: Resource, source_location: String, stored_quantity: int) -> int:

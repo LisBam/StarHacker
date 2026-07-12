@@ -57,7 +57,7 @@ var _backpack_drop_area: PanelContainer
 ## 标准物品操作弹窗；根据当前物品类型生成装备和丢弃功能按钮。
 var _action_popup: ItemActionPopup
 ## 部分丢弃数量弹窗；确认后从背包直接消费选择数量。
-var _quantity_dialog: ConfirmationDialog
+var _quantity_dialog: SellQuantityDialog
 ## 当前操作物品；弹窗关闭前保持精确资源实例引用。
 var _action_resource: Resource
 ## 当前操作物品真实数量；用于决定全部或部分丢弃入口。
@@ -246,7 +246,7 @@ func _build_interface() -> void:
 	_action_popup = ITEM_ACTION_POPUP_SCRIPT.new() as ItemActionPopup
 	_action_popup.action_pressed.connect(_on_action_pressed)
 	add_child(_action_popup)
-	_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as ConfirmationDialog
+	_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as SellQuantityDialog
 	_quantity_dialog.connect("quantity_confirmed", Callable(self, "_on_quantity_confirmed"))
 	add_child(_quantity_dialog)
 	_status_label = Label.new()
@@ -440,7 +440,7 @@ func _on_item_pressed(item_resource: Resource) -> void:
 		_action_popup.add_action("部分丢弃", ACTION_DISCARD_PARTIAL, false, true)
 	else:
 		_action_popup.add_action("丢弃", ACTION_DISCARD_ALL, false, true)
-	_action_popup.popup_at(get_viewport().get_mouse_position())
+	_action_popup.present_at(get_viewport().get_mouse_position())
 
 
 func _on_action_pressed(action_id: int) -> void:
@@ -459,7 +459,7 @@ func _on_action_pressed(action_id: int) -> void:
 		_execute_discard(_action_resource, maxi(_action_quantity, 1))
 	elif action_id == ACTION_DISCARD_PARTIAL:
 		_pending_partial_resource = _action_resource
-		_quantity_dialog.call("present_discard", str(_action_resource.get("display_name")), maxi(_action_quantity, 1))
+		_quantity_dialog.present_discard(str(_action_resource.get("display_name")), maxi(_action_quantity, 1))
 	elif action_id == ACTION_UNEQUIP and not _action_equipment_location.is_empty():
 		_global_inventory.call("transfer_equipment_to_storage", _action_equipment_location, "backpack")
 	elif action_id == ACTION_USE_REPAIR_KIT and str(_action_resource.get("item_kind")) == "repair_kit":
@@ -482,7 +482,7 @@ func _on_equipment_selected(item_resource: Resource, equipment_location: String)
 	_action_quantity = 1
 	_action_popup.clear_actions()
 	_action_popup.add_action("卸下", ACTION_UNEQUIP)
-	_action_popup.popup_at(get_viewport().get_mouse_position())
+	_action_popup.present_at(get_viewport().get_mouse_position())
 
 
 func _on_item_drop_requested(drag_data: Dictionary, target_location: String, target_index: int) -> void:

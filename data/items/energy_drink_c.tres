@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ConsumableData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/consumable_data.gd" id="1_consumable"]
+
+[resource]
+script = ExtResource("1_consumable")
+item_id = "energy_drink_c"
+display_name = "C型能量饮料"
+description = "使用后提高5点每秒能量恢复持续60s。"
+icon_text = "C"
+value = 60
+effect_stat = "energy_regeneration"
+effect_amount = 5.0
+duration_seconds = 60.0

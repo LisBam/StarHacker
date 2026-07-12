@@ -1,0 +1,32 @@
+[gd_resource type="Resource" script_class="CaelusFirewallChargeSkillData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/caelus_firewall_charge_skill_data.gd" id="1_data"]
+[ext_resource type="Script" path="res://scripts/skills/caelus_firewall_charge_behavior.gd" id="2_behavior"]
+
+[resource]
+script = ExtResource("1_data")
+skill_id = "caelus_firewall_charge"
+display_name = "炎墙，冲锋！"
+description = "长按进行蓄力，朝指定方向持续冲锋持续1s，冲锋期间不可操控角色，且受到的伤害降低80%，期间撞击敌人造成10（+20%防御力）点威力的伤害并朝两侧击退敌人。至多蓄力2秒并延长等量时间的冲锋时长。"
+behavior_script = ExtResource("2_behavior")
+targeting_mode = 0
+directional_input_mode = 0
+cooldown_duration = 20.0
+energy_cost = 0.0
+cast_range = 240.0
+directional_half_angle_degrees = 12.0
+target_group = &"skill_targets"
+target_requires_damage_method = true
+target_requires_line_of_sight = false
+can_charge = true
+maximum_charge_duration = 2.0
+charge_movement_speed_multiplier = 1.0
+target_marker_radius = 18.0
+base_charge_duration = 1.0
+bonus_move_speed_attribute = 150.0
+charge_damage_reduction_ratio = 0.8
+base_damage = 10.0
+defense_power_ratio = 0.2
+impact_force = 50.0
+collision_radius = 42.0
+damage_formula_attack_power = 100.0

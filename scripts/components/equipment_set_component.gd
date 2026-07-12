@@ -74,9 +74,34 @@ static func calculate_active_attribute_bonuses(armor_equipment: Dictionary) -> D
 	return accumulated_bonuses
 
 
+static func calculate_active_attribute_multipliers(armor_equipment: Dictionary) -> Dictionary:
+	## 汇总全部已触发套装的最终属性比例；多个套装提供同一属性时比例直接相加，再由属性组件统一乘算。
+	var accumulated_multipliers: Dictionary = {}
+	for raw_set_state in collect_active_set_states(armor_equipment).values():
+		# 当前套装状态；包含套装资源和有效件数，异常类型安全跳过。
+		var set_state: Dictionary = raw_set_state as Dictionary
+		# 套装数据；只有实现倍率查询接口的资源参与，旧套装继续保持原有直接属性效果。
+		var equipment_set: Resource = set_state.get("set_data") as Resource
+		if equipment_set == null or not equipment_set.has_method("get_attribute_multipliers"):
+			continue
+		# 当前套装倍率；达到的低档位与高档位已经在数据资源内累计。
+		var set_multipliers: Dictionary = equipment_set.call("get_attribute_multipliers", int(set_state.get("piece_count", 0))) as Dictionary
+		for raw_stat_name in set_multipliers.keys():
+			# 属性稳定名称；空键跳过，比例允许为正负值以支持风险型套装。
+			var stat_name: String = str(raw_stat_name).strip_edges()
+			if not stat_name.is_empty():
+				accumulated_multipliers[stat_name] = float(accumulated_multipliers.get(stat_name, 0.0)) + float(set_multipliers.get(raw_stat_name, 0.0))
+	return accumulated_multipliers
+
+
 func get_active_attribute_bonuses(armor_equipment: Dictionary) -> Dictionary:
 	## 为玩家装备组件提供实例接口；内部复用纯静态计算，便于局外 UI 与无头测试使用相同规则。
 	return calculate_active_attribute_bonuses(armor_equipment)
+
+
+func get_active_attribute_multipliers(armor_equipment: Dictionary) -> Dictionary:
+	## 为玩家战斗属性组件提供最终属性比例快照；内部复用纯静态计算，UI 和无头验证可得到相同结果。
+	return calculate_active_attribute_multipliers(armor_equipment)
 
 
 func roll_manual_chest_extra_drop_count(random_source: RandomNumberGenerator) -> int:
@@ -95,6 +120,64 @@ func roll_manual_chest_extra_drop_count(random_source: RandomNumberGenerator) ->
 			continue
 		extra_drop_count += maxi(int(equipment_set.call("roll_manual_chest_extra_drop_count", int(set_state.get("piece_count", 0)), random_source)), 0)
 	return extra_drop_count
+
+
+func get_contextual_movement_speed_multiplier(player_position: Vector2, movement_direction: Vector2) -> float:
+	## 返回当前朝附近掉落物移动时的综合移速倍率；不同套装分别触发并连乘，未触发固定返回 1。
+	if movement_direction.is_zero_approx():
+		return 1.0
+	# 综合移速倍率；每个已激活套装按 1+比例连乘，避免一个套装覆盖另一个套装效果。
+	var combined_multiplier: float = 1.0
+	for effect in _get_triggered_nearby_drop_effects(player_position, movement_direction):
+		combined_multiplier *= 1.0 + maxf(float(effect.get("move_speed_bonus_ratio", 0.0)), 0.0)
+	return maxf(combined_multiplier, 0.0)
+
+
+func get_contextual_damage_reduction_ratio(player_position: Vector2, movement_direction: Vector2) -> float:
+	## 返回当前朝附近掉落物移动时的综合减伤比例；不同套装按剩余伤害连乘后换算回单一比例。
+	if movement_direction.is_zero_approx():
+		return 0.0
+	# 剩余伤害倍率；初始 1，每项减伤按 1-ratio 连乘，最终用 1-结果转换为综合减伤。
+	var received_damage_multiplier: float = 1.0
+	for effect in _get_triggered_nearby_drop_effects(player_position, movement_direction):
+		received_damage_multiplier *= 1.0 - clampf(float(effect.get("damage_reduction_ratio", 0.0)), 0.0, 1.0)
+	return clampf(1.0 - received_damage_multiplier, 0.0, 1.0)
+
+
+func _get_triggered_nearby_drop_effects(player_position: Vector2, movement_direction: Vector2) -> Array[Dictionary]:
+	## 收集当前方向确实指向至少一个附近掉落物的四件套效果；掉落物必须仍在 item_drops 组且位于配置半径内。
+	# 触发效果结果；每个套装最多追加一次，即使范围内存在多个掉落物也不会重复叠加自身效果。
+	var triggered_effects: Array[Dictionary] = []
+	# 标准移动方向；零向量已由调用方过滤，归一化后只比较朝向点积是否大于零。
+	var normalized_movement_direction: Vector2 = movement_direction.normalized()
+	# 当前防具套装状态；统一排除损坏部件并按稳定 set_id 聚合。
+	var active_set_states: Dictionary = collect_active_set_states(_get_armor_equipment_resources())
+	for raw_set_state in active_set_states.values():
+		# 当前套装状态；提供套装资源与有效件数，异常资源安全跳过。
+		var set_state: Dictionary = raw_set_state as Dictionary
+		# 套装数据；只有实现通用附近掉落物效果查询接口的资源才参与方向判定。
+		var equipment_set: Resource = set_state.get("set_data") as Resource
+		if equipment_set == null or not equipment_set.has_method("get_nearby_drop_effect"):
+			continue
+		# 当前效果参数；未达到四件门槛时资源返回空词典。
+		var effect: Dictionary = equipment_set.call("get_nearby_drop_effect", int(set_state.get("piece_count", 0))) as Dictionary
+		if effect.is_empty():
+			continue
+		# 检测半径平方；平方距离比较避免每个掉落物重复开方。
+		var detection_radius_squared: float = pow(maxf(float(effect.get("detection_radius", 0.0)), 0.0), 2.0)
+		for raw_drop in get_tree().get_nodes_in_group("item_drops"):
+			# 掉落物节点；必须为有效 Node2D 且尚未排队删除，飞出动画期间不在组内因此不会触发。
+			var drop_node: Node2D = raw_drop as Node2D
+			if drop_node == null or not is_instance_valid(drop_node) or drop_node.is_queued_for_deletion():
+				continue
+			# 掉落物偏移；同位置目标没有可定义的移动方向，不触发朝向效果。
+			var drop_offset: Vector2 = drop_node.global_position - player_position
+			if drop_offset.is_zero_approx() or drop_offset.length_squared() > detection_radius_squared:
+				continue
+			if normalized_movement_direction.dot(drop_offset.normalized()) > 0.0:
+				triggered_effects.append(effect)
+				break
+	return triggered_effects
 
 
 func _get_armor_equipment_resources() -> Dictionary:

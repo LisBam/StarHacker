@@ -75,17 +75,17 @@ func _process(delta: float) -> void:
 			_finish_attack()
 
 
-func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
+func try_attack(direction: Vector2, weapon_data: Resource = null, attack_modifiers: Dictionary = {}) -> bool:
 	# 本次近战伤害；取值来自武器数据或组件默认值，默认 damage，修改会影响当前挥击命中伤害。
-	var selected_damage: float = _get_weapon_float(weapon_data, "melee_damage", damage)
+	var selected_damage: float = _get_weapon_attack_float(weapon_data, "damage", "melee", damage) * maxf(float(attack_modifiers.get("damage_multiplier", 1.0)), 0.0)
 	# 本次近战冷却；取值来自武器数据或组件默认值，默认 cooldown_duration，修改会影响下一次可近战时间。
 	var selected_cooldown: float = _get_weapon_float(weapon_data, "cooldown", cooldown_duration)
 	# 本次近战激活时长；取值来自武器数据或组件默认值，默认 active_duration，修改会影响命中框持续时间。
 	var selected_active_duration: float = _get_weapon_float(weapon_data, "melee_active_duration", active_duration)
 	# 本次近战攻击距离；表示判定区域沿攻击方向的最远端与玩家本体的距离，强化后会动态改变碰撞范围。
-	var selected_attack_distance: float = _get_weapon_float(weapon_data, "attack_distance", attack_distance)
+	var selected_attack_distance: float = _get_weapon_attack_float(weapon_data, "attack_distance", "melee", attack_distance)
 	# 本次近战冲击力；取值来自武器数据，单位为目标单次无碰撞理论位移像素，默认 0 表示只造成伤害不击退。
-	var selected_impact_force: float = _get_weapon_float(weapon_data, "impact_force", 0.0)
+	var selected_impact_force: float = _get_weapon_attack_float(weapon_data, "impact_force", "melee", 0.0) * maxf(float(attack_modifiers.get("impact_multiplier", 1.0)), 0.0)
 	# 本次武器暴击率；默认 0，不同近战武器可配置不同初始值。
 	var selected_critical_chance: float = clampf(_get_weapon_float(weapon_data, "critical_chance", 0.0) + _get_stats_float("get_equipment_critical_chance", 0.0), 0.0, EnhancementRules.CRITICAL_CHANCE_MAXIMUM)
 	# 本次武器暴击伤害；默认 1.5 表示 150%。
@@ -239,6 +239,17 @@ func _get_weapon_float(weapon_data: Resource, property_name: StringName, fallbac
 		return fallback_value
 
 	return float(property_value)
+
+
+func _get_weapon_attack_float(weapon_data: Resource, stat_name: String, attack_mode: String, fallback_value: float) -> float:
+	## 读取指定远近战通道的有效属性；混合武器由资源返回独立基础值与共享强化结果，旧资源继续使用普通有效属性接口。
+	if weapon_data == null:
+		return fallback_value
+	if weapon_data.has_method("get_effective_attack_stat"):
+		return float(weapon_data.call("get_effective_attack_stat", stat_name, attack_mode))
+	# 旧属性名；伤害在资源中以 melee_damage 保存，其余字段保持通用名称。
+	var legacy_property_name: String = "melee_damage" if stat_name == "damage" else stat_name
+	return _get_weapon_float(weapon_data, legacy_property_name, fallback_value)
 
 
 func _get_owner_attack_power() -> float:

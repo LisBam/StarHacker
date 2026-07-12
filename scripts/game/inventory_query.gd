@@ -95,15 +95,15 @@ static func _matches_category(entry: Dictionary, primary_category: String, subca
 	if primary_category == PRIMARY_ALL:
 		return subcategory == SUBCATEGORY_ALL
 	if primary_category == PRIMARY_WEAPONS:
-		if weapon_type not in [SUBCATEGORY_MELEE, SUBCATEGORY_RANGED]:
+		if weapon_type not in [SUBCATEGORY_MELEE, SUBCATEGORY_RANGED, "hybrid"]:
 			return false
-		return subcategory == SUBCATEGORY_ALL or weapon_type == subcategory
+		return subcategory == SUBCATEGORY_ALL or weapon_type == subcategory or (weapon_type == "hybrid" and subcategory in [SUBCATEGORY_MELEE, SUBCATEGORY_RANGED])
 	if primary_category == PRIMARY_EQUIPMENT:
 		return item_kind == "equipment" and (subcategory == SUBCATEGORY_ALL or str(item_resource.get("equipment_slot")) == subcategory)
 	if primary_category == PRIMARY_RESOURCES:
-		if item_kind in ["weapon", "equipment"] or weapon_type in [SUBCATEGORY_MELEE, SUBCATEGORY_RANGED]:
+		if item_kind in ["weapon", "equipment"] or weapon_type in [SUBCATEGORY_MELEE, SUBCATEGORY_RANGED, "hybrid"]:
 			return false
-		return subcategory == SUBCATEGORY_ALL or (subcategory == SUBCATEGORY_ENHANCEMENT_STONES and item_kind == "enhancement_stone") or (subcategory == SUBCATEGORY_ITEMS and item_kind == "repair_kit")
+		return subcategory == SUBCATEGORY_ALL or (subcategory == SUBCATEGORY_ENHANCEMENT_STONES and item_kind == "enhancement_stone") or (subcategory == SUBCATEGORY_ITEMS and item_kind in ["repair_kit", "consumable"])
 	return false
 
 
@@ -172,8 +172,10 @@ static func _build_search_text(entry: Dictionary) -> String:
 		search_parts.append("武器 近战")
 	elif weapon_type == SUBCATEGORY_RANGED:
 		search_parts.append("武器 远程")
+	elif weapon_type == "hybrid":
+		search_parts.append("武器 远程 近战 混合")
 	else:
-		search_parts.append("资源 强化石" if str(item_resource.get("item_kind")) == "enhancement_stone" else ("资源 道具 修复包" if str(item_resource.get("item_kind")) == "repair_kit" else ("装备 头部 躯干 腿部 脚部" if str(item_resource.get("item_kind")) == "equipment" else "资源")))
+		search_parts.append("资源 强化石" if str(item_resource.get("item_kind")) == "enhancement_stone" else ("资源 道具 修复包" if str(item_resource.get("item_kind")) == "repair_kit" else ("资源 道具 消耗品" if str(item_resource.get("item_kind")) == "consumable" else ("装备 头部 躯干 腿部 脚部" if str(item_resource.get("item_kind")) == "equipment" else "资源"))))
 	if str(item_resource.get("item_kind")) == "enhancement_stone":
 		# 强化词典；将“伤害+”“冷却+”等可见词条加入搜索内容。
 		var modifiers: Dictionary = EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary)

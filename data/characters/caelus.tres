@@ -1,19 +1,23 @@
-[gd_resource type="Resource" script_class="CharacterData" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="CharacterData" load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/data/character_data.gd" id="1_character"]
+[ext_resource type="Resource" path="res://data/skills/caelus/scavenging.tres" id="2_scavenging"]
+[ext_resource type="Resource" path="res://data/skills/caelus/firewall_charge.tres" id="3_firewall_charge"]
 
 [resource]
 script = ExtResource("1_character")
 character_id = "caelus"
 display_name = "穹"
-role = "均衡型开拓者"
-description = "生命上限较高，能量上限偏低，适合测试更稳定的近距离战斗节奏。"
+role = "防御型开拓者"
+description = "以高生命与高防御承受正面压力，通过冲锋和拾荒收益强化近距离探索。"
 unlocked_by_default = true
-max_health = 150.0
-max_energy = 95.0
-move_speed = 100.0
-attack_power = 9.0
-defense_power = 10.0
+max_health = 120.0
+max_energy = 80.0
+move_speed = 90.0
+attack_power = 90.0
+defense_power = 120.0
 energy_regeneration = 18.0
-passive = "被动技能：待配置"
-active = "主动技能：待配置"
+passive = "拾荒：成功撤离时，获得地图上掉落物总价值20%的金币。"
+active = "炎墙，冲锋！：长按进行蓄力，朝指定方向持续冲锋持续1s，冲锋期间不可操控角色，且受到的伤害降低80%，期间撞击敌人造成10（+20%防御力）点威力的伤害并朝两侧击退敌人。至多蓄力2秒并延长等量时间的冲锋时长。"
+passive_skills = Array[Resource]([ExtResource("2_scavenging")])
+active_skills = Array[Resource]([ExtResource("3_firewall_charge")])

@@ -236,6 +236,10 @@ func _try_begin_skill(slot_index: int) -> void:
 		_update_targeting_visual()
 	if bool(skill_data.get("can_charge")) and _charge_bar != null and _charge_bar.has_method("show_charge"):
 		_charge_bar.call("show_charge")
+	# 施法者移动倍率；可蓄力技能可在资源中声明按住期间减速，来源 ID 保证结束时只移除自身效果。
+	var caster: Node = get_parent()
+	if bool(skill_data.get("can_charge")) and caster != null and caster.has_method("set_movement_speed_multiplier_source"):
+		caster.call("set_movement_speed_multiplier_source", "active_skill_charge:%s" % str(skill_data.get("skill_id")), clampf(float(skill_data.get("charge_movement_speed_multiplier")), 0.0, 1.0))
 	skill_aiming_started.emit(slot_index, skill_data)
 
 
@@ -297,6 +301,10 @@ func _cancel_active_skill(released: bool) -> void:
 	var slot_index: int = _active_slot_index
 	# 被结束的技能资源；角色切换清空槽位前仍可用于结束信号说明来源。
 	var skill_data: Resource = get_skill_resource(slot_index)
+	# 施法者节点；活动技能结束时先移除按住期间移动倍率，成功释放后的行为可独立添加持续效果。
+	var caster: Node = get_parent()
+	if skill_data != null and caster != null and caster.has_method("remove_movement_speed_multiplier_source"):
+		caster.call("remove_movement_speed_multiplier_source", "active_skill_charge:%s" % str(skill_data.get("skill_id")))
 	_active_slot_index = -1
 	_charge_elapsed = 0.0
 	_locked_target = null

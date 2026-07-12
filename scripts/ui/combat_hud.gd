@@ -735,7 +735,7 @@ func _rebuild_inventory_slots() -> void:
 		var source_index: int = int((raw_entry as Dictionary).get("source_index", visible_index))
 
 		visible_item_count += 1
-		if str(item_data.get("weapon_type")) not in ["ranged", "melee"]:
+		if str(item_data.get("weapon_type")) not in ["ranged", "melee", "hybrid"]:
 			# 资源数量；取值 1 到 99，强化石与修复包都使用资源方格显示。
 			var quantity: int = clampi(int((raw_entry as Dictionary).get("quantity", 1)), 1, 99)
 			# 资源方格；复用仓库控件的方形布局，修复包可点击或拖动到武器，强化石仅保留锻造材料属性。
@@ -1833,7 +1833,7 @@ func _can_pending_combat_repair_target(weapon_resource: Resource) -> bool:
 		return false
 	# 合法修复目标；武器与四部位装备都必须提供耐久字段。
 	var item_kind: String = str(weapon_resource.get("item_kind"))
-	if str(weapon_resource.get("weapon_type")) not in ["ranged", "melee"] and item_kind != "equipment":
+	if str(weapon_resource.get("weapon_type")) not in ["ranged", "melee", "hybrid"] and item_kind != "equipment":
 		return false
 	# 当前耐久；只有存在耐久缺口的武器才应被绿色高亮为修复包目标。
 	var current_durability: float = maxf(float(weapon_resource.get("current_durability")), 0.0)
@@ -2778,7 +2778,7 @@ func _on_combat_resource_action_requested(item_resource: Resource) -> void:
 	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
 	_combat_action_item_quantity = int(global_inventory.call("get_storage_resource_quantity", item_resource, "backpack")) if global_inventory != null and global_inventory.has_method("get_storage_resource_quantity") else 1
 	_inventory_item_action_menu.clear_actions()
-	if str(item_resource.get("item_kind")) == "repair_kit":
+	if str(item_resource.get("item_kind")) in ["repair_kit", "consumable"]:
 		_inventory_item_action_menu.add_action("使用", INVENTORY_ITEM_ACTION_USE)
 	_add_inventory_discard_actions(_combat_action_item_quantity)
 	_inventory_item_action_menu.present_at(get_viewport().get_mouse_position())
@@ -2786,6 +2786,18 @@ func _on_combat_resource_action_requested(item_resource: Resource) -> void:
 
 func _on_inventory_item_action_menu_id_pressed(action_id: int) -> void:
 	if action_id == INVENTORY_ITEM_ACTION_USE and _combat_action_stone_resource != null:
+		if str(_combat_action_stone_resource.get("item_kind")) == "consumable":
+			# 临时增益组件；只有效果成功应用后才从背包原子扣除一个道具，异常配置不会造成物品丢失。
+			var temporary_buff_component: Node = _player.get_node_or_null("TemporaryBuffComponent") if _player != null else null
+			# 全局库存服务；消耗品与修复包共用背包堆叠数量，但不进入耐久目标选择流程。
+			var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+			if temporary_buff_component != null and temporary_buff_component.has_method("apply_consumable") and bool(temporary_buff_component.call("apply_consumable", _combat_action_stone_resource)) and global_inventory != null and global_inventory.has_method("consume_storage_resource_quantity"):
+				global_inventory.call("consume_storage_resource_quantity", _combat_action_stone_resource, "backpack", 1)
+			_combat_action_stone_resource = null
+			_combat_action_item_quantity = 1
+			if _shared_backpack_panel != null:
+				_shared_backpack_panel.refresh()
+			return
 		_pending_combat_stone_resource = _combat_action_stone_resource
 		_combat_action_stone_resource = null
 		_capture_combat_stone_return_view()
@@ -2813,7 +2825,7 @@ func _on_inventory_item_action_menu_id_pressed(action_id: int) -> void:
 			_combat_action_weapon_source_index = -1
 			return
 		# 装备目标类型；与武器 weapon_type 一致，用于复用原子替换流程。
-		var target_kind: String = str(weapon_resource.get("weapon_type"))
+		var target_kind: String = "ranged" if str(weapon_resource.get("weapon_type")) == "hybrid" else str(weapon_resource.get("weapon_type"))
 		# 远程目标下标；近战槽使用 -1，远程读取当前手持槽以实现直接替换。
 		var target_index: int = int(_equipment_component.call("get_current_ranged_slot")) if target_kind == "ranged" else -1
 		# 伪装拖拽数据；复用现有背包到装备槽的原子替换逻辑，避免点击装备产生第二套所有权流程。
@@ -2881,7 +2893,7 @@ func _on_combat_quantity_confirmed(quantity: int) -> void:
 func _discard_combat_inventory_item(item_resource: Resource, requested_quantity: int) -> void:
 	if item_resource == null or _game_world == null:
 		return
-	if str(item_resource.get("weapon_type")) in ["ranged", "melee"]:
+	if str(item_resource.get("weapon_type")) in ["ranged", "melee", "hybrid"]:
 		# 武器丢弃复用现有拖出背包流程，保留原资源实例、耐久、强化状态和生成失败回滚。
 		var drop_data: Dictionary = {"source_context": "inventory", "slot_kind": "inventory", "slot_index": _combat_action_weapon_source_index, "weapon_data": item_resource}
 		_drop_inventory_source_weapon_to_world(drop_data, item_resource)
@@ -3384,6 +3396,10 @@ func _show_success_settlement() -> void:
 	var outcome: Dictionary = {"result": "success", "title": "撤离成功", "gained_entries": [], "lost_entries": [], "gained_items": [], "lost_items": []}
 	_record_stock_survival_time()
 	_record_stock_extracted_values(global_inventory)
+	# 玩家被动技能组件；成功撤离完成库存结算前读取地图掉落物并发放一次角色专属奖励。
+	var passive_skill_component: Node = _player.get_node_or_null("PassiveSkillComponent") if _player != null else null
+	if passive_skill_component != null and passive_skill_component.has_method("apply_successful_extraction_bonuses"):
+		passive_skill_component.call("apply_successful_extraction_bonuses", global_inventory, _game_world)
 	if global_inventory != null and global_inventory.has_method("complete_combat_run_success"):
 		outcome = global_inventory.call("complete_combat_run_success")
 	_present_run_outcome(outcome)

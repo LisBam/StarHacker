@@ -14,6 +14,10 @@ class_name StelleGalacticGrandSlamSkillData
 @export_range(0.0, 10.0, 0.01, "or_greater") var maximum_charge_damage_bonus_ratio: float = 0.80
 ## 满蓄力击退增幅；默认 0.80 表示蓄力 3 秒时目标击退距离从 100 提高到 180 像素。
 @export_range(0.0, 10.0, 0.01, "or_greater") var maximum_charge_knockback_bonus_ratio: float = 0.80
+## 未蓄力释放前坐力；单位为理论位移像素，默认 80，释放方向与挥击方向一致且使用玩家统一外部速度衰减。
+@export_range(0.0, 3000.0, 1.0, "or_greater") var base_front_recoil_distance: float = 80.0
+## 满蓄力释放前坐力；单位为理论位移像素，默认 150，0 至满蓄力之间按蓄力比例线性插值。
+@export_range(0.0, 3000.0, 1.0, "or_greater") var maximum_front_recoil_distance: float = 150.0
 ## 统一伤害公式使用的来源攻击力；默认 100，使“10（+20%当前攻击力）”先组成技能威力，再只按目标防御结算而不重复乘算当前攻击力。
 @export_range(0.0, 99999.0, 1.0, "or_greater") var damage_formula_attack_power: float = 100.0
 ## 挥击是否受环境遮挡；默认 true，墙体或建筑位于角色和目标之间时不会隔墙命中。

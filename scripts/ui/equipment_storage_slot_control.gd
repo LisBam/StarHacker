@@ -84,7 +84,7 @@ func set_enhancement_target_highlight(enabled: bool) -> void:
 
 func set_weapon_target_selection_state(selection_active: bool, selectable: bool) -> void:
 	# 目标选择状态；空装备槽不参与可用或不可用表现，只有真实武器会被高亮或置灰。
-	var has_weapon: bool = _item_resource != null and (str(_item_resource.get("weapon_type")) in ["ranged", "melee"] or str(_item_resource.get("item_kind")) == "equipment")
+	var has_weapon: bool = _item_resource != null and (str(_item_resource.get("weapon_type")) in ["ranged", "melee", "hybrid"] or str(_item_resource.get("item_kind")) == "equipment")
 	_enhancement_target_highlight = selection_active and selectable and has_weapon
 	_weapon_target_selection_blocked = selection_active and not selectable and has_weapon
 	_refresh_enhancement_target_highlight()
@@ -136,7 +136,7 @@ func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
 	if dragged_resource == null:
 		return false
 	if _accepted_weapon_type in ["ranged", "melee"]:
-		return str(dragged_resource.get("weapon_type")) == _accepted_weapon_type
+		return str(dragged_resource.get("weapon_type")) in [_accepted_weapon_type, "hybrid"]
 	return str(dragged_resource.get("item_kind")) == "equipment" and str(dragged_resource.get("equipment_slot")) == _accepted_weapon_type
 
 

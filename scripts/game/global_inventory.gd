@@ -818,15 +818,16 @@ func grant_random_enhancement_stones_to_warehouse_gradually(stone_count: int, ba
 
 
 func grant_all_repair_kits_to_warehouse() -> int:
-	# 实际发放数量；每种已知修复包各发放一件，按 item_id 自动合并到已有同类堆叠。
+	## 兼容旧方法名并发放内容目录当前全部道具；修复包与消耗品都按各自稳定堆叠签名合并。
+	# 实际发放数量；每种已注册道具各发放一件，空资源或武器装备误项安全跳过。
 	var granted_count: int = 0
-	# 修复包标识；取值来自稳定路径表，新增道具后只需补充表项即可纳入开发者发放。
-	for repair_kit_id in _get_registered_resource_paths("item").keys():
-		# 修复包资源；从模板深拷贝，避免开发者发放的道具引用项目资源本体。
-		var repair_kit_resource: Resource = _load_repair_kit_resource(str(repair_kit_id))
-		if repair_kit_resource == null or str(repair_kit_resource.get("item_kind")) != "repair_kit":
+	# 道具标识；来自 ContentCatalog 通用 item 索引，新增合法道具不需要再补硬编码路径表。
+	for item_id in _get_registered_resource_paths("item").keys():
+		# 道具资源；从模板深拷贝，避免开发者发放内容引用项目资源本体。
+		var item_resource: Resource = _load_item_resource(str(item_id))
+		if item_resource == null or str(item_resource.get("item_kind")) in ["", "weapon", "equipment"]:
 			continue
-		_insert_record_with_stack_merge(_warehouse_records, _create_record(repair_kit_resource))
+		_insert_record_with_stack_merge(_warehouse_records, _create_record(item_resource))
 		granted_count += 1
 	if granted_count <= 0:
 		return 0
@@ -1627,7 +1628,7 @@ func _get_storage_records(location: String) -> Array[Dictionary]:
 
 
 func _is_weapon_resource(item_resource: Resource) -> bool:
-	return item_resource != null and not _is_enhancement_stone(item_resource) and str(item_resource.get("weapon_type")) in ["ranged", "melee"]
+	return item_resource != null and not _is_enhancement_stone(item_resource) and str(item_resource.get("weapon_type")) in ["ranged", "melee", "hybrid"]
 
 
 func _is_equipment_resource(item_resource: Resource) -> bool:
@@ -1642,8 +1643,13 @@ func _is_repair_kit(item_resource: Resource) -> bool:
 	return item_resource != null and str(item_resource.get("item_kind")) == "repair_kit"
 
 
+func _is_consumable(item_resource: Resource) -> bool:
+	## 判断资源是否为战斗限时消耗品；与修复包共用堆叠库存，但使用目标和效果结算保持独立。
+	return item_resource != null and str(item_resource.get("item_kind")) == "consumable"
+
+
 func _is_stackable_resource(item_resource: Resource) -> bool:
-	return _is_enhancement_stone(item_resource) or _is_repair_kit(item_resource)
+	return _is_enhancement_stone(item_resource) or _is_repair_kit(item_resource) or _is_consumable(item_resource)
 
 
 func _is_owned_weapon_resource(item_resource: Resource) -> bool:
@@ -1917,7 +1923,11 @@ func _is_resource_equipped(item_resource: Resource) -> bool:
 
 
 func _is_weapon_type(item_resource: Resource, weapon_type: String) -> bool:
-	return item_resource != null and str(item_resource.get("weapon_type")) == weapon_type
+	if item_resource == null:
+		return false
+	# 资源武器类型；混合武器兼容远程和近战装备位置，但同一资源实例仍只能由库存所有权记录占用一个槽。
+	var resource_weapon_type: String = str(item_resource.get("weapon_type"))
+	return resource_weapon_type == weapon_type or (resource_weapon_type == "hybrid" and weapon_type in ["ranged", "melee"])
 
 
 func _find_first_equipped_ranged_slot() -> int:
@@ -2257,6 +2267,16 @@ func _serialize_record(record: Dictionary) -> Dictionary:
 		serialized_record["icon_text"] = str(item_resource.get("icon_text"))
 		serialized_record["value"] = int(item_resource.get("value"))
 		serialized_record["repair_amount"] = maxf(float(item_resource.get("repair_amount")), 0.0)
+	elif _is_consumable(item_resource):
+		# 消耗品字段；保存稳定 ID 与结构化限时效果，资源路径变化时仍可按存档内容恢复。
+		serialized_record["item_id"] = str(item_resource.get("item_id"))
+		serialized_record["display_name"] = str(item_resource.get("display_name"))
+		serialized_record["description"] = str(item_resource.get("description"))
+		serialized_record["icon_text"] = str(item_resource.get("icon_text"))
+		serialized_record["value"] = int(item_resource.get("value"))
+		serialized_record["effect_stat"] = str(item_resource.get("effect_stat"))
+		serialized_record["effect_amount"] = maxf(float(item_resource.get("effect_amount")), 0.0)
+		serialized_record["duration_seconds"] = maxf(float(item_resource.get("duration_seconds")), 0.01)
 	elif _is_equipment_resource(item_resource):
 		# 防具运行时字段；保存耐久和强化累计值，基础属性继续由项目模板提供。
 		serialized_record["enhancement_formula_version"] = ENHANCEMENT_FORMULA_VERSION
@@ -2308,6 +2328,20 @@ func _deserialize_record(serialized_record: Dictionary) -> Dictionary:
 		repair_kit.value = maxi(int(serialized_record.get("value", serialized_record.get("sell_price", repair_kit.value))), 0)
 		repair_kit.repair_amount = maxf(float(serialized_record.get("repair_amount", repair_kit.repair_amount)), 1.0)
 		item_resource = repair_kit
+	elif item_kind == "consumable":
+		# 消耗品资源；优先从内容目录模板恢复，缺失时使用存档结构化字段重建。
+		var consumable: Resource = _load_item_resource(str(serialized_record.get("item_id", "")), resource_path)
+		if consumable == null:
+			consumable = ConsumableData.new()
+		consumable.set("item_id", str(serialized_record.get("item_id", consumable.get("item_id"))))
+		consumable.set("display_name", str(serialized_record.get("display_name", consumable.get("display_name"))))
+		consumable.set("description", str(serialized_record.get("description", consumable.get("description"))))
+		consumable.set("icon_text", str(serialized_record.get("icon_text", consumable.get("icon_text"))))
+		consumable.set("value", maxi(int(serialized_record.get("value", consumable.get("value"))), 0))
+		consumable.set("effect_stat", str(serialized_record.get("effect_stat", consumable.get("effect_stat"))))
+		consumable.set("effect_amount", maxf(float(serialized_record.get("effect_amount", consumable.get("effect_amount"))), 0.0))
+		consumable.set("duration_seconds", maxf(float(serialized_record.get("duration_seconds", consumable.get("duration_seconds"))), 0.01))
+		item_resource = consumable
 	elif item_kind == "equipment":
 		item_resource = _load_equipment_resource(equipment_id, resource_path)
 	else:
@@ -2395,6 +2429,18 @@ func _load_repair_kit_resource(item_id: String, preferred_path: String = "") -> 
 	return duplicated_resource if duplicated_resource != null else repair_kit_template
 
 
+func _load_item_resource(item_id: String, preferred_path: String = "") -> Resource:
+	## 从通用道具目录加载并复制资源；消耗品与以后新增道具通过同一内容目录 ID 恢复。
+	# 实际资源路径；优先使用存档路径，否则查询 ContentCatalog 的通用 item 索引。
+	var resolved_path: String = preferred_path if not preferred_path.is_empty() else _get_catalog_resource_path("item", item_id)
+	if resolved_path.is_empty() or not ResourceLoader.exists(resolved_path):
+		return null
+	# 道具模板；深拷贝避免同类堆叠记录共享可变运行时字段。
+	var item_template: Resource = load(resolved_path) as Resource
+	var duplicated_resource: Resource = item_template.duplicate(true) as Resource if item_template != null else null
+	return duplicated_resource if duplicated_resource != null else item_template
+
+
 func _load_equipment_resource(equipment_id: String, preferred_path: String = "") -> Resource:
 	# 装备路径；优先使用存档资源路径，缺失时按稳定 ID 回退默认表。
 	var resolved_path: String = preferred_path if not preferred_path.is_empty() else _get_catalog_resource_path("equipment", equipment_id, str(EQUIPMENT_RESOURCE_PATHS.get(equipment_id, "")))
@@ -2413,6 +2459,8 @@ func _resolve_resource_path(item_resource: Resource) -> String:
 		return item_resource.resource_path
 	if _is_repair_kit(item_resource):
 		return _get_catalog_resource_path("item", str(item_resource.get("item_id")), str(REPAIR_KIT_RESOURCE_PATHS.get(str(item_resource.get("item_id")), "")))
+	if _is_consumable(item_resource):
+		return _get_catalog_resource_path("item", str(item_resource.get("item_id")))
 	if _is_equipment_resource(item_resource):
 		return _get_catalog_resource_path("equipment", str(item_resource.get("equipment_id")), str(EQUIPMENT_RESOURCE_PATHS.get(str(item_resource.get("equipment_id")), "")))
 	return _get_catalog_resource_path("weapon", str(item_resource.get("weapon_id")), str(WEAPON_RESOURCE_PATHS.get(str(item_resource.get("weapon_id")), "")))

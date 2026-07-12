@@ -26,7 +26,7 @@ const TOOLTIP_CORNER_RADIUS: int = 6
 
 
 static func is_weapon(item_resource: Resource) -> bool:
-	return item_resource != null and str(item_resource.get("item_kind")) != "enhancement_stone" and str(item_resource.get("weapon_type")) in ["ranged", "melee"]
+	return item_resource != null and str(item_resource.get("item_kind")) != "enhancement_stone" and str(item_resource.get("weapon_type")) in ["ranged", "melee", "hybrid"]
 
 
 static func is_enhancement_stone(item_resource: Resource) -> bool:
@@ -35,6 +35,11 @@ static func is_enhancement_stone(item_resource: Resource) -> bool:
 
 static func is_repair_kit(item_resource: Resource) -> bool:
 	return item_resource != null and str(item_resource.get("item_kind")) == "repair_kit"
+
+
+static func is_consumable(item_resource: Resource) -> bool:
+	## 判断资源是否为战斗限时消耗品；详情面板使用结构化效果字段展示准确数值。
+	return item_resource != null and str(item_resource.get("item_kind")) == "consumable"
 
 
 static func is_equipment(item_resource: Resource) -> bool:
@@ -56,6 +61,8 @@ static func get_item_type_label(item_resource: Resource) -> String:
 		return "资源 · 强化石"
 	if is_repair_kit(item_resource):
 		return "道具 · 修复包"
+	if is_consumable(item_resource):
+		return "道具 · 消耗品"
 	if is_equipment(item_resource):
 		# 部位名称表；四个稳定装备槽映射为玩家可读中文，异常值回退“未知部位”。
 		var slot_labels: Dictionary = {"head": "头部", "body": "躯干", "legs": "腿部", "feet": "脚部"}
@@ -71,7 +78,7 @@ static func get_item_type_label(item_resource: Resource) -> String:
 		return equipment_type_label
 	# 武器类型；ranged 与 melee 分别映射到仓库武器子分类。
 	var weapon_type: String = str(item_resource.get("weapon_type")) if item_resource != null else ""
-	return "武器 · 远程" if weapon_type == "ranged" else ("武器 · 近战" if weapon_type == "melee" else "未知")
+	return "武器 · 远程" if weapon_type == "ranged" else ("武器 · 近战" if weapon_type == "melee" else ("武器 · 远程+近战" if weapon_type == "hybrid" else "未知"))
 
 
 static func get_item_value(item_resource: Resource) -> int:
@@ -111,6 +118,8 @@ static func build_bbcode(item_resource: Resource, quantity: int = 1, value_label
 		_append_stone_lines(detail_lines, item_resource)
 	elif is_repair_kit(item_resource):
 		_append_repair_kit_lines(detail_lines, item_resource)
+	elif is_consumable(item_resource):
+		_append_consumable_lines(detail_lines, item_resource)
 	elif is_weapon(item_resource):
 		_append_weapon_lines(detail_lines, item_resource)
 	elif is_equipment(item_resource):
@@ -276,6 +285,14 @@ static func _append_repair_kit_lines(detail_lines: Array[String], item_resource:
 	detail_lines.append("恢复耐久：%.0f" % repair_amount)
 
 
+static func _append_consumable_lines(detail_lines: Array[String], item_resource: Resource) -> void:
+	## 追加消耗品结构化效果；优先使用资源方法，兼容资源缺少方法时回退说明文本。
+	detail_lines.append("[b]使用效果[/b]")
+	# 效果摘要；由 ConsumableData 根据属性类型、数值与持续时间生成，确保显示与运行时字段一致。
+	var effect_description: String = str(item_resource.call("get_effect_description")) if item_resource.has_method("get_effect_description") else str(item_resource.get("description"))
+	detail_lines.append(effect_description)
+
+
 static func _append_stone_lines_by_benefit(detail_lines: Array[String], modifiers: Dictionary, beneficial: bool) -> void:
 	# 属性顺序；每一组内使用规则目录顺序，两次调用保证增强全部排在削弱之前。
 	for modifier_key in EnhancementRules.STAT_KEYS:
@@ -303,14 +320,22 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 		detail_lines.append("[color=%s]状态：损坏，无法使用[/color]" % NEGATIVE_COLOR)
 	# 武器类型；决定伤害、冷却及远近战专属属性的基础字段映射。
 	var weapon_type: String = str(item_resource.get("weapon_type"))
-	_append_weapon_stat_line(detail_lines, item_resource, "damage", 1)
+	if weapon_type == "hybrid":
+		_append_weapon_attack_channel_stat_line(detail_lines, item_resource, "远程伤害", "damage", "ranged", 1)
+		_append_weapon_attack_channel_stat_line(detail_lines, item_resource, "近战伤害", "damage", "melee", 1)
+	else:
+		_append_weapon_stat_line(detail_lines, item_resource, "damage", 1)
 	_append_weapon_stat_line(detail_lines, item_resource, "cooldown", 2, " 秒")
 	_append_weapon_stat_line(detail_lines, item_resource, "energy_consumption", 1)
-	_append_weapon_stat_line(detail_lines, item_resource, "attack_distance", 1)
+	if weapon_type == "hybrid":
+		_append_weapon_attack_channel_stat_line(detail_lines, item_resource, "远程距离", "attack_distance", "ranged", 1)
+		_append_weapon_attack_channel_stat_line(detail_lines, item_resource, "近战距离", "attack_distance", "melee", 1)
+	else:
+		_append_weapon_stat_line(detail_lines, item_resource, "attack_distance", 1)
 	# 暴击属性；与其他武器、装备属性共用统一颜色和括号变化明细，底层小数乘 100 后显示百分比。
 	_append_weapon_stat_line(detail_lines, item_resource, "critical_chance", 0, "%", 100.0)
 	_append_weapon_stat_line(detail_lines, item_resource, "critical_damage", 0, "%", 100.0)
-	if weapon_type == "ranged":
+	if weapon_type in ["ranged", "hybrid"]:
 		_append_weapon_stat_line(detail_lines, item_resource, "projectile_speed", 1)
 		_append_weapon_stat_line(detail_lines, item_resource, "deviation_degrees", 1, "°")
 		if bool(item_resource.get("has_scatter")):
@@ -319,13 +344,37 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 			_append_weapon_stat_line(detail_lines, item_resource, "piercing_count", 0)
 		if bool(item_resource.get("has_combo")):
 			_append_weapon_stat_line(detail_lines, item_resource, "combo_count", 0)
-	else:
+	if weapon_type in ["melee", "hybrid"]:
 		_append_weapon_stat_line(detail_lines, item_resource, "melee_active_duration", 2, " 秒")
 	if bool(item_resource.get("has_recoil")):
 		_append_weapon_stat_line(detail_lines, item_resource, "recoil_force", 1, " 像素")
 	if bool(item_resource.get("has_front_recoil")):
 		_append_weapon_stat_line(detail_lines, item_resource, "front_recoil_force", 1, " 像素")
-	_append_weapon_stat_line(detail_lines, item_resource, "impact_force", 1, " 像素")
+	if weapon_type == "hybrid":
+		_append_weapon_attack_channel_stat_line(detail_lines, item_resource, "远程冲击", "impact_force", "ranged", 1, " 像素")
+		_append_weapon_attack_channel_stat_line(detail_lines, item_resource, "近战冲击", "impact_force", "melee", 1, " 像素")
+	else:
+		_append_weapon_stat_line(detail_lines, item_resource, "impact_force", 1, " 像素")
+
+
+static func _append_weapon_attack_channel_stat_line(detail_lines: Array[String], item_resource: Resource, label: String, stat_name: String, attack_mode: String, decimals: int, suffix: String = "") -> void:
+	## 追加混合武器单一攻击通道属性；基础值独立、强化比例共享，显示时仍分别给出真实强化前后值。
+	# 基础字段名；伤害本来就分通道保存，距离与冲击使用混合武器专属字段。
+	var property_name: String = ("ranged_damage" if attack_mode == "ranged" else "melee_damage") if stat_name == "damage" else (("ranged_attack_distance" if attack_mode == "ranged" else "melee_attack_distance") if stat_name == "attack_distance" else ("ranged_impact_force" if attack_mode == "ranged" else "melee_impact_force"))
+	# 通道基础值；资源字段缺失时按 0 处理，现行 hybrid 资源必须显式填写全部六个基础值。
+	var base_value: float = maxf(float(item_resource.get(property_name)), 0.0)
+	# 通道有效值；优先使用武器统一双通道接口，兼容资源缺失时回退基础值。
+	var effective_value: float = float(item_resource.call("get_effective_attack_stat", stat_name, attack_mode)) if item_resource.has_method("get_effective_attack_stat") else base_value
+	# 强化差值；两个通道读取同一累计比例，但各自按基础值换算实际变化量。
+	var enhancement_value: float = effective_value - base_value
+	# 玩法颜色；伤害、距离和冲击提高均为增益，减少均为减益。
+	var total_color: String = (POSITIVE_COLOR if enhancement_value > 0.0 else NEGATIVE_COLOR) if not is_zero_approx(enhancement_value) else NEUTRAL_COLOR
+	# 数值格式；由调用方控制小数位，保持与普通武器详情一致。
+	var value_format: String = "%%.%df" % decimals
+	if is_zero_approx(enhancement_value):
+		detail_lines.append("%s：[color=%s]%s[/color]%s" % [label, total_color, value_format % effective_value, suffix])
+		return
+	detail_lines.append("%s：[color=%s]%s[/color]（%s[color=%s]%s[/color]）%s" % [label, total_color, value_format % effective_value, value_format % base_value, total_color, ("+" if enhancement_value >= 0.0 else "") + (value_format % enhancement_value), suffix])
 
 
 static func _append_weapon_stat_line(detail_lines: Array[String], item_resource: Resource, stat_name: String, decimals: int, suffix: String = "", display_multiplier: float = 1.0, skip_zero_unmodified: bool = false) -> void:

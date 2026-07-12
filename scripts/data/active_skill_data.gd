@@ -47,6 +47,8 @@ const DIRECTIONAL_INPUT_POSITION: int = 1
 @export var can_charge: bool = false
 ## 最大蓄力时间；取值大于 0 秒，默认 1 秒，达到上限后蓄力比例保持 100% 直到松开。
 @export_range(0.01, 30.0, 0.01, "or_greater") var maximum_charge_duration: float = 1.0
+## 蓄力期间移动速度倍率；取值 0 至 1，默认 1 表示不减速，只有 can_charge 开启且技能保持按住时由玩家控制器应用。
+@export_range(0.0, 1.0, 0.01) var charge_movement_speed_multiplier: float = 1.0
 ## 瞄准目标标记半径；取值大于 0 像素，默认 18，用于位置指向与锁定目标的世界预览圆环。
 @export_range(1.0, 256.0, 1.0, "or_greater") var target_marker_radius: float = 18.0
 

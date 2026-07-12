@@ -348,7 +348,7 @@ func _build_invalid_preview(message: String, invalid_sacrifice_entries: Array[Di
 
 func _is_weapon(item_resource: Resource) -> bool:
 	# 可锻造耐久物品；保留历史函数名以避免改动既有调用，实际同时识别武器和四部位装备。
-	return item_resource != null and (str(item_resource.get("weapon_type")) in ["ranged", "melee"] or str(item_resource.get("item_kind")) == "equipment")
+	return item_resource != null and (str(item_resource.get("weapon_type")) in ["ranged", "melee", "hybrid"] or str(item_resource.get("item_kind")) == "equipment")
 
 
 func _is_enhancement_stone(item_resource: Resource) -> bool:

@@ -74,19 +74,19 @@ func _process(delta: float) -> void:
 	_active_combo_weapon = null
 
 
-func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
+func try_attack(direction: Vector2, weapon_data: Resource = null, attack_modifiers: Dictionary = {}) -> bool:
 	# 本次使用的弹体场景；取值来自武器数据或组件默认值，默认 projectile_scene，修改会影响实际生成的弹体类型。
 	var selected_projectile_scene: PackedScene = _get_weapon_packed_scene(weapon_data, "projectile_scene", projectile_scene)
 	# 本次使用的弹体速度；取值来自武器数据或组件默认值，默认 projectile_speed，修改会影响本次弹体飞行速度。
 	var selected_projectile_speed: float = _get_weapon_float(weapon_data, "projectile_speed", projectile_speed)
 	# 本次使用的攻击距离；远程武器以该值限制弹体最大飞行距离，默认 340 像素。
-	var selected_attack_distance: float = _get_weapon_float(weapon_data, "attack_distance", 340.0)
+	var selected_attack_distance: float = _get_weapon_attack_float(weapon_data, "attack_distance", "ranged", 340.0)
 	# 本次使用的弹体伤害；取值来自武器数据或组件默认值，默认 projectile_damage，修改会影响本次弹体命中伤害。
-	var selected_projectile_damage: float = _get_weapon_float(weapon_data, "ranged_damage", projectile_damage)
+	var selected_projectile_damage: float = _get_weapon_attack_float(weapon_data, "damage", "ranged", projectile_damage) * maxf(float(attack_modifiers.get("damage_multiplier", 1.0)), 0.0)
 	# 本次使用的冷却；取值来自武器数据或组件默认值，默认 cooldown，修改会影响下一次可攻击时间。
 	var selected_cooldown: float = _get_weapon_float(weapon_data, "cooldown", cooldown)
 	# 本次使用的弹体冲击力；取值来自武器数据，单位为目标单次无碰撞理论位移像素，默认 0 表示只造成伤害不击退。
-	var selected_impact_force: float = _get_weapon_float(weapon_data, "impact_force", 0.0)
+	var selected_impact_force: float = _get_weapon_attack_float(weapon_data, "impact_force", "ranged", 0.0) * maxf(float(attack_modifiers.get("impact_multiplier", 1.0)), 0.0)
 	# 本次使用的偏移角度；取值来自武器数据，默认 0 度表示弹体严格沿瞄准方向发射。
 	var selected_deviation_degrees: float = maxf(_get_weapon_float(weapon_data, "deviation_degrees", 0.0), 0.0)
 	# 本次每轮散射弹体数；未持有散射属性的武器固定为 1，避免默认字段让普通武器获得额外弹体。
@@ -317,6 +317,17 @@ func _get_weapon_float(weapon_data: Resource, property_name: StringName, fallbac
 		return fallback_value
 
 	return float(property_value)
+
+
+func _get_weapon_attack_float(weapon_data: Resource, stat_name: String, attack_mode: String, fallback_value: float) -> float:
+	## 读取指定远近战通道的有效属性；混合武器由资源返回独立基础值与共享强化结果，旧资源继续使用普通有效属性接口。
+	if weapon_data == null:
+		return fallback_value
+	if weapon_data.has_method("get_effective_attack_stat"):
+		return float(weapon_data.call("get_effective_attack_stat", stat_name, attack_mode))
+	# 旧属性名；伤害在资源中以 ranged_damage 保存，其余字段保持通用名称。
+	var legacy_property_name: String = "ranged_damage" if stat_name == "damage" else stat_name
+	return _get_weapon_float(weapon_data, legacy_property_name, fallback_value)
 
 
 func _get_weapon_packed_scene(weapon_data: Resource, property_name: StringName, fallback_scene: PackedScene) -> PackedScene:

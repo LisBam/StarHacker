@@ -19,10 +19,18 @@ const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat
 @export var ranged_attack_component_path: NodePath = ^"RangedAttackComponent"
 ## 近战攻击组件路径；默认指向 MeleeAttackComponent，必须解析到提供 try_attack 方法的节点，修改会影响鼠标右键近战逻辑。
 @export var melee_attack_component_path: NodePath = ^"MeleeAttackComponent"
+## 武器蓄力组件路径；默认指向 WeaponChargeComponent，必须解析到通用蓄力状态组件，缺失时可蓄力武器不会接受攻击输入。
+@export var weapon_charge_component_path: NodePath = ^"WeaponChargeComponent"
 ## 战斗属性组件路径；默认指向 StatsComponent，必须解析到提供能量和生命方法的节点，修改会影响武器消耗与受伤转发。
 @export var stats_component_path: NodePath = ^"StatsComponent"
 ## 装备组件路径；默认指向 EquipmentComponent，必须解析到提供当前武器和切换方法的节点，修改会影响武器选择。
 @export var equipment_component_path: NodePath = ^"EquipmentComponent"
+## 装备套装组件路径；默认指向 EquipmentSetComponent，用于查询朝掉落物移动等运行时套装效果，缺失时普通装备属性仍正常生效。
+@export var equipment_set_component_path: NodePath = ^"EquipmentSetComponent"
+## 临时增益组件路径；默认指向 TemporaryBuffComponent，用于读取消耗品提供的移动倍率，缺失时其他战斗属性不受影响。
+@export var temporary_buff_component_path: NodePath = ^"TemporaryBuffComponent"
+## 主动技能组件路径；默认指向 ActiveSkillComponent，用于在技能瞄准或蓄力期间屏蔽武器输入，避免共享蓄力条互相覆盖。
+@export var active_skill_component_path: NodePath = ^"ActiveSkillComponent"
 ## 瞄准旋转轴路径；默认指向 AimPivot，必须解析到 Node2D，修改会影响武器朝向和枪口位置。
 @export var aim_pivot_path: NodePath = ^"AimPivot"
 ## 战斗相机路径；默认指向玩家子节点 Camera2D，必须解析到提供 add_shake 方法的节点，修改会影响屏幕震动反馈。
@@ -66,6 +74,16 @@ var _knockback_velocity: Vector2 = Vector2.ZERO
 var _damage_interval_remaining: float = 0.0
 ## 是否由战斗开发者工具禁用耐久消耗；默认 false，开启后正式战斗成功攻击也不会扣除武器耐久。
 var _durability_consumption_disabled_by_debug: bool = false
+## 外部移动倍率来源；键为稳定效果 ID、值为非负倍率，默认空字典，主动技能蓄力等临时效果分别写入并连乘。
+var _movement_speed_multiplier_sources: Dictionary = {}
+## 外部减伤来源；键为稳定效果 ID、值为 0 至 1 的减伤比例，默认空字典，不同来源按剩余伤害倍率连乘。
+var _damage_reduction_sources: Dictionary = {}
+## 强制移动方向；默认向右，主动冲锋开始时覆盖为单位向量，持续期间玩家输入不改变该方向。
+var _forced_movement_direction: Vector2 = Vector2.RIGHT
+## 强制移动剩余时间；取值大于等于 0 秒，默认 0 表示玩家可正常操控，归零后立即恢复输入移动。
+var _forced_movement_remaining: float = 0.0
+## 强制移动速度；单位为像素/秒，默认 0，主动冲锋按角色移速属性与技能额外移速换算后写入。
+var _forced_movement_speed: float = 0.0
 
 ## 输入组件实例缓存；默认在 ready 阶段按路径获取，保持动态类型以降低脚本类名缓存依赖，修改会影响移动与攻击输入读取。
 @onready var _input_component = get_node(input_component_path)
@@ -75,10 +93,18 @@ var _durability_consumption_disabled_by_debug: bool = false
 @onready var _ranged_attack_component = get_node(ranged_attack_component_path)
 ## 近战攻击组件实例缓存；默认在 ready 阶段按路径获取，保持动态类型以避免自定义类解析顺序问题，修改会影响近战命中框开启。
 @onready var _melee_attack_component = get_node(melee_attack_component_path)
+## 武器蓄力组件实例缓存；默认在 ready 阶段按路径获取，保持动态类型以支持独立替换蓄力表现与状态管理。
+@onready var _weapon_charge_component: Node = get_node_or_null(weapon_charge_component_path)
 ## 战斗属性组件实例缓存；默认在 ready 阶段按路径获取，保持动态类型以支持可替换属性系统，修改会影响能量消耗和生命处理。
 @onready var _stats_component = get_node(stats_component_path)
 ## 装备组件实例缓存；默认在 ready 阶段按路径获取，保持动态类型以支持可替换装备系统，修改会影响当前武器读取和切换。
 @onready var _equipment_component = get_node(equipment_component_path)
+## 装备套装组件实例缓存；默认按路径解析，允许为空，缺失时只跳过套装特殊移动和减伤效果。
+@onready var _equipment_set_component: Node = get_node_or_null(equipment_set_component_path)
+## 临时增益组件实例缓存；默认按路径解析，允许为空，缺失时只跳过移速饮料效果。
+@onready var _temporary_buff_component: Node = get_node_or_null(temporary_buff_component_path)
+## 主动技能组件实例缓存；默认按路径解析，允许为空，缺失时武器输入保持独立场景兼容行为。
+@onready var _active_skill_component: Node = get_node_or_null(active_skill_component_path)
 ## 瞄准轴节点缓存；默认按 aim_pivot_path 获取 Node2D，运行时跟随鼠标方向旋转，修改会影响武器视觉和枪口朝向。
 @onready var _aim_pivot: Node2D = get_node(aim_pivot_path) as Node2D
 ## 战斗相机节点缓存；默认按 camera_path 获取，允许为空，缺失时只跳过屏幕震动不影响移动和攻击。
@@ -97,9 +123,12 @@ func _physics_process(delta: float) -> void:
 	if not aim_direction.is_zero_approx():
 		_last_aim_direction = aim_direction
 		_aim_pivot.rotation = _last_aim_direction.angle()
+	_update_weapon_attack_input(delta)
 
 	_handle_dodge_request(movement_direction)
-	if _dodge_time_remaining > 0.0:
+	if _forced_movement_remaining > 0.0:
+		_move_forced_movement(delta)
+	elif _dodge_time_remaining > 0.0:
 		_move_dodge(delta)
 	else:
 		# 当前帧移动速度倍率；取值大于等于 1，默认由疾跑状态和能耗计算，修改会影响普通移动速度。
@@ -107,13 +136,6 @@ func _physics_process(delta: float) -> void:
 		_movement_component.move(self, movement_direction, delta, movement_speed_multiplier, _knockback_velocity)
 		_cancel_blocked_knockback_components()
 		_decay_knockback(delta)
-
-	if _input_component.is_fire_requested():
-		_try_fire_ranged_weapon()
-
-	if _input_component.consume_melee_request():
-		_try_use_melee_weapon()
-
 
 func apply_damage(damage: float, source: Node) -> void:
 	if not _can_receive_damage(damage):
@@ -132,7 +154,10 @@ func apply_damage(damage: float, source: Node) -> void:
 	# 最终伤害结果；敌方默认不暴击，接口为特殊敌人保留扩展能力。
 	var damage_result: Dictionary = calculator_script.calculate_damage(damage, source_attack_power, player_defense_power, float(source.call("get_critical_chance")) if source != null and source.has_method("get_critical_chance") else 0.0, float(source.call("get_critical_damage_multiplier")) if source != null and source.has_method("get_critical_damage_multiplier") else 1.5)
 	# 最终伤害；生命扣除、镜头震动和受击反馈使用同一整数结果。
-	var final_damage: float = float(damage_result.get("damage", 0))
+	# 减伤前最终伤害；已经完成攻防与暴击结算，所有临时减伤只对该结果应用一次。
+	var damage_before_reduction: float = float(damage_result.get("damage", 0))
+	# 最终伤害；武器蓄力、套装与技能来源按剩余伤害倍率连乘，四舍五入到项目统一整数伤害。
+	var final_damage: float = float(maxi(roundi(damage_before_reduction * _get_received_damage_multiplier()), 1)) if damage_before_reduction > 0.0 else 0.0
 	_record_stock_metric("damage_taken", final_damage)
 	_damage_interval_remaining = maxf(damage_interval, 0.0)
 	# 受伤前死亡状态；取值来自属性组件，默认用于避免死亡特效重复生成。
@@ -174,23 +199,7 @@ func _try_fire_ranged_weapon() -> void:
 	if current_weapon == null or not _can_use_weapon(current_weapon):
 		return
 
-	# 本次远程攻击能耗；取值大于等于 0，默认来自武器数据，修改会影响是否允许开火和扣能量数值。
-	var energy_consumption: float = _get_weapon_energy_consumption(current_weapon)
-	if _stats_component.has_method("can_spend_energy") and not _stats_component.call("can_spend_energy", energy_consumption):
-		return
-
-	# 本次远程攻击是否成功生成弹体；取值为 true/false，默认由远程攻击组件返回，修改会影响是否扣除能量。
-	var attack_succeeded: bool = _ranged_attack_component.try_attack(_last_aim_direction, current_weapon)
-	if not attack_succeeded:
-		return
-	_record_stock_metric("shots", 1.0)
-
-	_apply_weapon_recoil(current_weapon, _last_aim_direction)
-	_apply_weapon_front_recoil(current_weapon, _last_aim_direction)
-	_shake_screen_for_weapon_use(current_weapon)
-	if _stats_component.has_method("spend_energy"):
-		_stats_component.call("spend_energy", energy_consumption)
-	_consume_weapon_durability(current_weapon)
+	_execute_weapon_attack(current_weapon, "ranged", 0.0)
 
 
 func _try_use_melee_weapon() -> void:
@@ -202,22 +211,101 @@ func _try_use_melee_weapon() -> void:
 	if current_weapon == null or not _can_use_weapon(current_weapon):
 		return
 
-	# 本次近战攻击能耗；取值大于等于 0，默认来自武器数据，修改会影响是否允许挥击和扣能量数值。
-	var energy_consumption: float = _get_weapon_energy_consumption(current_weapon)
-	if _stats_component.has_method("can_spend_energy") and not _stats_component.call("can_spend_energy", energy_consumption):
-		return
+	_execute_weapon_attack(current_weapon, "melee", 0.0)
 
-	# 本次近战攻击是否成功开启命中框；取值为 true/false，默认由近战组件返回，修改会影响是否扣除能量。
-	var attack_succeeded: bool = _melee_attack_component.try_attack(_last_aim_direction, current_weapon)
-	if not attack_succeeded:
-		return
 
-	_apply_weapon_recoil(current_weapon, _last_aim_direction)
-	_apply_weapon_front_recoil(current_weapon, _last_aim_direction)
-	_shake_screen_for_weapon_use(current_weapon)
+func _update_weapon_attack_input(delta: float) -> void:
+	## 统一处理普通攻击与可蓄力武器；同一帧只允许一个武器蓄力来源，避免左右键同时持有时共享进度条和成本状态冲突。
+	if _active_skill_component != null and _active_skill_component.has_method("is_aiming") and bool(_active_skill_component.call("is_aiming")):
+		if _weapon_charge_component != null:
+			_weapon_charge_component.call("cancel_charge")
+		return
+	if _forced_movement_remaining > 0.0:
+		if _weapon_charge_component != null:
+			_weapon_charge_component.call("cancel_charge")
+		return
+	if _weapon_charge_component == null:
+		if _input_component.is_fire_requested():
+			_try_fire_ranged_weapon()
+		if _input_component.consume_melee_request():
+			_try_use_melee_weapon()
+		return
+	# 战斗输入是否启用；背包、地图、暂停或结算打开时取消蓄力且不把输入关闭误判为松手释放。
+	var combat_input_enabled: bool = bool(_input_component.call("is_combat_input_enabled")) if _input_component.has_method("is_combat_input_enabled") else true
+	if not combat_input_enabled or _is_stats_dead():
+		_weapon_charge_component.call("cancel_charge")
+		return
+	# 近战单次按下请求；每帧只消费一次，普通武器立即攻击，可蓄力武器进入按住状态。
+	var melee_requested: bool = bool(_input_component.call("consume_melee_request"))
+	if bool(_weapon_charge_component.call("is_charging")):
+		# 蓄力攻击通道；决定当前应继续读取左键还是右键保持状态。
+		var charging_mode: String = str(_weapon_charge_component.call("get_attack_mode"))
+		# 对应攻击键是否仍按住；松开时释放当前快照，武器切换不会改变已开始蓄力的来源。
+		var attack_held: bool = bool(_input_component.call("is_fire_requested")) if charging_mode == "ranged" else bool(_input_component.call("is_melee_pressed"))
+		if attack_held:
+			_weapon_charge_component.call("update_charge", delta)
+			return
+		# 释放上下文；组件先清理减速与减伤，再由控制器执行一次成本结算。
+		var release_context: Dictionary = _weapon_charge_component.call("release_charge") as Dictionary
+		var released_weapon: Resource = release_context.get("weapon") as Resource
+		_execute_weapon_attack(released_weapon, str(release_context.get("attack_mode", charging_mode)), float(release_context.get("charge_ratio", 0.0)))
+		return
+	# 当前远程武器；只在左键按住时读取，可蓄力武器开始蓄力，普通武器沿用冷却控制的连续射击。
+	var ranged_weapon: Resource = _equipment_component.call("get_current_ranged_weapon") as Resource if _equipment_component.has_method("get_current_ranged_weapon") else null
+	if _input_component.is_fire_requested() and ranged_weapon != null and bool(ranged_weapon.get("has_charge_effect")):
+		_weapon_charge_component.call("begin_charge", ranged_weapon, "ranged")
+		return
+	if _input_component.is_fire_requested():
+		_try_fire_ranged_weapon()
+	# 当前近战武器；普通近战保持单次请求语义，可蓄力近战从第一次按下开始累计。
+	var melee_weapon: Resource = _equipment_component.call("get_melee_weapon") as Resource if _equipment_component.has_method("get_melee_weapon") else null
+	if melee_requested and melee_weapon != null and bool(melee_weapon.get("has_charge_effect")):
+		_weapon_charge_component.call("begin_charge", melee_weapon, "melee")
+	elif melee_requested:
+		_try_use_melee_weapon()
+
+
+func _execute_weapon_attack(weapon_data: Resource, requested_mode: String, charge_ratio: float) -> bool:
+	## 执行一次武器使用并统一结算能量、耐久、冷却反馈和坐力；混合武器同时调用两个攻击组件但成本只结算一次。
+	if weapon_data == null or not _can_use_weapon(weapon_data):
+		return false
+	# 本次武器能耗；远程与近战通道共享该成本，混合攻击不得因生成两个命中而重复扣除。
+	var energy_consumption: float = _get_weapon_energy_consumption(weapon_data)
+	if _stats_component.has_method("can_spend_energy") and not bool(_stats_component.call("can_spend_energy", energy_consumption)):
+		return false
+	# 安全蓄力比例；普通武器固定传入 0，可蓄力武器取 0 至 1 线性插值三个效果倍率。
+	var resolved_charge_ratio: float = clampf(charge_ratio, 0.0, 1.0)
+	# 伤害倍率；满蓄提升来自武器数据，混合武器两个攻击通道使用同一倍率。
+	var damage_multiplier: float = 1.0 + maxf(float(weapon_data.get("maximum_charge_damage_bonus_ratio")), 0.0) * resolved_charge_ratio
+	# 冲击倍率；只影响目标位移语义，不改变攻击距离或攻击成本。
+	var impact_multiplier: float = 1.0 + maxf(float(weapon_data.get("maximum_charge_impact_bonus_ratio")), 0.0) * resolved_charge_ratio
+	# 坐力倍率；用于攻击成功后的单次前坐力或后坐力反馈，混合武器不会按通道重复施加。
+	var recoil_multiplier: float = 1.0 + maxf(float(weapon_data.get("maximum_charge_recoil_bonus_ratio")), 0.0) * resolved_charge_ratio
+	# 攻击参数；两个攻击组件只读取自身相关倍率，冷却仍从同一武器数据读取。
+	var attack_modifiers: Dictionary = {"damage_multiplier": damage_multiplier, "impact_multiplier": impact_multiplier}
+	# 是否为混合武器；兼容资源缺少方法时按 weapon_type 字段判断。
+	var is_hybrid_weapon: bool = bool(weapon_data.call("is_hybrid")) if weapon_data.has_method("is_hybrid") else str(weapon_data.get("weapon_type")) == "hybrid"
+	# 远程通道是否成功；混合武器始终尝试，普通武器只按请求通道执行。
+	var ranged_succeeded: bool = false
+	# 近战通道是否成功；与远程结果共同决定是否支付本次使用成本。
+	var melee_succeeded: bool = false
+	if requested_mode == "ranged" or is_hybrid_weapon:
+		ranged_succeeded = bool(_ranged_attack_component.call("try_attack", _last_aim_direction, weapon_data, attack_modifiers))
+	if requested_mode == "melee" or is_hybrid_weapon:
+		melee_succeeded = bool(_melee_attack_component.call("try_attack", _last_aim_direction, weapon_data, attack_modifiers))
+	if not ranged_succeeded and not melee_succeeded:
+		return false
+	if ranged_succeeded:
+		_record_stock_metric("shots", 1.0)
+	_apply_weapon_recoil(weapon_data, _last_aim_direction, recoil_multiplier)
+	_apply_weapon_front_recoil(weapon_data, _last_aim_direction, recoil_multiplier)
+	_shake_screen_for_weapon_use(weapon_data, recoil_multiplier)
 	if _stats_component.has_method("spend_energy"):
 		_stats_component.call("spend_energy", energy_consumption)
-	_consume_weapon_durability(current_weapon)
+	# 本次耐久成本；混合武器固定 2 点，当前仅剩 1 点时资源接口会消耗剩余 1 点并允许这次攻击完成。
+	var durability_cost: float = 2.0 if is_hybrid_weapon else 1.0
+	_consume_weapon_durability(weapon_data, durability_cost)
+	return true
 
 
 func _can_use_weapon(weapon_data: Resource) -> bool:
@@ -234,15 +322,19 @@ func is_weapon_durability_consumption_disabled_by_debug() -> bool:
 	return _durability_consumption_disabled_by_debug
 
 
-func _consume_weapon_durability(weapon_data: Resource) -> void:
+func _consume_weapon_durability(weapon_data: Resource, durability_cost: float = 1.0) -> void:
 	if _should_skip_weapon_durability_consumption() or weapon_data == null or not weapon_data.has_method("consume_durability"):
 		return
 	# 是否实际消耗耐久；耐久消耗为 0 或武器已损坏时不触发持久化和 UI 刷新。
 	# 固定消耗补充：现行武器成功使用统一扣除 1 点，此返回值只用于识别损坏武器等未发生变化的情况。
-	var durability_changed: bool = bool(weapon_data.call("consume_durability"))
+	# 消耗前耐久；用于股市指标记录真实变化，混合武器剩余 1 点时只能记录 1 点而不是固定 2 点。
+	var durability_before: float = maxf(float(weapon_data.get("current_durability")), 0.0)
+	var durability_changed: bool = bool(weapon_data.call("consume_durability", durability_cost))
 	if not durability_changed:
 		return
-	_record_stock_metric("weapon_durability", 1.0)
+	# 实际耐久变化；资源会限制在零以上，因此该值始终非负且不超过请求成本。
+	var durability_consumed: float = maxf(durability_before - float(weapon_data.get("current_durability")), 0.0)
+	_record_stock_metric("weapon_durability", durability_consumed)
 	if _equipment_component.has_method("notify_weapon_runtime_state_changed"):
 		_equipment_component.call("notify_weapon_runtime_state_changed", weapon_data)
 	weapon_durability_changed.emit(weapon_data)
@@ -262,7 +354,7 @@ func _handle_dodge_request(movement_direction: Vector2) -> void:
 
 	# 本帧是否请求闪避；取值为 true/false，默认由输入组件消费 Space 得出，修改会影响是否尝试突进。
 	var dodge_requested: bool = bool(_input_component.call("consume_dodge_request"))
-	if not dodge_requested or _dodge_time_remaining > 0.0:
+	if not dodge_requested or _dodge_time_remaining > 0.0 or _forced_movement_remaining > 0.0:
 		return
 
 	if movement_direction.is_zero_approx():
@@ -299,18 +391,100 @@ func _move_dodge(delta: float) -> void:
 
 
 func _get_movement_speed_multiplier(movement_direction: Vector2, delta: float) -> float:
-	if movement_direction.is_zero_approx():
-		return 1.0
+	# 综合移动倍率；默认 1，疾跑、蓄力、技能和套装效果依次连乘，互不覆盖其他来源。
+	var resolved_multiplier: float = 1.0
+	if not movement_direction.is_zero_approx() and _input_component.has_method("is_sprint_pressed") and bool(_input_component.call("is_sprint_pressed")):
+		# 本帧疾跑能耗；取值大于等于 0，只有成功支付时才应用疾跑倍率。
+		var sprint_energy_consumption: float = maxf(sprint_energy_consumption_per_second, 0.0) * delta
+		if _spend_energy(sprint_energy_consumption):
+			resolved_multiplier *= maxf(sprint_speed_multiplier, 1.0)
+	if _weapon_charge_component != null and _weapon_charge_component.has_method("get_movement_speed_multiplier"):
+		resolved_multiplier *= maxf(float(_weapon_charge_component.call("get_movement_speed_multiplier")), 0.0)
+	if _temporary_buff_component != null and _temporary_buff_component.has_method("get_move_speed_multiplier"):
+		resolved_multiplier *= maxf(float(_temporary_buff_component.call("get_move_speed_multiplier")), 0.0)
+	for raw_multiplier in _movement_speed_multiplier_sources.values():
+		resolved_multiplier *= maxf(float(raw_multiplier), 0.0)
+	if _equipment_set_component != null and _equipment_set_component.has_method("get_contextual_movement_speed_multiplier"):
+		resolved_multiplier *= maxf(float(_equipment_set_component.call("get_contextual_movement_speed_multiplier", global_position, movement_direction)), 0.0)
+	return maxf(resolved_multiplier, 0.0)
 
-	if not _input_component.has_method("is_sprint_pressed") or not bool(_input_component.call("is_sprint_pressed")):
-		return 1.0
 
-	# 本帧疾跑能耗；取值大于等于 0，默认由每秒能耗乘 delta 得出，修改会影响疾跑扣能节奏。
-	var sprint_energy_consumption: float = maxf(sprint_energy_consumption_per_second, 0.0) * delta
-	if not _spend_energy(sprint_energy_consumption):
-		return 1.0
+func set_movement_speed_multiplier_source(source_id: String, multiplier: float) -> void:
+	## 设置一个独立临时移动倍率；相同来源覆盖旧值，空 ID 被忽略，角色切换或效果结束时必须显式移除。
+	var normalized_source_id: String = source_id.strip_edges()
+	if normalized_source_id.is_empty():
+		return
+	_movement_speed_multiplier_sources[normalized_source_id] = maxf(multiplier, 0.0)
 
-	return maxf(sprint_speed_multiplier, 1.0)
+
+func remove_movement_speed_multiplier_source(source_id: String) -> void:
+	## 移除指定移动倍率来源；不存在时保持幂等，不影响疾跑、装备或其他技能。
+	_movement_speed_multiplier_sources.erase(source_id.strip_edges())
+
+
+func set_damage_reduction_source(source_id: String, reduction_ratio: float) -> void:
+	## 设置一个独立减伤来源；相同来源覆盖旧值，比例限制到 0 至 100%，多个来源按剩余伤害连乘。
+	var normalized_source_id: String = source_id.strip_edges()
+	if normalized_source_id.is_empty():
+		return
+	_damage_reduction_sources[normalized_source_id] = clampf(reduction_ratio, 0.0, 1.0)
+
+
+func remove_damage_reduction_source(source_id: String) -> void:
+	## 移除指定减伤来源；不存在时保持幂等，不影响装备套装、武器蓄力或其他技能。
+	_damage_reduction_sources.erase(source_id.strip_edges())
+
+
+func start_forced_movement(direction: Vector2, duration_seconds: float, bonus_move_speed_attribute: float) -> bool:
+	## 开始不可操控的定向移动；速度按当前角色移速属性加技能额外属性后统一换算为像素/秒。
+	if direction.is_zero_approx() or duration_seconds <= 0.0:
+		return false
+	_forced_movement_direction = direction.normalized()
+	_forced_movement_remaining = maxf(duration_seconds, 0.0)
+	# 当前移动速度属性；由移动组件保存角色基础值及装备倍率结算后的基础属性，技能额外值直接相加。
+	var current_move_speed_attribute: float = float(_movement_component.call("get_max_speed")) if _movement_component.has_method("get_max_speed") else 100.0
+	_forced_movement_speed = maxf(current_move_speed_attribute + bonus_move_speed_attribute, 0.0) * 3.0
+	_dodge_time_remaining = 0.0
+	_dodge_direction = Vector2.ZERO
+	return true
+
+
+func cancel_forced_movement() -> void:
+	## 立即结束当前强制移动；角色切换或技能行为提前销毁时调用，避免旧角色冲锋状态遗留到新角色。
+	_forced_movement_remaining = 0.0
+	_forced_movement_speed = 0.0
+	velocity = Vector2.ZERO
+
+
+func _move_forced_movement(delta: float) -> void:
+	## 推进当前强制移动并保留墙体碰撞；持续时间归零后清空速度，下一物理帧恢复正常控制。
+	velocity = _forced_movement_direction * _forced_movement_speed + _knockback_velocity
+	move_and_slide()
+	_cancel_blocked_knockback_components()
+	_decay_knockback(delta)
+	_forced_movement_remaining = maxf(_forced_movement_remaining - maxf(delta, 0.0), 0.0)
+	if _forced_movement_remaining <= 0.0:
+		_forced_movement_speed = 0.0
+		velocity = Vector2.ZERO
+
+
+func apply_front_recoil_distance(direction: Vector2, recoil_distance: float) -> void:
+	## 应用一次不依赖武器资源的前坐力理论位移；主动技能使用与武器相同的匀减速换算和累计速度上限。
+	if direction.is_zero_approx() or recoil_distance <= 0.0:
+		return
+	apply_knockback(direction.normalized(), _calculate_external_motion_initial_speed(recoil_distance))
+
+
+func _get_received_damage_multiplier() -> float:
+	## 汇总全部减伤来源并返回剩余伤害倍率；每项独立连乘可避免多个高减伤来源简单相加超过 100%。
+	var received_multiplier: float = 1.0
+	if _weapon_charge_component != null and _weapon_charge_component.has_method("get_damage_reduction_ratio"):
+		received_multiplier *= 1.0 - clampf(float(_weapon_charge_component.call("get_damage_reduction_ratio")), 0.0, 1.0)
+	for raw_reduction_ratio in _damage_reduction_sources.values():
+		received_multiplier *= 1.0 - clampf(float(raw_reduction_ratio), 0.0, 1.0)
+	if _equipment_set_component != null and _equipment_set_component.has_method("get_contextual_damage_reduction_ratio"):
+		received_multiplier *= 1.0 - clampf(float(_equipment_set_component.call("get_contextual_damage_reduction_ratio", global_position, _input_component.call("get_movement_vector"))), 0.0, 1.0)
+	return clampf(received_multiplier, 0.0, 1.0)
 
 
 func _spend_energy(amount: float) -> bool:
@@ -343,24 +517,24 @@ func apply_knockback(direction: Vector2, force: float) -> void:
 		_knockback_velocity = _knockback_velocity.normalized() * resolved_max_knockback_speed
 
 
-func _apply_weapon_recoil(weapon_data: Resource, attack_direction: Vector2) -> void:
+func _apply_weapon_recoil(weapon_data: Resource, attack_direction: Vector2, force_multiplier: float = 1.0) -> void:
 	if weapon_data == null or attack_direction.is_zero_approx():
 		return
 
 	# 武器后坐力；取值来自武器资源 recoil_force，单位为单次无碰撞理论位移像素，默认 0 表示不推动玩家。
-	var recoil_force: float = _get_weapon_recoil_force(weapon_data)
+	var recoil_force: float = _get_weapon_recoil_force(weapon_data) * maxf(force_multiplier, 0.0)
 	if recoil_force <= 0.0:
 		return
 
 	apply_knockback(-attack_direction.normalized(), _calculate_recoil_initial_speed(recoil_force))
 
 
-func _apply_weapon_front_recoil(weapon_data: Resource, attack_direction: Vector2) -> void:
+func _apply_weapon_front_recoil(weapon_data: Resource, attack_direction: Vector2, force_multiplier: float = 1.0) -> void:
 	if weapon_data == null or attack_direction.is_zero_approx():
 		return
 
 	# 武器前坐力；取值来自武器资源 front_recoil_force，单位为单次无碰撞理论位移像素，默认 0 表示不把玩家推向攻击方向。
-	var front_recoil_force: float = _get_weapon_front_recoil_force(weapon_data)
+	var front_recoil_force: float = _get_weapon_front_recoil_force(weapon_data) * maxf(force_multiplier, 0.0)
 	if front_recoil_force <= 0.0:
 		return
 
@@ -403,11 +577,11 @@ func _get_weapon_front_recoil_force(weapon_data: Resource) -> float:
 	return maxf(float(weapon_data.get("front_recoil_force")), 0.0)
 
 
-func _shake_screen_for_weapon_use(weapon_data: Resource) -> void:
+func _shake_screen_for_weapon_use(weapon_data: Resource, force_multiplier: float = 1.0) -> void:
 	# 武器后坐力；取值来自武器资源 recoil_force，默认用于换算射击屏幕震动强度。
-	var recoil_force: float = _get_weapon_recoil_force(weapon_data)
+	var recoil_force: float = _get_weapon_recoil_force(weapon_data) * maxf(force_multiplier, 0.0)
 	# 武器前坐力；取值来自武器资源 front_recoil_force，默认按后坐力一半倍率换算震动强度。
-	var front_recoil_force: float = _get_weapon_front_recoil_force(weapon_data)
+	var front_recoil_force: float = _get_weapon_front_recoil_force(weapon_data) * maxf(force_multiplier, 0.0)
 	# 武器使用震动强度；取值由后坐力和前坐力共同换算，默认 0 表示不震动。
 	var shake_amount: float = recoil_force * fire_shake_per_recoil + front_recoil_force * fire_shake_per_recoil * 0.5
 	if shake_amount <= 0.0:

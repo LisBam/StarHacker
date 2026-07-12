@@ -1,0 +1,31 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/weapon_data.gd" id="1_weapon"]
+[ext_resource type="PackedScene" path="res://scenes/projectiles/player_projectile.tscn" id="2_projectile"]
+
+[resource]
+script = ExtResource("1_weapon")
+weapon_id = "cheering_stick"
+display_name = "应援棒"
+weapon_type = "hybrid"
+description = "每次攻击同时触发近战伤害并发射远程子弹。"
+icon_text = "棒"
+value = 50
+max_durability = 400.0
+current_durability = 400.0
+energy_consumption = 20.0
+projectile_scene = ExtResource("2_projectile")
+projectile_speed = 900.0
+attack_distance = 340.0
+ranged_damage = 10.0
+cooldown = 0.35
+deviation_degrees = 10.0
+has_front_recoil = true
+front_recoil_force = 10.0
+impact_force = 25.0
+melee_damage = 20.0
+ranged_attack_distance = 340.0
+melee_attack_distance = 50.0
+ranged_impact_force = 25.0
+melee_impact_force = 15.0
+melee_active_duration = 0.12

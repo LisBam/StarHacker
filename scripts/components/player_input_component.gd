@@ -41,6 +41,8 @@ signal combat_input_enabled_changed(enabled: bool)
 var _left_mouse_down: bool = false
 ## 鼠标右键单次请求缓存；取值为 true/false，默认 false 表示无待处理近战，消费后清空以避免一次点击重复攻击。
 var _right_mouse_requested: bool = false
+## 鼠标右键按住状态；取值为 true/false，默认 false，物理回退输入在按下与松开事件中维护，供可蓄力近战武器读取。
+var _right_mouse_down: bool = false
 ## 闪避单次请求缓存；取值为 true/false，默认 false 表示无待处理闪避，消费后清空以避免一次按键重复突进。
 var _dodge_requested: bool = false
 ## 远程槽单次切换请求；取值为 -1 或有效槽索引，默认 -1 表示无请求，消费后清空以避免重复切换。
@@ -60,8 +62,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		var mouse_event: InputEventMouseButton = event as InputEventMouseButton
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT and _should_use_physical_fallback(fire_action):
 			_left_mouse_down = mouse_event.pressed
-		elif mouse_event.button_index == MOUSE_BUTTON_RIGHT and mouse_event.pressed and _should_use_physical_fallback(melee_action):
-			_right_mouse_requested = true
+		elif mouse_event.button_index == MOUSE_BUTTON_RIGHT and _should_use_physical_fallback(melee_action):
+			_right_mouse_down = mouse_event.pressed
+			if mouse_event.pressed:
+				_right_mouse_requested = true
 		elif mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP and mouse_event.pressed and _should_use_physical_fallback(switch_ranged_previous_action):
 			_ranged_cycle_request -= 1
 		elif mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN and mouse_event.pressed and _should_use_physical_fallback(switch_ranged_next_action):
@@ -122,6 +126,13 @@ func consume_melee_request() -> bool:
 	var requested: bool = _right_mouse_requested or _is_action_just_pressed(melee_action)
 	_right_mouse_requested = false
 	return requested
+
+
+func is_melee_pressed() -> bool:
+	## 返回近战动作当前是否保持按住；用于蓄力武器，普通近战仍通过 consume_melee_request 保持单次点击语义。
+	if not _combat_input_enabled:
+		return false
+	return _right_mouse_down or _is_action_pressed(melee_action) or (_should_use_physical_fallback(melee_action) and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT))
 
 
 func is_sprint_pressed() -> bool:
@@ -188,6 +199,7 @@ func set_combat_input_enabled(enabled: bool) -> void:
 
 	_left_mouse_down = false
 	_right_mouse_requested = false
+	_right_mouse_down = false
 	_dodge_requested = false
 	_ranged_slot_request = -1
 	_ranged_cycle_request = 0

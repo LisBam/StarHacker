@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="EquipmentSetData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/equipment_set_data.gd" id="1_set"]
+
+[resource]
+script = ExtResource("1_set")
+set_id = "scavenger_set"
+display_name = "拾荒者套装"
+two_piece_required_count = 2
+two_piece_description = "提高20%的防御力。"
+two_piece_attribute_multipliers = {
+"defense_power": 0.2
+}
+four_piece_required_count = 4
+four_piece_description = "当玩家朝附近的掉落物方向移动时，提高40%的移速，且期间获得15%的减伤。"
+nearby_drop_detection_radius = 300.0
+nearby_drop_move_speed_bonus_ratio = 0.4
+nearby_drop_damage_reduction_ratio = 0.15

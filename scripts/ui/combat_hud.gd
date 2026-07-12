@@ -13,7 +13,7 @@ const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_p
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
 ## 通用物品卡片视图；战斗装备栏、背包与结算列表统一读取其固定尺寸，禁止场景内单独覆盖。
 const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
-## 通用物品详情格式器；结算标题复用其有效售价读取规则计算武器、装备和堆叠资源总价值。
+## 通用物品详情格式器；结算标题复用其有效价值读取规则计算武器、装备和堆叠资源总价值。
 const ITEM_DETAIL_FORMATTER_SCRIPT: Script = preload("res://scripts/ui/item_detail_formatter.gd")
 ## 统一装备槽控件；四部位装备复用仓库武器槽的排版、耐久条、拖拽视觉与悬浮窗。
 const EQUIPMENT_STORAGE_SLOT_SCRIPT: Script = preload("res://scripts/ui/equipment_storage_slot_control.gd")
@@ -116,7 +116,7 @@ const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
 ## 短时逃跑物品损失比例；默认 0.20 表示背包每个物品单位独立保留 80%，只影响主动逃跑且不影响死亡结算。
 @export_range(0.0, 1.0, 0.01) var early_escape_loss_ratio: float = 0.20
 ## 远程冷却遮罩最短显示时长；默认 0.12 秒，更短或相等的高射速冷却不显示遮罩以避免持续闪烁。
-@export_range(0.0, 1.0, 0.01) var ranged_cooldown_overlay_minimum_duration: float = 0.12
+@export_range(0.0, 1.0, 0.01) var cooldown_overlay_minimum_duration: float = 0.12
 
 ## 玩家节点缓存；默认按 player_path 获取，允许为空但 HUD 不会显示有效状态，修改会影响所有组件绑定。
 var _player: Node
@@ -826,24 +826,24 @@ func _on_inventory_armor_item_selected(_item_resource: Resource, armor_slot: Str
 
 func _refresh_cooldown_overlays() -> void:
 	# 远程冷却比例；取值为 0 到 1，默认从远程攻击组件读取，修改会影响远程槽白色 CD 遮罩。
-	var ranged_cooldown_ratio: float = _get_component_cooldown_ratio(_ranged_attack_component)
+	var weapon_cooldown_ratio: float = _get_component_cooldown_ratio(_ranged_attack_component)
 	# 本次远程冷却总时长；高射速武器不显示快速闪烁的遮罩，但实际攻击冷却保持不变。
-	var ranged_cooldown_duration: float = _get_component_cooldown_duration(_ranged_attack_component)
-	if ranged_cooldown_duration <= ranged_cooldown_overlay_minimum_duration:
-		ranged_cooldown_ratio = 0.0
-	if ranged_cooldown_ratio <= 0.0:
+	var weapon_cooldown_duration: float = _get_component_cooldown_duration(_ranged_attack_component)
+	if weapon_cooldown_duration <= cooldown_overlay_minimum_duration:
+		weapon_cooldown_ratio = 0.0
+	if weapon_cooldown_ratio <= 0.0:
 		_last_cooling_ranged_slot = -1
 
 	# 远程槽冷却刷新索引；取值为控件数组下标，默认逐槽清理或设置遮罩，修改循环范围会影响 CD 显示目标。
 	for slot_index in range(_ranged_slot_controls.size()):
 		# 当前远程槽遮罩比例；取值为 0 到 1，默认只给最近开火槽显示，修改会影响远程 CD 归属。
-		var slot_cooldown_ratio: float = ranged_cooldown_ratio if slot_index == _last_cooling_ranged_slot else 0.0
+		var slot_cooldown_ratio: float = weapon_cooldown_ratio if slot_index == _last_cooling_ranged_slot else 0.0
 		_ranged_slot_controls[slot_index].call("set_cooldown_ratio", slot_cooldown_ratio)
 
 	if _melee_slot_control != null:
 		# 近战冷却比例；取值为 0 到 1，默认从近战攻击组件读取，修改会影响近战槽白色 CD 遮罩。
-		var melee_cooldown_ratio: float = _get_component_cooldown_ratio(_melee_attack_component)
-		_melee_slot_control.call("set_cooldown_ratio", melee_cooldown_ratio)
+		var melee_slot_cooldown_ratio: float = _get_component_cooldown_ratio(_melee_attack_component)
+		_melee_slot_control.call("set_cooldown_ratio", melee_slot_cooldown_ratio)
 
 
 func _create_weapon_slot_control(minimum_size: Vector2) -> Control:
@@ -3504,7 +3504,7 @@ func _on_settlement_subcategory_pressed(subcategory: String) -> void:
 
 
 func _build_settlement_section(section_name: String, entries: Array, empty_text: String, accent_color: Color) -> void:
-	# 分区总价值；按每个条目的当前有效单价乘实际数量累计，与物品悬停详情和仓库售价保持一致。
+	# 分区总价值；按每个条目的当前有效价值乘实际数量累计，与物品悬停详情和仓库保持一致。
 	var total_value: int = _calculate_settlement_entries_total_value(entries)
 	# 分区标题；显示分类名称、条目数量和总价值，颜色区分战利品与丢失物品。
 	var section_title: Label = Label.new()
@@ -3564,13 +3564,13 @@ func _calculate_settlement_entries_total_value(entries: Array) -> int:
 			continue
 		# 结构化结算条目；包含资源引用和实际数量，武器与装备通常为 1。
 		var entry: Dictionary = raw_entry as Dictionary
-		# 条目资源；缺失时无法读取有效售价，因此不会计入总价值。
+		# 条目资源；缺失时无法读取有效价值，因此不会计入总价值。
 		var item_resource: Resource = entry.get("resource") as Resource
 		if item_resource == null:
 			continue
 		# 条目实际数量；堆叠资源按结算数量累计，异常数量至少按 1 处理。
 		var quantity: int = maxi(int(entry.get("quantity", 1)), 1)
-		# 单位有效售价；包含强化与耐久对武器、装备价值的实时影响。
-		var unit_value: int = int(ITEM_DETAIL_FORMATTER_SCRIPT.call("get_item_sell_price", item_resource))
+		# 单位有效价值；包含强化与耐久对武器、装备价值的实时影响。
+		var unit_value: int = int(ITEM_DETAIL_FORMATTER_SCRIPT.call("get_item_value", item_resource))
 		total_value += maxi(unit_value, 0) * quantity
 	return maxi(total_value, 0)

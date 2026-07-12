@@ -243,7 +243,7 @@ func _add_item_card(parent_grid: GridContainer, item_resource: Resource, source_
 		return
 	# 最少一件报价；卡片只有在至少能送回一个单位时可点击，整组超额仍可通过部分送回继续操作。
 	var minimum_quote: Dictionary = _global_inventory.call("get_combat_shipping_quote", item_resource, source_location, 1) as Dictionary
-	# 当前展示数量报价；卡片显示整件或整组物品实际需要支付的撤离收费，悬停详情仍展示出售价格。
+	# 当前展示数量报价；卡片显示整件或整组物品实际需要支付的撤离收费，悬停详情仍展示价值。
 	var display_quote: Dictionary = _global_inventory.call("get_combat_shipping_quote", item_resource, source_location, quantity) as Dictionary
 	# 当前撤离收费；取值为物品当前有效价值的 20% 向上取整。
 	var extraction_fee: int = maxi(int(display_quote.get("fee", 0)), 0)
@@ -284,8 +284,8 @@ func _on_action_menu_id_pressed(action_id: int) -> void:
 			return
 		_pending_partial_resource = _action_resource
 		_pending_partial_source_location = _action_source_location
-		# 单件物品价值；武器使用强化和耐久后的有效售价，资源使用固定售价。
-		var unit_value: int = int(_action_resource.call("get_effective_sell_price")) if _action_resource.has_method("get_effective_sell_price") else maxi(int(_action_resource.get("sell_price")), 0)
+		# 单件物品价值；武器使用强化和耐久后的有效价值，其他资源使用固定价值。
+		var unit_value: int = int(_action_resource.call("get_effective_value")) if _action_resource.has_method("get_effective_value") else maxi(int(_action_resource.get("value")), 0)
 		_quantity_dialog.present_shipping(str(_action_resource.get("display_name")), maximum_quantity, unit_value, int(_global_inventory.call("get_combat_shipping_remaining_value")), 0.20)
 
 

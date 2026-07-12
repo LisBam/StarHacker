@@ -231,8 +231,8 @@ static func _get_entry_total_value(entry: Dictionary) -> int:
 	var item_resource: Resource = entry.get("resource") as Resource
 	if item_resource == null:
 		return 0
-	# 单件价值；武器优先读取强化后售价，资源读取固定售价。
-	var unit_value: int = int(item_resource.call("get_effective_sell_price")) if item_resource.has_method("get_effective_sell_price") else maxi(int(item_resource.get("sell_price")), 0)
+	# 单件价值；武器优先读取强化和耐久结算后的有效价值，其他资源读取固定价值。
+	var unit_value: int = int(item_resource.call("get_effective_value")) if item_resource.has_method("get_effective_value") else maxi(int(item_resource.get("value")), 0)
 	# 堆叠数量；武器为 1，资源限制在至少 1。
 	var quantity: int = maxi(int(entry.get("quantity", 1)), 1)
 	return unit_value * quantity

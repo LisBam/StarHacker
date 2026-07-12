@@ -16,7 +16,7 @@ const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.g
 const STORAGE_DROP_AREA_SCRIPT: Script = preload("res://scripts/ui/storage_drop_area.gd")
 ## 局外装备拖拽槽脚本；默认负责远近战类型校验以及装备栏双向拖拽数据生成。
 const EQUIPMENT_STORAGE_SLOT_SCRIPT: Script = preload("res://scripts/ui/equipment_storage_slot_control.gd")
-## 物品详情格式化器；用于识别武器、强化石和动态售价，避免仓库面板重复拼接属性文本。
+## 物品详情格式化器；用于识别武器、强化石和动态价值，避免仓库面板重复拼接属性文本。
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
 ## 强化结果弹窗脚本；仓库和局内背包共用同一数值说明格式。
 const ENHANCEMENT_RESULT_DIALOG_SCRIPT: Script = preload("res://scripts/ui/enhancement_result_dialog.gd")
@@ -702,14 +702,14 @@ func _on_item_action_requested(item_resource: Resource, source_location: String)
 	_action_item_location = source_location
 	_item_action_menu.clear_actions()
 	# 出售总价；强化石按整组数量计算，强化武器按动态售价计算。
-	var total_sell_price: int = int(_global_inventory.call("get_storage_resource_sell_price", item_resource, source_location))
+	var total_value: int = int(_global_inventory.call("get_storage_resource_value", item_resource, source_location))
 	# 当前库存数量；数量大于 1 时提供指定数量出售和全部出售两个独立入口。
 	var stored_quantity: int = int(_global_inventory.call("get_storage_resource_quantity", item_resource, source_location))
 	if stored_quantity > 1:
-		_item_action_menu.add_action("出售指定数量…", ITEM_ACTION_SELL, total_sell_price <= 0, true)
-		_item_action_menu.add_action("全部出售（+%d）" % total_sell_price, ITEM_ACTION_SELL_ALL, total_sell_price <= 0, true)
+		_item_action_menu.add_action("出售指定数量…", ITEM_ACTION_SELL, total_value <= 0, true)
+		_item_action_menu.add_action("全部出售（+%d）" % total_value, ITEM_ACTION_SELL_ALL, total_value <= 0, true)
 	else:
-		_item_action_menu.add_action("出售（+%d）" % total_sell_price, ITEM_ACTION_SELL, total_sell_price <= 0, true)
+		_item_action_menu.add_action("出售（+%d）" % total_value, ITEM_ACTION_SELL, total_value <= 0, true)
 	if str(item_resource.get("item_kind")) == "repair_kit":
 		_item_action_menu.add_action("使用", ITEM_ACTION_USE_REPAIR_KIT)
 	elif source_location == "backpack" and str(item_resource.get("item_kind")) == "equipment":
@@ -843,14 +843,14 @@ func _open_sell_quantity_dialog(item_resource: Resource, source_location: String
 	_quantity_sale_item_resource = item_resource
 	_quantity_sale_item_location = source_location
 	# 单件售价；整组总价除以当前数量，统一复用 GlobalInventory 的动态售价结果。
-	var total_sell_price: int = int(_global_inventory.call("get_storage_resource_sell_price", item_resource, source_location))
+	var total_value: int = int(_global_inventory.call("get_storage_resource_value", item_resource, source_location))
 	# 有效最大数量；至少为 1，防止旧操作菜单确认时物品已经发生变化。
 	var resolved_maximum_quantity: int = maxi(maximum_quantity, 1)
 	# 单件售价；整数总价由单价乘数量形成，因此整除不会丢失有效金币。
-	var unit_sell_price: int = total_sell_price / resolved_maximum_quantity
+	var unit_value: int = total_value / resolved_maximum_quantity
 	# 物品名称；统一由详情格式化器解析显示名，避免武器旧资源名称为空。
 	var item_display_name: String = str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", item_resource))
-	_sell_quantity_dialog.present(item_display_name, resolved_maximum_quantity, unit_sell_price)
+	_sell_quantity_dialog.present(item_display_name, resolved_maximum_quantity, unit_value)
 
 
 func _on_sell_quantity_confirmed(quantity: int) -> void:

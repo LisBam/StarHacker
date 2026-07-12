@@ -104,7 +104,7 @@
 ## 参数分组
 
 - 加载与错峰：`active_radius`、`sleep_hysteresis`、`update_interval`、`monsters_per_update`、`materializations_per_update`、`max_materialized_monsters`、`ai_update_interval`。
-- 死亡掉落：`weapon_drop_chance`、`enhancement_stone_drop_chance`、`enhancement_stone_min_modifier_count`、`enhancement_stone_max_modifier_count`、`enhancement_stone_negative_modifier_chance`、`enhancement_stone_base_sell_price`、`EnhancementRules.ENHANCEMENT_STEP_RATIO`。
+- 死亡掉落：`weapon_drop_chance`、`enhancement_stone_drop_chance`、`enhancement_stone_min_modifier_count`、`enhancement_stone_max_modifier_count`、`enhancement_stone_negative_modifier_chance`、`enhancement_stone_base_value`、`EnhancementRules.ENHANCEMENT_STEP_RATIO`。
 - 实心墙体视野：`vision_range`、`lose_target_range_multiplier`、`vision_requires_line_of_sight`、`vision_line_of_sight_collision_mask`、`vision_loss_grace_duration`、`solid_wall_group`、`line_of_sight_skip_limit`。
 - 短期线索：`target_memory_duration`、`target_prediction_time`、`target_prediction_max_distance`、`search_arrive_distance`、`lost_search_occlusion_offset`。
 - 中长期记忆：`medium_memory_duration`、`medium_hotspot_merge_distance`、`medium_hotspot_max_count`、`medium_recheck_trigger_radius`、`medium_recheck_duration`、`medium_recheck_cooldown`、`long_term_region_radius`、`long_term_alert_patrol_speed_multiplier`。

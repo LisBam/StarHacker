@@ -93,8 +93,8 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 		return _build_invalid_preview("牺牲槽中存在无法用于当前主物品的材料", invalid_sacrifice_entries)
 	if effective_material_count <= 0:
 		return _build_invalid_preview("当前材料无法为主物品提供有效锻造效果")
-	# 主武器当前价值；强化与耐久共同影响有效售价，价值越高最终锻造倍率越高。
-	var main_weapon_value: int = int(main_weapon.call("get_effective_sell_price")) if main_weapon.has_method("get_effective_sell_price") else maxi(int(main_weapon.get("sell_price")), 0)
+	# 主武器当前价值；强化与耐久共同影响有效价值，价值越高最终锻造倍率越高。
+	var main_weapon_value: int = int(main_weapon.call("get_effective_value")) if main_weapon.has_method("get_effective_value") else maxi(int(main_weapon.get("value")), 0)
 	# 主武器价值倍率；连续按价值比例计算，例如价值 250 金币时倍率为 1 + 2.5×0.4 = 2.0。
 	var cost_multiplier: float = BASE_COST_MULTIPLIER + float(main_weapon_value) / MAIN_WEAPON_VALUE_STEP * MAIN_WEAPON_MULTIPLIER_PER_STEP
 	# 耐久基础费用；只对实际能恢复的耐久收费，超过最大耐久的材料部分不产生费用。
@@ -146,8 +146,8 @@ func execute_forge(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 	var forge_cost: int = int(preview.get("cost", 0))
 	if int(_global_inventory.call("get_coins")) < forge_cost:
 		return {"success": false, "message": "金币不足，无法完成锻造"}
-	# 强化前售价；结果弹窗展示全部强化石与耐久修复共同完成后的价格变化。
-	var sell_price_before: int = int(main_weapon.call("get_effective_sell_price")) if main_weapon.has_method("get_effective_sell_price") else maxi(int(main_weapon.get("sell_price")), 0)
+	# 强化前价值；结果弹窗展示全部强化石与耐久修复共同完成后的价值变化。
+	var value_before: int = int(main_weapon.call("get_effective_value")) if main_weapon.has_method("get_effective_value") else maxi(int(main_weapon.get("value")), 0)
 	_global_inventory.call("adjust_coins", -forge_cost)
 	# 强化结果聚合；多颗强化石的提升和削弱明细按实际应用顺序合并。
 	var combined_result: Dictionary = {
@@ -155,7 +155,7 @@ func execute_forge(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 		"weapon": main_weapon,
 		"beneficial_changes": [],
 		"detrimental_changes": [],
-		"sell_price_before": sell_price_before,
+		"value_before": value_before,
 		"durability_before": float(preview.get("durability_before", 0.0)),
 		"durability_after": float(preview.get("durability_after", 0.0)),
 		"durability_restored": float(preview.get("durability_restored", 0.0)),
@@ -183,7 +183,7 @@ func execute_forge(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 	# 实际锻造后耐久；耐久值词条可能改变装备上限并限制当前耐久，结果弹窗必须读取最终资源状态。
 	# 名称与目标补充：该词条现统一显示为“耐久”，并可改变武器或装备的有效耐久上限。
 	combined_result["durability_after"] = maxf(float(main_weapon.get("current_durability")), 0.0)
-	combined_result["sell_price_after"] = int(main_weapon.call("get_effective_sell_price")) if main_weapon.has_method("get_effective_sell_price") else sell_price_before
+	combined_result["value_after"] = int(main_weapon.call("get_effective_value")) if main_weapon.has_method("get_effective_value") else value_before
 	_global_inventory.call("notify_weapon_runtime_state_changed", main_weapon)
 	return combined_result
 

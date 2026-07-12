@@ -16,8 +16,8 @@ class_name CharacterData
 @export_range(1.0, 9999.0, 1.0, "or_greater") var max_health: float = 100.0
 ## 基础能量上限；默认 100，进入战斗或切换角色时应用，运行时不应动态修改模板。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var max_energy: float = 100.0
-## 基础移动速度；默认 320，装备移速比例会在该值上继续结算，运行时不应动态修改模板。
-@export_range(1.0, 2000.0, 1.0, "or_greater") var move_speed: float = 320.0
+## 基础移动速度属性；默认 106.6667，按 1 点等于 3 像素/秒换算，装备移速比例会在该值上继续结算。
+@export_range(1.0, 2000.0, 0.0001, "or_greater") var move_speed: float = 106.6667
 ## 基础攻击力；默认 10，装备攻击加成会在该值上继续结算，运行时不应动态修改模板。
 @export_range(0.0, 99999.0, 1.0, "or_greater") var attack_power: float = 10.0
 ## 基础防御力；默认 5，装备防御加成会在该值上继续结算，运行时不应动态修改模板。

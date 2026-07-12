@@ -59,34 +59,34 @@ static func get_item_type_label(item_resource: Resource) -> String:
 	return "武器 · 远程" if weapon_type == "ranged" else ("武器 · 近战" if weapon_type == "melee" else "未知")
 
 
-static func get_item_sell_price(item_resource: Resource) -> int:
+static func get_item_value(item_resource: Resource) -> int:
 	if item_resource == null:
 		return 0
-	if item_resource.has_method("get_effective_sell_price"):
-		return maxi(int(item_resource.call("get_effective_sell_price")), 0)
-	return maxi(int(item_resource.get("sell_price")), 0)
+	if item_resource.has_method("get_effective_value"):
+		return maxi(int(item_resource.call("get_effective_value")), 0)
+	return maxi(int(item_resource.get("value")), 0)
 
 
-static func build_plain_text(item_resource: Resource, quantity: int = 1, price_label: String = "出售价格", total_price_override: int = -1) -> String:
-	return _strip_bbcode(build_bbcode(item_resource, quantity, price_label, total_price_override))
+static func build_plain_text(item_resource: Resource, quantity: int = 1, value_label: String = "价值", total_value_override: int = -1) -> String:
+	return _strip_bbcode(build_bbcode(item_resource, quantity, value_label, total_value_override))
 
 
-static func build_bbcode(item_resource: Resource, quantity: int = 1, price_label: String = "出售价格", total_price_override: int = -1) -> String:
+static func build_bbcode(item_resource: Resource, quantity: int = 1, value_label: String = "价值", total_value_override: int = -1) -> String:
 	if item_resource == null:
 		return "物品数据不可用"
-	# 详情文本行；首部统一显示名称、分类、数量与售价，后续按资源类型追加字段。
+	# 详情文本行；首部统一显示名称、分类、数量与价值，后续按资源类型追加字段。
 	var detail_lines: Array[String] = []
 	detail_lines.append("[font_size=18][b]%s[/b][/font_size]" % get_item_display_name(item_resource))
 	detail_lines.append("类型：%s" % get_item_type_label(item_resource))
 	if quantity > 1 or is_enhancement_stone(item_resource):
 		detail_lines.append("数量：%d / 99" % maxi(quantity, 1))
-	# 单件售价；资源堆叠额外展示整组价值，避免菜单价格与详情不一致。
-	var unit_sell_price: int = get_item_sell_price(item_resource)
-	# 详情价格；普通界面显示出售价格，物资撤离界面传入实际撤离收费覆盖值。
-	var displayed_total_price: int = total_price_override if total_price_override >= 0 else unit_sell_price * maxi(quantity, 1)
-	# 单价补充；仅普通出售价格且堆叠数量大于 1 时显示，撤离收费已经包含整组向上取整结果。
-	var unit_price_suffix: String = "（单个 %d）" % unit_sell_price if price_label == "出售价格" and quantity > 1 else ""
-	detail_lines.append("%s：%d 金币%s" % [price_label, displayed_total_price, unit_price_suffix])
+	# 单件价值；资源堆叠额外展示整组价值，避免菜单摘要与详情不一致。
+	var unit_value: int = get_item_value(item_resource)
+	# 详情价值；普通界面显示价值，物资撤离界面传入实际撤离收费覆盖值。
+	var displayed_total_value: int = total_value_override if total_value_override >= 0 else unit_value * maxi(quantity, 1)
+	# 单值补充；仅普通价值且堆叠数量大于 1 时显示，撤离收费已经包含整组向上取整结果。
+	var unit_value_suffix: String = "（单个 %d）" % unit_value if value_label == "价值" and quantity > 1 else ""
+	detail_lines.append("%s：%d 金币%s" % [value_label, displayed_total_value, unit_value_suffix])
 	# 物品说明；空说明不生成无意义空行。
 	var description: String = str(item_resource.get("description"))
 	if not description.is_empty():
@@ -137,7 +137,7 @@ static func _append_equipment_lines(detail_lines: Array[String], item_resource: 
 		_append_weapon_stat_line(detail_lines, item_resource, stat_name, decimals, suffix, display_multiplier, true)
 
 
-static func create_tooltip_control(item_resource: Resource, quantity: int = 1, price_label: String = "出售价格", total_price_override: int = -1) -> Control:
+static func create_tooltip_control(item_resource: Resource, quantity: int = 1, value_label: String = "价值", total_value_override: int = -1) -> Control:
 	# 富文本详情；由 Godot 自定义 tooltip 承载，fit_content 保证内容按文本高度完整展开。
 	var detail_label: RichTextLabel = RichTextLabel.new()
 	detail_label.bbcode_enabled = true
@@ -145,7 +145,7 @@ static func create_tooltip_control(item_resource: Resource, quantity: int = 1, p
 	detail_label.scroll_active = false
 	detail_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	detail_label.custom_minimum_size = Vector2(330.0, 0.0)
-	detail_label.text = build_bbcode(item_resource, quantity, price_label, total_price_override)
+	detail_label.text = build_bbcode(item_resource, quantity, value_label, total_value_override)
 
 	# 详情边距；为系统 tooltip 提供稳定留白，避免文字紧贴边缘。
 	var margin: MarginContainer = MarginContainer.new()
@@ -195,7 +195,7 @@ static func _append_stone_lines_by_benefit(detail_lines: Array[String], modifier
 		var modifier_direction: float = float(modifiers.get(modifier_key, 0.0))
 		if EnhancementRules.is_direction_beneficial(modifier_key, modifier_direction) != beneficial:
 			continue
-		# 词条颜色；按玩法利弊渲染，冷却-、能量消耗-、偏移-和后坐力-等降低型增益统一显示绿色。
+		# 词条颜色；按玩法利弊渲染，冷却-、能耗-、偏移-和后坐力-等降低型增益统一显示绿色。
 		var color_code: String = POSITIVE_COLOR if beneficial else NEGATIVE_COLOR
 		detail_lines.append("[color=%s]%s[/color]" % [color_code, EnhancementRules.build_modifier_token(modifier_key, modifier_direction, false)])
 
@@ -214,7 +214,7 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 	var weapon_type: String = str(item_resource.get("weapon_type"))
 	_append_weapon_stat_line(detail_lines, item_resource, "damage", 1)
 	_append_weapon_stat_line(detail_lines, item_resource, "cooldown", 2, " 秒")
-	_append_weapon_stat_line(detail_lines, item_resource, "energy_cost", 1)
+	_append_weapon_stat_line(detail_lines, item_resource, "energy_consumption", 1)
 	# 暴击属性；与其他武器、装备属性共用统一颜色和括号变化明细，底层小数乘 100 后显示百分比。
 	_append_weapon_stat_line(detail_lines, item_resource, "critical_chance", 0, "%", 100.0)
 	_append_weapon_stat_line(detail_lines, item_resource, "critical_damage", 0, "%", 100.0)
@@ -230,8 +230,10 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 			_append_weapon_stat_line(detail_lines, item_resource, "combo_count", 0)
 	else:
 		_append_weapon_stat_line(detail_lines, item_resource, "melee_active_duration", 2, " 秒")
-	_append_weapon_stat_line(detail_lines, item_resource, "recoil_force", 1)
-	_append_weapon_stat_line(detail_lines, item_resource, "front_recoil_force", 1)
+	if bool(item_resource.get("has_recoil")):
+		_append_weapon_stat_line(detail_lines, item_resource, "recoil_force", 1)
+	if bool(item_resource.get("has_front_recoil")):
+		_append_weapon_stat_line(detail_lines, item_resource, "front_recoil_force", 1)
 	_append_weapon_stat_line(detail_lines, item_resource, "impact_force", 1)
 
 

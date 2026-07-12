@@ -11,7 +11,7 @@ signal refresh_state_changed
 const SAVE_PATH: String = "user://shop_state.json"
 ## 商店存档版本；版本 2 在新增稀有强化词条后重建旧版普通商品池，同时保留灰市与刷新状态。
 const SAVE_VERSION: int = 2
-## 强化石随机生成的单词条基础售价；默认 30 金币，与战斗掉落规则一致。
+## 强化石随机生成的单词条基础价值；默认 30 金币，与战斗掉落规则一致。
 const STONE_BASE_SELL_PRICE: int = 30
 ## 强化石随机生成兼容最少词条数；实际词条数由品质规则决定，该值用于保持统一调用签名。
 const STONE_MINIMUM_MODIFIER_COUNT: int = 1
@@ -415,15 +415,15 @@ func _apply_random_compatible_enhancement(weapon_resource: Resource) -> bool:
 
 
 func _create_normal_stock_entry(item_resource: Resource) -> Dictionary:
-	# 原价；武器忽略二手耐久和历史强化状态，资源使用自身基础售价。
-	var original_price: int = maxi(int(item_resource.get("sell_price")), 0)
+	# 基础价值；武器忽略二手耐久和历史强化状态，资源使用自身固定价值。
+	var original_value: int = maxi(int(item_resource.get("value")), 0)
 	# 价格倍率；每件商品在 1.5 至 3.0 倍范围内独立抽取并在刷新周期内固定。
 	var price_multiplier: float = _random.randf_range(minf(normal_price_multiplier_minimum, normal_price_multiplier_maximum), maxf(normal_price_multiplier_minimum, normal_price_multiplier_maximum))
 	return {
 		"stock_id": _create_unique_id("shop"),
 		"resource": item_resource,
 		"quantity": 1,
-		"price": maxi(roundi(float(original_price) * price_multiplier), 1) if original_price > 0 else 0,
+		"price": maxi(roundi(float(original_value) * price_multiplier), 1) if original_value > 0 else 0,
 		"price_multiplier": snappedf(price_multiplier, 0.01),
 		"second_hand": bool(item_resource.get_meta("shop_second_hand", false)),
 		"used_stone_count": int(item_resource.get_meta("shop_used_stone_count", 0)),
@@ -444,7 +444,7 @@ func _on_combat_failure_losses_recorded(lost_entries: Array) -> void:
 		var gray_resource: Resource = lost_resource.duplicate(true) as Resource
 		if gray_resource == null:
 			continue
-		# 满耐久价值；武器按当前强化状态恢复到满耐久后估值，资源直接使用有效售价。
+		# 满耐久价值；武器按当前强化状态恢复到满耐久后估值，资源直接使用有效价值。
 		var full_durability_value: int = _get_full_durability_value(gray_resource)
 		# 遗失数量；武器固定为一，强化石保留该次失败实际遗失的堆叠数量。
 		var lost_quantity: int = maxi(int((raw_entry as Dictionary).get("quantity", 1)), 1)
@@ -477,8 +477,8 @@ func _get_full_durability_value(item_resource: Resource) -> int:
 		if valuation_weapon == null:
 			return 0
 		valuation_weapon.call("set_current_durability", float(valuation_weapon.call("get_maximum_durability")) if valuation_weapon.has_method("get_maximum_durability") else float(valuation_weapon.get("max_durability")))
-		return int(valuation_weapon.call("get_effective_sell_price"))
-	return int(item_resource.call("get_effective_sell_price")) if item_resource.has_method("get_effective_sell_price") else maxi(int(item_resource.get("sell_price")), 0)
+		return int(valuation_weapon.call("get_effective_value"))
+	return int(item_resource.call("get_effective_value")) if item_resource.has_method("get_effective_value") else maxi(int(item_resource.get("value")), 0)
 
 
 func _create_unique_id(prefix: String) -> String:

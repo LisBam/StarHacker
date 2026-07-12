@@ -18,8 +18,8 @@ class_name WeaponData
 @export_multiline var description: String = ""
 ## HUD 图标文本；默认问号用于未配置图标时兜底，建议保持 1 到 2 个字符，修改会影响装备栏显示。
 @export var icon_text: String = "?"
-## 局外出售价格；取值大于等于 0，默认 0 表示不可出售，只在永久仓库出售时兑换为局外金币且运行时通常不修改。
-@export_range(0, 999999, 1) var sell_price: int = 0
+## 物品价值；取值大于等于 0，默认 0 表示不可出售，玩家出售时以该值为基础结算且运行时通常不修改。
+@export_range(0, 999999, 1) var value: int = 0
 ## 武器最大耐久；取值大于 0，默认 500.0，运行时通常不修改，调整会影响耐久比例、读条与价格折损速度。
 ## 耐久上限保留 0.1 浮点精度供特殊武器扩展；已存档武器会按原耐久比例迁移到当前基础上限。
 @export_range(1.0, 999999.0, 0.1, "or_greater") var max_durability: float = 500.0
@@ -30,8 +30,8 @@ class_name WeaponData
 ## 独立消耗配置补充：默认参考值为 1.0，每把武器资源可覆盖为不同浮点消耗。
 ## 固定消耗规则补充：武器不再暴露独立耐久消耗属性，所有成功使用统一扣除 1 点且运行时不可按武器修改。
 const FIXED_DURABILITY_COST_PER_USE: float = 1.0
-## 每次成功使用武器消耗的能量；取值建议大于等于 0，默认 0 表示免费攻击，修改会影响玩家能量消耗节奏。
-@export_range(0.0, 9999.0, 0.1, "or_greater") var energy_cost: float = 0.0
+## 每次成功使用武器的能耗；取值建议大于等于 0，默认 0 表示免费攻击，修改会影响玩家能量消耗节奏。
+@export_range(0.0, 9999.0, 0.1, "or_greater") var energy_consumption: float = 0.0
 ## 远程武器使用的弹体场景；默认空表示不能发射，必须实例化为 Node2D，修改会影响远程攻击生成对象。
 @export var projectile_scene: PackedScene
 ## 远程弹体速度；取值建议大于 0，默认 900，修改会影响远程弹道速度。
@@ -40,8 +40,8 @@ const FIXED_DURABILITY_COST_PER_USE: float = 1.0
 @export_range(1.0, 12000.0, 1.0, "or_greater") var bullet_range: float = 340.0
 ## 远程弹体伤害；取值建议大于等于 0，默认 12，修改会影响弹体命中后的伤害值。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var ranged_damage: float = 12.0
-## 远程射击冷却；取值应大于 0，默认 0.16 秒，修改会影响连续射击频率。
-@export_range(0.01, 5.0, 0.01) var ranged_cooldown: float = 0.16
+## 武器冷却；取值应大于 0，远程默认 0.16 秒、近战资源应自行覆盖，修改会影响连续攻击频率。
+@export_range(0.01, 5.0, 0.01) var cooldown: float = 0.16
 ## 武器偏移角度；取值大于等于 0，默认 0 度表示完全精准，数值越高每颗弹体相对瞄准方向的随机角度越大。
 @export_range(0.0, 45.0, 0.1, "or_greater") var deviation_degrees: float = 0.0
 ## 是否具有散射属性；默认 false，只有显式启用的远程武器才能发射多颗弹体并接受散射强化。
@@ -58,9 +58,21 @@ const FIXED_DURABILITY_COST_PER_USE: float = 1.0
 @export_range(1, 100, 1, "or_greater") var combo_count: int = 1
 ## 连击相邻两轮之间的时间；默认 0.08 秒，运行时通常不修改，调整会改变连击持续时间但不改变结束后的武器冷却。
 @export_range(0.01, 5.0, 0.01) var combo_interval: float = 0.08
-## 武器后坐力；取值建议大于等于 0，默认 0 表示不推动使用者，远程开火时会把玩家向反方向推开。
+## 是否具有后坐力属性；默认 false，启用时自动关闭前坐力，保证一把武器至多拥有一种坐力属性。
+@export var has_recoil: bool = false:
+	set(value_enabled):
+		has_recoil = value_enabled
+		if has_recoil:
+			has_front_recoil = false
+## 武器后坐力；取值建议大于等于 0，默认 0 表示不推动使用者，只有 has_recoil 为 true 时参与战斗、显示与强化结算。
 @export_range(0.0, 3000.0, 1.0, "or_greater") var recoil_force: float = 0.0
-## 武器前坐力；取值建议大于等于 0，默认 0 表示不向攻击方向推动使用者，适合近战突进或特殊枪械反馈，屏幕震动按后坐力的一半换算。
+## 是否具有前坐力属性；默认 false，启用时自动关闭后坐力，保证一把武器至多拥有一种坐力属性。
+@export var has_front_recoil: bool = false:
+	set(value_enabled):
+		has_front_recoil = value_enabled
+		if has_front_recoil:
+			has_recoil = false
+## 武器前坐力；取值建议大于等于 0，默认 0 表示不向攻击方向推动使用者，只有 has_front_recoil 为 true 时参与战斗、显示与强化结算。
 @export_range(0.0, 3000.0, 1.0, "or_greater") var front_recoil_force: float = 0.0
 ## 武器冲击力；取值建议大于等于 0，默认 0 表示不造成击退，命中目标时会按目标韧性折算控制效果。
 @export_range(0.0, 5000.0, 1.0, "or_greater") var impact_force: float = 0.0
@@ -70,22 +82,20 @@ const FIXED_DURABILITY_COST_PER_USE: float = 1.0
 @export_range(0.0, 1.0, 0.01) var critical_chance: float = 0.0
 ## 武器暴击伤害倍率；默认 1.5 表示造成 150% 伤害，允许强化石永久调整。
 @export_range(1.0, 10.0, 0.05, "or_greater") var critical_damage: float = 1.5
-## 近战冷却；取值应大于 0，默认 0.45 秒，修改会影响近战攻击节奏。
-@export_range(0.01, 5.0, 0.01) var melee_cooldown: float = 0.45
 ## 近战命中框激活时长；取值应大于 0，默认 0.12 秒，修改会影响近战判定窗口。
 @export_range(0.01, 2.0, 0.01) var melee_active_duration: float = 0.12
 ## 累计强化百分比词典；键使用 damage、cooldown 等统一属性名，值为相对基础值的小数比例，运行时由强化石永久累加。
 ## 加算属性补充：暴击率与暴击伤害的累计值表示直接百分点偏移，其余武器属性仍表示相对基础值比例。
 @export var enhancement_modifiers: Dictionary = {}
 
-## 强化后售价最低倍率；默认 0.1，防止大量负词条把售价降为负数，运行时通常不修改。
-const MINIMUM_SELL_PRICE_MULTIPLIER: float = 0.1
-## 损坏武器最低耐久售价倍率；默认 0.1，使零耐久武器仍可按满耐久有效售价的 10% 出售。
-const MINIMUM_DURABILITY_SELL_PRICE_MULTIPLIER: float = 0.1
+## 强化后价值最低倍率；默认 0.1，防止大量负词条把价值降为负数，运行时通常不修改。
+const MINIMUM_VALUE_MULTIPLIER: float = 0.1
+## 损坏武器最低耐久价值倍率；默认 0.1，使零耐久武器仍保留满耐久有效价值的 10%。
+const MINIMUM_DURABILITY_VALUE_MULTIPLIER: float = 0.1
 ## 冷却和判定时长最小有效值；默认 0.01 秒，防止负强化导致除零或无限攻击。
 const MINIMUM_DURATION_VALUE: float = 0.01
 ## 可应用于所有武器的统一强化属性；新增通用战斗字段时应同步详情格式化器。
-const COMMON_ENHANCEMENT_STATS: Array[String] = ["damage", "cooldown", "energy_cost", "recoil_force", "front_recoil_force", "impact_force", "critical_chance", "critical_damage", "max_durability"]
+const COMMON_ENHANCEMENT_STATS: Array[String] = ["damage", "cooldown", "energy_consumption", "recoil_force", "front_recoil_force", "impact_force", "critical_chance", "critical_damage", "max_durability"]
 ## 远程武器专属强化属性；只允许远程武器消费包含这些字段的强化石效果。
 const RANGED_ENHANCEMENT_STATS: Array[String] = ["projectile_speed", "bullet_range", "deviation_degrees", "scatter_count", "piercing_count", "combo_count"]
 ## 近战武器专属强化属性；只允许近战武器消费包含这些字段的强化石效果。
@@ -137,7 +147,7 @@ func consume_durability() -> bool:
 
 
 func get_base_stat(stat_name: String) -> float:
-	# 基础字段名；damage 与 cooldown 会根据武器类型映射到旧资源字段，保持所有既有 tres 兼容。
+	# 基础字段名；damage 根据武器类型映射到远程或近战伤害字段，其他属性使用统一字段名。
 	var property_name: String = _resolve_base_property_name(stat_name)
 	if property_name.is_empty():
 		return 0.0
@@ -238,10 +248,10 @@ func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
 	return result
 
 
-func get_effective_sell_price() -> int:
-	# 售价调整比例；按玩法利弊判断累计强化，增强提高售价、削弱降低售价。
-	var sell_price_ratio: float = 0.0
-	# 已迁移累计词典；历史偏移键先合并到现行键，售价与实际有效属性读取同一份数据。
+func get_effective_value() -> int:
+	# 价值调整比例；按玩法利弊判断累计强化，增强提高价值、削弱降低价值。
+	var value_ratio: float = 0.0
+	# 已迁移累计词典；历史字段先合并到现行键，价值与实际有效属性读取同一份数据。
 	var migrated_modifiers: Dictionary = EnhancementRules.migrate_stat_aliases(enhancement_modifiers)
 	for raw_stat_name in migrated_modifiers.keys():
 		if _is_stat_supported(str(raw_stat_name)):
@@ -250,24 +260,22 @@ func get_effective_sell_price() -> int:
 			if not is_zero_approx(accumulated_ratio):
 				# 累计方向；用于判断该属性最终变化对武器是增强还是削弱。
 				var accumulated_direction: int = EnhancementRules.normalize_direction(accumulated_ratio)
-				sell_price_ratio += absf(accumulated_ratio) if EnhancementRules.is_direction_beneficial(str(raw_stat_name), accumulated_direction) else -absf(accumulated_ratio)
-	# 强化后基础售价；先应用强化利弊，保证耐久折损与强化价格变化可以稳定组合。
-	var enhanced_sell_price: float = float(sell_price) * maxf(1.0 + sell_price_ratio, MINIMUM_SELL_PRICE_MULTIPLIER)
-	# 耐久售价倍率；从零耐久的 10% 线性增长到满耐久的 100%，确保损坏武器仍保留回收价值。
-	var durability_sell_price_multiplier: float = lerpf(MINIMUM_DURABILITY_SELL_PRICE_MULTIPLIER, 1.0, get_durability_ratio())
-	# 四舍五入售价；强化价格和耐久折损依次组合，零耐久时为强化后满耐久售价的 10%。
-	var calculated_sell_price: int = roundi(enhanced_sell_price * durability_sell_price_multiplier)
-	# 最终售价；原始售价大于 0 的武器至少可出售 1 金币，避免低价损坏武器因整数舍入变为不可出售。
-	return maxi(calculated_sell_price, 1) if sell_price > 0 else 0
+				value_ratio += absf(accumulated_ratio) if EnhancementRules.is_direction_beneficial(str(raw_stat_name), accumulated_direction) else -absf(accumulated_ratio)
+	# 强化后基础价值；先应用强化利弊，保证耐久折损与强化变化可以稳定组合。
+	var enhanced_value: float = float(value) * maxf(1.0 + value_ratio, MINIMUM_VALUE_MULTIPLIER)
+	# 耐久价值倍率；从零耐久的 10% 线性增长到满耐久的 100%，确保损坏武器仍保留回收价值。
+	var durability_value_multiplier: float = lerpf(MINIMUM_DURABILITY_VALUE_MULTIPLIER, 1.0, get_durability_ratio())
+	# 四舍五入价值；强化变化和耐久折损依次组合，零耐久时为强化后满耐久价值的 10%。
+	var calculated_value: int = roundi(enhanced_value * durability_value_multiplier)
+	# 最终价值；原始价值大于 0 的武器至少可出售 1 金币，避免低价值损坏武器因整数舍入变为不可出售。
+	return maxi(calculated_value, 1) if value > 0 else 0
 
 
 func _resolve_base_property_name(stat_name: String) -> String:
-	# 统一属性名；兼容战斗组件仍传入旧的远近战字段名。
+	# 统一属性名；伤害根据武器类型映射，其他字段直接使用统一命名。
 	var canonical_stat_name: String = _resolve_canonical_stat_name(stat_name)
 	if canonical_stat_name == "damage":
 		return "ranged_damage" if is_ranged() else "melee_damage"
-	if canonical_stat_name == "cooldown":
-		return "ranged_cooldown" if is_ranged() else "melee_cooldown"
 	return canonical_stat_name if canonical_stat_name in COMMON_ENHANCEMENT_STATS + RANGED_ENHANCEMENT_STATS + MELEE_ENHANCEMENT_STATS else ""
 
 
@@ -275,14 +283,16 @@ func _resolve_canonical_stat_name(stat_name: String) -> String:
 	stat_name = EnhancementRules.canonicalize_stat_name(stat_name)
 	if stat_name in ["ranged_damage", "melee_damage"]:
 		return "damage"
-	if stat_name in ["ranged_cooldown", "melee_cooldown"]:
-		return "cooldown"
 	return stat_name
 
 
 func _is_stat_supported(stat_name: String) -> bool:
 	# 统一属性名；通用词条对所有武器有效，专属词条按 weapon_type 校验。
 	var canonical_stat_name: String = _resolve_canonical_stat_name(stat_name)
+	if canonical_stat_name == "recoil_force":
+		return has_recoil and not is_zero_approx(recoil_force)
+	if canonical_stat_name == "front_recoil_force":
+		return has_front_recoil and not is_zero_approx(front_recoil_force)
 	if canonical_stat_name in COMMON_ENHANCEMENT_STATS:
 		return not is_zero_approx(get_base_stat(canonical_stat_name))
 	if is_ranged():

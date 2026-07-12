@@ -6,8 +6,8 @@ class_name EnhancementStoneData
 ## 品质化强化石使用“品质 + 属性 + 实际百分比”作为堆叠条件，增强词条始终排在削弱词条之前。
 ## 方向化重构后堆叠条件改为“品质 + 属性 + 方向”，同组每颗强化石使用时都会重新随机具体幅度。
 
-## 单词条标准售价；固定 30 金币，生成和升阶都按最终词条数量重新计算总售价。
-const SELL_PRICE_PER_MODIFIER: int = 30
+## 单词条标准价值；固定 30 金币，生成和升阶都按最终词条数量重新计算总价值。
+const VALUE_PER_MODIFIER: int = 30
 
 ## 物品类型；固定为 enhancement_stone，供库存、分类和 UI 与武器资源解耦识别。
 @export var item_kind: String = "enhancement_stone"
@@ -21,8 +21,8 @@ const SELL_PRICE_PER_MODIFIER: int = 30
 @export_multiline var description: String = "用于强化武器，属性增减方向会永久累计到所选武器。"
 ## 强化石图标文本；默认菱形符号，地面掉落和资源方格共用该简写。
 @export var icon_text: String = "◆"
-## 单颗基础售价；取值大于等于 0，实际出售整组时会乘以堆叠数量。
-@export_range(0, 999999, 1) var sell_price: int = SELL_PRICE_PER_MODIFIER
+## 单颗基础价值；取值大于等于 0，实际出售整组时会乘以堆叠数量。
+@export_range(0, 999999, 1) var value: int = VALUE_PER_MODIFIER
 ## 强化方向词典；键为统一属性名，值只使用 +1 或 -1，旧存档百分比会按正负号自动归一化。
 @export var modifiers: Dictionary = {}
 
@@ -52,8 +52,8 @@ func get_stack_signature() -> String:
 	return "|".join(signature_parts)
 
 
-func get_effective_sell_price() -> int:
-	return maxi(sell_price, 0)
+func get_effective_value() -> int:
+	return maxi(value, 0)
 
 
 func can_apply_to_weapon(weapon_data: Resource) -> bool:
@@ -85,7 +85,7 @@ func create_upgraded_copy() -> EnhancementStoneData:
 	var next_quality_id: String = EnhancementRules.get_next_quality_id(get_resolved_quality_id())
 	if next_quality_id.is_empty():
 		return null
-	# 升阶资源；完整复制词条方向、说明、图标和售价，仅替换品质与统一显示名称，保证主石特征不会被重新随机。
+	# 升阶资源；完整复制词条方向、说明、图标和价值，仅替换品质与统一显示名称，保证主石特征不会被重新随机。
 	var upgraded_stone: EnhancementStoneData = duplicate(true) as EnhancementStoneData
 	if upgraded_stone == null:
 		return null
@@ -99,8 +99,8 @@ func create_upgraded_copy() -> EnhancementStoneData:
 			if not EnhancementRules.is_direction_beneficial(stat_name, supreme_modifiers.get(stat_name, 1)):
 				supreme_modifiers.erase(stat_name)
 		upgraded_stone.modifiers = supreme_modifiers
-	# 升阶售价；严格保持“30 × 最终词条数量”，移除极品削弱词条后不会保留旧的高售价。
-	upgraded_stone.sell_price = SELL_PRICE_PER_MODIFIER * upgraded_stone.get_normalized_modifiers().size()
+	# 升阶价值；严格保持“30 × 最终词条数量”，移除极品削弱词条后不会保留旧的高价值。
+	upgraded_stone.value = VALUE_PER_MODIFIER * upgraded_stone.get_normalized_modifiers().size()
 	upgraded_stone.display_name = _build_display_name(next_quality_id, upgraded_stone.get_resolved_target_kind())
 	return upgraded_stone
 
@@ -130,7 +130,7 @@ func get_pickup_preview_name() -> String:
 	return "%s（%s）" % [display_name, " ".join(preview_labels)]
 
 
-static func create_random(random_source: RandomNumberGenerator, minimum_modifier_count: int = 1, maximum_modifier_count: int = 3, detrimental_modifier_chance: float = 0.28, base_sell_price: int = SELL_PRICE_PER_MODIFIER, requested_target_kind: String = "") -> EnhancementStoneData:
+static func create_random(random_source: RandomNumberGenerator, minimum_modifier_count: int = 1, maximum_modifier_count: int = 3, detrimental_modifier_chance: float = 0.28, base_value: int = VALUE_PER_MODIFIER, requested_target_kind: String = "") -> EnhancementStoneData:
 	if random_source == null:
 		return null
 	# 兼容参数快照；保留旧调用签名以避免扩展脚本失效，当前词条数和削弱概率完全由品质规则决定。
@@ -181,13 +181,13 @@ static func create_random(random_source: RandomNumberGenerator, minimum_modifier
 		var detrimental_direction: int = -EnhancementRules.get_beneficial_direction(detrimental_stat_name)
 		generated_modifiers[detrimental_stat_name] = detrimental_direction
 
-	# 强化石资源；名称保持统一以提升同类识别，售价按词条数量线性增长。
+	# 强化石资源；名称保持统一以提升同类识别，价值按词条数量线性增长。
 	var enhancement_stone: EnhancementStoneData = EnhancementStoneData.new()
 	enhancement_stone.quality_id = generated_quality_id
 	enhancement_stone.target_kind = generated_target_kind
 	enhancement_stone.display_name = _build_display_name(generated_quality_id, generated_target_kind)
 	enhancement_stone.description = "用于强化%s，属性方向会永久累计到对应目标。" % ("装备" if generated_target_kind == "equipment" else "武器")
-	enhancement_stone.sell_price = maxi(base_sell_price * modifier_count, 0)
+	enhancement_stone.value = maxi(base_value * modifier_count, 0)
 	enhancement_stone.modifiers = generated_modifiers
 	return enhancement_stone
 

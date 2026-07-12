@@ -14,8 +14,8 @@ signal fired(projectile: Node2D)
 @export_range(1.0, 2400.0, 1.0, "or_greater") var projectile_speed: float = 900.0
 ## 默认弹体伤害；取值建议大于等于 0，默认 12 用于未传入武器数据时的兜底伤害，运行时修改会影响无装备模式下的射击伤害。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var projectile_damage: float = 12.0
-## 射击冷却时间；取值应大于 0，默认 0.16 秒形成连续点射手感，运行时修改会影响射击频率。
-@export_range(0.01, 5.0, 0.01) var fire_cooldown: float = 0.16
+## 冷却时间；取值应大于 0，默认 0.16 秒形成连续点射手感，运行时修改会影响攻击频率。
+@export_range(0.01, 5.0, 0.01) var cooldown: float = 0.16
 ## 枪口缺失时的备用出生距离；取值应大于等于 0，默认 34 让弹体从角色前方出现，修改会影响兜底发射位置。
 @export_range(0.0, 160.0, 1.0) var fallback_muzzle_distance: float = 34.0
 ## 枪口碰撞检查半径；取值建议略大于弹体半径，默认 7 像素，修改会影响贴墙射击被阻止的距离。
@@ -29,9 +29,9 @@ signal fired(projectile: Node2D)
 ## 散射分层随机比例；默认 0.35，其余弹体围绕左右等距锚点随机抖动且不会跨越所属侧。
 @export_range(0.0, 0.49, 0.01) var scatter_layer_jitter_ratio: float = 0.35
 
-## 剩余射击冷却；取值大于等于 0，默认 0 表示可立即射击，修改会影响组件是否接受下一次射击请求。
+## 剩余冷却；取值大于等于 0，默认 0 表示可立即攻击，修改会影响组件是否接受下一次攻击请求。
 var _cooldown_remaining: float = 0.0
-## 当前射击冷却总时长；取值大于等于 0，默认 0 表示无冷却基准，修改会影响 HUD 冷却覆盖比例。
+## 当前冷却总时长；取值大于等于 0，默认 0 表示无冷却基准，修改会影响 HUD 冷却覆盖比例。
 var _cooldown_duration: float = 0.0
 ## 连击剩余轮数；取值大于等于 0，默认 0 表示当前没有正在执行的连击。
 var _combo_rounds_remaining: int = 0
@@ -83,8 +83,8 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	var selected_bullet_range: float = _get_weapon_float(weapon_data, "bullet_range", 340.0)
 	# 本次使用的弹体伤害；取值来自武器数据或组件默认值，默认 projectile_damage，修改会影响本次弹体命中伤害。
 	var selected_projectile_damage: float = _get_weapon_float(weapon_data, "ranged_damage", projectile_damage)
-	# 本次使用的射击冷却；取值来自武器数据或组件默认值，默认 fire_cooldown，修改会影响下一次可射击时间。
-	var selected_fire_cooldown: float = _get_weapon_float(weapon_data, "ranged_cooldown", fire_cooldown)
+	# 本次使用的冷却；取值来自武器数据或组件默认值，默认 cooldown，修改会影响下一次可攻击时间。
+	var selected_cooldown: float = _get_weapon_float(weapon_data, "cooldown", cooldown)
 	# 本次使用的弹体冲击力；取值来自武器数据，默认 0 表示只造成伤害不击退。
 	var selected_impact_force: float = _get_weapon_float(weapon_data, "impact_force", 0.0)
 	# 本次使用的偏移角度；取值来自武器数据，默认 0 度表示弹体严格沿瞄准方向发射。
@@ -115,9 +115,9 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	_active_combo_weapon = weapon_data if _combo_rounds_remaining > 0 else null
 	_active_combo_interval = maxf(float(weapon_data.get("combo_interval")), 0.01)
 	_combo_interval_remaining = _active_combo_interval
-	_active_combo_cooldown = selected_fire_cooldown
+	_active_combo_cooldown = selected_cooldown
 	# 首轮成功时立即显示完整冷却；连击期间保持满值，末轮结束后重新开始减少。
-	_start_cooldown(selected_fire_cooldown)
+	_start_cooldown(selected_cooldown)
 	return true
 
 

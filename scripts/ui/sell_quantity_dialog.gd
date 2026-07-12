@@ -49,9 +49,8 @@ const MINING_ACTION_WITHDRAW: String = "withdraw"
 var _maximum_quantity: int = 1
 ## 当前最小可选数值；默认 1 保持出售、移动等既有模式不变，开发者金币模式允许为 0。
 var _minimum_quantity: int = 1
-## 当前单件售价；取值大于等于 0，默认 0 用于即时计算出售总价。
-## 股票交易价格精度补充；股票模式下该变量使用两位小数证券币，其他物品模式仍传入整数金币。
-var _unit_sell_price: float = 0.0
+## 当前单位交易数值；物品出售模式表示单件价值，股票模式表示两位小数证券币价格，默认 0。
+var _unit_transaction_value: float = 0.0
 ## 当前单件物品价值；默认 0，仅物资送回模式用于计算价值、运费和额度。
 var _unit_item_value: int = 0
 ## 当前可用送回价值；默认 0，仅物资送回模式用于提示选择数量是否会超过单局上限。
@@ -98,13 +97,13 @@ func _ready() -> void:
 	_ensure_interface_initialized()
 
 
-func present(item_display_name: String, maximum_quantity: int, unit_sell_price: int) -> void:
+func present(item_display_name: String, maximum_quantity: int, unit_value: int) -> void:
 	_ensure_interface_initialized()
 	_display_mode = DISPLAY_MODE_SALE
 	_minimum_quantity = 1
 	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
 	_maximum_quantity = maxi(maximum_quantity, 1)
-	_unit_sell_price = float(maxi(unit_sell_price, 0))
+	_unit_transaction_value = float(maxi(unit_value, 0))
 	title = "选择出售数量"
 	get_ok_button().text = "出售"
 	_description_label.text = "%s · 最多可出售 %d 个" % [_item_display_name, _maximum_quantity]
@@ -117,7 +116,7 @@ func present_transfer(item_display_name: String, maximum_quantity: int, source_d
 	_minimum_quantity = 1
 	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
 	_maximum_quantity = maxi(maximum_quantity, 1)
-	_unit_sell_price = 0.0
+	_unit_transaction_value = 0.0
 	title = "选择移动数量"
 	get_ok_button().text = "移动"
 	_description_label.text = "%s · %s → %s · 最多 %d 个" % [_item_display_name, source_display_name, target_display_name, _maximum_quantity]
@@ -130,7 +129,7 @@ func present_discard(item_display_name: String, maximum_quantity: int) -> void:
 	_minimum_quantity = 1
 	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
 	_maximum_quantity = maxi(maximum_quantity, 1)
-	_unit_sell_price = 0.0
+	_unit_transaction_value = 0.0
 	title = "选择丢弃数量"
 	get_ok_button().text = "丢弃"
 	_description_label.text = "%s · 最多可丢弃 %d 个" % [_item_display_name, _maximum_quantity]
@@ -143,7 +142,7 @@ func present_shipping(item_display_name: String, maximum_quantity: int, unit_ite
 	_minimum_quantity = 1
 	_item_display_name = item_display_name if not item_display_name.is_empty() else "物品"
 	_maximum_quantity = maxi(maximum_quantity, 1)
-	_unit_sell_price = 0.0
+	_unit_transaction_value = 0.0
 	_unit_item_value = maxi(unit_item_value, 0)
 	_shipping_remaining_value = maxi(shipping_remaining_value, 0)
 	_shipping_fee_ratio = clampf(shipping_fee_ratio, 0.0, 1.0)
@@ -159,7 +158,7 @@ func present_stock_trade(stock_display_name: String, maximum_quantity: int, unit
 	_minimum_quantity = 1
 	_item_display_name = stock_display_name if not stock_display_name.is_empty() else "股票"
 	_maximum_quantity = maxi(maximum_quantity, 1)
-	_unit_sell_price = maxf(snappedf(unit_price, 0.01), 0.01)
+	_unit_transaction_value = maxf(snappedf(unit_price, 0.01), 0.01)
 	_stock_trade_is_buying = is_buying
 	_stock_trade_executable_maximum = maxi(maximum_quantity, 0)
 	_stock_trade_available_coins = maxf(snappedf(available_coins, 0.01), 0.0)
@@ -207,7 +206,7 @@ func update_stock_trade(unit_price: float, maximum_quantity: int, available_coin
 	## 刷新已打开股票数量弹窗的实时报价；保留玩家当前选择，并在可买上限下降时安全收紧数量。
 	if _display_mode != DISPLAY_MODE_STOCK_TRADE:
 		return
-	_unit_sell_price = maxf(snappedf(unit_price, 0.01), 0.01)
+	_unit_transaction_value = maxf(snappedf(unit_price, 0.01), 0.01)
 	_stock_trade_executable_maximum = maxi(maximum_quantity, 0)
 	_stock_trade_available_coins = maxf(snappedf(available_coins, 0.01), 0.0)
 	# 控件数量上限；零股可交易时仍保留数值控件的最小合法范围 1，并通过禁用按钮阻止进入下一步。
@@ -226,7 +225,7 @@ func update_stock_trade(unit_price: float, maximum_quantity: int, available_coin
 func _update_stock_trade_description() -> void:
 	## 更新股票交易说明；明确单价和上限均为持续波动中的实时数据，不暗示锁价。
 	var maximum_text: String = "%d 股" % _stock_trade_executable_maximum if _stock_trade_executable_maximum > 0 else "0 股"
-	_description_label.text = "%s · 实时单价 %.2f 证券币 · 当前最多 %s" % [_item_display_name, _unit_sell_price, maximum_text]
+	_description_label.text = "%s · 实时单价 %.2f 证券币 · 当前最多 %s" % [_item_display_name, _unit_transaction_value, maximum_text]
 
 
 func _ensure_interface_initialized() -> void:
@@ -359,7 +358,7 @@ func _refresh_total_price(quantity: int) -> void:
 	if _display_mode == DISPLAY_MODE_STOCK_TRADE:
 		# 股票成交额；按当前实时整数单价计算，行情刷新时会由宿主再次调用本函数更新。
 		# 证券币成交规则；旧整数说明仅保留历史注释兼容，成交额保留两位小数证券币。
-		var stock_gross: float = snappedf(_unit_sell_price * resolved_quantity, 0.01)
+		var stock_gross: float = snappedf(_unit_transaction_value * resolved_quantity, 0.01)
 		# 股票手续费；成交额的 0.5% 向上取整且最低 1 金币，与股市服务最终成交公式一致。
 		# 证券币手续费规则；旧整数说明仅保留历史注释兼容，手续费向上保留到 0.01 且最低 0.01 证券币。
 		var stock_fee: float = maxf(float(ceili(maxf(stock_gross * _stock_trade_fee_ratio * 100.0 - 0.000001, 0.0))) / 100.0, 0.01)
@@ -393,9 +392,9 @@ func _refresh_total_price(quantity: int) -> void:
 		_total_price_label.text = "当前选择：%d" % resolved_quantity
 		return
 	get_ok_button().disabled = false
-	# 出售总价；单价乘当前数量，用于确认前即时预览金币收益。
-	var total_sell_price: int = int(_unit_sell_price) * resolved_quantity
-	_total_price_label.text = "可获得 %d 金币" % total_sell_price
+	# 出售总价值；单件价值乘当前数量，用于确认前即时预览金币收益。
+	var total_value: int = int(_unit_transaction_value) * resolved_quantity
+	_total_price_label.text = "可获得 %d 金币" % total_value
 
 
 func _on_confirmed() -> void:

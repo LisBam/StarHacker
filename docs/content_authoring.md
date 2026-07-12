@@ -27,11 +27,14 @@
 ## 3. 类型与兼容规则
 
 - 武器资源必须使用 `WeaponData` 或兼容脚本，`item_kind` 必须为 `weapon`，`weapon_id` 不得为空。
+- 武器基础经济与攻击节奏字段统一使用 `value`、`energy_consumption` 和 `cooldown`，分别对应玩家物品价值、单次攻击能耗和攻击冷却；新资源不得继续声明旧 `sell_price`、`energy_cost`、`ranged_cooldown` 或 `melee_cooldown`。
+- 散射、穿透、连击、后坐力和前坐力都使用显式持有开关。后坐力填写 `has_recoil + recoil_force`，前坐力填写 `has_front_recoil + front_recoil_force`；两者互斥，一把武器至多启用其中一种，未启用的坐力数值不显示、不生效且不能强化。
 - 装备资源必须使用 `EquipmentData` 或兼容脚本，`item_kind` 必须为 `equipment`，`equipment_id` 不得为空。
 - 道具资源必须声明非空 `item_kind` 与 `item_id`，且 `item_kind` 不能为 `weapon` 或 `equipment`。复制现有修复包并保持 `repair_kit` 类型即可完整复用商店、堆叠、修复和掉落逻辑。
 - 新的道具类型可以被内容目录、商店和存档路径识别，但如果它引入新的使用行为、卡片字段、筛选类别或堆叠规则，仍需实现对应的独立数据组件与业务组件；自动发现只负责注册，不会猜测未知玩法。
 - 怪物目录中的场景必须能够加载为 `PackedScene`。复制现有近战或远程怪物可以直接复用当前生成协议；完全不同的根节点或脚本必须自行实现 GameWorld、MonsterSimulationManager 和死亡掉落所需接口。
 - 角色资源必须使用 `CharacterData` 或提供兼容的 `character_id` 与 `to_profile()`；基础属性在进入战斗和训练场切换角色时应用。当前主动与被动技能字段仍是说明文本，不会自动生成技能行为。
+- 角色 `move_speed` 使用属性点而非直接像素速度，运行时按 `1 点 = 3 像素/秒` 换算；例如填写 `100` 等效旧规则的 `300` 速度，装备移速比例继续作用于属性点。
 
 ## 4. 生效时机与发布边界
 

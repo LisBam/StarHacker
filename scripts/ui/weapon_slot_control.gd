@@ -80,7 +80,7 @@ var _weapon_target_selection_blocked: bool = false
 var _title_label: Label
 ## 武器名标签缓存；默认由 _ready 创建，显示武器名称或空槽文本，修改会影响武器名称刷新目标。
 var _name_label: Label
-## 详情标签缓存；默认由 _ready 创建，显示能量消耗和冷却信息，修改会影响槽位辅助信息刷新目标。
+## 详情标签缓存；默认由 _ready 创建，显示能耗和冷却信息，修改会影响槽位辅助信息刷新目标。
 var _detail_label: Label
 ## 当前拖拽数据缓存；取值为拖拽字典或空字典，默认用于拖拽结束时判断是否需要丢弃到世界。
 var _active_drag_data: Dictionary = {}
@@ -508,12 +508,12 @@ func _get_weapon_detail_text() -> String:
 	if weapon_data == null:
 		return ""
 
-	# 武器能量消耗；取值来自资源 energy_cost 字段，默认 0，修改会影响槽位能量提示。
-	var energy_cost: float = maxf(float(weapon_data.get("energy_cost")), 0.0)
-	if energy_cost <= 0.0:
-		return "能量 0"
+	# 武器能耗；取值来自资源 energy_consumption 字段，默认 0，修改会影响槽位能耗提示。
+	var energy_consumption: float = maxf(float(weapon_data.get("energy_consumption")), 0.0)
+	if energy_consumption <= 0.0:
+		return "能耗 0"
 
-	return "能量 %d" % roundi(energy_cost)
+	return "能耗 %d" % roundi(energy_consumption)
 
 
 func _get_weapon_type_label(target_weapon_data: Resource) -> String:
@@ -548,8 +548,8 @@ func _get_weapon_tooltip_text() -> String:
 	if not description.is_empty():
 		tooltip_lines.append(description)
 
-	# 武器能量消耗；取值来自资源 energy_cost 字段，默认 0 表示不消耗能量。
-	var energy_cost: float = maxf(float(weapon_data.get("energy_cost")), 0.0)
+	# 武器能耗；取值来自资源 energy_consumption 字段，默认 0 表示不消耗能量。
+	var energy_consumption: float = maxf(float(weapon_data.get("energy_consumption")), 0.0)
 	# 武器后坐力；取值来自资源 recoil_force 字段，默认 0 表示不开火后推。
 	var recoil_force: float = maxf(float(weapon_data.get("recoil_force")), 0.0)
 	# 武器前坐力；取值来自资源 front_recoil_force 字段，默认 0 表示不向攻击方向推动使用者。
@@ -560,10 +560,10 @@ func _get_weapon_tooltip_text() -> String:
 	var critical_chance: float = float(weapon_data.call("get_effective_stat", "critical_chance")) if weapon_data.has_method("get_effective_stat") else maxf(float(weapon_data.get("critical_chance")), 0.0)
 	# 武器暴击伤害；使用倍率保存，详情转换为百分比展示。
 	var critical_damage: float = float(weapon_data.call("get_effective_stat", "critical_damage")) if weapon_data.has_method("get_effective_stat") else maxf(float(weapon_data.get("critical_damage")), 1.0)
-	tooltip_lines.append("能量消耗：%d" % roundi(energy_cost))
-	if recoil_force > 0.0:
+	tooltip_lines.append("能耗：%d" % roundi(energy_consumption))
+	if bool(weapon_data.get("has_recoil")) and recoil_force > 0.0:
 		tooltip_lines.append("后坐力：%d" % roundi(recoil_force))
-	if front_recoil_force > 0.0:
+	if bool(weapon_data.get("has_front_recoil")) and front_recoil_force > 0.0:
 		tooltip_lines.append("前坐力：%d" % roundi(front_recoil_force))
 	tooltip_lines.append("冲击力：%d" % roundi(impact_force))
 	tooltip_lines.append("暴击率：%.0f%%" % (critical_chance * 100.0))
@@ -584,24 +584,24 @@ func _append_ranged_tooltip_lines(tooltip_lines: PackedStringArray) -> void:
 	var projectile_speed: float = maxf(float(weapon_data.get("projectile_speed")), 0.0)
 	# 子弹射程；取值来自资源 bullet_range 字段，默认用于提示弹体最大飞行距离。
 	var bullet_range: float = maxf(float(weapon_data.get("bullet_range")), 0.0)
-	# 远程冷却；取值来自资源 ranged_cooldown 字段，默认用于提示连续射击间隔。
-	var ranged_cooldown: float = maxf(float(weapon_data.get("ranged_cooldown")), 0.0)
+	# 武器冷却；取值来自统一 cooldown 字段，默认用于提示连续攻击间隔。
+	var cooldown: float = maxf(float(weapon_data.get("cooldown")), 0.0)
 	# 武器偏移；取值来自资源 deviation_degrees 字段，表示弹体相对瞄准方向的最大随机角度。
 	var deviation_degrees: float = maxf(float(weapon_data.get("deviation_degrees")), 0.0)
 	tooltip_lines.append("伤害：%d" % roundi(ranged_damage))
 	tooltip_lines.append("子弹速度：%d" % roundi(projectile_speed))
 	tooltip_lines.append("子弹射程：%d" % roundi(bullet_range))
 	tooltip_lines.append("偏移：%.1f°" % deviation_degrees)
-	tooltip_lines.append("冷却：%.2f 秒" % ranged_cooldown)
+	tooltip_lines.append("冷却：%.2f 秒" % cooldown)
 
 
 func _append_melee_tooltip_lines(tooltip_lines: PackedStringArray) -> void:
 	# 近战伤害；取值来自资源 melee_damage 字段，默认用于提示挥击伤害。
 	var melee_damage: float = maxf(float(weapon_data.get("melee_damage")), 0.0)
-	# 近战冷却；取值来自资源 melee_cooldown 字段，默认用于提示连续挥击间隔。
-	var melee_cooldown: float = maxf(float(weapon_data.get("melee_cooldown")), 0.0)
+	# 武器冷却；取值来自统一 cooldown 字段，默认用于提示连续攻击间隔。
+	var cooldown: float = maxf(float(weapon_data.get("cooldown")), 0.0)
 	# 命中框持续时间；取值来自资源 melee_active_duration 字段，默认用于提示近战判定窗口。
 	var melee_active_duration: float = maxf(float(weapon_data.get("melee_active_duration")), 0.0)
 	tooltip_lines.append("伤害：%d" % roundi(melee_damage))
-	tooltip_lines.append("冷却：%.2f 秒" % melee_cooldown)
+	tooltip_lines.append("冷却：%.2f 秒" % cooldown)
 	tooltip_lines.append("判定时长：%.2f 秒" % melee_active_duration)

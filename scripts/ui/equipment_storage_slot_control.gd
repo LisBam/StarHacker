@@ -11,7 +11,7 @@ signal repair_kit_drop_requested(repair_kit_resource: Resource, source_location:
 
 ## 拖拽数据类型标识；必须与 StorageItemControl 和 StorageDropArea 保持一致。
 const DRAG_DATA_TYPE: String = "global_storage_item"
-## 统一物品详情格式化器；装备槽悬停时显示武器基础值、强化差值和动态售价。
+## 统一物品详情格式化器；装备槽悬停时显示武器基础值、强化差值和动态价值。
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
 ## 通用物品卡片视图；局外与战斗装备槽必须和背包、仓库、锻造、商店使用同一固定尺寸模板。
 const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")

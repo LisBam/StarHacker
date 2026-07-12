@@ -17,7 +17,7 @@ const CALCULATION_ADDITIVE_POINTS: String = "additive_points"
 const CALCULATION_ADDITIVE_VALUE: String = "additive_value"
 ## 一级乘算属性组标识；用于伤害、攻击力、防御力、最大生命值、视野和冷却的独立幅度配置。
 const MAGNITUDE_GROUP_PRIMARY: String = "primary"
-## 二级乘算属性组标识；用于移速、能量消耗、偏移、坐力、冲击力和回血的独立幅度配置。
+## 二级乘算属性组标识；用于移速、能耗、偏移、坐力、冲击力和回血的独立幅度配置。
 const MAGNITUDE_GROUP_SECONDARY: String = "secondary"
 ## 三级乘算属性组标识；用于弹体速度、射程、判定时长和耐久值的独立幅度配置。
 ## 属性名称补充：max_durability 的现行玩家可见名称统一为“耐久”，含义是改变武器或装备耐久上限。
@@ -68,7 +68,7 @@ const MULTIPLICATIVE_STAT_GROUPS: Dictionary = {
 	"vision_range": MAGNITUDE_GROUP_PRIMARY,
 	"cooldown": MAGNITUDE_GROUP_PRIMARY,
 	"defense_power": MAGNITUDE_GROUP_PRIMARY,
-	"energy_cost": MAGNITUDE_GROUP_SECONDARY,
+	"energy_consumption": MAGNITUDE_GROUP_SECONDARY,
 	"deviation_degrees": MAGNITUDE_GROUP_SECONDARY,
 	"recoil_force": MAGNITUDE_GROUP_SECONDARY,
 	"front_recoil_force": MAGNITUDE_GROUP_SECONDARY,
@@ -182,7 +182,7 @@ const MINIMUM_DURATION_VALUE: float = 0.01
 const STAT_KEYS: Array[String] = [
 	"damage",
 	"cooldown",
-	"energy_cost",
+	"energy_consumption",
 	"projectile_speed",
 	"bullet_range",
 	"deviation_degrees",
@@ -206,14 +206,14 @@ const STAT_KEYS: Array[String] = [
 	"energy_regeneration",
 ]
 ## 武器强化石属性池；只包含武器能够应用的属性。
-const WEAPON_STAT_KEYS: Array[String] = ["damage", "cooldown", "energy_cost", "projectile_speed", "bullet_range", "deviation_degrees", "recoil_force", "front_recoil_force", "impact_force", "melee_active_duration", "critical_chance", "critical_damage", "max_durability", "scatter_count", "piercing_count", "combo_count"]
+const WEAPON_STAT_KEYS: Array[String] = ["damage", "cooldown", "energy_consumption", "projectile_speed", "bullet_range", "deviation_degrees", "recoil_force", "front_recoil_force", "impact_force", "melee_active_duration", "critical_chance", "critical_damage", "max_durability", "scatter_count", "piercing_count", "combo_count"]
 ## 装备强化石属性池；移速仅脚部可应用，视野仅头部可应用。
 const EQUIPMENT_STAT_KEYS: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance", "move_speed", "vision_range", "energy_regeneration"]
 ## 属性中文名称；键为统一属性名，值用于强化石、搜索、筛选和武器详情。
 const STAT_LABELS: Dictionary = {
 	"damage": "伤害",
 	"cooldown": "冷却",
-	"energy_cost": "能量消耗",
+	"energy_consumption": "能耗",
 	"projectile_speed": "弹体速度",
 	"bullet_range": "射程",
 	"deviation_degrees": "偏移",
@@ -240,7 +240,7 @@ const STAT_LABELS: Dictionary = {
 const BENEFICIAL_DIRECTIONS: Dictionary = {
 	"damage": 1,
 	"cooldown": -1,
-	"energy_cost": -1,
+	"energy_consumption": -1,
 	"projectile_speed": 1,
 	"bullet_range": 1,
 	"deviation_degrees": -1,
@@ -272,8 +272,12 @@ static func normalize_direction(raw_value: Variant) -> int:
 
 
 static func canonicalize_stat_name(stat_name: String) -> String:
-	## 把历史弹道属性名迁移为现行“偏移”属性名；旧字符串只作为存档兼容入口，不进入新随机池或玩家界面。
-	return "deviation_degrees" if stat_name == "spread_degrees" else stat_name
+	## 把历史属性名迁移为现行统一名称；旧字符串只作为存档兼容入口，不进入新随机池或玩家界面。
+	if stat_name == "spread_degrees":
+		return "deviation_degrees"
+	if stat_name == "energy_cost":
+		return "energy_consumption"
+	return stat_name
 
 
 static func migrate_stat_aliases(modifiers: Dictionary) -> Dictionary:

@@ -2419,8 +2419,14 @@ func _get_registered_resource_paths(content_kind: String) -> Dictionary:
 	var result: Dictionary = {}
 	# 内置兼容路径；按内容类型选择旧硬编码表，自动加载不可用时仍支持已有物品与存档。
 	var fallback_paths: Dictionary = WEAPON_RESOURCE_PATHS if content_kind == "weapon" else (EQUIPMENT_RESOURCE_PATHS if content_kind == "equipment" else REPAIR_KIT_RESOURCE_PATHS)
+	# 可用性目录；存在时复核内置兼容路径，防止已归入扩展包的旧资源绕过角色解锁过滤。
+	var availability_catalog: Node = get_tree().root.get_node_or_null("ContentCatalog")
 	for raw_id in fallback_paths.keys():
-		result[str(raw_id)] = str(fallback_paths.get(raw_id, ""))
+		# 内置资源路径；空值或当前锁定扩展包路径不进入开发者全量发放清单。
+		var fallback_path: String = str(fallback_paths.get(raw_id, ""))
+		if availability_catalog != null and availability_catalog.has_method("is_content_path_available") and not bool(availability_catalog.call("is_content_path_available", fallback_path)):
+			continue
+		result[str(raw_id)] = fallback_path
 	# 内容目录；通过路径加载稳定 ID，忽略类型错误或空 ID 的文件。
 	var content_catalog: Node = get_tree().root.get_node_or_null("ContentCatalog")
 	if content_catalog == null:

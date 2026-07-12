@@ -8,6 +8,7 @@ character_id = "silver_wolf"
 display_name = "银狼"
 role = "高能量骇客"
 description = "生命上限偏低，能量上限较高，适合测试高频武器和持续消耗型动作。"
+unlocked_by_default = true
 max_health = 105.0
 max_energy = 155.0
 move_speed = 118.3333

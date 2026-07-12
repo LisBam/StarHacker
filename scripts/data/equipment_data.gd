@@ -16,6 +16,8 @@ class_name EquipmentData
 @export_enum("head", "body", "legs", "feet") var equipment_slot: String = "head"
 ## 装备说明；默认空字符串，用于详情面板说明设计用途。
 @export_multiline var description: String = ""
+## 所属套装数据；默认空表示独立装备，配置后会按稳定套装 ID 参与已穿戴且未损坏部件的档位统计。
+@export var equipment_set: Resource
 ## 装备图标文本；默认护盾符号，用于紧凑物品卡片。
 @export var icon_text: String = "◇"
 ## 装备价值；默认 0，强化和耐久会共同影响玩家出售时的实际价值。

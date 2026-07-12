@@ -170,11 +170,11 @@ func _get_character_profile(character_id: String) -> Dictionary:
 		"display_name": "星",
 		"role": "标准型开拓者",
 		"description": "生命和能量上限都较平衡，适合验证默认战斗流程。",
-		"max_health": 130.0,
-		"max_energy": 110.0,
-		"move_speed": 106.6667,
-		"attack_power": 10.0,
-		"defense_power": 5.0,
+		"max_health": 100.0,
+		"max_energy": 100.0,
+		"move_speed": 100.0,
+		"attack_power": 100.0,
+		"defense_power": 100.0,
 		"passive": "被动技能：待配置",
 		"active": "主动技能：待配置"
 	}

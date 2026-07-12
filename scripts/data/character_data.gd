@@ -12,6 +12,8 @@ class_name CharacterData
 @export var role: String = "未配置定位"
 ## 角色说明；默认空字符串，用于长期记录角色玩法特征和适用场景。
 @export_multiline var description: String = ""
+## 是否开局默认解锁；默认 false 使后续新增角色保持锁定，设为 true 的角色会在首次启动和旧存档中自动补入解锁列表。
+@export var unlocked_by_default: bool = false
 ## 基础生命上限；默认 100，进入战斗或切换角色时应用，运行时不应动态修改模板。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var max_health: float = 100.0
 ## 基础能量上限；默认 100，进入战斗或切换角色时应用，运行时不应动态修改模板。
@@ -42,6 +44,7 @@ func to_profile() -> Dictionary:
 		"display_name": display_name,
 		"role": role,
 		"description": description,
+		"unlocked_by_default": unlocked_by_default,
 		"max_health": max_health,
 		"max_energy": max_energy,
 		"move_speed": move_speed,

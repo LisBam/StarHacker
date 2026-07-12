@@ -4,12 +4,17 @@ class_name ItemDetailFormatter
 ## 物品详情格式化器集中生成仓库、背包、装备栏和结算界面的统一悬停信息。
 ## 武器强化数值使用 RichTextLabel BBCode 着色，同时保留纯文本版本作为系统无富文本环境的兜底。
 
+## 装备套装组件脚本；悬停详情调用其纯统计接口，保证激活颜色与实际套装效果使用同一有效件数规则。
+const EQUIPMENT_SET_COMPONENT_SCRIPT: Script = preload("res://scripts/components/equipment_set_component.gd")
+
 ## 正强化颜色；默认亮绿色，用于高于基础值的总值与正数强化差值。
 const POSITIVE_COLOR: String = "#70e889"
 ## 负强化颜色；默认亮红色，用于低于基础值的总值与负数强化差值。
 const NEGATIVE_COLOR: String = "#ff7070"
 ## 中性数值颜色；默认浅色，用于尚未强化或与基础值相同的总值。
 const NEUTRAL_COLOR: String = "#d8e8ee"
+## 未触发套装颜色；默认中灰色，用于低于两件或四件门槛的套装效果文本。
+const INACTIVE_SET_COLOR: String = "#8a9298"
 ## 悬停信息背景颜色；默认深蓝黑且透明度为 0.68，比系统默认背景更通透。
 const TOOLTIP_BACKGROUND_COLOR: Color = Color(0.025, 0.04, 0.055, 0.68)
 ## 悬停信息边框颜色；默认接近纯白，用于在半透明背景外形成清晰轮廓。
@@ -52,8 +57,18 @@ static func get_item_type_label(item_resource: Resource) -> String:
 	if is_repair_kit(item_resource):
 		return "道具 · 修复包"
 	if is_equipment(item_resource):
+		# 部位名称表；四个稳定装备槽映射为玩家可读中文，异常值回退“未知部位”。
 		var slot_labels: Dictionary = {"head": "头部", "body": "躯干", "legs": "腿部", "feet": "脚部"}
-		return "装备 · %s" % slot_labels.get(str(item_resource.get("equipment_slot")), "未知部位")
+		# 基础装备类型文本；标准物品卡片会直接显示该行，因此始终包含装备部位。
+		var equipment_type_label: String = "装备 · %s" % slot_labels.get(str(item_resource.get("equipment_slot")), "未知部位")
+		# 套装数据；配置有效显示名称时追加到类型行，让非悬停状态也能识别装备归属。
+		var equipment_set: Resource = item_resource.get("equipment_set") as Resource if _resource_has_property(item_resource, "equipment_set") else null
+		if equipment_set != null:
+			# 套装显示名称；空值不追加，避免标准卡片出现多余分隔符。
+			var set_display_name: String = str(equipment_set.get("display_name")).strip_edges()
+			if not set_display_name.is_empty():
+				return "%s · %s" % [equipment_type_label, set_display_name]
+		return equipment_type_label
 	# 武器类型；ranged 与 melee 分别映射到仓库武器子分类。
 	var weapon_type: String = str(item_resource.get("weapon_type")) if item_resource != null else ""
 	return "武器 · 远程" if weapon_type == "ranged" else ("武器 · 近战" if weapon_type == "melee" else "未知")
@@ -111,6 +126,7 @@ static func _append_equipment_lines(detail_lines: Array[String], item_resource: 
 	detail_lines.append("耐久：%.1f / %.1f" % [current_durability, max_durability])
 	if item_resource.has_method("is_broken") and bool(item_resource.call("is_broken")):
 		detail_lines.append("[color=%s]状态：损坏，全部装备属性失效[/color]" % NEGATIVE_COLOR)
+	_append_equipment_set_lines(detail_lines, item_resource)
 	# 装备属性规格；每项依次保存属性名、小数位、单位后缀和显示倍率，百分比字段统一乘 100 后追加 %。
 	var stat_specs: Array[Array] = [
 		["attack_power", 1, "", 1.0],
@@ -118,7 +134,7 @@ static func _append_equipment_lines(detail_lines: Array[String], item_resource: 
 		["max_health", 1, "", 1.0],
 		["health_regeneration_per_five_seconds", 1, "", 1.0],
 		["energy_regeneration", 1, "", 1.0],
-		["dodge_chance", 0, "%", 100.0],
+		["dodge_chance", 1, "%", 100.0],
 		["move_speed", 0, "%", 100.0],
 		["vision_range", 0, "%", 100.0],
 		["critical_chance", 0, "%", 100.0],
@@ -135,6 +151,81 @@ static func _append_equipment_lines(detail_lines: Array[String], item_resource: 
 		# 显示倍率；底层百分比小数乘 100 后再进入统一文本格式化流程。
 		var display_multiplier: float = float(stat_spec[3])
 		_append_weapon_stat_line(detail_lines, item_resource, stat_name, decimals, suffix, display_multiplier, true)
+
+
+static func _append_equipment_set_lines(detail_lines: Array[String], item_resource: Resource) -> void:
+	## 追加装备所属套装与两个档位效果；已达到门槛显示绿色，未达到门槛显示灰色。
+	# 当前防具快照；读取 GlobalInventory 公开接口，悬停仓库或背包中的套装件时仍以身上装备为准。
+	var armor_equipment: Dictionary = _get_equipped_armor_resources()
+	_append_equipment_set_lines_from_snapshot(detail_lines, item_resource, armor_equipment)
+
+
+static func build_equipment_set_bbcode(item_resource: Resource, armor_equipment: Dictionary) -> String:
+	## 使用调用方提供的防具快照构建套装详情片段；供确定性测试和不依赖 AutoLoad 的预览界面复用。
+	# 套装详情行；结构与正式悬停框完全一致，只省略物品名称、价值和普通属性。
+	var detail_lines: Array[String] = []
+	_append_equipment_set_lines_from_snapshot(detail_lines, item_resource, armor_equipment)
+	return "\n".join(detail_lines)
+
+
+static func _append_equipment_set_lines_from_snapshot(detail_lines: Array[String], item_resource: Resource, armor_equipment: Dictionary) -> void:
+	## 使用明确装备快照追加套装行；正式悬停和测试入口共享颜色、文本与门槛判断。
+	# 套装数据；基础装备未配置引用时保持空结果。
+	var equipment_set: Resource = item_resource.get("equipment_set") as Resource if _resource_has_property(item_resource, "equipment_set") else null
+	if equipment_set == null or not equipment_set.has_method("get_tier_definitions"):
+		return
+	# 套装稳定标识；空 ID 不参与件数统计。
+	var set_id: String = str(equipment_set.get("set_id")).strip_edges()
+	if set_id.is_empty():
+		return
+	# 当前有效件数；损坏装备由套装组件统一排除。
+	var active_piece_count: int = int(EQUIPMENT_SET_COMPONENT_SCRIPT.call("get_active_piece_count_for_set", armor_equipment, set_id))
+	# 套装显示名称；缺失时回退稳定 ID。
+	var set_display_name: String = str(equipment_set.get("display_name")).strip_edges()
+	if set_display_name.is_empty():
+		set_display_name = set_id
+	detail_lines.append("[b]所属套装：%s（当前 %d 件）[/b]" % [set_display_name, active_piece_count])
+	# 套装档位遍历项；保持数据资源原始顺序。
+	for raw_tier_definition in equipment_set.call("get_tier_definitions") as Array[Dictionary]:
+		# 套装档位定义；包含触发件数和效果原文。
+		var tier_definition: Dictionary = raw_tier_definition as Dictionary
+		# 触发件数；至少为 1，用于标题和激活判断。
+		var required_count: int = maxi(int(tier_definition.get("required_count", 1)), 1)
+		# 效果原文；空文本不创建档位行。
+		var effect_description: String = str(tier_definition.get("description", ""))
+		if effect_description.is_empty():
+			continue
+		# 档位颜色；达到门槛为绿色，否则为灰色。
+		var tier_color: String = POSITIVE_COLOR if active_piece_count >= required_count else INACTIVE_SET_COLOR
+		# 档位标题；标准两件套与四件套保持内容文档原始中文，其余可配置门槛使用数字标题。
+		var tier_title: String = "两件套效果" if required_count == 2 else ("四件套效果" if required_count == 4 else "%d件套效果" % required_count)
+		detail_lines.append("[color=%s]%s：%s[/color]" % [tier_color, tier_title, effect_description])
+
+
+static func _get_equipped_armor_resources() -> Dictionary:
+	## 从运行中的全局库存读取装备栏快照；脱离 SceneTree 的格式化测试安全回退为空装备。
+	# 主循环；只有 SceneTree 才能访问 AutoLoad 根节点，编辑器资源预览等环境可能为空。
+	var main_loop: MainLoop = Engine.get_main_loop()
+	# 场景树；类型转换失败时表示当前没有可用运行时装备状态。
+	var scene_tree: SceneTree = main_loop as SceneTree
+	if scene_tree == null:
+		return {}
+	# 全局库存服务；统一拥有四部位装备记录，详情格式化器只读取公开资源快照。
+	var global_inventory: Node = scene_tree.root.get_node_or_null("GlobalInventory")
+	if global_inventory != null and global_inventory.has_method("get_armor_equipment_resources"):
+		return global_inventory.call("get_armor_equipment_resources") as Dictionary
+	return {}
+
+
+static func _resource_has_property(content_resource: Resource, property_name: String) -> bool:
+	## 判断兼容物品资源是否公开指定字段；缺少套装字段的旧装备继续按基础装备显示。
+	if content_resource == null:
+		return false
+	# 属性描述遍历项；统一检查脚本导出字段与内置属性名。
+	for property_info in content_resource.get_property_list():
+		if str((property_info as Dictionary).get("name", "")) == property_name:
+			return true
+	return false
 
 
 static func create_tooltip_control(item_resource: Resource, quantity: int = 1, value_label: String = "价值", total_value_override: int = -1) -> Control:

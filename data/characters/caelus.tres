@@ -8,6 +8,7 @@ character_id = "caelus"
 display_name = "穹"
 role = "均衡型开拓者"
 description = "生命上限较高，能量上限偏低，适合测试更稳定的近距离战斗节奏。"
+unlocked_by_default = true
 max_health = 150.0
 max_energy = 95.0
 move_speed = 100.0

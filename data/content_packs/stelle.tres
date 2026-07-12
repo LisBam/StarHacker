@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="ContentPackData" load_steps=13 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/content_pack_data.gd" id="1_content_pack"]
+[ext_resource type="Resource" path="res://data/weapons/stelle/galactic_baseball_bat.tres" id="2_melee_weapon"]
+[ext_resource type="Resource" path="res://data/weapons/stelle/as_ive_written.tres" id="3_ranged_weapon"]
+[ext_resource type="Resource" path="res://data/equipment/stelle/trailblazer_hat.tres" id="4_head"]
+[ext_resource type="Resource" path="res://data/equipment/stelle/trailblazer_coat.tres" id="5_body"]
+[ext_resource type="Resource" path="res://data/equipment/stelle/trailblazer_pants.tres" id="6_legs"]
+[ext_resource type="Resource" path="res://data/equipment/stelle/trailblazer_boots.tres" id="7_feet"]
+[ext_resource type="Resource" path="res://data/items/repair_kit_basic.tres" id="8_basic_kit"]
+[ext_resource type="Resource" path="res://data/items/repair_kit_medium.tres" id="9_medium_kit"]
+[ext_resource type="Resource" path="res://data/items/repair_kit_advanced.tres" id="10_advanced_kit"]
+[ext_resource type="PackedScene" path="res://scenes/enemies/stelle/voidranger_reaver.tscn" id="11_melee_enemy"]
+[ext_resource type="PackedScene" path="res://scenes/enemies/stelle/voidranger_eliminator.tscn" id="12_ranged_enemy"]
+
+[resource]
+script = ExtResource("1_content_pack")
+pack_id = "stelle"
+display_name = "星"
+character_id = "stelle"
+weapon_resources = Array[Resource]([ExtResource("2_melee_weapon"), ExtResource("3_ranged_weapon")])
+equipment_resources = Array[Resource]([ExtResource("4_head"), ExtResource("5_body"), ExtResource("6_legs"), ExtResource("7_feet")])
+item_resources = Array[Resource]([ExtResource("8_basic_kit"), ExtResource("9_medium_kit"), ExtResource("10_advanced_kit")])
+enemy_scenes = Array[PackedScene]([ExtResource("11_melee_enemy"), ExtResource("12_ranged_enemy")])

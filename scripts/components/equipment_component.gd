@@ -12,6 +12,8 @@ signal armor_equipment_changed(armor_slot: String, equipment_data: Resource)
 
 ## 背包组件路径；默认指向同级 InventoryComponent，可为空，修改会影响装备物品是否自动登记到背包。
 @export var inventory_component_path: NodePath = ^"../InventoryComponent"
+## 套装组件路径；默认指向同级 EquipmentSetComponent，修改会影响套装属性是否进入玩家最终属性聚合。
+@export var equipment_set_component_path: NodePath = ^"../EquipmentSetComponent"
 ## 远程武器槽数量；取值建议 1 到 8，默认 2 满足双远程武器需求，运行时修改后需要重新初始化槽位。
 @export_range(1, 8, 1) var ranged_slot_count: int = 2
 ## 开局远程武器列表；默认空数组，最多按 ranged_slot_count 装入，修改会影响玩家初始远程装备。
@@ -35,6 +37,8 @@ var _stats_component: Node
 var _movement_component: Node
 ## 玩家战斗相机缓存；头部视野属性变化时调整相机缩放。
 var _combat_camera: Camera2D
+## 装备套装组件缓存；只读取当前套装属性结果，不持有套装件数或物品所有权。
+var _equipment_set_component: Node
 ## 不含装备的基础相机缩放；默认进入场景时读取当前 Camera2D.zoom。
 var _base_camera_zoom: Vector2 = Vector2.ONE
 ## 不含装备的基础移速；默认 320，首次同步时从移动组件读取。
@@ -54,6 +58,7 @@ func _ready() -> void:
 	_stats_component = owner.get_node_or_null("StatsComponent") if owner != null else get_node_or_null("../StatsComponent")
 	_movement_component = owner.get_node_or_null("MovementComponent") if owner != null else get_node_or_null("../MovementComponent")
 	_combat_camera = owner.get_node_or_null("Camera2D") as Camera2D if owner != null else get_node_or_null("../Camera2D") as Camera2D
+	_equipment_set_component = get_node_or_null(equipment_set_component_path)
 	if _movement_component != null and _movement_component.has_method("get_max_speed"):
 		_base_move_speed = float(_movement_component.call("get_max_speed"))
 	if _combat_camera != null:
@@ -363,13 +368,24 @@ func _sync_from_global_inventory() -> void:
 func _apply_armor_attributes() -> void:
 	# 聚合属性；损坏装备不提供任何加成，避免零耐久仍持续生效。
 	var attributes: Dictionary = {"attack_power": 0.0, "defense_power": 0.0, "max_health": 0.0, "health_regeneration_per_five_seconds": 0.0, "energy_regeneration": 0.0, "dodge_chance": 0.0, "move_speed": 0.0, "vision_range": 0.0, "critical_chance": 0.0, "critical_damage": 0.0}
+	# 四部位装备；同一快照同时用于普通属性与套装统计，避免一次刷新读取到不同装备状态。
+	var armor_equipment: Dictionary = get_armor_equipment_resources()
 	for armor_slot in ["head", "body", "legs", "feet"]:
-		var equipment_data: Resource = get_armor_equipment(armor_slot)
+		# 当前部位装备；空槽与损坏装备不参与任何普通属性聚合。
+		var equipment_data: Resource = armor_equipment.get(armor_slot) as Resource
 		if equipment_data == null or (equipment_data.has_method("is_broken") and bool(equipment_data.call("is_broken"))):
 			continue
 		for stat_name in attributes.keys():
 			var stat_value: float = float(equipment_data.call("get_effective_stat", stat_name)) if equipment_data.has_method("get_effective_stat") else float(equipment_data.get(stat_name))
 			attributes[stat_name] = float(attributes[stat_name]) + stat_value
+	if _equipment_set_component != null and _equipment_set_component.has_method("get_active_attribute_bonuses"):
+		# 套装属性加成；数据资源返回直接有效值，只有装备组件已支持的属性键才会写入角色聚合。
+		var set_attribute_bonuses: Dictionary = _equipment_set_component.call("get_active_attribute_bonuses", armor_equipment) as Dictionary
+		for raw_stat_name in set_attribute_bonuses.keys():
+			# 套装属性名；未知键安全跳过，使特殊效果不会误写入战斗属性组件。
+			var stat_name: String = str(raw_stat_name)
+			if attributes.has(stat_name):
+				attributes[stat_name] = float(attributes.get(stat_name, 0.0)) + float(set_attribute_bonuses.get(raw_stat_name, 0.0))
 	if _stats_component != null and _stats_component.has_method("apply_equipment_attributes"):
 		_stats_component.call("apply_equipment_attributes", attributes)
 	_equipment_move_speed_ratio = maxf(float(attributes.get("move_speed", 0.0)), 0.0)

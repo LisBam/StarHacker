@@ -3,6 +3,9 @@ extends Node
 ## 内容目录在项目启动时扫描约定目录，为武器、装备、道具、怪物和角色提供统一自动注册入口。
 ## 内容文件只需放入对应目录并通过类型校验，商店、掉落、开发者发放、生成和角色系统即可共同读取。
 
+## 可用内容发生变化信号；角色解锁扩展包后通知长期运行的商店等服务合并新路径。
+signal content_availability_changed
+
 ## 武器资源目录；递归扫描 .tres 与 .res，运行时通常不动态修改。
 @export_dir var weapons_directory: String = "res://data/weapons"
 ## 装备资源目录；递归扫描 .tres 与 .res，运行时通常不动态修改。
@@ -13,6 +16,8 @@ extends Node
 @export_dir var characters_directory: String = "res://data/characters"
 ## 怪物场景目录；递归扫描 .tscn 与 .scn，所有可加载 PackedScene 都会进入随机怪物池。
 @export_dir var enemies_directory: String = "res://scenes/enemies"
+## 扩展包清单目录；递归扫描 .tres 与 .res，清单把角色解锁状态映射到四类自动发现内容。
+@export_dir var content_packs_directory: String = "res://data/content_packs"
 
 ## 已发现武器路径；键为稳定 weapon_id，值为项目资源路径，同 ID 重复时保留排序靠前的文件。
 var _weapon_paths_by_id: Dictionary = {}
@@ -26,6 +31,14 @@ var _character_profiles_by_id: Dictionary = {}
 var _character_ids: Array[String] = []
 ## 已发现怪物场景路径；按路径稳定排序，供世界生成时加载为随机场景池。
 var _enemy_scene_paths: PackedStringArray = PackedStringArray()
+## 已发现扩展包资源；键为稳定 pack_id，值为 ContentPackData 兼容资源，同 ID 重复时保留排序靠前的文件。
+var _content_packs_by_id: Dictionary = {}
+## 已发现扩展包顺序；按清单资源路径稳定排序，供解锁服务和调试界面复用。
+var _content_pack_ids: Array[String] = []
+## 角色对应扩展包索引；键为 character_id，值为该角色唯一扩展包 ID，重复归属时保留排序靠前的清单。
+var _content_pack_id_by_character_id: Dictionary = {}
+## 内容路径对应扩展包索引；没有登记的路径属于基础内容并始终可用，登记路径随所属角色解锁。
+var _content_pack_id_by_resource_path: Dictionary = {}
 
 
 func _ready() -> void:
@@ -38,22 +51,23 @@ func reload_catalog() -> void:
 	_item_paths_by_id = _scan_identified_resources(items_directory, "item_id", "item")
 	_scan_character_profiles()
 	_enemy_scene_paths = _scan_scene_paths(enemies_directory)
+	_scan_content_packs()
 
 
 func get_weapon_paths() -> PackedStringArray:
-	return _dictionary_values_as_paths(_weapon_paths_by_id)
+	return _filter_unlocked_content_paths(_dictionary_values_as_paths(_weapon_paths_by_id))
 
 
 func get_equipment_paths() -> PackedStringArray:
-	return _dictionary_values_as_paths(_equipment_paths_by_id)
+	return _filter_unlocked_content_paths(_dictionary_values_as_paths(_equipment_paths_by_id))
 
 
 func get_item_paths() -> PackedStringArray:
-	return _dictionary_values_as_paths(_item_paths_by_id)
+	return _filter_unlocked_content_paths(_dictionary_values_as_paths(_item_paths_by_id))
 
 
 func get_enemy_scene_paths() -> PackedStringArray:
-	return _enemy_scene_paths.duplicate()
+	return _filter_unlocked_content_paths(_enemy_scene_paths)
 
 
 func get_weapon_path(weapon_id: String) -> String:
@@ -86,6 +100,55 @@ func get_character_profile(character_id: String) -> Dictionary:
 	# 已注册档案；返回深拷贝，避免 UI 或战斗系统意外修改目录中的权威配置。
 	var profile: Dictionary = _character_profiles_by_id.get(character_id, {}) as Dictionary
 	return profile.duplicate(true)
+
+
+func get_content_pack_ids() -> Array[String]:
+	## 返回全部合法扩展包 ID；是否已解锁由 SessionState 根据所属角色单独判断。
+	return _content_pack_ids.duplicate()
+
+
+func has_content_pack(pack_id: String) -> bool:
+	## 判断扩展包是否存在于当前目录；空 ID 与重复后被忽略的清单均返回 false。
+	return _content_packs_by_id.has(pack_id)
+
+
+func get_content_pack_character_id(pack_id: String) -> String:
+	## 返回扩展包所属角色；无效扩展包回退空字符串，避免误把基础内容绑定到默认角色。
+	# 扩展包资源；只读取公开 character_id 字段，不让解锁服务依赖具体资源脚本类型。
+	var content_pack: Resource = _content_packs_by_id.get(pack_id) as Resource
+	return str(content_pack.get("character_id")).strip_edges() if content_pack != null else ""
+
+
+func get_content_pack_id_for_character(character_id: String) -> String:
+	## 返回角色对应的唯一扩展包 ID；当前未创建清单的角色返回空字符串并保持原有角色内容不变。
+	return str(_content_pack_id_by_character_id.get(character_id, ""))
+
+
+func get_content_pack_profile(pack_id: String) -> Dictionary:
+	## 返回扩展包只读快照；调用方可检查归属与各类内容路径，但不能修改目录内的权威清单资源。
+	# 扩展包资源；不存在时返回空词典，调用方可据此判断无效 ID。
+	var content_pack: Resource = _content_packs_by_id.get(pack_id) as Resource
+	if content_pack == null:
+		return {}
+	return {
+		"pack_id": pack_id,
+		"display_name": str(content_pack.get("display_name")),
+		"character_id": str(content_pack.get("character_id")),
+		"weapon_paths": content_pack.call("get_weapon_paths"),
+		"equipment_paths": content_pack.call("get_equipment_paths"),
+		"item_paths": content_pack.call("get_item_paths"),
+		"enemy_scene_paths": content_pack.call("get_enemy_scene_paths"),
+	}
+
+
+func is_content_path_available(content_path: String) -> bool:
+	## 公开查询任意资源路径当前是否可用；旧场景和服务的检查器兜底数组必须通过此接口避免绕过扩展包过滤。
+	return _is_content_path_unlocked(content_path)
+
+
+func notify_unlock_state_changed() -> void:
+	## 由角色解锁服务在永久解锁成功后调用；目录内容本身不重扫，只通知消费者重新查询过滤结果。
+	content_availability_changed.emit()
 
 
 func _scan_identified_resources(directory_path: String, id_property: String, expected_kind: String) -> Dictionary:
@@ -137,6 +200,34 @@ func _scan_character_profiles() -> void:
 		_character_ids.push_front("stelle")
 
 
+func _scan_content_packs() -> void:
+	## 扫描扩展包清单并建立角色、内容路径到扩展包的双向索引。
+	_content_packs_by_id.clear()
+	_content_pack_ids.clear()
+	_content_pack_id_by_character_id.clear()
+	_content_pack_id_by_resource_path.clear()
+	# 扩展包资源路径；按完整路径稳定排序，重复 ID 与重复归属始终保留第一份。
+	var content_pack_paths: PackedStringArray = _collect_files(content_packs_directory, PackedStringArray(["tres", "res"]))
+	for content_pack_path in content_pack_paths:
+		# 扩展包资源；必须同时公开稳定 ID、所属角色与完整路径查询接口。
+		var content_pack: Resource = load(content_pack_path) as Resource
+		if content_pack == null or not _resource_has_property(content_pack, "pack_id") or not _resource_has_property(content_pack, "character_id") or not content_pack.has_method("get_all_content_paths"):
+			continue
+		# 扩展包标识；空值或重复值不会注册，避免一个解锁键对应多份不确定清单。
+		var pack_id: String = str(content_pack.get("pack_id")).strip_edges()
+		# 所属角色标识；必须已经存在于角色目录，防止无法通过任何角色解锁的内容进入归属表。
+		var character_id: String = str(content_pack.get("character_id")).strip_edges()
+		if pack_id.is_empty() or character_id.is_empty() or _content_packs_by_id.has(pack_id) or _content_pack_id_by_character_id.has(character_id) or not _character_profiles_by_id.has(character_id):
+			continue
+		_content_packs_by_id[pack_id] = content_pack
+		_content_pack_ids.append(pack_id)
+		_content_pack_id_by_character_id[character_id] = pack_id
+		# 归属内容路径；多个清单误填同一路径时保留排序靠前的扩展包，保证过滤结果可复现。
+		for owned_content_path in content_pack.call("get_all_content_paths") as PackedStringArray:
+			if not owned_content_path.is_empty() and not _content_pack_id_by_resource_path.has(owned_content_path):
+				_content_pack_id_by_resource_path[owned_content_path] = pack_id
+
+
 func _scan_scene_paths(directory_path: String) -> PackedStringArray:
 	# 场景结果；只保留 ResourceLoader 可识别且实际加载为 PackedScene 的文件。
 	var result: PackedStringArray = PackedStringArray()
@@ -184,6 +275,33 @@ func _dictionary_values_as_paths(path_dictionary: Dictionary) -> PackedStringArr
 		result.append(str(raw_path))
 	result.sort()
 	return result
+
+
+func _filter_unlocked_content_paths(content_paths: PackedStringArray) -> PackedStringArray:
+	## 过滤扩展包内容并保持原路径顺序；基础内容不绑定扩展包，因此始终保留。
+	# 可用内容路径；每次查询实时读取 SessionState，使角色解锁后无需重启目录服务。
+	var unlocked_paths: PackedStringArray = PackedStringArray()
+	for content_path in content_paths:
+		if _is_content_path_unlocked(content_path):
+			unlocked_paths.append(content_path)
+	return unlocked_paths
+
+
+func _is_content_path_unlocked(content_path: String) -> bool:
+	## 判断单个内容路径是否可用；未登记路径属于基础内容，扩展包路径必须由所属角色解锁。
+	# 扩展包标识；空值表示该内容没有专属归属限制。
+	var pack_id: String = str(_content_pack_id_by_resource_path.get(content_path, ""))
+	if pack_id.is_empty():
+		return true
+	# 会话状态服务；正常项目运行时统一持有永久角色解锁列表。
+	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
+	if session_state != null and session_state.has_method("is_content_pack_unlocked"):
+		return bool(session_state.call("is_content_pack_unlocked", pack_id))
+	# 所属角色档案；隔离加载 ContentCatalog 时按角色默认解锁字段回退，避免启动顺序造成内容暂时消失。
+	var character_id: String = get_content_pack_character_id(pack_id)
+	# 角色档案；只有显式声明默认解锁才允许在 SessionState 缺失时开放扩展包。
+	var character_profile: Dictionary = _character_profiles_by_id.get(character_id, {}) as Dictionary
+	return bool(character_profile.get("unlocked_by_default", false))
 
 
 func _resource_has_property(content_resource: Resource, property_name: String) -> bool:

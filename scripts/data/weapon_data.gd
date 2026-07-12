@@ -44,6 +44,20 @@ const FIXED_DURABILITY_COST_PER_USE: float = 1.0
 @export_range(0.01, 5.0, 0.01) var ranged_cooldown: float = 0.16
 ## 武器扩散角度；取值大于等于 0，默认 0 度表示完全精准，数值越高每次弹体相对瞄准方向的随机偏移越明显。
 @export_range(0.0, 45.0, 0.1, "or_greater") var spread_degrees: float = 0.0
+## 是否具有散射属性；默认 false，只有显式启用的远程武器才能发射多颗弹体并接受散射强化。
+@export var has_scatter: bool = false
+## 每轮射击生成的弹体总数；默认 1 表示单弹体，只有 has_scatter 为 true 时参与战斗与强化结算。
+@export_range(1, 100, 1, "or_greater") var scatter_count: int = 1
+## 是否具有穿透属性；默认 false，只有显式启用的远程武器才能穿透目标并接受穿透强化。
+@export var has_piercing: bool = false
+## 每颗弹体可额外穿过的目标数量；默认 0 表示命中首个目标后销毁，只有 has_piercing 为 true 时参与战斗与强化结算。
+@export_range(0, 100, 1, "or_greater") var piercing_count: int = 0
+## 是否具有连击属性；默认 false，只有显式启用的远程武器才能连续发射多轮并接受连击强化。
+@export var has_combo: bool = false
+## 一次攻击连续执行的射击轮数；默认 1 表示只发射一轮，完整连击结束后才进入武器冷却。
+@export_range(1, 100, 1, "or_greater") var combo_count: int = 1
+## 连击相邻两轮之间的时间；默认 0.08 秒，运行时通常不修改，调整会改变连击持续时间但不改变结束后的武器冷却。
+@export_range(0.01, 5.0, 0.01) var combo_interval: float = 0.08
 ## 武器后坐力；取值建议大于等于 0，默认 0 表示不推动使用者，远程开火时会把玩家向反方向推开。
 @export_range(0.0, 3000.0, 1.0, "or_greater") var recoil_force: float = 0.0
 ## 武器前坐力；取值建议大于等于 0，默认 0 表示不向攻击方向推动使用者，适合近战突进或特殊枪械反馈，屏幕震动按后坐力的一半换算。
@@ -73,7 +87,7 @@ const MINIMUM_DURATION_VALUE: float = 0.01
 ## 可应用于所有武器的统一强化属性；新增通用战斗字段时应同步详情格式化器。
 const COMMON_ENHANCEMENT_STATS: Array[String] = ["damage", "cooldown", "energy_cost", "recoil_force", "front_recoil_force", "impact_force", "critical_chance", "critical_damage", "max_durability"]
 ## 远程武器专属强化属性；只允许远程武器消费包含这些字段的强化石效果。
-const RANGED_ENHANCEMENT_STATS: Array[String] = ["projectile_speed", "bullet_range", "spread_degrees"]
+const RANGED_ENHANCEMENT_STATS: Array[String] = ["projectile_speed", "bullet_range", "spread_degrees", "scatter_count", "piercing_count", "combo_count"]
 ## 近战武器专属强化属性；只允许近战武器消费包含这些字段的强化石效果。
 const MELEE_ENHANCEMENT_STATS: Array[String] = ["melee_active_duration"]
 
@@ -183,7 +197,7 @@ func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
 		# 词条方向；新版只读取 +1 或 -1，旧百分比也会按正负号归一化。
 		var modifier_direction: int = EnhancementRules.normalize_direction(modifiers.get(raw_stat_name, 1))
 		# 词条实际比例；品质化数据保留 5% 至 60% 幅度，旧 +1/-1 数据迁移为 10%。
-		var modifier_ratio: float = EnhancementRules.get_effect_ratio(modifiers.get(raw_stat_name, modifier_direction))
+		var modifier_ratio: float = EnhancementRules.get_effect_value(stat_name, modifiers.get(raw_stat_name, modifier_direction))
 		if is_zero_approx(modifier_ratio):
 			continue
 		# 基础数值；不包含任何历史强化，用于结果弹窗说明本次百分比的换算基准。
@@ -263,7 +277,13 @@ func _is_stat_supported(stat_name: String) -> bool:
 	# 统一属性名；通用词条对所有武器有效，专属词条按 weapon_type 校验。
 	var canonical_stat_name: String = _resolve_canonical_stat_name(stat_name)
 	if canonical_stat_name in COMMON_ENHANCEMENT_STATS:
-		return true
+		return not is_zero_approx(get_base_stat(canonical_stat_name))
 	if is_ranged():
-		return canonical_stat_name in RANGED_ENHANCEMENT_STATS
-	return canonical_stat_name in MELEE_ENHANCEMENT_STATS
+		if canonical_stat_name == "scatter_count":
+			return has_scatter
+		if canonical_stat_name == "piercing_count":
+			return has_piercing
+		if canonical_stat_name == "combo_count":
+			return has_combo
+		return canonical_stat_name in RANGED_ENHANCEMENT_STATS and not is_zero_approx(get_base_stat(canonical_stat_name))
+	return canonical_stat_name in MELEE_ENHANCEMENT_STATS and not is_zero_approx(get_base_stat(canonical_stat_name))

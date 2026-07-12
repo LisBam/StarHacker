@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="WeaponData" format=3]
+
+[ext_resource type="Script" uid="uid://bnwiep4d7h6jo" path="res://scripts/data/weapon_data.gd" id="1_weapon_data"]
+[ext_resource type="PackedScene" path="res://scenes/projectiles/player_projectile.tscn" id="2_projectile"]
+
+[resource]
+script = ExtResource("1_weapon_data")
+weapon_id = "pulse_combo_rifle"
+display_name = "脉冲连击步枪"
+description = "具有连击属性的脉冲枪械，完整连击结束后才进入武器冷却。"
+icon_text = "连"
+sell_price = 165
+energy_cost = 11.0
+projectile_scene = ExtResource("2_projectile")
+projectile_speed = 1080.0
+bullet_range = 400.0
+ranged_damage = 11.0
+ranged_cooldown = 0.36
+spread_degrees = 2.0
+has_combo = true
+combo_count = 1
+combo_interval = 0.08
+recoil_force = 70.0
+impact_force = 190.0
+critical_chance = 0.08

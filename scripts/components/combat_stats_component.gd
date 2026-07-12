@@ -44,6 +44,8 @@ var _equipment_defense_power: float = 0.0
 var _equipment_max_health: float = 0.0
 ## 装备每 5 秒回血值；默认 0，每个完整周期结算一次。
 var _equipment_health_regeneration_per_five_seconds: float = 0.0
+## 装备每秒能量恢复加成；默认 0，由有效躯干装备整体覆盖并叠加到基础恢复速度。
+var _equipment_energy_regeneration: float = 0.0
 ## 装备闪避率；默认 0，受到攻击时由玩家控制器独立判定。
 var _equipment_dodge_chance: float = 0.0
 ## 装备暴击率加成；默认 0，与当前武器暴击率相加。
@@ -75,11 +77,13 @@ func _process(delta: float) -> void:
 		set_energy(max_energy)
 		return
 
-	if energy_regeneration_per_second <= 0.0 or current_energy >= max_energy:
+	# 当前每秒能量恢复；基础值与装备加成直接相加，每 1 点装备属性对应每秒额外恢复 1 点能量。
+	var effective_energy_regeneration: float = maxf(energy_regeneration_per_second + _equipment_energy_regeneration, 0.0)
+	if effective_energy_regeneration <= 0.0 or current_energy >= max_energy:
 		return
 
 	# 本帧恢复后的能量值；取值限制在 0 到 max_energy，默认由恢复速度和 delta 计算，修改会影响能量自然回复结果。
-	var regenerated_energy: float = minf(current_energy + energy_regeneration_per_second * delta, max_energy)
+	var regenerated_energy: float = minf(current_energy + effective_energy_regeneration * delta, max_energy)
 	set_energy(regenerated_energy)
 
 
@@ -222,6 +226,7 @@ func apply_equipment_attributes(attributes: Dictionary) -> void:
 	_equipment_defense_power = maxf(float(attributes.get("defense_power", 0.0)), 0.0)
 	_equipment_max_health = maxf(float(attributes.get("max_health", 0.0)), 0.0)
 	_equipment_health_regeneration_per_five_seconds = maxf(float(attributes.get("health_regeneration_per_five_seconds", 0.0)), 0.0)
+	_equipment_energy_regeneration = maxf(float(attributes.get("energy_regeneration", 0.0)), 0.0)
 	_equipment_dodge_chance = clampf(float(attributes.get("dodge_chance", 0.0)), 0.0, EnhancementRules.DODGE_CHANCE_MAXIMUM)
 	_equipment_critical_chance = clampf(float(attributes.get("critical_chance", 0.0)), 0.0, EnhancementRules.CRITICAL_CHANCE_MAXIMUM)
 	# 装备暴击伤害增量；保留负值且不设置上限，最终与武器暴击伤害直接相加。

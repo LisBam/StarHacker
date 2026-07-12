@@ -67,6 +67,9 @@ const STONE_DETRIMENTAL_CHANCE: float = 0.28
 	"res://data/weapons/ion_smg.tres",
 	"res://data/weapons/scatter_blaster.tres",
 	"res://data/weapons/rail_cannon.tres",
+	"res://data/weapons/prism_scatter_gun.tres",
+	"res://data/weapons/phase_piercer.tres",
+	"res://data/weapons/pulse_combo_rifle.tres",
 	"res://data/weapons/phase_blade.tres",
 	"res://data/weapons/quantum_dagger.tres",
 ])

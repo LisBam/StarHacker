@@ -117,6 +117,7 @@ static func _append_equipment_lines(detail_lines: Array[String], item_resource: 
 		["defense_power", 1, "", 1.0],
 		["max_health", 1, "", 1.0],
 		["health_regeneration_per_five_seconds", 1, "", 1.0],
+		["energy_regeneration", 1, "", 1.0],
 		["dodge_chance", 0, "%", 100.0],
 		["move_speed", 0, "%", 100.0],
 		["vision_range", 0, "%", 100.0],
@@ -221,6 +222,12 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 		_append_weapon_stat_line(detail_lines, item_resource, "bullet_range", 1)
 		_append_weapon_stat_line(detail_lines, item_resource, "projectile_speed", 1)
 		_append_weapon_stat_line(detail_lines, item_resource, "spread_degrees", 1, "°")
+		if bool(item_resource.get("has_scatter")):
+			_append_weapon_stat_line(detail_lines, item_resource, "scatter_count", 0)
+		if bool(item_resource.get("has_piercing")):
+			_append_weapon_stat_line(detail_lines, item_resource, "piercing_count", 0)
+		if bool(item_resource.get("has_combo")):
+			_append_weapon_stat_line(detail_lines, item_resource, "combo_count", 0)
 	else:
 		_append_weapon_stat_line(detail_lines, item_resource, "melee_active_duration", 2, " 秒")
 	_append_weapon_stat_line(detail_lines, item_resource, "recoil_force", 1)

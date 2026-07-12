@@ -404,11 +404,13 @@ func _apply_random_compatible_enhancement(weapon_resource: Resource) -> bool:
 		var enhancement_stone: EnhancementStoneData = EnhancementStoneData.create_random(_random, STONE_MINIMUM_MODIFIER_COUNT, STONE_MAXIMUM_MODIFIER_COUNT, STONE_DETRIMENTAL_CHANCE, STONE_BASE_SELL_PRICE, target_kind)
 		if enhancement_stone == null or not enhancement_stone.can_apply_to_weapon(weapon_resource):
 			continue
+		# 可应用词条；历史强化与玩家锻造使用同一共有属性子集，避免商品生成计入目标未拥有的词条。
+		var applicable_modifiers: Dictionary = enhancement_stone.get_applicable_modifiers_for_target(weapon_resource)
 		# 延迟实际倍率；按品质逐条生成百分比，与玩家在锻造中消耗强化石使用同一规则。
 		var rolled_modifiers: Dictionary = {}
 		for stat_name in EnhancementRules.STAT_KEYS:
-			if enhancement_stone.modifiers.has(stat_name):
-				rolled_modifiers[stat_name] = EnhancementRules.roll_quality_modifier_ratio(_random, enhancement_stone.quality_id, stat_name, enhancement_stone.modifiers.get(stat_name, 1))
+			if applicable_modifiers.has(stat_name):
+				rolled_modifiers[stat_name] = EnhancementRules.roll_quality_modifier_ratio(_random, enhancement_stone.quality_id, stat_name, applicable_modifiers.get(stat_name, 1))
 		if bool(weapon_resource.call("apply_enhancement", rolled_modifiers)):
 			return true
 	return false

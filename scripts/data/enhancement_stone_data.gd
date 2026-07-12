@@ -57,15 +57,37 @@ func get_effective_value() -> int:
 
 
 func can_apply_to_weapon(weapon_data: Resource) -> bool:
-	if weapon_data == null:
-		return false
-	# 适用类型；武器强化石与装备强化石不能跨类型使用。
-	var target_is_equipment: bool = str(weapon_data.get("item_kind")) == "equipment"
+	# 可应用词条；只要强化石与目标存在至少一个共有属性，该目标就属于合法锻造目标。
+	var applicable_modifiers: Dictionary = get_applicable_modifiers_for_target(weapon_data)
+	return not applicable_modifiers.is_empty()
+
+
+func get_applicable_modifiers_for_target(target_resource: Resource) -> Dictionary:
+	# 可应用词条；返回强化石词条与目标实际拥有属性的交集，锻造合法性和最终结算必须共用该结果。
+	var applicable_modifiers: Dictionary = {}
+	if target_resource == null:
+		return applicable_modifiers
+	# 目标是否为装备；武器强化石与装备强化石继续保持类型隔离，不能跨类型形成共有属性。
+	var target_is_equipment: bool = str(target_resource.get("item_kind")) == "equipment"
 	if (get_resolved_target_kind() == "equipment") != target_is_equipment:
-		return false
-	if weapon_data.has_method("can_apply_enhancement"):
-		return bool(weapon_data.call("can_apply_enhancement", get_normalized_modifiers()))
-	return not get_normalized_modifiers().is_empty() and not str(weapon_data.get("weapon_type")).is_empty()
+		return applicable_modifiers
+	# 归一化词条；旧属性别名和旧百分比方向在求交集前转换，避免同一属性出现两种兼容结果。
+	var normalized_modifiers: Dictionary = get_normalized_modifiers()
+	if normalized_modifiers.is_empty():
+		return applicable_modifiers
+	if target_resource.has_method("can_apply_enhancement"):
+		for raw_stat_name in normalized_modifiers.keys():
+			# 单属性候选；逐条查询目标能力，保证部分兼容强化石不会因其他无关词条被整体拒绝。
+			var stat_name: String = str(raw_stat_name)
+			# 单属性词典；复用目标现有兼容接口，不让强化石数据层依赖武器或装备的具体字段集合。
+			var single_modifier: Dictionary = {stat_name: normalized_modifiers.get(raw_stat_name, 0.0)}
+			if bool(target_resource.call("can_apply_enhancement", single_modifier)):
+				applicable_modifiers[stat_name] = normalized_modifiers.get(raw_stat_name, 0.0)
+		return applicable_modifiers
+	# 旧扩展资源兼容；未实现逐词条能力接口的武器沿用完整词条，实际应用仍由资源自身接口决定。
+	if not target_is_equipment and not str(target_resource.get("weapon_type")).is_empty():
+		return normalized_modifiers
+	return applicable_modifiers
 
 
 func get_normalized_modifiers() -> Dictionary:

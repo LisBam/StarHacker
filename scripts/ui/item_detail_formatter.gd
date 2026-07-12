@@ -325,7 +325,7 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 		_append_weapon_stat_line(detail_lines, item_resource, "recoil_force", 1, " 像素")
 	if bool(item_resource.get("has_front_recoil")):
 		_append_weapon_stat_line(detail_lines, item_resource, "front_recoil_force", 1, " 像素")
-	_append_weapon_stat_line(detail_lines, item_resource, "impact_force", 1)
+	_append_weapon_stat_line(detail_lines, item_resource, "impact_force", 1, " 像素")
 
 
 static func _append_weapon_stat_line(detail_lines: Array[String], item_resource: Resource, stat_name: String, decimals: int, suffix: String = "", display_multiplier: float = 1.0, skip_zero_unmodified: bool = false) -> void:

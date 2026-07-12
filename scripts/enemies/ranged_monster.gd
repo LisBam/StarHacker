@@ -16,7 +16,7 @@ class_name RangedMonster
 @export_range(0.0, 9999.0, 1.0, "or_greater") var ranged_projectile_damage: float = 10.0
 ## 敌方弹体最大飞行距离；取值建议大于 0，默认 520 像素，修改会影响弹体自动销毁距离。
 @export_range(1.0, 12000.0, 1.0, "or_greater") var ranged_projectile_max_distance: float = 520.0
-## 敌方弹体冲击力；取值建议大于等于 0，默认 90，命中玩家时会造成短距离击退。
+## 敌方弹体冲击力；单位为玩家单次无碰撞理论位移像素，1 点对应 1 像素，默认 90 表示命中玩家时产生 90 像素理论位移。
 @export_range(0.0, 5000.0, 1.0, "or_greater") var ranged_projectile_impact_force: float = 90.0
 ## 敌方弹体偏移角度；取值大于等于 0，默认 4 度，每次射击会在瞄准方向两侧随机变化。
 @export_range(0.0, 45.0, 0.1, "or_greater") var ranged_projectile_deviation_degrees: float = 4.0

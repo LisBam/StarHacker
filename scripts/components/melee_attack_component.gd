@@ -33,7 +33,7 @@ var _active_remaining: float = 0.0
 var _hit_instances: Dictionary = {}
 ## 当前挥击实际伤害；取值建议大于等于 0，默认跟随 damage，修改会影响本次挥击命中和信号伤害。
 var _current_damage: float = 35.0
-## 当前挥击冲击力；取值建议大于等于 0，默认 0 表示不击退，修改会影响本次挥击命中后的控制效果。
+## 当前挥击冲击力；单位为目标单次无碰撞理论位移像素，默认 0 表示不击退，修改会影响本次挥击命中后的控制效果。
 var _current_impact_force: float = 0.0
 ## 当前挥击方向；取值为单位向量，默认向右，修改会影响被击中目标的击退方向。
 var _current_attack_direction: Vector2 = Vector2.RIGHT
@@ -84,7 +84,7 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	var selected_active_duration: float = _get_weapon_float(weapon_data, "melee_active_duration", active_duration)
 	# 本次近战攻击距离；表示判定区域沿攻击方向的最远端与玩家本体的距离，强化后会动态改变碰撞范围。
 	var selected_attack_distance: float = _get_weapon_float(weapon_data, "attack_distance", attack_distance)
-	# 本次近战冲击力；取值来自武器数据，默认 0 表示只造成伤害不击退。
+	# 本次近战冲击力；取值来自武器数据，单位为目标单次无碰撞理论位移像素，默认 0 表示只造成伤害不击退。
 	var selected_impact_force: float = _get_weapon_float(weapon_data, "impact_force", 0.0)
 	# 本次武器暴击率；默认 0，不同近战武器可配置不同初始值。
 	var selected_critical_chance: float = clampf(_get_weapon_float(weapon_data, "critical_chance", 0.0) + _get_stats_float("get_equipment_critical_chance", 0.0), 0.0, EnhancementRules.CRITICAL_CHANCE_MAXIMUM)

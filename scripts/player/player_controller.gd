@@ -39,8 +39,8 @@ const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat
 @export_range(0.01, 2.0, 0.01) var dodge_duration: float = 0.16
 ## 击退速度衰减；取值建议大于 0，默认 1800 像素每秒平方，修改会影响武器坐力的初速度换算以及所有外部速度的持续时间。
 @export_range(1.0, 12000.0, 1.0, "or_greater") var knockback_decay: float = 1800.0
-## 外部击退最大累计速度；默认 3600 像素每秒，可完整容纳 3000 点武器坐力按默认衰减换算出的单次初速度，同时限制连续攻击与受击无限叠加。
-@export_range(1.0, 12000.0, 1.0, "or_greater") var max_accumulated_knockback_speed: float = 3600.0
+## 外部击退最大累计速度；默认 4300 像素每秒，可完整容纳 5000 点冲击力按默认衰减换算出的单次初速度，同时限制连续攻击与受击无限叠加。
+@export_range(1.0, 12000.0, 1.0, "or_greater") var max_accumulated_knockback_speed: float = 4300.0
 ## 射击震动后坐力倍率；取值建议 0 到 0.1，默认 0.035 会让高后坐力武器产生更强屏幕震动。
 @export_range(0.0, 1.0, 0.001) var fire_shake_per_recoil: float = 0.035
 ## 受伤震动伤害倍率；取值建议 0 到 1，默认 0.16 会让高伤害受击产生更强屏幕震动。
@@ -369,11 +369,16 @@ func _apply_weapon_front_recoil(weapon_data: Resource, attack_direction: Vector2
 
 func _calculate_recoil_initial_speed(recoil_distance: float) -> float:
 	## 把武器坐力的理论位移像素换算为匀减速初速度；返回值单位为像素/秒，供共享外部速度接口使用。
-	# 安全坐力距离；最低为 0 像素，异常负值不会产生反向或无效平方根。
-	var resolved_recoil_distance: float = maxf(recoil_distance, 0.0)
+	return _calculate_external_motion_initial_speed(recoil_distance)
+
+
+func _calculate_external_motion_initial_speed(motion_distance: float) -> float:
+	## 把单次无碰撞理论位移像素换算为匀减速初速度；坐力与命中冲击共用该公式，返回值单位为像素/秒。
+	# 安全理论位移；最低为 0 像素，异常负值不会产生反向或无效平方根。
+	var resolved_motion_distance: float = maxf(motion_distance, 0.0)
 	# 安全速度衰减；最低为 1 像素/秒²，与实际外部速度衰减使用相同保护值，修改会同步保持理论位移不变。
 	var resolved_knockback_decay: float = maxf(knockback_decay, 1.0)
-	return sqrt(2.0 * resolved_knockback_decay * resolved_recoil_distance)
+	return sqrt(2.0 * resolved_knockback_decay * resolved_motion_distance)
 
 
 func _get_weapon_recoil_force(weapon_data: Resource) -> float:
@@ -481,14 +486,14 @@ func _apply_knockback_from_source(source: Node) -> void:
 	if source == null:
 		return
 
-	# 来源冲击力；取值来自 source.get_impact_force()，默认 0 表示不击退玩家。
+	# 来源冲击力；取值来自 source.get_impact_force()，单位为单次无碰撞理论位移像素，默认 0 表示不击退玩家。
 	var impact_force: float = _get_source_impact_force(source)
 	if impact_force <= 0.0:
 		return
 
 	# 来源击退方向；取值优先来自 source.get_knockback_direction()，默认由来源位置指向玩家。
 	var knockback_direction: Vector2 = _get_source_knockback_direction(source)
-	apply_knockback(knockback_direction, impact_force)
+	apply_knockback(knockback_direction, _calculate_external_motion_initial_speed(impact_force))
 
 
 func _get_source_impact_force(source: Node) -> float:

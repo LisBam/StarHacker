@@ -10,6 +10,8 @@ signal transfer_confirmed(amount: int, is_deposit: bool)
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 可视进度拖动条组件；统一绘制证券币充值和提现金额的完整范围、当前进度与滑块位置。
 const PROGRESS_SLIDER_VISUAL_SCRIPT: Script = preload("res://scripts/ui/progress_slider_visual.gd")
+## 弹窗最外层框架组件；直接绘制不透明标题栏、外框、标题文字和关闭按钮。
+const DIALOG_OUTER_FRAME_SCRIPT: Script = preload("res://scripts/ui/dialog_outer_frame.gd")
 
 ## 弹窗默认宽度；默认 400 像素，与股票买卖数量窗口保持一致，运行时无需动态修改。
 @export_range(320, 640, 1) var dialog_width: int = 400
@@ -74,11 +76,13 @@ func _ensure_interface_initialized() -> void:
 	if _interface_initialized:
 		return
 	_interface_initialized = true
-	transparent = true
+	# 窗口透明模式；关闭原生透明合成，保证包围标题栏与内容区域的最外层背景和青蓝描边保持完全可见。
+	transparent = false
 	unresizable = true
 	get_cancel_button().text = "取消"
 	_apply_dialog_visual_style()
 	_build_interface()
+	DIALOG_OUTER_FRAME_SCRIPT.install(self)
 	confirmed.connect(_on_confirmed)
 
 
@@ -100,7 +104,7 @@ func _build_interface() -> void:
 	content_margin.add_theme_constant_override("margin_left", 12)
 	content_margin.add_theme_constant_override("margin_top", 8)
 	content_margin.add_theme_constant_override("margin_right", 12)
-	content_margin.add_theme_constant_override("margin_bottom", 8)
+	content_margin.add_theme_constant_override("margin_bottom", 1)
 	add_child(content_margin)
 	# 内容容器；统一使用 8 像素间距保持紧凑且可读。
 	var content: VBoxContainer = VBoxContainer.new()
@@ -148,6 +152,8 @@ func _apply_dialog_visual_style() -> void:
 	dialog_panel_style.border_color = Color(0.30, 0.50, 0.60, minf(dialog_background_alpha + 0.10, 1.0))
 	dialog_panel_style.set_border_width_all(1)
 	dialog_panel_style.set_corner_radius_all(8)
+	dialog_panel_style.content_margin_top = UI_STYLE_GUIDE.DIALOG_TITLE_HEIGHT
+	dialog_panel_style.content_margin_bottom = UI_STYLE_GUIDE.DIALOG_ACTION_BOTTOM_CLEARANCE
 	dialog_theme.set_stylebox("panel", "Window", dialog_panel_style)
 	dialog_theme.set_stylebox("panel", "AcceptDialog", dialog_panel_style)
 	dialog_theme.set_stylebox("panel", "ConfirmationDialog", dialog_panel_style)

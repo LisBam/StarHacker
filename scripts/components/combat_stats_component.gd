@@ -125,12 +125,19 @@ func configure_max_stats(new_max_health: float, new_max_energy: float) -> void:
 	var resolved_max_health: float = maxf(new_max_health, 1.0)
 	# 标准化后的最大能量；取值至少为 1，默认由角色配置随机得出，修改会影响能量上限和满能量值。
 	var resolved_max_energy: float = maxf(new_max_energy, 1.0)
-	max_health = resolved_max_health
+	max_health = resolved_max_health + _equipment_max_health
 	max_energy = resolved_max_energy
 	current_health = max_health
 	current_energy = max_energy
 	_is_dead = false
 	_emit_all_stats_changed()
+
+
+func configure_character_base_stats(new_max_health: float, new_max_energy: float, new_attack_power: float, new_defense_power: float) -> void:
+	## 配置角色基础战斗属性并保留当前装备加成；进入场景和训练场切换角色时使用该入口。
+	attack_power = maxf(new_attack_power, 0.0)
+	defense_power = maxf(new_defense_power, 0.0)
+	configure_max_stats(new_max_health, new_max_energy)
 
 
 func take_damage(amount: float) -> void:
@@ -202,6 +209,31 @@ func get_attack_power() -> float:
 
 func get_defense_power() -> float:
 	return maxf(defense_power + _equipment_defense_power, 0.0)
+
+
+func get_character_attribute_snapshot() -> Dictionary:
+	## 返回角色面板所需的基础值、有效装备值与总值，UI 无需访问组件私有字段或复制战斗计算公式。
+	# 基础生命上限；从当前总生命上限扣除装备加成，最低保持 1。
+	var base_max_health: float = maxf(max_health - _equipment_max_health, 1.0)
+	return {
+		"current_health": current_health,
+		"max_health": _build_attribute_snapshot(base_max_health, _equipment_max_health),
+		"max_energy": _build_attribute_snapshot(max_energy, 0.0),
+		"attack_power": _build_attribute_snapshot(attack_power, _equipment_attack_power),
+		"defense_power": _build_attribute_snapshot(defense_power, _equipment_defense_power),
+		"health_regeneration_per_five_seconds": _build_attribute_snapshot(0.0, _equipment_health_regeneration_per_five_seconds),
+		"dodge_chance": _build_attribute_snapshot(0.0, _equipment_dodge_chance),
+		"energy_regeneration": _build_attribute_snapshot(energy_regeneration_per_second, _equipment_energy_regeneration)
+	}
+
+
+func _build_attribute_snapshot(base_value: float, equipment_value: float) -> Dictionary:
+	## 构建统一的三值属性结构；装备削弱后的总值最低为 0，便于所有角色面板行复用。
+	return {
+		"base": base_value,
+		"equipment": equipment_value,
+		"total": maxf(base_value + equipment_value, 0.0)
+	}
 
 
 func get_dodge_chance() -> float:

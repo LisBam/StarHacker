@@ -787,6 +787,36 @@ func grant_random_enhancement_stones_to_warehouse(stone_count: int = DEVELOPER_S
 	return granted_count
 
 
+func grant_random_enhancement_stones_to_warehouse_gradually(stone_count: int, batch_size: int = 25) -> int:
+	## 按帧分批向永久仓库生成随机强化石；全部完成后只保存并派发一次仓库变化，避免大量 UI 重建。
+	# 实际发放数量；每颗成功创建并插入仓库后加一。
+	var granted_count: int = 0
+	# 请求数量；负数按 0 处理，上限由调用方开发者菜单限制为 1000。
+	var resolved_stone_count: int = maxi(stone_count, 0)
+	# 每帧生成数量；最低为 1，默认 25 平衡完成速度与单帧开销。
+	var resolved_batch_size: int = maxi(batch_size, 1)
+	for stone_index in range(resolved_stone_count):
+		# 随机强化石；与战斗掉落、商店和同步开发者入口共用正式品质与词条生成器。
+		var enhancement_stone: EnhancementStoneData = EnhancementStoneData.create_random(
+			_random,
+			DEVELOPER_STONE_MIN_MODIFIER_COUNT,
+			DEVELOPER_STONE_MAX_MODIFIER_COUNT,
+			DEVELOPER_STONE_DETRIMENTAL_CHANCE,
+			DEVELOPER_STONE_BASE_SELL_PRICE
+		)
+		if enhancement_stone != null:
+			_insert_record_with_stack_merge(_warehouse_records, _create_record(enhancement_stone))
+			granted_count += 1
+		# 批次边界；最后一颗无需额外等待，其他批次让出一帧缓解主线程卡顿。
+		if (stone_index + 1) % resolved_batch_size == 0 and stone_index + 1 < resolved_stone_count:
+			await get_tree().process_frame
+	if granted_count <= 0:
+		return 0
+	_queue_save_inventory()
+	warehouse_changed.emit()
+	return granted_count
+
+
 func grant_all_repair_kits_to_warehouse() -> int:
 	# 实际发放数量；每种已知修复包各发放一件，按 item_id 自动合并到已有同类堆叠。
 	var granted_count: int = 0

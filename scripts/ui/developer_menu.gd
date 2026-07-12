@@ -25,9 +25,11 @@ const COMMON_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/comm
 ## 旧版单次金币调整数量；默认 1000，仅保留历史场景兼容，现行菜单改为直接输入目标金币余额。
 @export_range(1, 9999999, 1) var coin_step: int = 1000
 ## 随机强化石数量默认值；默认 10，打开数量弹窗时作为初始选择，玩家可在 1 至最大值之间修改。
-@export_range(1, 9999, 1) var enhancement_stone_grant_count: int = 10
-## 随机强化石单次发放上限；默认 9999，限制开发者误输入造成的长时间生成和巨大存档。
-@export_range(1, 99999, 1) var enhancement_stone_grant_maximum: int = 9999
+@export_range(1, 1000, 1) var enhancement_stone_grant_count: int = 10
+## 随机强化石单次发放上限；固定为 1000，兼顾批量概率验证与调试存档规模。
+@export_range(1, 1000, 1) var enhancement_stone_grant_maximum: int = 1000
+## 随机强化石每帧生成数量；默认 25，使最大 1000 颗在较短时间内分批完成并避免单帧卡顿。
+@export_range(1, 100, 1) var enhancement_stone_grant_batch_size: int = 25
 ## 可直接设置的金币余额上限；默认 9999999，避免调试输入超过项目整数经济显示范围。
 @export_range(1, 999999999, 1) var coin_value_maximum: int = 9999999
 
@@ -409,10 +411,13 @@ func _on_developer_value_confirmed(value: int) -> void:
 	if _global_inventory == null:
 		return
 	if _pending_developer_value_action == "stones":
-		if not _global_inventory.has_method("grant_random_enhancement_stones_to_warehouse"):
+		if not _global_inventory.has_method("grant_random_enhancement_stones_to_warehouse_gradually"):
 			return
-		# 实际发放数量；每颗使用正式生成器，稀有词条仍保持常规词条五分之一权重。
-		var granted_count: int = int(_global_inventory.call("grant_random_enhancement_stones_to_warehouse", maxi(value, 1)))
+		_grant_stones_button.disabled = true
+		_status_label.text = "正在分批生成 %d 颗随机强化石……" % maxi(value, 1)
+		# 实际发放数量；每颗使用正式生成器，按帧分批生成并在全部完成后统一刷新仓库。
+		var granted_count: int = int(await _global_inventory.call("grant_random_enhancement_stones_to_warehouse_gradually", maxi(value, 1), maxi(enhancement_stone_grant_batch_size, 1)))
+		_grant_stones_button.disabled = false
 		_status_label.text = "已向永久仓库发放 %d 颗随机强化石" % granted_count
 	elif _pending_developer_value_action == "coins":
 		if not _global_inventory.has_method("set_coins"):

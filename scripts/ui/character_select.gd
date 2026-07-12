@@ -50,6 +50,10 @@ var _selected_character_id: String = CHARACTER_STELLE
 @onready var _speed_value_label: Label = %SpeedValueLabel
 ## 速度数值条缓存；默认绑定 SpeedPreviewBar，用于表现固定移动速度。
 @onready var _speed_preview_bar: ProgressBar = %SpeedPreviewBar
+## 攻击力文本缓存；默认绑定 AttackValueLabel，显示当前查看角色的基础攻击力。
+@onready var _attack_value_label: Label = %AttackValueLabel
+## 防御力文本缓存；默认绑定 DefenseValueLabel，显示当前查看角色的基础防御力。
+@onready var _defense_value_label: Label = %DefenseValueLabel
 ## 被动技能文本缓存；默认绑定 PassiveLabel，显示后续被动技能占位信息。
 @onready var _passive_label: Label = %PassiveLabel
 ## 主动技能文本缓存；默认绑定 ActiveLabel，显示后续主动技能占位信息。
@@ -107,12 +111,18 @@ func _refresh_character_detail() -> void:
 	var max_energy: float = float(profile.get("max_energy", 0.0))
 	# 固定移动速度；取值来自角色档案，默认用于文字和条形预览。
 	var move_speed: float = float(profile.get("move_speed", 0.0))
+	# 固定攻击力；取值来自角色档案，默认用于角色选择详情文字。
+	var attack_power: float = float(profile.get("attack_power", 0.0))
+	# 固定防御力；取值来自角色档案，默认用于角色选择详情文字。
+	var defense_power: float = float(profile.get("defense_power", 0.0))
 	_character_name_label.text = str(profile.get("display_name", "角色"))
 	_character_role_label.text = str(profile.get("role", "未配置定位"))
 	_character_description_label.text = str(profile.get("description", "暂无角色说明"))
 	_health_value_label.text = "生命上限  %d" % roundi(max_health)
 	_energy_value_label.text = "能量上限  %d" % roundi(max_energy)
 	_speed_value_label.text = "速度  %d" % roundi(move_speed)
+	_attack_value_label.text = "攻击力  %d" % roundi(attack_power)
+	_defense_value_label.text = "防御力  %d" % roundi(defense_power)
 	_health_preview_bar.max_value = stat_bar_maximum
 	_energy_preview_bar.max_value = stat_bar_maximum
 	_speed_preview_bar.max_value = speed_bar_maximum
@@ -170,6 +180,8 @@ func _get_character_profile(character_id: String) -> Dictionary:
 		"max_health": 130.0,
 		"max_energy": 110.0,
 		"move_speed": 320.0,
+		"attack_power": 100.0,
+		"defense_power": 5.0,
 		"passive": "被动技能：待配置",
 		"active": "主动技能：待配置"
 	}

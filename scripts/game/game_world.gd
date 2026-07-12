@@ -218,18 +218,30 @@ const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, 
 @export_range(1.0, 9999.0, 1.0, "or_greater") var stelle_max_energy: float = 110.0
 ## 星的固定移动速度；取值应大于 0，默认 320，切换角色时会写入玩家移动组件。
 @export_range(1.0, 2000.0, 1.0, "or_greater") var stelle_move_speed: float = 320.0
+## 星的固定攻击力；默认 100 保持武器基础伤害不变，切换角色时写入战斗属性组件。
+@export_range(0.0, 99999.0, 1.0, "or_greater") var stelle_attack_power: float = 100.0
+## 星的固定防御力；默认 5，切换角色时写入战斗属性组件并参与承伤公式。
+@export_range(0.0, 99999.0, 1.0, "or_greater") var stelle_defense_power: float = 5.0
 ## 穹的固定生命上限；取值应大于 0，默认 150，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var caelus_max_health: float = 150.0
 ## 穹的固定能量上限；取值应大于 0，默认 95，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var caelus_max_energy: float = 95.0
 ## 穹的固定移动速度；取值应大于 0，默认 300，切换角色时会写入玩家移动组件。
 @export_range(1.0, 2000.0, 1.0, "or_greater") var caelus_move_speed: float = 300.0
+## 穹的固定攻击力；默认 95，较低输出与较高生存能力形成角色差异。
+@export_range(0.0, 99999.0, 1.0, "or_greater") var caelus_attack_power: float = 95.0
+## 穹的固定防御力；默认 10，为三名角色中最高基础防御。
+@export_range(0.0, 99999.0, 1.0, "or_greater") var caelus_defense_power: float = 10.0
 ## 银狼的固定生命上限；取值应大于 0，默认 105，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var silver_wolf_max_health: float = 105.0
 ## 银狼的固定能量上限；取值应大于 0，默认 155，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var silver_wolf_max_energy: float = 155.0
 ## 银狼的固定移动速度；取值应大于 0，默认 355，切换角色时会写入玩家移动组件。
 @export_range(1.0, 2000.0, 1.0, "or_greater") var silver_wolf_move_speed: float = 355.0
+## 银狼的固定攻击力；默认 110，为三名角色中最高基础攻击。
+@export_range(0.0, 99999.0, 1.0, "or_greater") var silver_wolf_attack_power: float = 110.0
+## 银狼的固定防御力；默认 2，以较低防御平衡高攻击、能量和移速。
+@export_range(0.0, 99999.0, 1.0, "or_greater") var silver_wolf_defense_power: float = 2.0
 
 ## 随机数生成器；默认新建并在 ready 随机化，修改会影响地图和怪物生成结果。
 var _random: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -796,24 +808,26 @@ func _apply_selected_character() -> void:
 
 	# 玩家属性组件；默认从玩家子节点 StatsComponent 获取，缺失时跳过占位属性应用。
 	var stats_component: Node = _player.get_node_or_null("StatsComponent")
-	if stats_component != null and stats_component.has_method("configure_max_stats"):
+	if stats_component != null and stats_component.has_method("configure_character_base_stats"):
 		# 固定生命上限；取值来自当前角色配置，默认用于进入场景或训练场切换角色时刷新生命。
 		var resolved_max_health: float = _get_character_max_health(_selected_character_id)
 		# 固定能量上限；取值来自当前角色配置，默认用于进入场景或训练场切换角色时刷新能量。
 		var resolved_max_energy: float = _get_character_max_energy(_selected_character_id)
-		stats_component.call("configure_max_stats", resolved_max_health, resolved_max_energy)
+		# 固定攻击力；取值来自当前角色配置，装备加成会由属性组件继续叠加。
+		var resolved_attack_power: float = _get_character_attack_power(_selected_character_id)
+		# 固定防御力；取值来自当前角色配置，装备加成会由属性组件继续叠加。
+		var resolved_defense_power: float = _get_character_defense_power(_selected_character_id)
+		stats_component.call("configure_character_base_stats", resolved_max_health, resolved_max_energy, resolved_attack_power, resolved_defense_power)
 
 	# 玩家移动组件；默认从玩家子节点 MovementComponent 获取，缺失时跳过速度应用。
-	var movement_component: Node = _player.get_node_or_null("MovementComponent")
-	if movement_component == null:
+	var equipment_component: Node = _player.get_node_or_null("EquipmentComponent")
+	if equipment_component == null:
 		return
 
 	# 固定移动速度；取值来自当前角色配置，默认用于进入场景或训练场切换角色时刷新移动速度。
 	var resolved_move_speed: float = _get_character_move_speed(_selected_character_id)
-	if movement_component.has_method("configure_max_speed"):
-		movement_component.call("configure_max_speed", resolved_move_speed)
-	else:
-		movement_component.set("max_speed", resolved_move_speed)
+	if equipment_component.has_method("configure_base_move_speed"):
+		equipment_component.call("configure_base_move_speed", resolved_move_speed)
 
 
 func _get_character_max_health(character_id: String) -> float:
@@ -841,6 +855,24 @@ func _get_character_move_speed(character_id: String) -> float:
 		return maxf(silver_wolf_move_speed, 1.0)
 
 	return maxf(stelle_move_speed, 1.0)
+
+
+func _get_character_attack_power(character_id: String) -> float:
+	if character_id == CHARACTER_CAEULUS:
+		return maxf(caelus_attack_power, 0.0)
+	if character_id == CHARACTER_SILVER_WOLF:
+		return maxf(silver_wolf_attack_power, 0.0)
+
+	return maxf(stelle_attack_power, 0.0)
+
+
+func _get_character_defense_power(character_id: String) -> float:
+	if character_id == CHARACTER_CAEULUS:
+		return maxf(caelus_defense_power, 0.0)
+	if character_id == CHARACTER_SILVER_WOLF:
+		return maxf(silver_wolf_defense_power, 0.0)
+
+	return maxf(stelle_defense_power, 0.0)
 
 
 func _normalize_character_id(character_id: String) -> String:

@@ -53,9 +53,11 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	_cooldown_remaining = maxf(_cooldown_remaining - delta, 0.0)
 	if _combo_rounds_remaining <= 0:
+		_cooldown_remaining = maxf(_cooldown_remaining - delta, 0.0)
 		return
+	# 连击期间冷却保持满值；HUD 从首轮开始显示冷却覆盖，末轮完成后才开始正常减少。
+	_cooldown_remaining = _cooldown_duration
 	_combo_interval_remaining = maxf(_combo_interval_remaining - delta, 0.0)
 	if _combo_interval_remaining > 0.0:
 		return
@@ -109,8 +111,8 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	_active_combo_interval = maxf(float(weapon_data.get("combo_interval")), 0.01)
 	_combo_interval_remaining = _active_combo_interval
 	_active_combo_cooldown = selected_fire_cooldown
-	if _combo_rounds_remaining <= 0:
-		_start_cooldown(selected_fire_cooldown)
+	# 首轮成功时立即显示完整冷却；连击期间保持满值，末轮结束后重新开始减少。
+	_start_cooldown(selected_fire_cooldown)
 	return true
 
 

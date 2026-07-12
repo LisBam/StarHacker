@@ -39,6 +39,10 @@ var _combat_camera: Camera2D
 var _base_camera_zoom: Vector2 = Vector2.ONE
 ## 不含装备的基础移速；默认 320，首次同步时从移动组件读取。
 var _base_move_speed: float = 320.0
+## 当前装备移速比例；默认 0，由有效脚部装备聚合，角色面板用它换算实际速度加成。
+var _equipment_move_speed_ratio: float = 0.0
+## 当前装备视野比例；默认 0，由有效头部装备聚合，角色面板按百分比显示。
+var _equipment_vision_range_ratio: float = 0.0
 
 ## 背包组件缓存；默认按 inventory_component_path 获取，允许为空，修改会影响装备初始化时的背包登记。
 @onready var _inventory_component = get_node_or_null(inventory_component_path)
@@ -199,6 +203,30 @@ func get_melee_weapon() -> Resource:
 	return _melee_weapon
 
 
+func configure_base_move_speed(new_base_move_speed: float) -> void:
+	## 更新不含装备的角色基础移速并立即重新应用装备比例；切换角色时使用，避免覆盖脚部加成。
+	_base_move_speed = maxf(new_base_move_speed, 1.0)
+	_apply_movement_and_vision_attributes()
+
+
+func get_character_attribute_snapshot() -> Dictionary:
+	## 返回角色面板所需的移速与视野三值结构，保持展示结果和装备实际应用公式一致。
+	# 装备实际移速；比例属性换算为速度点数，确保面板不直接显示内部小数比例。
+	var equipment_move_speed: float = _base_move_speed * _equipment_move_speed_ratio
+	return {
+		"move_speed": {
+			"base": _base_move_speed,
+			"equipment": equipment_move_speed,
+			"total": _base_move_speed + equipment_move_speed
+		},
+		"vision_range": {
+			"base": 1.0,
+			"equipment": _equipment_vision_range_ratio,
+			"total": 1.0 + _equipment_vision_range_ratio
+		}
+	}
+
+
 func get_armor_equipment(armor_slot: String) -> Resource:
 	if _global_inventory != null and _global_inventory.has_method("get_armor_equipment_resource"):
 		return _global_inventory.call("get_armor_equipment_resource", armor_slot) as Resource
@@ -344,11 +372,18 @@ func _apply_armor_attributes() -> void:
 			attributes[stat_name] = float(attributes[stat_name]) + stat_value
 	if _stats_component != null and _stats_component.has_method("apply_equipment_attributes"):
 		_stats_component.call("apply_equipment_attributes", attributes)
+	_equipment_move_speed_ratio = maxf(float(attributes.get("move_speed", 0.0)), 0.0)
+	_equipment_vision_range_ratio = maxf(float(attributes.get("vision_range", 0.0)), 0.0)
+	_apply_movement_and_vision_attributes()
+
+
+func _apply_movement_and_vision_attributes() -> void:
+	## 把已缓存的角色基础值与装备比例写入运行时组件；角色切换和装备变化共用同一计算路径。
 	if _movement_component != null and _movement_component.has_method("configure_max_speed"):
-		_movement_component.call("configure_max_speed", _base_move_speed * (1.0 + maxf(float(attributes.get("move_speed", 0.0)), 0.0)))
+		_movement_component.call("configure_max_speed", _base_move_speed * (1.0 + _equipment_move_speed_ratio))
 	if _combat_camera != null:
 		# 相机缩放越小视野越广；按 1 + 视野百分比反比缩放，8% 视野对应缩放除以 1.08。
-		var vision_multiplier: float = 1.0 + maxf(float(attributes.get("vision_range", 0.0)), 0.0)
+		var vision_multiplier: float = 1.0 + _equipment_vision_range_ratio
 		_combat_camera.zoom = _base_camera_zoom / vision_multiplier
 
 

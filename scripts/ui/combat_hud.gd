@@ -367,6 +367,12 @@ var _settlement_subcategory: String = InventoryQuery.SUBCATEGORY_ALL
 @onready var _switch_character_caelus_button: Button = %SwitchCharacterCaelusButton
 ## 训练场银狼角色按钮缓存；默认绑定 SwitchCharacterSilverWolfButton，点击后切换为银狼并刷新占位属性。
 @onready var _switch_character_silver_wolf_button: Button = %SwitchCharacterSilverWolfButton
+## 训练场角色按钮容器；默认绑定 CharacterSwitchContent，新发现角色会动态插入返回按钮前的弹性占位之前。
+@onready var _character_switch_content: VBoxContainer = get_node("Root/PauseOverlay/CharacterSwitchPanel/CharacterSwitchMargin/CharacterSwitchContent") as VBoxContainer
+## 训练场角色列表底部占位；默认绑定 CharacterSwitchBottomSpacer，动态按钮会插入到该节点之前。
+@onready var _character_switch_bottom_spacer: Control = get_node("Root/PauseOverlay/CharacterSwitchPanel/CharacterSwitchMargin/CharacterSwitchContent/CharacterSwitchBottomSpacer") as Control
+## 训练场角色按钮滚动内容；默认在 ready 中创建，承载内置与自动发现角色，避免新角色超出固定面板。
+var _training_character_button_container: VBoxContainer
 ## 训练场角色切换返回按钮缓存；默认绑定 CharacterSwitchBackButton，点击后回到训练场设置面板。
 @onready var _character_switch_back_button: Button = %CharacterSwitchBackButton
 ## 暂停设置主音量滑条缓存；默认绑定 PauseMasterVolumeSlider，取值 0 到 100，修改会影响全局 Master 音量。
@@ -1681,6 +1687,8 @@ func _bind_pause_menu() -> void:
 	_switch_character_stelle_button.pressed.connect(_on_switch_character_stelle_button_pressed)
 	_switch_character_caelus_button.pressed.connect(_on_switch_character_caelus_button_pressed)
 	_switch_character_silver_wolf_button.pressed.connect(_on_switch_character_silver_wolf_button_pressed)
+	_setup_training_character_button_scroll()
+	_build_dynamic_training_character_buttons()
 	_character_switch_back_button.pressed.connect(_on_character_switch_back_button_pressed)
 	_infinite_energy_check_button.toggled.connect(_on_infinite_energy_toggled)
 	_infinite_health_check_button.toggled.connect(_on_infinite_health_toggled)
@@ -3226,6 +3234,54 @@ func _on_switch_character_caelus_button_pressed() -> void:
 
 func _on_switch_character_silver_wolf_button_pressed() -> void:
 	_switch_training_character(CHARACTER_SILVER_WOLF)
+
+
+func _build_dynamic_training_character_buttons() -> void:
+	# 会话状态；内置三个按钮已有固定信号，仅为自动发现的额外角色创建新按钮。
+	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
+	if session_state == null or not session_state.has_method("get_character_ids"):
+		return
+	# 内置按钮表；资源中的显示名称也会同步覆盖场景默认文字，保证角色档案是唯一名称来源。
+	var built_in_buttons: Dictionary = {
+		CHARACTER_STELLE: _switch_character_stelle_button,
+		CHARACTER_CAEULUS: _switch_character_caelus_button,
+		CHARACTER_SILVER_WOLF: _switch_character_silver_wolf_button,
+	}
+	for character_id in session_state.call("get_character_ids") as Array[String]:
+		# 角色档案；显示名来自自动资源，按钮点击后复用训练场统一切换接口。
+		var profile: Dictionary = session_state.call("get_character_profile", character_id) as Dictionary
+		var built_in_button: Button = built_in_buttons.get(character_id) as Button
+		if built_in_button != null:
+			built_in_button.text = str(profile.get("display_name", character_id))
+			continue
+		var character_button: Button = Button.new()
+		character_button.custom_minimum_size = Vector2(0.0, 42.0)
+		character_button.text = str(profile.get("display_name", character_id))
+		character_button.pressed.connect(_switch_training_character.bind(character_id))
+		_training_character_button_container.add_child(character_button)
+
+
+func _setup_training_character_button_scroll() -> void:
+	_character_switch_bottom_spacer.visible = false
+	# 角色滚动区；占用标题与返回区之间的剩余高度，新增角色不会扩大或溢出暂停面板。
+	var scroll_container: ScrollContainer = ScrollContainer.new()
+	scroll_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll_container.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll_container.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_character_switch_content.add_child(scroll_container)
+	_character_switch_content.move_child(scroll_container, _switch_character_stelle_button.get_index())
+	# 按钮容器；横向填满滚动区并复用原列表 12 像素间距。
+	_training_character_button_container = VBoxContainer.new()
+	_training_character_button_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_training_character_button_container.add_theme_constant_override("separation", 12)
+	scroll_container.add_child(_training_character_button_container)
+	# 内置按钮；重新挂载后缓存和既有点击信号保持有效。
+	_character_switch_content.remove_child(_switch_character_stelle_button)
+	_training_character_button_container.add_child(_switch_character_stelle_button)
+	_character_switch_content.remove_child(_switch_character_caelus_button)
+	_training_character_button_container.add_child(_switch_character_caelus_button)
+	_character_switch_content.remove_child(_switch_character_silver_wolf_button)
+	_training_character_button_container.add_child(_switch_character_silver_wolf_button)
 
 
 func _on_character_switch_back_button_pressed() -> void:

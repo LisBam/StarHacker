@@ -53,6 +53,13 @@ func get_game_mode_label() -> String:
 
 
 func get_character_profile(character_id: String) -> Dictionary:
+	# 内容目录；默认由自动加载提供，新建角色资源后可直接返回其完整档案。
+	var content_catalog: Node = get_tree().root.get_node_or_null("ContentCatalog")
+	if content_catalog != null and content_catalog.has_method("get_character_profile"):
+		# 自动注册档案；空结果表示角色标识无效，此时继续使用内置档案保证旧场景可独立运行。
+		var catalog_profile: Dictionary = content_catalog.call("get_character_profile", character_id) as Dictionary
+		if not catalog_profile.is_empty():
+			return catalog_profile
 	# 标准化角色标识；取值为三个可选角色之一，默认兜底为星，修改会影响档案分支。
 	var normalized_character_id: String = normalize_character_id(character_id)
 	if normalized_character_id == CHARACTER_CAEULUS:
@@ -119,6 +126,10 @@ func normalize_game_mode(value: String) -> String:
 
 
 func normalize_character_id(value: String) -> String:
+	# 内容目录；有效的自动注册角色直接保留其稳定 ID，允许外部复制的新角色进入会话。
+	var content_catalog: Node = get_tree().root.get_node_or_null("ContentCatalog")
+	if content_catalog != null and content_catalog.has_method("has_character") and bool(content_catalog.call("has_character", value)):
+		return value
 	if value == CHARACTER_CAEULUS:
 		return CHARACTER_CAEULUS
 	if value == CHARACTER_SILVER_WOLF:
@@ -128,9 +139,24 @@ func normalize_character_id(value: String) -> String:
 
 
 func get_character_display_name(character_id: String) -> String:
+	# 角色档案；优先读取自动内容目录，确保新角色名称同步显示在主菜单和战斗 HUD。
+	var profile: Dictionary = get_character_profile(character_id)
+	if not profile.is_empty():
+		return str(profile.get("display_name", "角色"))
 	if character_id == CHARACTER_CAEULUS:
 		return "穹"
 	if character_id == CHARACTER_SILVER_WOLF:
 		return "银狼"
 
 	return "星"
+
+
+func get_character_ids() -> Array[String]:
+	# 内容目录；返回按资源路径稳定排序的全部可选角色，供角色选择和训练场动态创建按钮。
+	var content_catalog: Node = get_tree().root.get_node_or_null("ContentCatalog")
+	if content_catalog != null and content_catalog.has_method("get_character_ids"):
+		# 自动角色标识；非空时作为全部选择界面的统一列表，空目录继续使用内置三角色。
+		var catalog_ids: Array[String] = content_catalog.call("get_character_ids") as Array[String]
+		if not catalog_ids.is_empty():
+			return catalog_ids
+	return [CHARACTER_STELLE, CHARACTER_CAEULUS, CHARACTER_SILVER_WOLF]

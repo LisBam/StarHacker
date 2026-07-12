@@ -17,6 +17,7 @@ config/icon="res://icon.svg"
 
 [autoload]
 
+ContentCatalog="*res://scripts/game/content_catalog.gd"
 SessionState="*res://scripts/game/session_state.gd"
 InputBindings="*res://scripts/game/input_bindings.gd"
 DebugSettings="*res://scripts/game/debug_settings.gd"

@@ -107,6 +107,7 @@ var _loaded_state_was_repaired: bool = false
 
 func _ready() -> void:
 	_random.randomize()
+	_merge_automatically_discovered_resource_paths()
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
 	if _global_inventory != null and _global_inventory.has_signal("combat_failure_losses_recorded"):
 		_global_inventory.connect("combat_failure_losses_recorded", Callable(self, "_on_combat_failure_losses_recorded"))
@@ -115,6 +116,28 @@ func _ready() -> void:
 	elif _loaded_state_was_repaired:
 		_save_state()
 	ensure_automatic_refresh()
+
+
+func _merge_automatically_discovered_resource_paths() -> void:
+	# 内容目录；自动加载缺失时继续使用检查器路径，确保服务脚本仍可在隔离测试中运行。
+	var content_catalog: Node = get_tree().root.get_node_or_null("ContentCatalog")
+	if content_catalog == null:
+		return
+	if content_catalog.has_method("get_weapon_paths"):
+		weapon_resource_paths = _merge_unique_paths(weapon_resource_paths, content_catalog.call("get_weapon_paths") as PackedStringArray)
+	if content_catalog.has_method("get_equipment_paths"):
+		equipment_resource_paths = _merge_unique_paths(equipment_resource_paths, content_catalog.call("get_equipment_paths") as PackedStringArray)
+	if content_catalog.has_method("get_item_paths"):
+		item_resource_paths = _merge_unique_paths(item_resource_paths, content_catalog.call("get_item_paths") as PackedStringArray)
+
+
+func _merge_unique_paths(configured_paths: PackedStringArray, discovered_paths: PackedStringArray) -> PackedStringArray:
+	# 合并路径；保留检查器配置顺序并追加尚未注册的自动资源，避免同一内容获得重复抽取权重。
+	var result: PackedStringArray = configured_paths.duplicate()
+	for resource_path in discovered_paths:
+		if not result.has(resource_path):
+			result.append(resource_path)
+	return result
 
 
 func get_shop_entries() -> Array[Dictionary]:

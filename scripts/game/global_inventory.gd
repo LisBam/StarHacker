@@ -733,7 +733,7 @@ func grant_all_known_weapons_to_warehouse() -> int:
 	# 实际发放数量；默认从 0 累加，只统计成功加载并写入永久仓库的武器资源。
 	var granted_count: int = 0
 	# 已知武器标识；取值来自稳定资源路径表，每次调用都会为每种武器创建独立实例。
-	for weapon_id in WEAPON_RESOURCE_PATHS.keys():
+	for weapon_id in _get_registered_resource_paths("weapon").keys():
 		# 开发者发放资源；取值为模板深拷贝，加载失败的条目不会影响其他武器发放。
 		var item_resource: Resource = _load_weapon_resource(str(weapon_id))
 		if item_resource == null:
@@ -750,7 +750,7 @@ func grant_all_known_weapons_to_warehouse() -> int:
 func grant_all_known_equipment_to_warehouse() -> int:
 	# 发放数量；每种已知装备各深拷贝一件进入永久仓库。
 	var granted_count: int = 0
-	for equipment_id in EQUIPMENT_RESOURCE_PATHS.keys():
+	for equipment_id in _get_registered_resource_paths("equipment").keys():
 		var equipment_resource: Resource = _load_equipment_resource(str(equipment_id))
 		if equipment_resource == null:
 			continue
@@ -821,10 +821,10 @@ func grant_all_repair_kits_to_warehouse() -> int:
 	# 实际发放数量；每种已知修复包各发放一件，按 item_id 自动合并到已有同类堆叠。
 	var granted_count: int = 0
 	# 修复包标识；取值来自稳定路径表，新增道具后只需补充表项即可纳入开发者发放。
-	for repair_kit_id in REPAIR_KIT_RESOURCE_PATHS.keys():
+	for repair_kit_id in _get_registered_resource_paths("item").keys():
 		# 修复包资源；从模板深拷贝，避免开发者发放的道具引用项目资源本体。
 		var repair_kit_resource: Resource = _load_repair_kit_resource(str(repair_kit_id))
-		if repair_kit_resource == null:
+		if repair_kit_resource == null or str(repair_kit_resource.get("item_kind")) != "repair_kit":
 			continue
 		_insert_record_with_stack_merge(_warehouse_records, _create_record(repair_kit_resource))
 		granted_count += 1
@@ -2343,7 +2343,7 @@ func _load_weapon_resource(weapon_id: String, preferred_path: String = "") -> Re
 	# 实际资源路径；优先使用存档路径，缺失时按稳定武器标识查询默认表。
 	var resolved_path: String = preferred_path
 	if resolved_path.is_empty():
-		resolved_path = str(WEAPON_RESOURCE_PATHS.get(weapon_id, ""))
+		resolved_path = _get_catalog_resource_path("weapon", weapon_id, str(WEAPON_RESOURCE_PATHS.get(weapon_id, "")))
 	if resolved_path.is_empty() or not ResourceLoader.exists(resolved_path):
 		return null
 	# 武器模板；取值为项目 Resource，加载成功后深拷贝为独立物品实例。
@@ -2359,7 +2359,7 @@ func _load_repair_kit_resource(item_id: String, preferred_path: String = "") -> 
 	# 实际资源路径；优先读取存档路径，缺失时按稳定修复包标识回退项目默认表。
 	var resolved_path: String = preferred_path
 	if resolved_path.is_empty():
-		resolved_path = str(REPAIR_KIT_RESOURCE_PATHS.get(item_id, ""))
+		resolved_path = _get_catalog_resource_path("item", item_id, str(REPAIR_KIT_RESOURCE_PATHS.get(item_id, "")))
 	if resolved_path.is_empty() or not ResourceLoader.exists(resolved_path):
 		return null
 	# 修复包模板；读取成功后深拷贝，确保拾取或购买的同类道具不会共享运行时资源状态。
@@ -2373,7 +2373,7 @@ func _load_repair_kit_resource(item_id: String, preferred_path: String = "") -> 
 
 func _load_equipment_resource(equipment_id: String, preferred_path: String = "") -> Resource:
 	# 装备路径；优先使用存档资源路径，缺失时按稳定 ID 回退默认表。
-	var resolved_path: String = preferred_path if not preferred_path.is_empty() else str(EQUIPMENT_RESOURCE_PATHS.get(equipment_id, ""))
+	var resolved_path: String = preferred_path if not preferred_path.is_empty() else _get_catalog_resource_path("equipment", equipment_id, str(EQUIPMENT_RESOURCE_PATHS.get(equipment_id, "")))
 	if resolved_path.is_empty() or not ResourceLoader.exists(resolved_path):
 		return null
 	# 装备模板；深拷贝保证同类多件装备的耐久和强化状态互不影响。
@@ -2388,7 +2388,50 @@ func _resolve_resource_path(item_resource: Resource) -> String:
 	if not item_resource.resource_path.is_empty():
 		return item_resource.resource_path
 	if _is_repair_kit(item_resource):
-		return str(REPAIR_KIT_RESOURCE_PATHS.get(str(item_resource.get("item_id")), ""))
+		return _get_catalog_resource_path("item", str(item_resource.get("item_id")), str(REPAIR_KIT_RESOURCE_PATHS.get(str(item_resource.get("item_id")), "")))
 	if _is_equipment_resource(item_resource):
-		return str(EQUIPMENT_RESOURCE_PATHS.get(str(item_resource.get("equipment_id")), ""))
-	return str(WEAPON_RESOURCE_PATHS.get(str(item_resource.get("weapon_id")), ""))
+		return _get_catalog_resource_path("equipment", str(item_resource.get("equipment_id")), str(EQUIPMENT_RESOURCE_PATHS.get(str(item_resource.get("equipment_id")), "")))
+	return _get_catalog_resource_path("weapon", str(item_resource.get("weapon_id")), str(WEAPON_RESOURCE_PATHS.get(str(item_resource.get("weapon_id")), "")))
+
+
+func _get_catalog_resource_path(content_kind: String, content_id: String, fallback_path: String = "") -> String:
+	# 内容目录；按类型调用稳定 ID 查询，自动加载缺失或未找到时返回原硬编码表保证旧存档兼容。
+	var content_catalog: Node = get_tree().root.get_node_or_null("ContentCatalog")
+	if content_catalog == null:
+		return fallback_path
+	# 查询方法；武器、装备和通用道具分别使用独立命名，避免内容类型之间错误恢复。
+	var method_name: String = "get_%s_path" % content_kind
+	if not content_catalog.has_method(method_name):
+		return fallback_path
+	# 自动路径；非空时优先使用，使外部复制内容可在后续读档中通过稳定 ID 恢复。
+	var catalog_path: String = str(content_catalog.call(method_name, content_id))
+	return catalog_path if not catalog_path.is_empty() else fallback_path
+
+
+func _get_registered_resource_paths(content_kind: String) -> Dictionary:
+	# 路径表；先复制内置配置，再合并内容目录，开发者发放可覆盖全部自动发现资源。
+	var result: Dictionary = {}
+	# 内置兼容路径；按内容类型选择旧硬编码表，自动加载不可用时仍支持已有物品与存档。
+	var fallback_paths: Dictionary = WEAPON_RESOURCE_PATHS if content_kind == "weapon" else (EQUIPMENT_RESOURCE_PATHS if content_kind == "equipment" else REPAIR_KIT_RESOURCE_PATHS)
+	for raw_id in fallback_paths.keys():
+		result[str(raw_id)] = str(fallback_paths.get(raw_id, ""))
+	# 内容目录；通过路径加载稳定 ID，忽略类型错误或空 ID 的文件。
+	var content_catalog: Node = get_tree().root.get_node_or_null("ContentCatalog")
+	if content_catalog == null:
+		return result
+	# 路径列表查询方法；按内容类型映射到目录服务公开接口。
+	var paths_method: String = "get_%s_paths" % content_kind
+	if not content_catalog.has_method(paths_method):
+		return result
+	for resource_path in content_catalog.call(paths_method) as PackedStringArray:
+		# 内容模板；加载稳定 ID 用于建立 ID 到路径的开发者发放与存档恢复映射。
+		var content_resource: Resource = load(resource_path) as Resource
+		if content_resource == null:
+			continue
+		# ID 属性名；武器、装备和道具各使用自身资源协议中的稳定字段。
+		var id_property: String = "weapon_id" if content_kind == "weapon" else ("equipment_id" if content_kind == "equipment" else "item_id")
+		# 内容稳定 ID；空值不会覆盖兼容路径表，避免无法恢复的资源进入发放列表。
+		var content_id: String = str(content_resource.get(id_property)).strip_edges()
+		if not content_id.is_empty():
+			result[content_id] = resource_path
+	return result

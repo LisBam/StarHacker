@@ -12,6 +12,7 @@
 - 主菜单提供“设置”入口，设置首页包含全局 Master 主音量和“按键绑定”入口；底部“角色、背包、仓库、商店、锻造、炒股、矿场”使用一个左右各 24 像素边距的七列等宽 `HBoxContainer`。仓库可在纯永久仓库模式与仓库/背包联合模式间切换，出售安全物品并通过拖拽管理仓库、背包和装备槽。
 - 主菜单依次输入 `LISBAM` 会显示局外开发者菜单，提供资源、金币、仓库和股市调试；股市分组可触发全量刷新、小幅刷新、随机事件、大盘切换和不返还金币的清空持仓。战斗内打开 ESC 暂停菜单后同样可输入 `LISBAM`，此时显示战斗开发者菜单，可切换无限血量、无限能量并在正式模式打开训练场设置。
 - `res://scripts/game/session_state.gd` 通过 `project.godot` 自动加载为 `SessionState`，负责保存本次进入的模式和角色，避免把入口参数写进场景路径。
+- `res://scripts/game/content_catalog.gd` 通过 `project.godot` 自动加载为 `ContentCatalog`，启动时递归扫描武器、装备、道具、角色和怪物约定目录，并向商店、库存、战斗生成和角色 UI 提供统一内容清单；创建规则见 `docs/content_authoring.md`。
 - `res://scripts/game/global_inventory.gd` 通过 `project.godot` 自动加载为 `GlobalInventory`，分别保存随身背包、永久仓库、装备槽、局外金币、获得时间、上次撤离优先级和战斗结算，并写入 `user://global_inventory.json`。
 - `res://scripts/game/stock_market_service.gd` 通过 `project.godot` 自动加载为 `StockMarketService`，独立保存五只股票行情、动态价值中枢、大盘周期、随机事件和对局行为连续性；持仓与金币仍由 `GlobalInventory` 统一拥有。
 - `res://scripts/game/mining_farm_service.gd` 通过 `project.godot` 自动加载为 `MiningFarmService`，跨全部场景维护整数算力币、永久算力资产、在线产出与临时增益，并独立写入 `user://mining_farm_state.json`。矿场面板关闭后仅停止 UI 动效，服务继续以 5 秒周期批量结算。
@@ -22,6 +23,7 @@
 
 - `res://scenes/characters/player.tscn` 是当前通用玩家预制体，根节点为 `CharacterBody2D`。实际显示角色由独立角色系统保存到 `SessionState` 的当前选择决定。
 - 当前可选角色为“星”“穹”“银狼”。进入骇入、进入训练场或在训练场内切换角色时，会按固定配置设置生命上限、能量上限、攻击力、防御力和移动速度；独立角色系统从同一档案展示并保存当前选择，主动技能和被动技能后续再接入。
+- 角色档案由 `CharacterData` 定义并保存在 `res://data/characters/`。角色选择页与训练场切换面板按内容目录动态创建额外按钮；复制档案并修改唯一 `character_id` 后，无需再修改场景按钮或角色分支。
 - `res://scripts/player/player_controller.gd` 是聚合脚本，只负责调度输入、移动、远程攻击、近战攻击和瞄准朝向。聚合脚本通过节点路径获取组件，不直接强类型依赖自定义组件类，避免新项目或缓存刷新时出现全局类名解析顺序问题。
 - 玩家视觉、碰撞、摄像机、枪口、输入组件、移动组件、远程攻击组件和近战攻击组件都以子节点形式挂载，便于逐项替换。
 
@@ -101,6 +103,8 @@
 - `GameWorld`：战斗承载脚本，生成大型网格地图、整图敌人分布、正式模式敌人补充、导航标点、墙体建筑、20 至 40 个宝箱、2 至 5 个物资撤离点、正式撤离点和掉落物，并提供摄像机探索、全图视野解锁与共享 A* 路径查询接口。
 
 ## 武器与装备
+
+`ContentCatalog` 会递归扫描 `res://data/weapons/`、`res://data/equipment/` 和 `res://data/items/`。商店、战斗掉落、开发者发放和库存恢复共同读取扫描结果；原有检查器数组与内置路径表只作为旧场景、初始装备和隔离测试兼容配置。复制内容模板后必须修改稳定 ID，详细规则见 `docs/content_authoring.md`。
 
 武器由 `res://scripts/data/weapon_data.gd` 定义，默认资源位于 `res://data/weapons/`：
 

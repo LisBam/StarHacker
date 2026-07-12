@@ -21,6 +21,10 @@ const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 
 ## 当前选中的角色标识；取值为 stelle、caelus 或 silver_wolf，默认 stelle，修改会影响确认进入的角色。
 var _selected_character_id: String = CHARACTER_STELLE
+## 角色按钮表；键为自动目录中的稳定角色 ID，值为对应列表按钮，运行时由现有按钮和新增资源共同构建。
+var _character_buttons: Dictionary = {}
+## 角色按钮滚动内容；默认在 ready 中创建，承载全部内置与自动发现按钮，角色数量增加时可纵向滚动访问。
+var _character_button_container: VBoxContainer
 
 ## 页面标题缓存；默认绑定 TitleLabel，显示当前模式下的角色选择标题。
 @onready var _title_label: Label = %TitleLabel
@@ -30,6 +34,10 @@ var _selected_character_id: String = CHARACTER_STELLE
 @onready var _caelus_button: Button = %CaelusButton
 ## 银狼角色按钮缓存；默认绑定 SilverWolfButton，点击后查看银狼的详情。
 @onready var _silver_wolf_button: Button = %SilverWolfButton
+## 角色列表内容容器；默认绑定 CharacterListContent，新发现角色会在底部弹性占位之前动态插入。
+@onready var _character_list_content: VBoxContainer = get_node("RootMargin/RootContent/MainColumns/CharacterListPanel/CharacterListMargin/CharacterListContent") as VBoxContainer
+## 角色列表底部占位；默认绑定 ListSpacer，动态角色按钮会插入到该节点之前以保持顶部排列。
+@onready var _character_list_spacer: Control = get_node("RootMargin/RootContent/MainColumns/CharacterListPanel/CharacterListMargin/CharacterListContent/ListSpacer") as Control
 ## 角色名称文本缓存；默认绑定 CharacterNameLabel，显示当前查看角色的名称。
 @onready var _character_name_label: Label = %CharacterNameLabel
 ## 角色定位文本缓存；默认绑定 CharacterRoleLabel，显示当前查看角色的临时定位。
@@ -71,9 +79,11 @@ func _ready() -> void:
 	_stelle_button.toggle_mode = true
 	_caelus_button.toggle_mode = true
 	_silver_wolf_button.toggle_mode = true
+	_setup_character_button_scroll()
 	_stelle_button.pressed.connect(_on_stelle_button_pressed)
 	_caelus_button.pressed.connect(_on_caelus_button_pressed)
 	_silver_wolf_button.pressed.connect(_on_silver_wolf_button_pressed)
+	_build_character_buttons()
 	_confirm_button.pressed.connect(_on_confirm_button_pressed)
 	_back_button.pressed.connect(_on_back_button_pressed)
 	_selected_character_id = _get_session_selected_character_id()
@@ -93,9 +103,11 @@ func _select_character(character_id: String) -> void:
 
 
 func _set_button_states() -> void:
-	_stelle_button.set_pressed_no_signal(_selected_character_id == CHARACTER_STELLE)
-	_caelus_button.set_pressed_no_signal(_selected_character_id == CHARACTER_CAEULUS)
-	_silver_wolf_button.set_pressed_no_signal(_selected_character_id == CHARACTER_SILVER_WOLF)
+	for raw_character_id in _character_buttons.keys():
+		# 角色按钮；每次选择只更新按下状态，不重新创建节点，保持键盘焦点和交互反馈稳定。
+		var character_button: Button = _character_buttons.get(raw_character_id) as Button
+		if character_button != null:
+			character_button.set_pressed_no_signal(str(raw_character_id) == _selected_character_id)
 
 
 func _refresh_character_detail() -> void:
@@ -181,12 +193,69 @@ func _set_session_selected_character(character_id: String) -> void:
 
 
 func _normalize_character_id(character_id: String) -> String:
+	# 会话状态；统一使用内容目录校验新角色 ID，避免本界面维护额外白名单。
+	var session_state: Node = _get_session_state()
+	if session_state != null and session_state.has_method("normalize_character_id"):
+		return str(session_state.call("normalize_character_id", character_id))
 	if character_id == CHARACTER_CAEULUS:
 		return CHARACTER_CAEULUS
 	if character_id == CHARACTER_SILVER_WOLF:
 		return CHARACTER_SILVER_WOLF
 
 	return CHARACTER_STELLE
+
+
+func _build_character_buttons() -> void:
+	# 内置按钮；保留场景节点和现有名称，内容资源可统一覆盖按钮显示名称。
+	_character_buttons = {
+		CHARACTER_STELLE: _stelle_button,
+		CHARACTER_CAEULUS: _caelus_button,
+		CHARACTER_SILVER_WOLF: _silver_wolf_button,
+	}
+	# 会话角色列表；内容目录可用时包含全部自动发现角色，否则保留三个内置角色。
+	var character_ids: Array[String] = [CHARACTER_STELLE, CHARACTER_CAEULUS, CHARACTER_SILVER_WOLF]
+	var session_state: Node = _get_session_state()
+	if session_state != null and session_state.has_method("get_character_ids"):
+		character_ids = session_state.call("get_character_ids") as Array[String]
+	for character_id in character_ids:
+		# 角色档案；统一读取显示名称，新资源无需修改场景即可获得列表入口。
+		var profile: Dictionary = _get_character_profile(character_id)
+		var character_button: Button = _character_buttons.get(character_id) as Button
+		if character_button == null:
+			character_button = Button.new()
+			character_button.custom_minimum_size = Vector2(0.0, 58.0)
+			character_button.toggle_mode = true
+			character_button.pressed.connect(_on_dynamic_character_pressed.bind(character_id))
+			_character_button_container.add_child(character_button)
+			_character_buttons[character_id] = character_button
+		character_button.text = str(profile.get("display_name", character_id))
+
+
+func _setup_character_button_scroll() -> void:
+	_character_list_spacer.visible = false
+	# 角色滚动区；占用列表标题与底部弹性空间之间的剩余高度，角色较少时不会出现滚动条。
+	var scroll_container: ScrollContainer = ScrollContainer.new()
+	scroll_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll_container.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll_container.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_character_list_content.add_child(scroll_container)
+	_character_list_content.move_child(scroll_container, _stelle_button.get_index())
+	# 按钮容器；横向填满滚动区，按钮按统一 12 像素间距纵向排列。
+	_character_button_container = VBoxContainer.new()
+	_character_button_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_character_button_container.add_theme_constant_override("separation", 12)
+	scroll_container.add_child(_character_button_container)
+	# 内置角色按钮；移动节点不会改变缓存、信号或场景所有权，只改变布局承载关系。
+	_character_list_content.remove_child(_stelle_button)
+	_character_button_container.add_child(_stelle_button)
+	_character_list_content.remove_child(_caelus_button)
+	_character_button_container.add_child(_caelus_button)
+	_character_list_content.remove_child(_silver_wolf_button)
+	_character_button_container.add_child(_silver_wolf_button)
+
+
+func _on_dynamic_character_pressed(character_id: String) -> void:
+	_select_character(character_id)
 
 
 func _on_stelle_button_pressed() -> void:

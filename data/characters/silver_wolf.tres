@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="CharacterData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/character_data.gd" id="1_character"]
+
+[resource]
+script = ExtResource("1_character")
+character_id = "silver_wolf"
+display_name = "银狼"
+role = "高能量骇客"
+description = "生命上限偏低，能量上限较高，适合测试高频武器和持续消耗型动作。"
+max_health = 105.0
+max_energy = 155.0
+move_speed = 355.0
+attack_power = 11.0
+defense_power = 2.0
+energy_regeneration = 18.0
+passive = "被动技能：待配置"
+active = "主动技能：待配置"

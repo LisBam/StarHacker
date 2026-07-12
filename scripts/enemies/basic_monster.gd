@@ -49,7 +49,7 @@ const PLAYER_PHYSICS_LAYER_MASK: int = 1
 @export_range(0.0, 99999.0, 1.0, "or_greater") var defense_power: float = 0.0
 ## 韧性；取值为百分比，默认 0 表示不减免控制，1 表示减少 1% 击退效果，100 表示完全免疫击退。
 @export_range(0.0, 100.0, 1.0) var toughness: float = 0.0
-## 攻击冲击力；取值建议大于等于 0，默认 180 会在命中玩家时造成短距离击退。
+## 攻击冲击力；单位为目标单次无碰撞理论位移像素，1 点对应 1 像素，默认 180 表示命中玩家时产生 180 像素理论位移。
 @export_range(0.0, 5000.0, 1.0, "or_greater") var attack_impact_force: float = 180.0
 ## 移动速度；取值建议大于 0，默认 150 像素每秒，运行时修改会影响怪物追击速度。
 @export_range(1.0, 2000.0, 1.0, "or_greater") var move_speed: float = 150.0
@@ -732,14 +732,31 @@ func _apply_knockback_from_source(source: Node) -> void:
 	if source == null:
 		return
 
-	# 来源冲击力；取值来自 source.get_impact_force()，默认 0 表示不击退怪物。
+	# 来源冲击力；取值来自 source.get_impact_force()，单位为单次无碰撞理论位移像素，默认 0 表示不击退怪物。
 	var impact_force: float = _get_source_impact_force(source)
 	if impact_force <= 0.0:
 		return
 
 	# 来源击退方向；取值优先来自 source.get_knockback_direction()，默认由来源位置指向怪物。
 	var knockback_direction: Vector2 = _get_source_knockback_direction(source)
-	apply_knockback(knockback_direction, impact_force)
+	_apply_impact_distance(knockback_direction, impact_force)
+
+
+func _apply_impact_distance(direction: Vector2, impact_distance: float) -> void:
+	## 把冲击力理论位移按怪物韧性折算后换算为初速度；只用于伤害来源冲击，技能直接速度型击退继续使用 apply_knockback。
+	if direction.is_zero_approx() or impact_distance <= 0.0 or _movement_component == null:
+		return
+	# 韧性减免比例；取值为 0 到 1，默认由 toughness 百分比换算并直接减少理论位移。
+	var toughness_reduction: float = clampf(toughness, 0.0, 100.0) * 0.01
+	# 韧性折算后的理论位移；最低为 0 像素，100% 韧性会完全免疫本次冲击。
+	var resolved_impact_distance: float = maxf(impact_distance * (1.0 - toughness_reduction), 0.0)
+	if resolved_impact_distance <= 0.0:
+		return
+	# 有效击退衰减；最低为 1 像素/秒²，与移动组件实际衰减保护保持一致。
+	var resolved_knockback_decay: float = maxf(knockback_decay, 1.0)
+	# 冲击初速度；按匀减速公式换算，确保无碰撞时最终位移等于韧性折算后的冲击力点数。
+	var impact_initial_speed: float = sqrt(2.0 * resolved_knockback_decay * resolved_impact_distance)
+	_movement_component.call("apply_knockback", direction, impact_initial_speed)
 
 
 func _get_source_impact_force(source: Node) -> float:

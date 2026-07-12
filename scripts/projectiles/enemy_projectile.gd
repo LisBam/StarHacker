@@ -14,7 +14,7 @@ signal hit_body(body: Node, damage: float)
 @export_range(1.0, 12000.0, 1.0, "or_greater") var max_distance: float = 520.0
 ## 弹体伤害；取值建议大于等于 0，默认 10，运行时修改会影响命中玩家后的生命损失。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var damage: float = 10.0
-## 弹体冲击力；取值建议大于等于 0，默认 90，命中玩家时会造成短距离击退。
+## 弹体冲击力；单位为玩家单次无碰撞理论位移像素，1 点对应 1 像素，默认 90 表示命中玩家时产生 90 像素理论位移。
 @export_range(0.0, 5000.0, 1.0, "or_greater") var impact_force: float = 90.0
 
 ## 当前弹体速度向量；取值为方向乘速度，默认向右用于未 launch 时的兜底移动。

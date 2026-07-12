@@ -74,7 +74,7 @@ const FIXED_DURABILITY_COST_PER_USE: float = 1.0
 			has_recoil = false
 ## 武器前坐力；单位为单次无碰撞理论正向位移像素，1 点对应 1 像素，默认 0 表示不向攻击方向推动使用者，只有 has_front_recoil 为 true 时参与战斗、显示与强化结算。
 @export_range(0.0, 3000.0, 1.0, "or_greater") var front_recoil_force: float = 0.0
-## 武器冲击力；取值建议大于等于 0，默认 0 表示不造成击退，命中目标时会按目标韧性折算控制效果。
+## 武器冲击力；单位为目标单次无碰撞理论位移像素，1 点对应 1 像素，默认 0 表示不造成击退，命中怪物时会先按目标韧性减少理论位移。
 @export_range(0.0, 5000.0, 1.0, "or_greater") var impact_force: float = 0.0
 ## 近战伤害；取值建议大于等于 0，默认 35，修改会影响近战命中后的伤害值。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var melee_damage: float = 35.0

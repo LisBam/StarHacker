@@ -554,7 +554,7 @@ func _get_weapon_tooltip_text() -> String:
 	var recoil_force: float = maxf(float(weapon_data.get("recoil_force")), 0.0)
 	# 武器前坐力；取值来自资源 front_recoil_force 字段，默认 0 表示不向攻击方向推动使用者。
 	var front_recoil_force: float = maxf(float(weapon_data.get("front_recoil_force")), 0.0)
-	# 武器冲击力；取值来自资源 impact_force 字段，默认 0 表示不击退目标。
+	# 武器冲击力；取值来自资源 impact_force 字段，单位为目标单次无碰撞理论位移像素，默认 0 表示不击退目标。
 	var impact_force: float = maxf(float(weapon_data.get("impact_force")), 0.0)
 	# 武器暴击率；使用有效属性接口读取强化后的百分比。
 	var critical_chance: float = float(weapon_data.call("get_effective_stat", "critical_chance")) if weapon_data.has_method("get_effective_stat") else maxf(float(weapon_data.get("critical_chance")), 0.0)
@@ -562,10 +562,10 @@ func _get_weapon_tooltip_text() -> String:
 	var critical_damage: float = float(weapon_data.call("get_effective_stat", "critical_damage")) if weapon_data.has_method("get_effective_stat") else maxf(float(weapon_data.get("critical_damage")), 1.0)
 	tooltip_lines.append("能耗：%d" % roundi(energy_consumption))
 	if bool(weapon_data.get("has_recoil")) and recoil_force > 0.0:
-		tooltip_lines.append("后坐力：%d" % roundi(recoil_force))
+		tooltip_lines.append("后坐力：%d 像素" % roundi(recoil_force))
 	if bool(weapon_data.get("has_front_recoil")) and front_recoil_force > 0.0:
-		tooltip_lines.append("前坐力：%d" % roundi(front_recoil_force))
-	tooltip_lines.append("冲击力：%d" % roundi(impact_force))
+		tooltip_lines.append("前坐力：%d 像素" % roundi(front_recoil_force))
+	tooltip_lines.append("冲击力：%d 像素" % roundi(impact_force))
 	tooltip_lines.append("暴击率：%.0f%%" % (critical_chance * 100.0))
 	tooltip_lines.append("暴击伤害：%.0f%%" % (critical_damage * 100.0))
 

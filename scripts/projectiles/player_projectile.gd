@@ -20,7 +20,7 @@ signal hit_area(area: Area2D, damage: float)
 @export var destroy_on_hit: bool = true
 ## 可额外穿过的目标数量；默认 0 表示首个目标后销毁，正数仅对可受伤目标生效，墙体始终阻挡弹体。
 @export_range(0, 100, 1, "or_greater") var piercing_count: int = 0
-## 弹体冲击力；取值建议大于等于 0，默认 0 表示只造成伤害不击退，武器会在发射时覆盖该值。
+## 弹体冲击力；单位为目标单次无碰撞理论位移像素，1 点对应 1 像素，默认 0 表示只造成伤害不击退，武器会在发射时覆盖该值。
 @export_range(0.0, 5000.0, 1.0, "or_greater") var impact_force: float = 0.0
 
 ## 当前弹体速度向量；取值为方向乘速度，默认向右用于未 launch 时的兜底移动，修改会影响后续飞行方向和速度。

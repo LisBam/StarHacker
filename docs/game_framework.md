@@ -160,7 +160,7 @@ ContentCatalog 模板
 
 ### 7.1 伤害与弹体
 
-- 可受伤对象实现 `apply_damage(damage: float, source: Node)`；需要击退时从来源读取冲击力和方向。
+- 可受伤对象实现 `apply_damage(damage: float, source: Node)`；需要击退时从来源读取冲击力理论位移和方向，再由受击目标按自身韧性与击退衰减换算外部初速度。
 - 可被近战清除的敌方弹体实现 `destroy_by_melee(source: Node)`，并使用 `EnemyProjectile` 物理层。
 - 新远程或近战武器优先复用现有攻击组件，只替换数据、弹体、枪口和必要参数。
 

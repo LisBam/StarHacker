@@ -39,6 +39,7 @@
 - 武器基础经济与攻击节奏字段统一使用 `value`、`energy_consumption` 和 `cooldown`，分别对应玩家物品价值、单次攻击能耗和攻击冷却；新资源不得继续声明旧 `sell_price`、`energy_cost`、`ranged_cooldown` 或 `melee_cooldown`。
 - 武器攻击范围统一填写 `attack_distance`，新资源不得继续声明旧 `bullet_range`。远程武器以该值限制弹体最大飞行距离；近战武器以该值定义攻击方向最远判定端到玩家本体的距离，组件会按场景命中框的原近端与高度自动重算宽度、中心和视觉区域。该属性属于远近战通用强化属性。
 - 散射、穿透、连击、后坐力和前坐力都使用显式持有开关。后坐力填写 `has_recoil + recoil_force`，前坐力填写 `has_front_recoil + front_recoil_force`；坐力数值单位为单次无碰撞理论位移像素，1 点对应 1 像素。两者互斥，一把武器至多启用其中一种，未启用的坐力数值不显示、不生效且不能强化。
+- 武器冲击力填写 `impact_force`，单位同样为目标单次无碰撞理论位移像素，1 点对应无韧性目标的 1 像素；命中怪物时先按目标韧性减少理论位移，再使用目标自身的击退衰减换算初速度。
 - 装备资源必须使用 `EquipmentData` 或兼容脚本，`item_kind` 必须为 `equipment`，`equipment_id` 不得为空。
 - 套装装备通过 `equipment_set` 引用同一份 `EquipmentSetData`。`set_id` 必须稳定唯一；两件与四件门槛、显示原文、属性加成和特殊效果数值只写在套装资源中，不得复制到每件装备或 UI 脚本。
 - 套装属性字典使用装备聚合的统一属性名，数值是直接加到有效装备结果的点数或比例。当前支持的属性效果必须已经存在于 `EquipmentComponent` 属性表；世界特殊效果由 `EquipmentSetComponent` 提供独立接口，不能由装备资源直接访问宝箱或关卡。

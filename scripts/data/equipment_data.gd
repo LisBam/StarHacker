@@ -144,7 +144,13 @@ func set_current_durability(value: float) -> void:
 
 
 func _is_stat_supported(stat_name: String) -> bool:
-	return stat_name in COMMON_ENHANCEMENT_STATS or (equipment_slot == "feet" and stat_name in FEET_ENHANCEMENT_STATS) or (equipment_slot == "head" and stat_name in HEAD_ENHANCEMENT_STATS) or (equipment_slot == "body" and stat_name in BODY_ENHANCEMENT_STATS)
+	# 部位允许状态；通用属性适用于所有装备，专属属性只允许对应部位参与共有属性判断。
+	var is_allowed_for_slot: bool = stat_name in COMMON_ENHANCEMENT_STATS or (equipment_slot == "feet" and stat_name in FEET_ENHANCEMENT_STATS) or (equipment_slot == "head" and stat_name in HEAD_ENHANCEMENT_STATS) or (equipment_slot == "body" and stat_name in BODY_ENHANCEMENT_STATS)
+	if not is_allowed_for_slot:
+		return false
+	# 基础属性值；只有非零基础值代表目标实际拥有该属性，强化石不能把零值凭空变为新能力。
+	var base_property_value: Variant = get(stat_name)
+	return base_property_value != null and not is_zero_approx(float(base_property_value))
 
 
 func _is_stat_available(stat_name: String) -> bool:

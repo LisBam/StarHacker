@@ -1028,13 +1028,19 @@ func use_enhancement_stone_with_result(stone_resource: Resource, source_location
 	var source_records: Array[Dictionary] = _get_storage_records(source_location)
 	if stone_record_index < 0 or stone_record_index >= source_records.size() or not _is_owned_weapon_resource(weapon_resource):
 		return failed_result
-	# 强化词条；从石头资源读取，WeaponData 负责过滤与目标武器不兼容的属性。
-	var modifiers: Dictionary = stone_resource.call("get_normalized_modifiers") as Dictionary if stone_resource.has_method("get_normalized_modifiers") else EnhancementRules.normalize_modifiers(stone_resource.get("modifiers") as Dictionary)
+	# 强化词条；优先读取强化石与目标实际拥有属性的交集，旧强化石资源回退归一化完整词条并由目标继续过滤。
+	var modifiers: Dictionary = {}
+	if stone_resource.has_method("get_applicable_modifiers_for_target"):
+		modifiers = stone_resource.call("get_applicable_modifiers_for_target", weapon_resource) as Dictionary
+	elif stone_resource.has_method("get_normalized_modifiers"):
+		modifiers = stone_resource.call("get_normalized_modifiers") as Dictionary
+	else:
+		modifiers = EnhancementRules.normalize_modifiers(stone_resource.get("modifiers") as Dictionary)
 	if modifiers.is_empty() or not weapon_resource.has_method("apply_enhancement"):
 		return failed_result
 	# 强化石品质；用于在使用瞬间选择对应的增强与削弱随机数值区间。
 	var stone_quality_id: String = str(stone_resource.call("get_resolved_quality_id")) if stone_resource.has_method("get_resolved_quality_id") else str(stone_resource.get("quality_id"))
-	# 本次实际强化词典；资源本身仍只保存方向，每次消耗一颗时独立生成具体百分比。
+	# 本次实际强化词典；只为目标实际拥有的共有属性生成幅度，不兼容词条不会进入结果或影响目标。
 	var rolled_modifiers: Dictionary = {}
 	# 可强化属性遍历项；按规则目录稳定顺序生成本次实际比例，便于结果展示和测试复现。
 	for stat_name in EnhancementRules.STAT_KEYS:

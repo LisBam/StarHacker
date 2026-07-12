@@ -17,6 +17,16 @@ const DISPLAY_MODE_DISCARD: String = "discard"
 const DISPLAY_MODE_SHIPPING: String = "shipping"
 ## 股票交易数量模式标识；显示当前数量和每股价格，最终手续费由后续通用确认弹窗精确展示。
 const DISPLAY_MODE_STOCK_TRADE: String = "stock_trade"
+## 矿场交易数量模式标识；复用同款滑条与数字输入，覆盖资产购买、出售、充值和提现。
+const DISPLAY_MODE_MINING_TRANSACTION: String = "mining_transaction"
+## 矿场资产购买操作；数量表示购买台数，摘要显示总算力币成本。
+const MINING_ACTION_BUY: String = "buy"
+## 矿场资产出售操作；数量表示出售台数，摘要显示按 60% 向上取整的返还。
+const MINING_ACTION_SELL: String = "sell"
+## 矿场充值操作；数量表示消耗的整数永久金币，摘要显示 1:10000 到账。
+const MINING_ACTION_RECHARGE: String = "recharge"
+## 矿场提现操作；数量表示到账的整数永久金币，摘要显示反推后的算力币成本与手续费。
+const MINING_ACTION_WITHDRAW: String = "withdraw"
 
 ## 弹窗默认宽度；默认 520 像素可容纳物品名称、数量滑条和数字输入框。
 ## 当前尺寸补充；默认值已调整为 400 像素以保持紧凑，仍可在检查器中按界面语言长度调整，运行时无需动态修改。
@@ -50,6 +60,16 @@ var _stock_trade_executable_maximum: int = 0
 var _stock_trade_available_coins: float = 0.0
 ## 股票买卖手续费比例；默认 0.005 即 0.5%，仅股票模式用于实时计算两位小数证券币手续费。
 var _stock_trade_fee_ratio: float = 0.005
+## 当前矿场操作类型；默认购买，仅矿场交易模式用于选择对应整数预览公式。
+var _mining_action: String = MINING_ACTION_BUY
+## 矿场交易单价或兑换倍率；默认 0，购买出售时为官方资产价，充值提现时为 10000。
+var _mining_unit_value: int = 0
+## 矿场出售返还比例；默认 60%，只在资产出售数量预览中使用。
+var _mining_sell_return_ratio: float = 0.60
+## 矿场提现手续费率；默认 10%，只在提现成本反推预览中使用。
+var _mining_withdrawal_fee_ratio: float = 0.10
+## 矿场是否显示真实整数；默认 false 使用 K/M/B 缩写，由矿场面板的显示开关传入。
+var _mining_show_exact_values: bool = false
 ## 数量滑条；默认运行时创建，取值范围与数字输入框保持双向同步。
 var _quantity_slider: HSlider
 ## 数量数字输入框；默认运行时创建，玩家可键盘直接输入精确数量。
@@ -131,6 +151,25 @@ func present_stock_trade(stock_display_name: String, maximum_quantity: int, unit
 	title = "选择买入数量" if is_buying else "选择卖出数量"
 	get_ok_button().text = "下一步"
 	_update_stock_trade_description()
+	_present_current_configuration()
+
+
+func present_mining_transaction(action: String, display_name: String, maximum_quantity: int, unit_value: int, sell_return_ratio: float = 0.60, withdrawal_fee_ratio: float = 0.10, show_exact_values: bool = false) -> void:
+	## 使用股市同款滑条与数字输入展示矿场整数交易数量；最终结算仍由矿场服务重新校验。
+	_ensure_interface_initialized()
+	_display_mode = DISPLAY_MODE_MINING_TRANSACTION
+	_mining_action = action
+	_item_display_name = display_name if not display_name.is_empty() else "矿场交易"
+	_maximum_quantity = maxi(maximum_quantity, 1)
+	_mining_unit_value = maxi(unit_value, 0)
+	_mining_sell_return_ratio = clampf(sell_return_ratio, 0.0, 1.0)
+	_mining_withdrawal_fee_ratio = clampf(withdrawal_fee_ratio, 0.0, 0.99)
+	_mining_show_exact_values = show_exact_values
+	# 操作文案；数量窗口统一使用“下一步”，确认后进入股市同款二次确认窗口。
+	var action_name: String = _get_mining_action_name()
+	title = "选择%s数量" % action_name
+	get_ok_button().text = "下一步"
+	_description_label.text = "%s · 当前最多可%s %d" % [_item_display_name, action_name, _maximum_quantity]
 	_present_current_configuration()
 
 
@@ -297,6 +336,20 @@ func _refresh_total_price(quantity: int) -> void:
 			_total_price_label.text += " · 当前持仓不足"
 		get_ok_button().disabled = not stock_trade_executable
 		return
+	if _display_mode == DISPLAY_MODE_MINING_TRANSACTION:
+		if _mining_action == MINING_ACTION_RECHARGE:
+			_total_price_label.text = "消耗 %d 金币 · 到账 %s 算力币" % [resolved_quantity, _format_mining_value(resolved_quantity * _mining_unit_value)]
+		elif _mining_action == MINING_ACTION_WITHDRAW:
+			# 提现总成本；按到账金币整体反推并向上取整，与矿场服务正式公式一致。
+			var withdrawal_cost: int = ceili(float(resolved_quantity * _mining_unit_value) / (1.0 - _mining_withdrawal_fee_ratio))
+			_total_price_label.text = "到账 %d 金币 · 需要 %s 算力币 · 手续费 %s" % [resolved_quantity, _format_mining_value(withdrawal_cost), _format_mining_value(withdrawal_cost - resolved_quantity * _mining_unit_value)]
+		elif _mining_action == MINING_ACTION_SELL:
+			# 出售返还；总官方价乘 60% 后整体向上取整，与矿场服务结算顺序一致。
+			var sell_return: int = ceili(float(resolved_quantity * _mining_unit_value) * _mining_sell_return_ratio)
+			_total_price_label.text = "出售 %d 台 · 返还 %s 算力币" % [resolved_quantity, _format_mining_value(sell_return)]
+		else:
+			_total_price_label.text = "购买 %d 台 · 需要 %s 算力币" % [resolved_quantity, _format_mining_value(resolved_quantity * _mining_unit_value)]
+		return
 	get_ok_button().disabled = false
 	# 出售总价；单价乘当前数量，用于确认前即时预览金币收益。
 	var total_sell_price: int = int(_unit_sell_price) * resolved_quantity
@@ -307,3 +360,29 @@ func _on_confirmed() -> void:
 	# 确认数量；从可直接输入的数字框读取，确保键盘最后一次修改被采用。
 	var confirmed_quantity: int = clampi(roundi(_quantity_spin_box.value), 1, _maximum_quantity)
 	quantity_confirmed.emit(confirmed_quantity)
+
+
+func _get_mining_action_name() -> String:
+	## 返回矿场操作的中文动词，用于数量弹窗标题和最大数量说明。
+	if _mining_action == MINING_ACTION_SELL:
+		return "出售"
+	if _mining_action == MINING_ACTION_RECHARGE:
+		return "充值"
+	if _mining_action == MINING_ACTION_WITHDRAW:
+		return "提现"
+	return "购买"
+
+
+func _format_mining_value(value: int) -> String:
+	## 根据矿场具体数值开关格式化交易金额；仅改变文本，不改变数量或最终整数结算。
+	if _mining_show_exact_values:
+		return str(value)
+	# 绝对值；决定当前应使用 K、M 或 B 单位。
+	var absolute_value: int = absi(value)
+	if absolute_value >= 1000000000:
+		return "%.2fB" % (float(value) / 1000000000.0)
+	if absolute_value >= 1000000:
+		return "%.2fM" % (float(value) / 1000000.0)
+	if absolute_value >= 10000:
+		return "%.2fK" % (float(value) / 1000.0)
+	return str(value)

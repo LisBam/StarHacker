@@ -18,8 +18,8 @@ const COMPUTE_COINS_PER_GOLD: int = 10000
 const WITHDRAWAL_FEE_RATIO: float = 0.10
 ## 资产出售返还比例；默认按当前官方购买价的 60% 向上取整返还算力币。
 const ASSET_SELL_RETURN_RATIO: float = 0.60
-## 骇入增益每金币加成比例；默认每 1 金币增加 0.01%，换算为小数倍率为 0.0001。
-const HACK_BUFF_RATIO_PER_GOLD: float = 0.0001
+## 骇入增益每金币加成比例；默认每 10 金币增加 0.01%，换算为每金币 0.00001 小数倍率。
+const HACK_BUFF_RATIO_PER_GOLD: float = 0.00001
 ## 骇入增益在线持续时间；默认 1800 秒即 30 分钟，游戏关闭期间不会消耗。
 const HACK_BUFF_DURATION_SECONDS: float = 1800.0
 ## 股市联动触发涨幅；默认骇客数字科技单轮上涨达到 10% 时激活矿场增益。
@@ -162,6 +162,34 @@ func get_withdrawal_cost(gold_amount: int) -> int:
 	return int(ceil(float(gold_amount * COMPUTE_COINS_PER_GOLD) / (1.0 - WITHDRAWAL_FEE_RATIO)))
 
 
+func get_maximum_withdrawable_gold() -> int:
+	## 返回当前余额最多可到账的整数金币；公式与正式提现完全一致，不使用单金币成本近似。
+	if _balance <= 0:
+		return 0
+	# 理论上界；忽略手续费时余额最多兑换的金币数一定不小于真实结果，可作为二分搜索右边界。
+	var upper_bound: int = maxi(int(_balance / COMPUTE_COINS_PER_GOLD), 1)
+	# 二分下界；始终表示当前已确认可支付的金币数量。
+	var lower_bound: int = 0
+	while lower_bound < upper_bound:
+		# 中间数量；向上取中点保证相邻区间可以正常收敛。
+		var middle: int = int((lower_bound + upper_bound + 1) / 2)
+		if get_withdrawal_cost(middle) <= _balance:
+			lower_bound = middle
+		else:
+			upper_bound = middle - 1
+	return lower_bound
+
+
+func get_maximum_buy_quantity(asset_id: String) -> int:
+	## 返回当前余额可购买的最大资产数量；未解锁、无效价格或余额不足时返回 0。
+	var definition: Dictionary = _get_asset_definition(asset_id)
+	if definition.is_empty() or not is_asset_unlocked(asset_id):
+		return 0
+	# 当前官方单价；必须为正整数，异常配置不会参与除法。
+	var unit_price: int = int(definition.get("price", 0))
+	return int(_balance / unit_price) if unit_price > 0 else 0
+
+
 func get_asset_sell_return(asset_id: String, quantity: int) -> int:
 	# 资产定义；出售始终使用当前官方价格，不读取历史购买成本或临时折扣。
 	var definition: Dictionary = _get_asset_definition(asset_id)
@@ -237,7 +265,7 @@ func sell_asset(asset_id: String, quantity: int) -> Dictionary:
 func apply_successful_extraction_buff(extracted_value_gold: int) -> void:
 	if extracted_value_gold <= 0:
 		return
-	# 新增比例；每 1 金币固定增加 0.01%，允许与当前骇入增益直接叠加。
+	# 新增比例；每 10 金币固定增加 0.01%，允许与当前骇入增益直接叠加。
 	var added_ratio: float = float(extracted_value_gold) * HACK_BUFF_RATIO_PER_GOLD
 	_hack_buff_ratio += added_ratio
 	_hack_buff_remaining_seconds = maxf(_hack_buff_remaining_seconds, 0.0) + HACK_BUFF_DURATION_SECONDS

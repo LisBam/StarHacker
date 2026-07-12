@@ -176,8 +176,8 @@ func complete_combat_run_success() -> Dictionary:
 		return _last_run_outcome.duplicate(true)
 
 	_last_extraction_epoch += 1
-	# 本局获得物品条目；由首次从战场拾取的资源构建，自己丢弃后重新捡回不会重复或新增统计。
-	var gained_entries: Array[Dictionary] = _build_run_gained_entries()
+	# 本局获得物品条目；从当前全部所有权记录读取本局来源数量，覆盖背包、装备和物资撤离点已送回仓库的物品。
+	var gained_entries: Array[Dictionary] = _build_retained_run_gained_entries()
 	# 本局获得物品名称；保留为兼容字段，列表式结算优先读取包含 Resource 的 gained_entries。
 	var gained_items: Array[String] = _get_outcome_entry_names(gained_entries)
 	# 成功撤离携带记录；包含背包与装备，全部写入本次撤离编号以支持以后卸下时仍优先排序。

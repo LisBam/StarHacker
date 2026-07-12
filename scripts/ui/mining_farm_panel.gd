@@ -5,6 +5,11 @@ extends PanelContainer
 
 signal closed
 
+## 股市与全局物品共用的滑条数量弹窗；矿场扩展其整数交易模式，不再维护独立数量控件。
+const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
+## 股市同款二次确认弹窗；矿场交易在数量选择后统一展示最终金额并等待再次确认。
+const COMMON_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/common_confirmation_dialog.gd")
+
 ## 可购买资产页标识；用于标签按钮与列表重建，不写入存档。
 const TAB_AVAILABLE: String = "available"
 ## 已持有资产页标识；资产按单台产出从高到低展示并提供出售入口。
@@ -15,6 +20,8 @@ const ACTION_RECHARGE: String = "recharge"
 const ACTION_WITHDRAW: String = "withdraw"
 ## 出售操作标识；数量弹窗输入资产台数并实时显示 60% 折价返还。
 const ACTION_SELL: String = "sell"
+## 购买操作标识；数量弹窗输入资产台数并在二次确认后按官方单价批量购买。
+const ACTION_BUY: String = "buy"
 
 ## 面板固定尺寸；默认 1080×640，适配 1280×720 主菜单并保留四周遮罩空间。
 @export var panel_size: Vector2 = Vector2(1080.0, 640.0)
@@ -45,9 +52,15 @@ var _dialog_action: String = ""
 var _dialog_asset_id: String = ""
 ## 最近一次购买的资产标识；列表重建后用于定位并播放启动上线动画。
 var _pending_startup_asset_id: String = ""
+## 是否显示全部具体整数；默认 false 使用 K/M/B 缩写，开启后整个矿场界面禁用数字缩写。
+var _show_exact_values: bool = false
+## 等待二次确认的数量；默认 0，数量弹窗确认后保存到最终交易完成或取消。
+var _pending_quantity: int = 0
 
 ## 余额文本；显示整数或 K/M/B 两位小数缩写，实际余额始终保持整数。
 var _balance_label: Label
+## 具体数值显示开关；位于余额右侧，切换后立即重建全部数值文本和资产卡片。
+var _exact_value_check_box: CheckBox
 ## 金币折合文本；固定保留四位小数，帮助玩家判断当前可提现进度。
 var _gold_equivalent_label: Label
 ## 每秒产出文本；绿色高亮并持续播放轻微呼吸效果。
@@ -66,10 +79,8 @@ var _production_progress: ProgressBar
 var _floating_feedback_layer: Control
 ## 数量操作弹窗；充值、提现和出售共用同一紧凑组件。
 var _quantity_dialog: ConfirmationDialog
-## 数量输入框；只允许正整数，范围由当前操作和实时余额决定。
-var _quantity_input: SpinBox
-## 数量弹窗说明；实时显示到账、所需算力币、手续费或资产返还。
-var _quantity_preview_label: Label
+## 股市同款二次确认弹窗；完整展示操作、数量、金额和余额状态后才执行真实交易。
+var _confirmation_dialog: ConfirmationDialog
 ## 信息提示弹窗；交易失败时展示服务返回原因，不修改任何数据。
 var _message_dialog: AcceptDialog
 
@@ -118,8 +129,6 @@ func _connect_services() -> void:
 		_service.connect("assets_changed", Callable(self, "_on_assets_changed"))
 	if _service.has_signal("buffs_changed"):
 		_service.connect("buffs_changed", Callable(self, "_refresh_buffs"))
-	if _global_inventory != null and _global_inventory.has_signal("coins_changed"):
-		_global_inventory.connect("coins_changed", Callable(self, "_refresh_quantity_preview"))
 
 
 func _build_interface() -> void:
@@ -162,7 +171,16 @@ func _build_header(root: VBoxContainer) -> void:
 	_balance_label = Label.new()
 	_balance_label.add_theme_font_size_override("font_size", 31)
 	_balance_label.add_theme_color_override("font_color", Color(0.70, 0.92, 1.0, 1.0))
-	balance_box.add_child(_balance_label)
+	# 余额标题行；余额左侧保持主视觉，右侧放置具体数值开关且不挤压产出状态栏。
+	var balance_title_row: HBoxContainer = HBoxContainer.new()
+	balance_title_row.add_theme_constant_override("separation", 12)
+	balance_box.add_child(balance_title_row)
+	balance_title_row.add_child(_balance_label)
+	_exact_value_check_box = CheckBox.new()
+	_exact_value_check_box.text = "显示具体数值"
+	_exact_value_check_box.button_pressed = _show_exact_values
+	_exact_value_check_box.toggled.connect(_on_exact_value_toggled)
+	balance_title_row.add_child(_exact_value_check_box)
 	_gold_equivalent_label = Label.new()
 	_gold_equivalent_label.add_theme_font_size_override("font_size", 13)
 	_gold_equivalent_label.add_theme_color_override("font_color", Color(0.66, 0.72, 0.78, 1.0))
@@ -184,7 +202,9 @@ func _build_header(root: VBoxContainer) -> void:
 	production_box.add_child(_buff_container)
 	# 关闭按钮；关闭后 UI 和动画停止，服务转入后台低频结算。
 	var close_button: Button = Button.new()
-	close_button.custom_minimum_size = Vector2(78.0, 36.0)
+	close_button.custom_minimum_size = Vector2(58.0, 26.0)
+	close_button.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	close_button.add_theme_font_size_override("font_size", 12)
 	close_button.text = "关闭"
 	close_button.pressed.connect(_close_panel)
 	header.add_child(close_button)
@@ -254,28 +274,13 @@ func _build_footer(root: VBoxContainer) -> void:
 
 
 func _build_quantity_dialog() -> void:
-	_quantity_dialog = ConfirmationDialog.new()
-	_quantity_dialog.title = "数量选择"
-	_quantity_dialog.min_size = Vector2i(430, 190)
-	_quantity_dialog.confirmed.connect(_confirm_quantity_action)
+	_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as ConfirmationDialog
+	_quantity_dialog.connect("quantity_confirmed", Callable(self, "_on_quantity_confirmed"))
 	add_child(_quantity_dialog)
-	# 弹窗内容；数字输入和实时预览保持纵向紧凑排列。
-	var content: VBoxContainer = VBoxContainer.new()
-	content.add_theme_constant_override("separation", 12)
-	_quantity_dialog.add_child(content)
-	_quantity_input = SpinBox.new()
-	_quantity_input.min_value = 1.0
-	_quantity_input.max_value = 1.0
-	_quantity_input.step = 1.0
-	_quantity_input.value = 1.0
-	_quantity_input.allow_greater = false
-	_quantity_input.allow_lesser = false
-	_quantity_input.value_changed.connect(Callable(self, "_refresh_quantity_preview").unbind(1))
-	content.add_child(_quantity_input)
-	_quantity_preview_label = Label.new()
-	_quantity_preview_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_quantity_preview_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	content.add_child(_quantity_preview_label)
+	_confirmation_dialog = COMMON_CONFIRMATION_DIALOG_SCRIPT.new() as ConfirmationDialog
+	_confirmation_dialog.confirmed.connect(_confirm_quantity_action)
+	_confirmation_dialog.canceled.connect(_clear_pending_transaction)
+	add_child(_confirmation_dialog)
 
 
 func _build_message_dialog() -> void:
@@ -404,11 +409,23 @@ func _create_asset_card(definition: Dictionary, quantity: int) -> Control:
 	var content: VBoxContainer = VBoxContainer.new()
 	content.add_theme_constant_override("separation", 4)
 	margin.add_child(content)
+	# 名称与收益行；每类资产名称右侧持续显示该类当前绿色收益飘字。
+	var name_row: HBoxContainer = HBoxContainer.new()
+	name_row.add_theme_constant_override("separation", 8)
+	content.add_child(name_row)
 	var name_label: Label = Label.new()
 	name_label.add_theme_font_size_override("font_size", 17)
 	name_label.add_theme_color_override("font_color", Color(0.74, 0.92, 1.0, 1.0) if unlocked else Color(0.48, 0.50, 0.54, 1.0))
 	name_label.text = str(definition.get("name", "未知资产"))
-	content.add_child(name_label)
+	name_row.add_child(name_label)
+	var asset_yield_label: Label = Label.new()
+	asset_yield_label.add_theme_font_size_override("font_size", 12)
+	asset_yield_label.add_theme_color_override("font_color", Color(0.34, 1.0, 0.62, 1.0))
+	# 卡片收益；可购买页显示单台收益，已持有页显示该类资产当前总收益。
+	var displayed_asset_yield: int = int(definition.get("production", 0)) if _active_tab == TAB_AVAILABLE else quantity * int(definition.get("production", 0))
+	asset_yield_label.text = "+%s/秒" % _format_integer_value(displayed_asset_yield)
+	name_row.add_child(asset_yield_label)
+	_play_asset_yield_float(asset_yield_label)
 	var detail_label: Label = Label.new()
 	detail_label.add_theme_font_size_override("font_size", 12)
 	detail_label.add_theme_color_override("font_color", Color(0.67, 0.72, 0.77, 1.0))
@@ -430,7 +447,7 @@ func _create_asset_card(definition: Dictionary, quantity: int) -> Control:
 	if _active_tab == TAB_AVAILABLE:
 		action_button.text = "购买" if unlocked else "总产出达到 %s/秒后解锁" % _format_integer_value(int(definition.get("unlock_rate", 0)))
 		action_button.disabled = not unlocked
-		action_button.pressed.connect(Callable(self, "_buy_asset").bind(asset_id))
+		action_button.pressed.connect(Callable(self, "_open_quantity_dialog").bind(ACTION_BUY, asset_id))
 	else:
 		action_button.text = "出售"
 		action_button.pressed.connect(Callable(self, "_open_quantity_dialog").bind(ACTION_SELL, asset_id))
@@ -441,76 +458,80 @@ func _create_asset_card(definition: Dictionary, quantity: int) -> Control:
 	return card
 
 
-func _buy_asset(asset_id: String) -> void:
-	if _service == null or not _service.has_method("buy_asset"):
-		return
-	# 购买结果；服务在确认瞬间复核解锁与余额，UI 只负责反馈。
-	var result: Dictionary = _service.call("buy_asset", asset_id, 1) as Dictionary
-	if not bool(result.get("success", false)):
-		_show_message(str(result.get("message", "购买失败")))
-		return
-	_pending_startup_asset_id = asset_id
-	_show_floating_feedback("资产上线 -%s 算力币" % _format_integer_value(int(result.get("cost", 0))))
-	_rebuild_assets()
-
-
 func _open_quantity_dialog(action: String, asset_id: String) -> void:
 	_dialog_action = action
 	_dialog_asset_id = asset_id
-	_quantity_input.value = 1.0
+	_pending_quantity = 0
 	if action == ACTION_RECHARGE:
-		_quantity_dialog.title = "充值算力币"
 		# 最大充值金币；至少允许输入 1，最终仍由服务校验真实余额。
 		var coins: int = int(_global_inventory.call("get_coins")) if _global_inventory != null and _global_inventory.has_method("get_coins") else 0
-		_quantity_input.max_value = float(maxi(coins, 1))
+		if coins <= 0:
+			_show_message("永久金币不足，无法充值")
+			_clear_pending_transaction()
+			return
+		_quantity_dialog.call("present_mining_transaction", ACTION_RECHARGE, "算力币充值", coins, 10000, 0.60, 0.10, _show_exact_values)
 	elif action == ACTION_WITHDRAW:
-		_quantity_dialog.title = "提现永久金币"
-		_quantity_input.max_value = float(maxi(int(floor(float(_get_real_balance()) / 11112.0)), 1))
+		# 最大可提现金币；使用服务精确公式，避免按单金币成本近似造成大额提现上限偏差。
+		var maximum_gold: int = int(_service.call("get_maximum_withdrawable_gold")) if _service != null and _service.has_method("get_maximum_withdrawable_gold") else 0
+		if maximum_gold <= 0:
+			_show_message("算力币余额不足，最低提现 1 金币")
+			_clear_pending_transaction()
+			return
+		_quantity_dialog.call("present_mining_transaction", ACTION_WITHDRAW, "永久金币提现", maximum_gold, 10000, 0.60, 0.10, _show_exact_values)
 	else:
-		_quantity_dialog.title = "出售算力资产"
-		_quantity_input.max_value = float(maxi(int(_service.call("get_asset_quantity", asset_id)), 1))
-	_refresh_quantity_preview()
-	_quantity_dialog.popup_centered()
+		# 当前资产定义；数量窗口读取官方单价，确认时服务仍按当前定义重新计算。
+		var definition: Dictionary = _get_asset_definition(asset_id)
+		var unit_price: int = int(definition.get("price", 0))
+		var display_name: String = str(definition.get("name", "算力资产"))
+		if action == ACTION_SELL:
+			var owned_quantity: int = int(_service.call("get_asset_quantity", asset_id))
+			_quantity_dialog.call("present_mining_transaction", ACTION_SELL, display_name, owned_quantity, unit_price, 0.60, 0.10, _show_exact_values)
+		else:
+			var maximum_buy: int = int(_service.call("get_maximum_buy_quantity", asset_id)) if _service.has_method("get_maximum_buy_quantity") else 0
+			if maximum_buy <= 0:
+				_show_message("算力币余额不足，无法购买该资产")
+				_clear_pending_transaction()
+				return
+			_quantity_dialog.call("present_mining_transaction", ACTION_BUY, display_name, maximum_buy, unit_price, 0.60, 0.10, _show_exact_values)
 
 
-func _refresh_quantity_preview() -> void:
-	if _quantity_preview_label == null or _quantity_input == null:
-		return
-	# 当前整数数量；SpinBox 已限制步长为 1，仍显式取整以保持接口稳定。
-	var quantity: int = maxi(int(round(_quantity_input.value)), 1)
-	if _dialog_action == ACTION_RECHARGE:
-		_quantity_preview_label.text = "消耗 %d 永久金币\n到账 %s 算力币" % [quantity, _format_integer_value(quantity * 10000)]
-	elif _dialog_action == ACTION_WITHDRAW:
-		# 提现成本；直接调用服务公开公式，确保预览与最终扣款完全一致。
-		var cost: int = int(_service.call("get_withdrawal_cost", quantity)) if _service != null else 0
-		_quantity_preview_label.text = "到账 %d 永久金币\n需要 %s 算力币（手续费 %s）" % [quantity, _format_integer_value(cost), _format_integer_value(cost - quantity * 10000)]
-	else:
-		# 资产返还；按当前官方价的 60% 向上取整，与服务最终结算共用公式。
-		var returned: int = int(_service.call("get_asset_sell_return", _dialog_asset_id, quantity)) if _service != null else 0
-		_quantity_preview_label.text = "出售 %d 台\n预计返还 %s 算力币" % [quantity, _format_integer_value(returned)]
+func _on_quantity_confirmed(quantity: int) -> void:
+	_pending_quantity = maxi(quantity, 1)
+	# 二次确认内容；完整列出实际数量和服务公式计算的最终整数金额。
+	var message: String = _build_transaction_confirmation_message()
+	var action_name: String = _get_action_display_name()
+	_confirmation_dialog.call("present", "确认%s" % action_name, message, "确认%s" % action_name, "取消", 480, 270, true)
 
 
 func _confirm_quantity_action() -> void:
 	if _service == null:
 		return
-	# 确认数量；所有操作都只接受正整数，并在服务端再次复核余额或持有量。
-	var quantity: int = maxi(int(round(_quantity_input.value)), 1)
+	# 确认数量；来自股市同款滑条窗口，并在服务端再次复核余额或持有量。
+	var quantity: int = maxi(_pending_quantity, 1)
 	var result: Dictionary = {}
 	if _dialog_action == ACTION_RECHARGE:
 		result = _service.call("recharge", quantity) as Dictionary
 	elif _dialog_action == ACTION_WITHDRAW:
 		result = _service.call("withdraw", quantity) as Dictionary
+	elif _dialog_action == ACTION_BUY:
+		result = _service.call("buy_asset", _dialog_asset_id, quantity) as Dictionary
 	elif _dialog_action == ACTION_SELL:
 		result = _service.call("sell_asset", _dialog_asset_id, quantity) as Dictionary
 	if not bool(result.get("success", false)):
 		_show_message(str(result.get("message", "操作失败")))
+		_clear_pending_transaction()
 		return
 	if _dialog_action == ACTION_SELL:
 		_show_floating_feedback("资产变现 +%s 算力币" % _format_integer_value(int(result.get("returned", 0))))
 	elif _dialog_action == ACTION_RECHARGE:
 		_show_floating_feedback("充值到账 +%s 算力币" % _format_integer_value(int(result.get("compute_coins", 0))))
 	else:
-		_show_floating_feedback("提现到账 +%d 金币" % int(result.get("gold", 0)))
+		if _dialog_action == ACTION_BUY:
+			_pending_startup_asset_id = _dialog_asset_id
+			_show_floating_feedback("资产上线 -%s 算力币" % _format_integer_value(int(result.get("cost", 0))))
+		else:
+			_show_floating_feedback("提现到账 +%d 金币" % int(result.get("gold", 0)))
+	_clear_pending_transaction()
 	_rebuild_assets()
 
 
@@ -597,6 +618,7 @@ func _close_panel() -> void:
 	set_process(false)
 	_dialog_action = ""
 	_dialog_asset_id = ""
+	_pending_quantity = 0
 	if _service != null and _service.has_method("set_panel_open"):
 		_service.call("set_panel_open", false)
 	closed.emit()
@@ -607,6 +629,8 @@ func _get_real_balance() -> int:
 
 
 func _format_integer_value(value: int) -> String:
+	if _show_exact_values:
+		return str(value)
 	# 绝对值；决定 K、M、B 单位，负号在格式化结果中由原值自然保留。
 	var absolute_value: int = absi(value)
 	if absolute_value >= 1000000000:
@@ -616,6 +640,67 @@ func _format_integer_value(value: int) -> String:
 	if absolute_value >= 10000:
 		return "%.2fK" % (float(value) / 1000.0)
 	return str(value)
+
+
+func _on_exact_value_toggled(enabled: bool) -> void:
+	_show_exact_values = enabled
+	_refresh_balance_text()
+	_refresh_production()
+	_rebuild_assets()
+
+
+func _play_asset_yield_float(label: Label) -> void:
+	## 循环播放资产收益绿色飘字；只改变局部位置和透明度，不参与服务结算。
+	var origin_position: Vector2 = label.position
+	var tween: Tween = create_tween().set_loops()
+	tween.tween_property(label, "position:y", origin_position.y - 4.0, 0.55).set_trans(Tween.TRANS_SINE)
+	tween.parallel().tween_property(label, "modulate:a", 0.62, 0.55)
+	tween.tween_property(label, "position:y", origin_position.y, 0.55).set_trans(Tween.TRANS_SINE)
+	tween.parallel().tween_property(label, "modulate:a", 1.0, 0.55)
+
+
+func _get_asset_definition(asset_id: String) -> Dictionary:
+	## 从服务公开定义中查找指定资产；返回副本，UI 不修改静态配置。
+	var definitions: Array = _service.call("get_asset_definitions") as Array if _service != null and _service.has_method("get_asset_definitions") else []
+	for raw_definition in definitions:
+		var definition: Dictionary = raw_definition as Dictionary
+		if str(definition.get("id", "")) == asset_id:
+			return definition
+	return {}
+
+
+func _build_transaction_confirmation_message() -> String:
+	## 构建股市同款二次确认正文；金额使用矿场服务公开公式，确认后服务仍会最终复核。
+	var quantity: int = maxi(_pending_quantity, 1)
+	if _dialog_action == ACTION_RECHARGE:
+		return "充值 %d 金币\n到账：%s 算力币\n当前永久金币：%d\n确认后立即同步写入两份存档" % [quantity, _format_integer_value(quantity * 10000), int(_global_inventory.call("get_coins"))]
+	if _dialog_action == ACTION_WITHDRAW:
+		var cost: int = int(_service.call("get_withdrawal_cost", quantity))
+		return "提现到账：%d 金币\n需要：%s 算力币\n手续费：%s 算力币\n当前余额：%s 算力币" % [quantity, _format_integer_value(cost), _format_integer_value(cost - quantity * 10000), _format_integer_value(_get_real_balance())]
+	var definition: Dictionary = _get_asset_definition(_dialog_asset_id)
+	var asset_name: String = str(definition.get("name", "算力资产"))
+	if _dialog_action == ACTION_SELL:
+		var returned: int = int(_service.call("get_asset_sell_return", _dialog_asset_id, quantity))
+		return "%s %d 台\n返还：%s 算力币\n出售后持有：%d 台\n总产出将立即降低" % [asset_name, quantity, _format_integer_value(returned), int(_service.call("get_asset_quantity", _dialog_asset_id)) - quantity]
+	var total_cost: int = int(definition.get("price", 0)) * quantity
+	return "%s %d 台\n需要：%s 算力币\n购买后持有：%d 台\n下一结算周期开始产出" % [asset_name, quantity, _format_integer_value(total_cost), int(_service.call("get_asset_quantity", _dialog_asset_id)) + quantity]
+
+
+func _get_action_display_name() -> String:
+	## 返回当前矿场交易中文名称，统一用于确认窗口标题和按钮。
+	if _dialog_action == ACTION_RECHARGE:
+		return "充值"
+	if _dialog_action == ACTION_WITHDRAW:
+		return "提现"
+	if _dialog_action == ACTION_SELL:
+		return "出售"
+	return "购买"
+
+
+func _clear_pending_transaction() -> void:
+	_pending_quantity = 0
+	_dialog_action = ""
+	_dialog_asset_id = ""
 
 
 func _format_duration(seconds: float) -> String:

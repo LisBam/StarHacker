@@ -64,7 +64,7 @@ const FIXED_DURABILITY_COST_PER_USE: float = 1.0
 		has_recoil = value_enabled
 		if has_recoil:
 			has_front_recoil = false
-## 武器后坐力；取值建议大于等于 0，默认 0 表示不推动使用者，只有 has_recoil 为 true 时参与战斗、显示与强化结算。
+## 武器后坐力；单位为单次无碰撞理论反向位移像素，1 点对应 1 像素，默认 0 表示不推动使用者，只有 has_recoil 为 true 时参与战斗、显示与强化结算。
 @export_range(0.0, 3000.0, 1.0, "or_greater") var recoil_force: float = 0.0
 ## 是否具有前坐力属性；默认 false，启用时自动关闭后坐力，保证一把武器至多拥有一种坐力属性。
 @export var has_front_recoil: bool = false:
@@ -72,7 +72,7 @@ const FIXED_DURABILITY_COST_PER_USE: float = 1.0
 		has_front_recoil = value_enabled
 		if has_front_recoil:
 			has_recoil = false
-## 武器前坐力；取值建议大于等于 0，默认 0 表示不向攻击方向推动使用者，只有 has_front_recoil 为 true 时参与战斗、显示与强化结算。
+## 武器前坐力；单位为单次无碰撞理论正向位移像素，1 点对应 1 像素，默认 0 表示不向攻击方向推动使用者，只有 has_front_recoil 为 true 时参与战斗、显示与强化结算。
 @export_range(0.0, 3000.0, 1.0, "or_greater") var front_recoil_force: float = 0.0
 ## 武器冲击力；取值建议大于等于 0，默认 0 表示不造成击退，命中目标时会按目标韧性折算控制效果。
 @export_range(0.0, 5000.0, 1.0, "or_greater") var impact_force: float = 0.0

@@ -322,9 +322,9 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 	else:
 		_append_weapon_stat_line(detail_lines, item_resource, "melee_active_duration", 2, " 秒")
 	if bool(item_resource.get("has_recoil")):
-		_append_weapon_stat_line(detail_lines, item_resource, "recoil_force", 1)
+		_append_weapon_stat_line(detail_lines, item_resource, "recoil_force", 1, " 像素")
 	if bool(item_resource.get("has_front_recoil")):
-		_append_weapon_stat_line(detail_lines, item_resource, "front_recoil_force", 1)
+		_append_weapon_stat_line(detail_lines, item_resource, "front_recoil_force", 1, " 像素")
 	_append_weapon_stat_line(detail_lines, item_resource, "impact_force", 1)
 
 

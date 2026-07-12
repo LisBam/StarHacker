@@ -180,7 +180,7 @@ func _get_character_profile(character_id: String) -> Dictionary:
 		"max_health": 130.0,
 		"max_energy": 110.0,
 		"move_speed": 320.0,
-		"attack_power": 100.0,
+		"attack_power": 10.0,
 		"defense_power": 5.0,
 		"passive": "被动技能：待配置",
 		"active": "主动技能：待配置"

@@ -31,6 +31,8 @@ const COMMON_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/comm
 const SHARED_BACKPACK_PANEL_SCRIPT: Script = preload("res://scripts/ui/main_menu_backpack_panel.gd")
 ## 物资撤离面板脚本；玩家在物资撤离点驻留 3 秒后按闪避打开，面板期间暂停游戏。
 const SUPPLY_EXTRACTION_PANEL_SCRIPT: Script = preload("res://scripts/ui/supply_extraction_panel.gd")
+## 全局窗口样式指南；统一战斗背包、暂停菜单、地图、物资撤离、开发者菜单和结算窗口视觉。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 战斗开发者模式解锁序列；默认六个英文字母，输入错误时按首字母重新开始匹配。
 const DEVELOPER_UNLOCK_SEQUENCE: String = "LISBAM"
 ## 背包全部分页标识；默认显示所有背包武器，修改会影响筛选按钮与背包网格过滤。
@@ -387,6 +389,20 @@ var _settlement_subcategory: String = InventoryQuery.SUBCATEGORY_ALL
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	UI_STYLE_GUIDE.apply_screen_theme(_root_control)
+	UI_STYLE_GUIDE.apply_window_panel(_inventory_panel)
+	UI_STYLE_GUIDE.apply_window_panel(_pause_menu_panel)
+	UI_STYLE_GUIDE.apply_window_panel(_pause_settings_panel)
+	UI_STYLE_GUIDE.apply_window_panel(_test_settings_panel)
+	UI_STYLE_GUIDE.apply_window_panel(_character_switch_panel)
+	UI_STYLE_GUIDE.apply_window_panel(get_node("Root/PauseOverlay/PauseMapPanel") as Control)
+	UI_STYLE_GUIDE.apply_window_panel(get_node("Root/DeathOverlay/DeathPanel") as Control)
+	UI_STYLE_GUIDE.apply_overlay_dim(get_node("Root/LargeMapOverlay/LargeMapDim") as ColorRect)
+	UI_STYLE_GUIDE.apply_overlay_dim(get_node("Root/PauseOverlay/PauseDim") as ColorRect)
+	UI_STYLE_GUIDE.apply_overlay_dim(get_node("Root/DeathOverlay/DeathDim") as ColorRect)
+	UI_STYLE_GUIDE.apply_title_label(_death_title_label)
+	UI_STYLE_GUIDE.apply_primary_button(_death_return_main_menu_button)
+	UI_STYLE_GUIDE.apply_danger_button(_return_main_menu_button)
 	_master_bus_index = AudioServer.get_bus_index("Master")
 	_bind_game_world()
 	_bind_player_components()
@@ -963,7 +979,7 @@ func _build_supply_extraction_overlay() -> void:
 	_supply_extraction_overlay = overlay
 	# 遮罩暗层；覆盖全部 HUD 并吸收鼠标输入。
 	var dim: ColorRect = ColorRect.new()
-	dim.color = Color(0.0, 0.0, 0.0, 0.76)
+	dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
 	dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	overlay.add_child(dim)
@@ -1000,7 +1016,7 @@ func _build_combat_developer_overlay() -> void:
 	# 开发者背景遮罩；使用深色半透明背景把战斗调试菜单与暂停地图分离。
 	var developer_dim: ColorRect = ColorRect.new()
 	developer_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	developer_dim.color = Color(0.0, 0.0, 0.0, 0.76)
+	developer_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
 	developer_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	developer_overlay.add_child(developer_dim)
 	# 战斗开发者菜单；复用局外组件，但隐藏金币与仓库操作并显示无限属性和训练工具。

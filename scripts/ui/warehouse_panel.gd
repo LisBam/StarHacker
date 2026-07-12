@@ -7,6 +7,8 @@ signal closed
 
 ## 仓库物品交互控件脚本；默认复用统一摘要、悬停详情、点击和拖拽协议。
 const ITEM_ACTION_POPUP_SCRIPT: Script = preload("res://scripts/ui/item_action_popup.gd")
+## 全局窗口样式指南；统一仓库主窗口、内部装备分区、查询控件与普通按钮视觉。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
 ## 通用物品卡片视图；仓库、背包与局外装备槽统一读取其固定尺寸。
 const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
@@ -154,6 +156,8 @@ var _pending_repair_kit_location: String = ""
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	custom_minimum_size = panel_minimum_size
+	UI_STYLE_GUIDE.apply_screen_theme(self)
+	UI_STYLE_GUIDE.apply_window_panel(self)
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
 	_build_storage_interface()
 	if _global_inventory != null:
@@ -206,6 +210,7 @@ func _build_storage_interface() -> void:
 	title_label.text = "局外永久仓库"
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.add_theme_font_size_override("font_size", 25)
+	UI_STYLE_GUIDE.apply_title_label(title_label)
 	header.add_child(title_label)
 	_coins_label = Label.new()
 	_coins_label.add_theme_font_size_override("font_size", 18)

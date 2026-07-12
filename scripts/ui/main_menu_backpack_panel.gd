@@ -8,6 +8,9 @@ signal closed
 ## 丢弃请求；战斗上下文由 CombatHud 生成地面掉落，局外上下文由组件直接永久删除。
 signal combat_discard_requested(item_resource: Resource, quantity: int)
 
+## 全局窗口样式指南；统一局外与局内共享背包的主窗口、装备分区、查询和操作控件视觉。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+
 ## 主菜单上下文标识；丢弃直接永久删除，其他装备、修复和查询行为与战斗一致。
 const CONTEXT_MAIN_MENU: String = "main_menu"
 ## 战斗上下文标识；丢弃请求交给 CombatHud 生成地面掉落。
@@ -99,6 +102,8 @@ var _subcategory_bar: HBoxContainer
 
 func _ready() -> void:
 	custom_minimum_size = panel_minimum_size
+	UI_STYLE_GUIDE.apply_screen_theme(self)
+	UI_STYLE_GUIDE.apply_window_panel(self)
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
 	_build_interface()
 	_connect_inventory_signals()
@@ -138,6 +143,7 @@ func _build_interface() -> void:
 	var title_label: Label = Label.new()
 	title_label.text = "背包"
 	title_label.add_theme_font_size_override("font_size", 25)
+	UI_STYLE_GUIDE.apply_title_label(title_label)
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title_label)
 	_context_hint_label = Label.new()

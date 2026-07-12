@@ -7,6 +7,9 @@ class_name KeyBindingPanel
 signal binding_capture_started
 signal binding_capture_finished
 
+## 全局窗口样式指南；统一按键行、绑定按钮、滚动区域和恢复默认操作视觉。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+
 ## 面板标题；默认“按键绑定”，运行时通常不修改，修改会影响设置界面标题文本。
 @export var title_text: String = "按键绑定"
 ## 列表最小高度；取值建议 180 到 420，默认 260，修改会影响设置界面内按键列表可见行数。
@@ -28,6 +31,7 @@ var _rows_container: VBoxContainer
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	UI_STYLE_GUIDE.apply_screen_theme(self)
 	_input_bindings = get_tree().root.get_node_or_null("InputBindings")
 	_build_panel()
 	_refresh_binding_buttons()
@@ -65,6 +69,7 @@ func _build_panel() -> void:
 	title_label.text = title_text
 	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title_label.add_theme_font_size_override("font_size", 18)
+	UI_STYLE_GUIDE.apply_title_label(title_label)
 	add_child(title_label)
 
 	# 滚动容器；取值为动态创建 ScrollContainer，默认容纳较多操作行。

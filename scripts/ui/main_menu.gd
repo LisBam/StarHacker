@@ -10,6 +10,8 @@ const GAME_MODE_HACK: String = "hack"
 const GAME_MODE_TRAINING: String = "training"
 ## 按键绑定面板脚本；默认用于主菜单设置中动态创建可重绑定操作列表。
 const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_panel.gd")
+## 全局窗口样式指南；统一主菜单、设置页和全部局外遮罩窗口的主题与语义按钮颜色。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 局外仓库面板脚本；默认在主菜单点击仓库按钮后动态创建并读取全局背包服务。
 const WAREHOUSE_PANEL_SCRIPT: Script = preload("res://scripts/ui/warehouse_panel.gd")
 ## 主菜单背包面板脚本；复用游戏内背包装备结构，局外丢弃会直接永久移除物品。
@@ -111,6 +113,13 @@ var _developer_sequence_index: int = 0
 
 
 func _ready() -> void:
+	UI_STYLE_GUIDE.apply_screen_theme(self)
+	UI_STYLE_GUIDE.apply_window_panel(_settings_panel)
+	UI_STYLE_GUIDE.apply_primary_button(_start_button)
+	UI_STYLE_GUIDE.apply_danger_button(_quit_button)
+	UI_STYLE_GUIDE.apply_title_label(get_node("Center/Title") as Label)
+	UI_STYLE_GUIDE.apply_title_label(_settings_title_label)
+	(get_node("Background") as ColorRect).color = UI_STYLE_GUIDE.SCREEN_BACKGROUND_COLOR
 	_master_bus_index = AudioServer.get_bus_index("Master")
 	_start_button.pressed.connect(_on_start_button_pressed)
 	_training_button.pressed.connect(_on_training_button_pressed)
@@ -239,7 +248,8 @@ func _build_warehouse_overlay() -> void:
 	# 仓库背景遮罩；使用半透明黑色突出仓库内容。
 	var warehouse_dim: ColorRect = ColorRect.new()
 	warehouse_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	warehouse_dim.color = Color(0.0, 0.0, 0.0, 0.62)
+	# 全局遮罩补充；实际颜色由样式指南统一为带蓝色分量的深色透明层。
+	warehouse_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
 	warehouse_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	warehouse_overlay.add_child(warehouse_dim)
 
@@ -274,7 +284,8 @@ func _build_backpack_overlay() -> void:
 	_backpack_overlay = backpack_overlay
 	var backpack_dim: ColorRect = ColorRect.new()
 	backpack_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	backpack_dim.color = Color(0.0, 0.0, 0.0, 0.62)
+	# 全局遮罩补充；背包与其他局外窗口使用同一深蓝黑透明层。
+	backpack_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
 	backpack_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	backpack_overlay.add_child(backpack_dim)
 	# 背包面板；居中显示并保持与游戏内背包接近的 960×620 尺寸。
@@ -312,7 +323,8 @@ func _build_shop_overlay() -> void:
 	# 商店背景遮罩；使用半透明黑色突出商品查询和购买区域。
 	var shop_dim: ColorRect = ColorRect.new()
 	shop_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	shop_dim.color = Color(0.0, 0.0, 0.0, 0.62)
+	# 全局遮罩补充；实际颜色由样式指南统一管理。
+	shop_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
 	shop_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	shop_overlay.add_child(shop_dim)
 
@@ -350,7 +362,8 @@ func _build_forge_overlay() -> void:
 	# 锻造背景遮罩；使用半透明黑色突出环形牺牲槽和锻造预览。
 	var forge_dim: ColorRect = ColorRect.new()
 	forge_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	forge_dim.color = Color(0.0, 0.0, 0.0, 0.68)
+	# 全局遮罩补充；实际颜色由样式指南统一管理。
+	forge_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
 	forge_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	forge_overlay.add_child(forge_dim)
 
@@ -386,7 +399,7 @@ func _build_stock_market_overlay() -> void:
 	# 股市背景遮罩；透明度与商店、仓库保持一致，使行情面板成为清晰的局外焦点。
 	var stock_market_dim: ColorRect = ColorRect.new()
 	stock_market_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	stock_market_dim.color = Color(0.0, 0.0, 0.0, 0.68)
+	stock_market_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
 	stock_market_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	stock_market_overlay.add_child(stock_market_dim)
 	# 股市面板；固定 1040×620 像素并由独立组件处理行情展示与交易确认。
@@ -422,7 +435,7 @@ func _build_mining_farm_overlay() -> void:
 	# 矿场背景遮罩；使用与股市一致的深色透明度，使两个局外资产系统视觉并列。
 	var mining_farm_dim: ColorRect = ColorRect.new()
 	mining_farm_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	mining_farm_dim.color = Color(0.0, 0.0, 0.0, 0.68)
+	mining_farm_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
 	mining_farm_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	mining_farm_overlay.add_child(mining_farm_dim)
 	# 矿场面板；固定 1080×640 像素并由独立组件维护卡片、交易与动画。
@@ -457,7 +470,7 @@ func _build_developer_overlay() -> void:
 	# 开发者背景遮罩；使用深色半透明背景突出隐藏调试菜单。
 	var developer_dim: ColorRect = ColorRect.new()
 	developer_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	developer_dim.color = Color(0.0, 0.0, 0.0, 0.72)
+	developer_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
 	developer_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	developer_overlay.add_child(developer_dim)
 	# 开发者菜单面板；居中显示资源与金币快捷操作。

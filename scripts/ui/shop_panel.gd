@@ -8,6 +8,8 @@ signal closed
 
 ## 商店商品卡片脚本；每个条目独立展示最终价格、倍率和二手说明。
 const SHOP_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/shop_item_control.gd")
+## 全局窗口样式指南；统一商店主窗口、频道标签、查询控件和状态区域视觉。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 普通商店通道标识；显示随机刷新武器与资源，并允许金币手动刷新。
 const CHANNEL_NORMAL: String = "normal"
 ## 灰市通道标识；显示最近五次撤离失败中实际遗失且尚未购回的物品。
@@ -73,6 +75,8 @@ var _status_fade_elapsed_seconds: float = -1.0
 func _ready() -> void:
 	custom_minimum_size = panel_minimum_size
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	UI_STYLE_GUIDE.apply_screen_theme(self)
+	UI_STYLE_GUIDE.apply_window_panel(self)
 	_shop_service = get_tree().root.get_node_or_null("ShopService")
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
 	_build_interface()
@@ -119,6 +123,7 @@ func _build_interface() -> void:
 	title_label.text = "量子商店"
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.add_theme_font_size_override("font_size", 26)
+	UI_STYLE_GUIDE.apply_title_label(title_label)
 	header.add_child(title_label)
 	_coins_label = Label.new()
 	_coins_label.add_theme_font_size_override("font_size", 18)

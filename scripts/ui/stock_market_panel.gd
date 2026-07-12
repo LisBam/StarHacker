@@ -16,6 +16,8 @@ const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quant
 const COMMON_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/common_confirmation_dialog.gd")
 ## 证券币转账弹窗脚本；负责整数金币充值和整数证券币提现的金额输入与结果预览。
 const SECURITIES_TRANSFER_DIALOG_SCRIPT: Script = preload("res://scripts/ui/securities_transfer_dialog.gd")
+## 全局窗口样式指南；为股市基准界面补充统一按钮、输入、滚动和内部面板主题。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 标准股票卡片尺寸；固定 160×72，与项目物品卡片规范一致。
 const CARD_SIZE: Vector2 = Vector2(160.0, 72.0)
 ## 面板目标尺寸；默认 1040×620，宿主应按该尺寸居中放置。
@@ -77,6 +79,7 @@ var _event_tween: Tween
 
 func _ready() -> void:
 	custom_minimum_size = panel_minimum_size
+	UI_STYLE_GUIDE.apply_screen_theme(self)
 	_stock_market_service = get_tree().root.get_node_or_null("StockMarketService")
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
 	_build_interface()
@@ -223,11 +226,13 @@ func _build_interface() -> void:
 	_buy_button = Button.new()
 	_buy_button.text = "买入"
 	_buy_button.custom_minimum_size = Vector2(0.0, 42.0)
+	UI_STYLE_GUIDE.apply_primary_button(_buy_button)
 	_buy_button.pressed.connect(_on_buy_pressed)
 	trade_content.add_child(_buy_button)
 	_sell_button = Button.new()
 	_sell_button.text = "卖出"
 	_sell_button.custom_minimum_size = Vector2(0.0, 42.0)
+	UI_STYLE_GUIDE.apply_danger_button(_sell_button)
 	_sell_button.pressed.connect(_on_sell_pressed)
 	trade_content.add_child(_sell_button)
 	# 持仓区标题；位于主体与横向持仓列表之间。

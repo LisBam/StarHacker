@@ -12,6 +12,8 @@ const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_it
 const ITEM_ACTION_POPUP_SCRIPT: Script = preload("res://scripts/ui/item_action_popup.gd")
 ## 数量选择弹窗脚本；堆叠物品部分送回仓库时复用出售数量 UI。
 const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
+## 全局窗口样式指南；统一物资撤离窗口、规则说明、分区和操作控件视觉。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 全部送回操作编号；单件物品和整组堆叠共同使用。
 const ACTION_SEND_ALL: int = 1
 ## 部分送回操作编号；只在堆叠数量大于 1 时显示。
@@ -55,6 +57,8 @@ var _pending_partial_source_location: String = ""
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	custom_minimum_size = panel_minimum_size
+	UI_STYLE_GUIDE.apply_screen_theme(self)
+	UI_STYLE_GUIDE.apply_window_panel(self)
 	_build_interface()
 	visible = false
 
@@ -106,6 +110,7 @@ func _build_interface() -> void:
 	title_label.text = "物资撤离点"
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.add_theme_font_size_override("font_size", 25)
+	UI_STYLE_GUIDE.apply_title_label(title_label)
 	header.add_child(title_label)
 	_coins_label = Label.new()
 	_coins_label.add_theme_font_size_override("font_size", 17)

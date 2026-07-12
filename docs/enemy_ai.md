@@ -14,7 +14,7 @@
 | `res://scripts/components/monster_simulation_manager.gd` | 在轻量虚拟记录和真实敌人节点之间分批物化、休眠与回收 |
 | `res://scripts/game/game_world.gd` | 建立整图人口目标、障碍矩形和共享导航网格，并统一处理死亡掉落 |
 
-`basic_monster.tscn` 与 `ranged_monster.tscn` 显式组合三个 AI 组件，`GameWorld` 显式组合人口管理器。感知不控制移动或攻击，战术不访问其他怪物，移动不推断玩家状态。
+`res://scenes/enemies/stelle/voidranger_reaver.tscn` 与 `res://scenes/enemies/stelle/voidranger_eliminator.tscn` 分别复用近战、远程组合根并显式组合三个 AI 组件，`GameWorld` 显式组合人口管理器。感知不控制移动或攻击，战术不访问其他怪物，移动不推断玩家状态。当前怪物内容池只注册这两个星扩展包场景，组合根脚本继续作为后续敌人模板的共享实现。
 
 ## 2. 虚拟人口生命周期
 

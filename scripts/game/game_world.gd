@@ -82,6 +82,7 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 ## 脱离卡死最大搜索圈数；默认 12 圈，在 48 像素格配置下最多搜索约 576 像素范围。
 @export_range(1, 64, 1) var unstuck_max_search_radius: int = 12
 ## 随机怪物场景；默认由 game_world.tscn 指向 BasicMonster，必须实例化为 Node2D，修改会影响随机生成的敌人类型。
+## 星内容精简补充：当前正式场景兜底指向虚卒·掠夺者，运行时再由内容目录合并两种星扩展包怪物。
 @export var monster_scene: PackedScene
 ## 随机怪物场景池；默认由场景填入近战和远程怪物，非空时会优先从池中随机选择生成对象。
 @export var monster_scenes: Array[PackedScene] = []
@@ -1885,6 +1886,7 @@ func _get_random_chest_weapon(high_quality: bool) -> Resource:
 	if weapon_drop_table.is_empty():
 		return _get_random_chest_stone(high_quality)
 	# 高品质武器池；当前以基础价值不低于 120 金币识别，覆盖脉冲步枪、散射爆能枪和磁轨炮等高价值枪械。
+	# 星内容精简补充：当前两把保留武器价值均为 50，高品质候选为空时会按既有规则回退完整星武器池。
 	var candidate_weapons: Array[Resource] = []
 	for weapon_template in weapon_drop_table:
 		if weapon_template != null and (not high_quality or int(weapon_template.get("value")) >= 120):

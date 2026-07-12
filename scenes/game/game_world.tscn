@@ -1,10 +1,10 @@
-[gd_scene load_steps=31 format=3]
+[gd_scene load_steps=23 format=3]
 
 [ext_resource type="Script" path="res://scripts/game/game_world.gd" id="1_game_world"]
 [ext_resource type="PackedScene" path="res://scenes/characters/player.tscn" id="2_player"]
 [ext_resource type="Script" path="res://scripts/ui/combat_hud.gd" id="3_combat_hud"]
 [ext_resource type="Script" path="res://scripts/ui/inventory_drop_area.gd" id="4_inventory_drop_area"]
-[ext_resource type="PackedScene" path="res://scenes/enemies/basic_monster.tscn" id="5_basic_monster"]
+[ext_resource type="PackedScene" path="res://scenes/enemies/stelle/voidranger_reaver.tscn" id="5_voidranger_reaver"]
 [ext_resource type="PackedScene" path="res://scenes/environment/wall_ring_building.tscn" id="6_wall_ring_building"]
 [ext_resource type="PackedScene" path="res://scenes/environment/compact_building.tscn" id="7_compact_building"]
 [ext_resource type="PackedScene" path="res://scenes/environment/wall_segment.tscn" id="8_wall_segment"]
@@ -13,18 +13,10 @@
 [ext_resource type="PackedScene" path="res://scenes/environment/cross_access_building.tscn" id="11_cross_access_building"]
 [ext_resource type="PackedScene" path="res://scenes/environment/l_wall.tscn" id="12_l_wall"]
 [ext_resource type="PackedScene" path="res://scenes/environment/l_building.tscn" id="13_l_building"]
-[ext_resource type="PackedScene" path="res://scenes/enemies/ranged_monster.tscn" id="14_ranged_monster"]
+[ext_resource type="PackedScene" path="res://scenes/enemies/stelle/voidranger_eliminator.tscn" id="14_voidranger_eliminator"]
 [ext_resource type="PackedScene" path="res://scenes/drops/weapon_drop.tscn" id="15_weapon_drop"]
-[ext_resource type="Resource" path="res://data/weapons/quantum_pistol.tres" id="16_quantum_pistol"]
-[ext_resource type="Resource" path="res://data/weapons/pulse_rifle.tres" id="17_pulse_rifle"]
-[ext_resource type="Resource" path="res://data/weapons/ion_smg.tres" id="18_ion_smg"]
-[ext_resource type="Resource" path="res://data/weapons/scatter_blaster.tres" id="19_scatter_blaster"]
-[ext_resource type="Resource" path="res://data/weapons/rail_cannon.tres" id="20_rail_cannon"]
-[ext_resource type="Resource" path="res://data/weapons/phase_blade.tres" id="21_phase_blade"]
-[ext_resource type="Resource" path="res://data/weapons/quantum_dagger.tres" id="22_quantum_dagger"]
-[ext_resource type="Resource" path="res://data/weapons/prism_scatter_gun.tres" id="28_prism_scatter_gun"]
-[ext_resource type="Resource" path="res://data/weapons/phase_piercer.tres" id="29_phase_piercer"]
-[ext_resource type="Resource" path="res://data/weapons/pulse_combo_rifle.tres" id="30_pulse_combo_rifle"]
+[ext_resource type="Resource" path="res://data/weapons/stelle/as_ive_written.tres" id="16_as_ive_written"]
+[ext_resource type="Resource" path="res://data/weapons/stelle/galactic_baseball_bat.tres" id="21_galactic_baseball_bat"]
 [ext_resource type="Script" path="res://scripts/components/monster_simulation_manager.gd" id="23_monster_simulation_manager"]
 [ext_resource type="Resource" path="res://data/items/repair_kit_basic.tres" id="24_repair_kit_basic"]
 [ext_resource type="Resource" path="res://data/items/repair_kit_medium.tres" id="25_repair_kit_medium"]
@@ -33,11 +25,11 @@
 
 [node name="GameWorld" type="Node2D"]
 script = ExtResource("1_game_world")
-monster_scene = ExtResource("5_basic_monster")
-monster_scenes = Array[PackedScene]([ExtResource("5_basic_monster"), ExtResource("14_ranged_monster")])
+monster_scene = ExtResource("5_voidranger_reaver")
+monster_scenes = Array[PackedScene]([ExtResource("5_voidranger_reaver"), ExtResource("14_voidranger_eliminator")])
 obstacle_scenes = Array[PackedScene]([ExtResource("6_wall_ring_building"), ExtResource("7_compact_building"), ExtResource("8_wall_segment"), ExtResource("10_corridor_building"), ExtResource("11_cross_access_building"), ExtResource("12_l_wall"), ExtResource("13_l_building")])
 weapon_drop_scene = ExtResource("15_weapon_drop")
-weapon_drop_table = Array[Resource]([ExtResource("16_quantum_pistol"), ExtResource("17_pulse_rifle"), ExtResource("18_ion_smg"), ExtResource("19_scatter_blaster"), ExtResource("20_rail_cannon"), ExtResource("21_phase_blade"), ExtResource("22_quantum_dagger"), ExtResource("28_prism_scatter_gun"), ExtResource("29_phase_piercer"), ExtResource("30_pulse_combo_rifle")])
+weapon_drop_table = Array[Resource]([ExtResource("16_as_ive_written"), ExtResource("21_galactic_baseball_bat")])
 repair_kit_drop_table = Array[Resource]([ExtResource("24_repair_kit_basic"), ExtResource("25_repair_kit_medium"), ExtResource("26_repair_kit_advanced")])
 loot_chest_scene = ExtResource("27_loot_chest")
 

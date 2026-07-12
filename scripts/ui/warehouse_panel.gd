@@ -120,9 +120,9 @@ var _pending_stone_location: String = ""
 ## 取消使用按钮；默认隐藏，玩家点击强化石“使用”后显示并可退出目标选择。
 var _cancel_stone_use_button: Button
 ## 强化结果弹窗；默认运行时创建一次，每次成功强化时复用。
-var _enhancement_result_dialog: AcceptDialog
+var _enhancement_result_dialog: EnhancementResultDialog
 ## 堆叠出售数量弹窗；默认运行时创建一次，重复出售时复用并刷新最大数量和单价。
-var _sell_quantity_dialog: ConfirmationDialog
+var _sell_quantity_dialog: SellQuantityDialog
 ## 数量出售待处理资源；默认 null，打开数量弹窗后保存精确资源实例直到玩家确认或覆盖下一次操作。
 var _quantity_sale_item_resource: Resource
 ## 数量出售待处理位置；取值 warehouse 或 backpack，默认空字符串表示没有有效出售请求。
@@ -372,9 +372,9 @@ func _build_storage_interface() -> void:
 	_item_action_menu = ITEM_ACTION_POPUP_SCRIPT.new() as ItemActionPopup
 	_item_action_menu.action_pressed.connect(_on_item_action_menu_id_pressed)
 	add_child(_item_action_menu)
-	_enhancement_result_dialog = ENHANCEMENT_RESULT_DIALOG_SCRIPT.new() as AcceptDialog
+	_enhancement_result_dialog = ENHANCEMENT_RESULT_DIALOG_SCRIPT.new() as EnhancementResultDialog
 	add_child(_enhancement_result_dialog)
-	_sell_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as ConfirmationDialog
+	_sell_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as SellQuantityDialog
 	_sell_quantity_dialog.connect("quantity_confirmed", Callable(self, "_on_sell_quantity_confirmed"))
 	add_child(_sell_quantity_dialog)
 	_apply_storage_display_mode()
@@ -712,7 +712,7 @@ func _on_item_action_requested(item_resource: Resource, source_location: String)
 			_item_action_menu.add_action("装备2", ITEM_ACTION_EQUIP_RANGED_2)
 		else:
 			_item_action_menu.add_action("装备", ITEM_ACTION_EQUIP)
-	_item_action_menu.popup_at(get_viewport().get_mouse_position())
+	_item_action_menu.present_at(get_viewport().get_mouse_position())
 
 
 func _on_item_action_menu_id_pressed(action_id: int) -> void:
@@ -823,8 +823,8 @@ func _on_cancel_stone_use_pressed() -> void:
 
 
 func _present_enhancement_result(enhancement_result: Dictionary) -> void:
-	if _enhancement_result_dialog != null and _enhancement_result_dialog.has_method("present_result"):
-		_enhancement_result_dialog.call("present_result", enhancement_result)
+	if _enhancement_result_dialog != null:
+		_enhancement_result_dialog.present_result(enhancement_result)
 
 
 func _open_sell_quantity_dialog(item_resource: Resource, source_location: String, maximum_quantity: int) -> void:
@@ -842,7 +842,7 @@ func _open_sell_quantity_dialog(item_resource: Resource, source_location: String
 	var unit_sell_price: int = total_sell_price / resolved_maximum_quantity
 	# 物品名称；统一由详情格式化器解析显示名，避免武器旧资源名称为空。
 	var item_display_name: String = str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", item_resource))
-	_sell_quantity_dialog.call("present", item_display_name, resolved_maximum_quantity, unit_sell_price)
+	_sell_quantity_dialog.present(item_display_name, resolved_maximum_quantity, unit_sell_price)
 
 
 func _on_sell_quantity_confirmed(quantity: int) -> void:
@@ -873,7 +873,7 @@ func _open_transfer_quantity_dialog(item_resource: Resource, source_location: St
 	var source_display_name: String = "永久仓库" if source_location == "warehouse" else "随身背包"
 	# 目标中文名；与来源使用同一术语，避免玩家误解为出售或装备操作。
 	var target_display_name: String = "永久仓库" if target_location == "warehouse" else "随身背包"
-	_sell_quantity_dialog.call("present_transfer", item_display_name, maxi(maximum_quantity, 1), source_display_name, target_display_name)
+	_sell_quantity_dialog.present_transfer(item_display_name, maxi(maximum_quantity, 1), source_display_name, target_display_name)
 
 
 func _reset_quantity_operation() -> void:

@@ -75,6 +75,11 @@ func popup_at(screen_position: Vector2) -> void:
 	popup()
 
 
+func present_at(screen_position: Vector2) -> void:
+	## 通过项目统一的 present 前缀展示物品操作弹窗；坐标使用视口屏幕坐标，旧 popup_at() 接口继续保留兼容既有扩展。
+	popup_at(screen_position)
+
+
 func _build_interface() -> void:
 	# 弹窗背景；深蓝灰底、亮边框和圆角用于与物品卡片保持同一视觉语言。
 	var popup_style: StyleBoxFlat = StyleBoxFlat.new()

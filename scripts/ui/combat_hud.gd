@@ -199,13 +199,13 @@ var _combat_action_item_quantity: int = 1
 ## 当前局内部分丢弃等待确认的物品；默认 null，数量弹窗确认后按当前背包真实数量再次限制。
 var _pending_discard_resource: Resource
 ## 局内数量选择弹窗；默认运行时创建一次，部分丢弃时切换为丢弃模式。
-var _combat_quantity_dialog: ConfirmationDialog
+var _combat_quantity_dialog: SellQuantityDialog
 ## 通用局内背包面板；运行时替代场景中的旧背包实现，CombatHud 只管理显示、输入锁定和地面丢弃。
 var _shared_backpack_panel: SharedBackpackPanel
 ## 局内取消使用按钮；默认隐藏，进入强化目标选择后显示。
 var _inventory_cancel_stone_use_button: Button
 ## 局内强化结果弹窗；默认运行时创建一次并在每次成功强化时复用。
-var _enhancement_result_dialog: AcceptDialog
+var _enhancement_result_dialog: EnhancementResultDialog
 ## 强化选择前主分类；默认资源分类，成功使用强化石后恢复到玩家跳转前的资源页面。
 var _combat_stone_return_primary_category: String = InventoryQuery.PRIMARY_RESOURCES
 ## 强化选择前子分类；默认强化石，成功使用强化石后恢复原分页。
@@ -1651,9 +1651,9 @@ func _build_inventory_item_action_menu() -> void:
 	var title_parent: Node = _inventory_title_label.get_parent()
 	title_parent.add_child(_inventory_cancel_stone_use_button)
 	title_parent.move_child(_inventory_cancel_stone_use_button, _inventory_title_label.get_index() + 1)
-	_enhancement_result_dialog = ENHANCEMENT_RESULT_DIALOG_SCRIPT.new() as AcceptDialog
+	_enhancement_result_dialog = ENHANCEMENT_RESULT_DIALOG_SCRIPT.new() as EnhancementResultDialog
 	_root_control.add_child(_enhancement_result_dialog)
-	_combat_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as ConfirmationDialog
+	_combat_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as SellQuantityDialog
 	_combat_quantity_dialog.connect("quantity_confirmed", Callable(self, "_on_combat_quantity_confirmed"))
 	_root_control.add_child(_combat_quantity_dialog)
 
@@ -2720,7 +2720,7 @@ func _on_combat_resource_action_requested(item_resource: Resource) -> void:
 		_inventory_item_action_menu.clear_actions()
 		_inventory_item_action_menu.add_action("装备", INVENTORY_ITEM_ACTION_EQUIP)
 		_add_inventory_discard_actions(1)
-		_inventory_item_action_menu.popup_at(get_viewport().get_mouse_position())
+		_inventory_item_action_menu.present_at(get_viewport().get_mouse_position())
 		return
 	_combat_action_stone_resource = item_resource
 	_combat_action_weapon_resource = null
@@ -2732,7 +2732,7 @@ func _on_combat_resource_action_requested(item_resource: Resource) -> void:
 	if str(item_resource.get("item_kind")) == "repair_kit":
 		_inventory_item_action_menu.add_action("使用", INVENTORY_ITEM_ACTION_USE)
 	_add_inventory_discard_actions(_combat_action_item_quantity)
-	_inventory_item_action_menu.popup_at(get_viewport().get_mouse_position())
+	_inventory_item_action_menu.present_at(get_viewport().get_mouse_position())
 
 
 func _on_inventory_item_action_menu_id_pressed(action_id: int) -> void:
@@ -2783,7 +2783,7 @@ func _on_inventory_item_action_menu_id_pressed(action_id: int) -> void:
 		var partial_resource: Resource = _combat_action_weapon_resource if _combat_action_weapon_resource != null else _combat_action_stone_resource
 		if partial_resource != null and _combat_quantity_dialog != null:
 			_pending_discard_resource = partial_resource
-			_combat_quantity_dialog.call("present_discard", str(partial_resource.get("display_name")), maxi(_combat_action_item_quantity, 1))
+			_combat_quantity_dialog.present_discard(str(partial_resource.get("display_name")), maxi(_combat_action_item_quantity, 1))
 
 
 func _on_combat_weapon_selected(weapon_resource: Resource, selected_context: String, selected_kind: String, selected_index: int) -> void:
@@ -2808,7 +2808,7 @@ func _on_combat_weapon_selected(weapon_resource: Resource, selected_context: Str
 	_inventory_item_action_menu.clear_actions()
 	_inventory_item_action_menu.add_action("装备", INVENTORY_ITEM_ACTION_EQUIP)
 	_add_inventory_discard_actions(1)
-	_inventory_item_action_menu.popup_at(get_viewport().get_mouse_position())
+	_inventory_item_action_menu.present_at(get_viewport().get_mouse_position())
 
 
 func _add_inventory_discard_actions(item_quantity: int) -> void:
@@ -2926,8 +2926,8 @@ func _on_cancel_combat_stone_use_pressed() -> void:
 
 
 func _present_combat_enhancement_result(enhancement_result: Dictionary) -> void:
-	if _enhancement_result_dialog != null and _enhancement_result_dialog.has_method("present_result"):
-		_enhancement_result_dialog.call("present_result", enhancement_result)
+	if _enhancement_result_dialog != null:
+		_enhancement_result_dialog.present_result(enhancement_result)
 
 
 func _capture_combat_stone_return_view() -> void:

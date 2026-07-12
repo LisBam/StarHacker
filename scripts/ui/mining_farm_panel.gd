@@ -82,11 +82,11 @@ var _production_progress: ProgressBar
 ## 浮动收益提示层；余额正向变化或后台补齐时在状态栏下方上浮淡出。
 var _floating_feedback_layer: Control
 ## 数量操作弹窗；充值、提现和出售共用同一紧凑组件。
-var _quantity_dialog: ConfirmationDialog
+var _quantity_dialog: SellQuantityDialog
 ## 股市同款二次确认弹窗；完整展示操作、数量、金额和余额状态后才执行真实交易。
-var _confirmation_dialog: ConfirmationDialog
+var _confirmation_dialog: CommonConfirmationDialog
 ## 信息提示弹窗；交易失败时展示服务返回原因，不修改任何数据。
-var _message_dialog: AcceptDialog
+var _message_dialog: CommonConfirmationDialog
 
 
 func _ready() -> void:
@@ -280,18 +280,17 @@ func _build_footer(root: VBoxContainer) -> void:
 
 
 func _build_quantity_dialog() -> void:
-	_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as ConfirmationDialog
+	_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as SellQuantityDialog
 	_quantity_dialog.connect("quantity_confirmed", Callable(self, "_on_quantity_confirmed"))
 	add_child(_quantity_dialog)
-	_confirmation_dialog = COMMON_CONFIRMATION_DIALOG_SCRIPT.new() as ConfirmationDialog
+	_confirmation_dialog = COMMON_CONFIRMATION_DIALOG_SCRIPT.new() as CommonConfirmationDialog
 	_confirmation_dialog.confirmed.connect(_confirm_quantity_action)
 	_confirmation_dialog.canceled.connect(_clear_pending_transaction)
 	add_child(_confirmation_dialog)
 
 
 func _build_message_dialog() -> void:
-	_message_dialog = AcceptDialog.new()
-	_message_dialog.title = "矿场提示"
+	_message_dialog = COMMON_CONFIRMATION_DIALOG_SCRIPT.new() as CommonConfirmationDialog
 	add_child(_message_dialog)
 
 
@@ -482,7 +481,7 @@ func _open_quantity_dialog(action: String, asset_id: String) -> void:
 			_show_message("永久金币不足，无法充值")
 			_clear_pending_transaction()
 			return
-		_quantity_dialog.call("present_mining_transaction", ACTION_RECHARGE, "算力币充值", coins, 10000, 0.60, 0.10, _show_exact_values)
+		_quantity_dialog.present_mining_transaction(ACTION_RECHARGE, "算力币充值", coins, 10000, 0.60, 0.10, _show_exact_values)
 	elif action == ACTION_WITHDRAW:
 		# 最大可提现金币；使用服务精确公式，避免按单金币成本近似造成大额提现上限偏差。
 		var maximum_gold: int = int(_service.call("get_maximum_withdrawable_gold")) if _service != null and _service.has_method("get_maximum_withdrawable_gold") else 0
@@ -490,7 +489,7 @@ func _open_quantity_dialog(action: String, asset_id: String) -> void:
 			_show_message("算力币余额不足，最低提现 1 金币")
 			_clear_pending_transaction()
 			return
-		_quantity_dialog.call("present_mining_transaction", ACTION_WITHDRAW, "永久金币提现", maximum_gold, 10000, 0.60, 0.10, _show_exact_values)
+		_quantity_dialog.present_mining_transaction(ACTION_WITHDRAW, "永久金币提现", maximum_gold, 10000, 0.60, 0.10, _show_exact_values)
 	else:
 		# 当前资产定义；数量窗口读取官方单价，确认时服务仍按当前定义重新计算。
 		var definition: Dictionary = _get_asset_definition(asset_id)
@@ -498,14 +497,14 @@ func _open_quantity_dialog(action: String, asset_id: String) -> void:
 		var display_name: String = str(definition.get("name", "算力资产"))
 		if action == ACTION_SELL:
 			var owned_quantity: int = int(_service.call("get_asset_quantity", asset_id))
-			_quantity_dialog.call("present_mining_transaction", ACTION_SELL, display_name, owned_quantity, unit_price, 0.60, 0.10, _show_exact_values)
+			_quantity_dialog.present_mining_transaction(ACTION_SELL, display_name, owned_quantity, unit_price, 0.60, 0.10, _show_exact_values)
 		else:
 			var maximum_buy: int = int(_service.call("get_maximum_buy_quantity", asset_id)) if _service.has_method("get_maximum_buy_quantity") else 0
 			if maximum_buy <= 0:
 				_show_message("算力币余额不足，无法购买该资产")
 				_clear_pending_transaction()
 				return
-			_quantity_dialog.call("present_mining_transaction", ACTION_BUY, display_name, maximum_buy, unit_price, 0.60, 0.10, _show_exact_values)
+			_quantity_dialog.present_mining_transaction(ACTION_BUY, display_name, maximum_buy, unit_price, 0.60, 0.10, _show_exact_values)
 
 
 func _on_quantity_confirmed(quantity: int) -> void:
@@ -513,7 +512,7 @@ func _on_quantity_confirmed(quantity: int) -> void:
 	# 二次确认内容；完整列出实际数量和服务公式计算的最终整数金额。
 	var message: String = _build_transaction_confirmation_message()
 	var action_name: String = _get_action_display_name()
-	_confirmation_dialog.call("present", "确认%s" % action_name, message, "确认%s" % action_name, "取消", 480, 270, true)
+	_confirmation_dialog.present("确认%s" % action_name, message, "确认%s" % action_name, "取消", 480, 270, true)
 
 
 func _confirm_quantity_action() -> void:
@@ -626,8 +625,7 @@ func _play_startup_animation(card: Control) -> void:
 
 
 func _show_message(message: String) -> void:
-	_message_dialog.dialog_text = message
-	_message_dialog.popup_centered()
+	_message_dialog.present_information("矿场提示", message)
 
 
 func _close_panel() -> void:

@@ -101,7 +101,7 @@ var _inventory_split: HSplitContainer
 ## 装备栏左侧面板；仓库来源时整体隐藏，避免装备物品与仓库候选混合。
 var _equipment_panel: PanelContainer
 ## 锻造结果弹窗；完成动画和实际结算后展示属性与耐久变化。
-var _result_dialog: AcceptDialog
+var _result_dialog: EnhancementResultDialog
 ## 当前是否正在播放锻造并执行结算；为 true 时阻止关闭、换槽和重复点击。
 var _forging_in_progress: bool = false
 ## 动画临时控件；每项对应一个非空牺牲槽的名称标签。
@@ -359,7 +359,7 @@ func _build_interface() -> void:
 	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(_status_label)
-	_result_dialog = ENHANCEMENT_RESULT_DIALOG_SCRIPT.new() as AcceptDialog
+	_result_dialog = ENHANCEMENT_RESULT_DIALOG_SCRIPT.new() as EnhancementResultDialog
 	add_child(_result_dialog)
 
 
@@ -723,7 +723,7 @@ func _on_forge_pressed() -> void:
 		return
 	_status_label.text = "锻造完成"
 	_refresh_all()
-	_result_dialog.call("present_result", forge_result)
+	_result_dialog.present_result(forge_result)
 
 
 func _play_forge_animation() -> void:

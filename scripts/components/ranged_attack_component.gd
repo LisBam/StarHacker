@@ -24,6 +24,10 @@ signal fired(projectile: Node2D)
 @export_flags_2d_physics var muzzle_block_collision_mask: int = 16
 ## 弹体父节点路径；默认留空表示挂到当前场景，运行时通常不修改，指定后会影响弹体所在层级和坐标继承。
 @export var projectile_parent_path: NodePath
+## 散射中心弹偏移比例；默认 0.25，主弹只使用完整偏移角的四分之一并随机落在瞄准方向附近。
+@export_range(0.0, 1.0, 0.01) var scatter_center_deviation_ratio: float = 0.25
+## 散射分层随机比例；默认 0.35，其余弹体围绕左右等距锚点随机抖动且不会跨越所属侧。
+@export_range(0.0, 0.49, 0.01) var scatter_layer_jitter_ratio: float = 0.35
 
 ## 剩余射击冷却；取值大于等于 0，默认 0 表示可立即射击，修改会影响组件是否接受下一次射击请求。
 var _cooldown_remaining: float = 0.0
@@ -41,15 +45,15 @@ var _active_combo_cooldown: float = 0.0
 var _active_combo_direction: Vector2 = Vector2.RIGHT
 ## 当前连击武器资源；默认 null，连击结束后清空，保证中途切换装备不会改变已经开始的攻击参数。
 var _active_combo_weapon: Resource
-## 弹体扩散随机源；默认启动时随机化，每次开火独立生成对称角度偏移。
-var _spread_random: RandomNumberGenerator = RandomNumberGenerator.new()
+## 弹体偏移随机源；默认启动时随机化，每颗弹体独立生成受分层范围约束的角度偏移。
+var _deviation_random: RandomNumberGenerator = RandomNumberGenerator.new()
 
 ## 枪口节点缓存；默认按 muzzle_path 解析，允许为空并走备用距离，修改会影响弹体出生位置来源。
 @onready var _muzzle: Node2D = get_node_or_null(muzzle_path) as Node2D
 
 
 func _ready() -> void:
-	_spread_random.randomize()
+	_deviation_random.randomize()
 
 
 func _process(delta: float) -> void:
@@ -83,8 +87,8 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	var selected_fire_cooldown: float = _get_weapon_float(weapon_data, "ranged_cooldown", fire_cooldown)
 	# 本次使用的弹体冲击力；取值来自武器数据，默认 0 表示只造成伤害不击退。
 	var selected_impact_force: float = _get_weapon_float(weapon_data, "impact_force", 0.0)
-	# 本次使用的扩散角度；取值来自武器数据，默认 0 度表示弹体严格沿瞄准方向发射。
-	var selected_spread_degrees: float = maxf(_get_weapon_float(weapon_data, "spread_degrees", 0.0), 0.0)
+	# 本次使用的偏移角度；取值来自武器数据，默认 0 度表示弹体严格沿瞄准方向发射。
+	var selected_deviation_degrees: float = maxf(_get_weapon_float(weapon_data, "deviation_degrees", 0.0), 0.0)
 	# 本次每轮散射弹体数；未持有散射属性的武器固定为 1，避免默认字段让普通武器获得额外弹体。
 	var selected_scatter_count: int = maxi(roundi(_get_weapon_float(weapon_data, "scatter_count", 1.0)), 1) if _weapon_has_attribute(weapon_data, "has_scatter") else 1
 	# 本次连击轮数；未持有连击属性的武器固定为 1，完整轮次结束后才进入正式冷却。
@@ -103,7 +107,7 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 	weapon_data.set_meta("active_bullet_range", selected_bullet_range)
 	weapon_data.set_meta("active_projectile_damage", selected_projectile_damage)
 	weapon_data.set_meta("active_impact_force", selected_impact_force)
-	weapon_data.set_meta("active_spread_degrees", selected_spread_degrees)
+	weapon_data.set_meta("active_deviation_degrees", selected_deviation_degrees)
 	if not _fire_round(direction.normalized(), weapon_data):
 		return false
 	_combo_rounds_remaining = selected_combo_count - 1
@@ -124,14 +128,14 @@ func _fire_round(direction: Vector2, weapon_data: Resource) -> bool:
 	var spawned_projectile_count: int = 0
 	# 当前轮散射数量；显式散射武器按扇形角度表生成，普通武器仍只发射一颗弹体。
 	var scatter_count: int = maxi(int(weapon_data.get_meta("active_scatter_count", 1)), 1)
-	# 当前轮扩散角度；限制为非负数，表示瞄准方向两侧各自允许使用的最大角度。
-	var spread_degrees: float = maxf(float(weapon_data.get_meta("active_spread_degrees", 0.0)), 0.0)
-	# 是否为显式散射武器；散射武器固定保留中心弹，普通武器继续使用单弹随机扩散。
+	# 当前轮偏移角度；限制为非负数，表示瞄准方向两侧各自允许使用的最大角度。
+	var deviation_degrees: float = maxf(float(weapon_data.get_meta("active_deviation_degrees", 0.0)), 0.0)
+	# 是否为显式散射武器；散射武器保留瞄准附近主弹，普通武器继续使用单弹随机偏移。
 	var has_scatter: bool = bool(weapon_data.get_meta("active_has_scatter", false))
-	# 当前轮弹体角度表；元素为相对瞄准方向的角度，数量与本轮弹体数一致。
-	var projectile_offsets: Array[float] = _build_scatter_offsets_degrees(scatter_count, spread_degrees) if has_scatter else [_spread_random.randf_range(-spread_degrees, spread_degrees)]
+	# 当前轮弹体角度表；元素为相对瞄准方向的随机角度，数量与本轮弹体数一致。
+	var projectile_offsets: Array[float] = _build_scatter_deviation_offsets_degrees(scatter_count, deviation_degrees) if has_scatter else [_deviation_random.randf_range(-deviation_degrees, deviation_degrees)]
 	for projectile_offset in projectile_offsets:
-		# 本颗弹体方向；散射武器使用分层扇形角度，普通武器使用原有随机角度。
+		# 本颗弹体方向；散射武器使用分层随机偏移，普通武器使用完整区间随机偏移。
 		var resolved_direction: Vector2 = direction.rotated(deg_to_rad(projectile_offset))
 		# 本颗弹体出生位置；枪口或备用位置被墙体阻挡时只跳过该颗弹体。
 		var spawn_position: Vector2 = _get_spawn_position(resolved_direction)
@@ -165,15 +169,17 @@ func _fire_round(direction: Vector2, weapon_data: Resource) -> bool:
 	return spawned_projectile_count > 0
 
 
-func _build_scatter_offsets_degrees(scatter_count: int, spread_degrees: float) -> Array[float]:
-	## 生成显式散射武器的扇形角度表；固定包含 0 度中心弹，其余弹体在左右扩散区间内最大化相邻间距。
+func _build_scatter_deviation_offsets_degrees(scatter_count: int, deviation_degrees: float) -> Array[float]:
+	## 生成显式散射武器的分层随机角度；主弹随机靠近瞄准方向，其余弹体在左右各自层级内随机并保持分散。
 	# 安全弹体数量；最低为 1，异常强化数据不会生成空射击轮次。
 	var resolved_scatter_count: int = maxi(scatter_count, 1)
-	# 安全扩散角；最低为 0，零扩散时全部弹体只能沿瞄准方向重合。
-	var resolved_spread_degrees: float = maxf(spread_degrees, 0.0)
-	# 角度结果；第一项固定为 0，保证每轮至少一颗子弹严格靠近瞄准方向。
-	var offsets: Array[float] = [0.0]
-	if resolved_scatter_count <= 1 or resolved_spread_degrees <= 0.0:
+	# 安全偏移角；最低为 0，零偏移时全部弹体只能沿瞄准方向重合。
+	var resolved_deviation_degrees: float = maxf(deviation_degrees, 0.0)
+	# 中心弹随机范围；只使用完整偏移角的一部分，使主弹受偏移影响但仍优先靠近瞄准方向。
+	var center_deviation: float = resolved_deviation_degrees * clampf(scatter_center_deviation_ratio, 0.0, 1.0)
+	# 角度结果；第一项为主弹的随机偏移，零偏移时保持 0 度。
+	var offsets: Array[float] = [_deviation_random.randf_range(-center_deviation, center_deviation)]
+	if resolved_scatter_count <= 1 or resolved_deviation_degrees <= 0.0:
 		while offsets.size() < resolved_scatter_count:
 			offsets.append(0.0)
 		return offsets
@@ -184,17 +190,29 @@ func _build_scatter_offsets_degrees(scatter_count: int, spread_degrees: float) -
 	var left_projectile_count: int = remaining_projectile_count / 2
 	# 右侧弹体数量；与左侧共同占满全部剩余弹体。
 	var right_projectile_count: int = remaining_projectile_count - left_projectile_count
-	if remaining_projectile_count % 2 == 1 and _spread_random.randi_range(0, 1) == 0:
+	if remaining_projectile_count % 2 == 1 and _deviation_random.randi_range(0, 1) == 0:
 		left_projectile_count = right_projectile_count
 		right_projectile_count = remaining_projectile_count - left_projectile_count
 
 	for left_index in range(1, left_projectile_count + 1):
-		# 左侧角度；按本侧弹体总数等距铺到负扩散边界，最大化中心弹与相邻弹体的间距。
-		var left_offset: float = -resolved_spread_degrees * float(left_index) / float(left_projectile_count)
+		# 左侧层级间距；本侧弹体以等距锚点为中心随机，较大下标逐步靠近负偏移边界。
+		var left_layer_step: float = resolved_deviation_degrees / float(left_projectile_count)
+		# 左侧锚点；固定为负角度，确保随机抖动后仍从瞄准方向左侧射出。
+		var left_anchor: float = -left_layer_step * float(left_index)
+		# 左侧随机半径；限制在层级间距的 49% 内，避免相邻层级交叉或越过瞄准线。
+		var left_jitter: float = left_layer_step * clampf(scatter_layer_jitter_ratio, 0.0, 0.49)
+		# 左侧角度；每颗弹体独立随机并夹取到完整偏移范围。
+		var left_offset: float = clampf(_deviation_random.randf_range(left_anchor - left_jitter, left_anchor + left_jitter), -resolved_deviation_degrees, -0.0001)
 		offsets.append(left_offset)
 	for right_index in range(1, right_projectile_count + 1):
-		# 右侧角度；按本侧弹体总数等距铺到正扩散边界，与左侧共同覆盖完整扇区。
-		var right_offset: float = resolved_spread_degrees * float(right_index) / float(right_projectile_count)
+		# 右侧层级间距；与左侧使用相同规则，保证两侧总体密度接近。
+		var right_layer_step: float = resolved_deviation_degrees / float(right_projectile_count)
+		# 右侧锚点；固定为正角度，确保随机抖动后仍从瞄准方向右侧射出。
+		var right_anchor: float = right_layer_step * float(right_index)
+		# 右侧随机半径；限制在层级间距的 49% 内，避免相邻层级交叉或越过瞄准线。
+		var right_jitter: float = right_layer_step * clampf(scatter_layer_jitter_ratio, 0.0, 0.49)
+		# 右侧角度；每颗弹体独立随机并夹取到完整偏移范围。
+		var right_offset: float = clampf(_deviation_random.randf_range(right_anchor - right_jitter, right_anchor + right_jitter), 0.0001, resolved_deviation_degrees)
 		offsets.append(right_offset)
 	return offsets
 

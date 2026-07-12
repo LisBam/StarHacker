@@ -92,7 +92,7 @@
 - `BasicMonster`：基础怪物聚合入口，维护血量、攻击、韧性、个体数值随机和组件配置，通过子组件组合索敌与移动能力，并保留近战、击退和继承扩展接口。
 - `EnemyPerceptionComponent`：维护视野射线、目标记忆、视野丢失缓冲、遮挡次数、最后线索预测、障碍背后锚点、范围搜查和彻底脱战，不执行移动或攻击。
 - `EnemyMovementComponent`：维护预设巡逻、出生点游荡、A* 路径缓存、局部绕障、空路径重试节流、卡住恢复、击退和实际移动，不读取玩家实时位置。
-- `RangedMonster`：远程测试怪物，继承基础怪物受击、韧性、索敌记忆、绕障、个体移动差异和游荡逻辑；只有玩家可见、实时距离不超过 `shoot_range` 且射击线无遮挡时才发射敌方子弹，并按 `ranged_projectile_spread_degrees` 对实际方向施加随机扩散。
+- `RangedMonster`：远程测试怪物，继承基础怪物受击、韧性、索敌记忆、绕障、个体移动差异和游荡逻辑；只有玩家可见、实时距离不超过 `shoot_range` 且射击线无遮挡时才发射敌方子弹，并按 `ranged_projectile_deviation_degrees` 对实际方向施加随机偏移。
 - `WeaponDrop`：通用地面物品掉落物，兼容武器、强化石和修复包并加入 `item_drops` 组，HUD 按距离扫描后生成附近掉落列表；拾取成功后会把同一个资源实例加入背包并释放掉落物节点。
 - `CombatBurstEffect`：代码绘制的短促战斗爆发特效，用于玩家和怪物受击、死亡反馈；默认挂到当前场景根节点，保证死亡节点释放后特效仍能播放完成。
 - `SessionState`：入口会话状态，保存当前模式和当前角色，供主菜单、GameWorld 和训练场角色切换复用。
@@ -110,7 +110,7 @@
 - `ion_smg.tres`：离子冲锋枪，远程测试武器，高射速、低单发伤害。
 - `rail_cannon.tres`：磁轨炮，远程测试武器，高伤害、长冷却。
 - `scatter_blaster.tres`：散射爆能枪，远程测试武器，中等射速和中等消耗。
-- `prism_scatter_gun.tres`：棱镜散射枪，显式具有散射属性，每轮保留中心弹并让其余弹体尽量铺满扩散扇区。
+- `prism_scatter_gun.tres`：棱镜散射枪，显式具有散射属性，每颗弹体受偏移影响，主弹靠近瞄准方向，其余弹体在左右层级内随机分散。
 - `phase_piercer.tres`：相位贯穿枪，显式具有穿透属性，基础穿透为 0 并可通过兼容强化石提升。
 - `pulse_combo_rifle.tres`：脉冲连击步枪，显式具有连击属性，相邻轮次间隔 0.08 秒且末轮后才进入冷却。
 - `quantum_dagger.tres`：量子短刃，近战测试武器，低消耗、短冷却，默认前坐力为 140。
@@ -121,7 +121,7 @@
 
 强化石由 `res://scripts/data/enhancement_stone_data.gd` 定义，`item_kind` 固定为 `enhancement_stone`，`quality_id` 区分 low、medium、high、supreme，`modifiers` 只保存属性的 `+1/-1` 方向。掉落品质权重为 40% 初级、30% 中级、20% 高级、10% 极品；每颗石头必定至少一条增强，词条不重复，额外增强与削弱出现概率继续由品质配置决定。词条使用不放回加权抽取，散射、穿透、连击、移速、视野和能量恢复的单项权重均为常规属性的五分之一。具体幅度在每颗石头用于锻造时根据属性公式、属性幅度组、品质和方向重新随机：乘算属性分为一级、二级、三级幅度组，武器暴击率、武器暴击伤害和装备闪避率分别拥有独立的加算百分点区间，散射、穿透、连击与能量恢复使用独立加算点数区间。耐久词条可由武器或装备强化石生成并改变对应目标的有效耐久上限；暴击率与暴击伤害不会由装备强化石生成或应用。只有品质、属性和方向全部一致时才堆叠，幅度不参与签名；旧强化石存档中的具体百分比读取后只保留方向。所有区间端点与最终上限以 `docs/游戏机制与玩法内容.md` 为唯一权威数值表。
 
-武器悬停详情只在属性确实发生强化变化时使用“总值（基础值±强化值）”格式；未变化属性只显示最终值，不显示“（100+0）”。强化石详情只显示属性与方向，增强词条全部排在削弱词条之前；颜色严格表达玩法收益，增强为绿色、削弱为红色，因此冷却-、能量消耗-、扩散-和后坐力-均显示绿色，对应反方向显示红色。强化成功后的共用弹窗按同一规则着色：乘算词条显示“提升/削弱 xx%”，加算词条显示“±xx%”，并展示强化前有效值、强化后有效值、实际变化和售价变化。
+武器悬停详情只在属性确实发生强化变化时使用“总值（基础值±强化值）”格式；未变化属性只显示最终值，不显示“（100+0）”。强化石详情只显示属性与方向，增强词条全部排在削弱词条之前；颜色严格表达玩法收益，增强为绿色、削弱为红色，因此冷却-、能量消耗-、偏移-和后坐力-均显示绿色，对应反方向显示红色。强化成功后的共用弹窗按同一规则着色：乘算词条显示“提升/削弱 xx%”，加算词条显示“±xx%”，并展示强化前有效值、强化后有效值、实际变化和售价变化。
 
 每把武器默认最大耐久与初始当前耐久均为 500.0。每次成功使用固定扣除 1 点耐久，武器资源不再声明或保存独立的 `durability_cost_per_use` 属性；训练场固定不消耗，正式战斗可通过开发者开关临时禁用。耐久售价倍率按 `0.1 + 0.9 × 当前耐久比例` 线性计算，满耐久为强化后有效售价的 100%，零耐久损坏武器仍可出售且售价为同强化状态满耐久售价的 10%；原始售价大于 0 时四舍五入后的最低结果为 1 金币。版本 6 存档同时保存当前耐久和保存时上限；版本 5 的 100 上限与后续 1000 上限耐久均按原比例迁移到当前 500.0 上限。
 
@@ -135,7 +135,7 @@
 
 远程攻击流程为：玩家输入左键 -> `PlayerController` 读取当前远程武器并拒绝损坏武器 -> 检查能量 -> 成功生成弹体 -> 扣除能量；非训练场且未开启调试免消耗时，再固定扣除 1 点武器耐久。
 
-远程稀有属性由 `RangedAttackComponent` 独立执行：显式散射武器通过 `_build_scatter_offsets_degrees()` 固定生成 0 度中心弹，其余弹体在正负扩散边界内按两侧数量等距铺开，以最大化固定中心弹约束下的最小相邻角间距；奇数弹左右对称，偶数弹随机决定多出弹体的一侧。普通非散射武器仍只发射一颗并沿用原有随机扩散。穿透把可额外穿过的目标数写入弹体，环境墙体仍立即销毁弹体且已命中目标不会重复受伤；连击在一次攻击内按武器 `combo_interval` 连续执行指定轮数，期间拒绝新攻击并在末轮结束后启动正式冷却。散射和连击不会额外触发能量、耐久或玩家后坐力结算。
+远程稀有属性由 `RangedAttackComponent` 独立执行：显式散射武器通过 `_build_scatter_deviation_offsets_degrees()` 为每颗弹体生成随机角度。主弹使用 `scatter_center_deviation_ratio`，默认只在完整偏移角 25% 内随机；其余弹体按左右等距锚点分层，并使用 `scatter_layer_jitter_ratio` 在各层级间距 35% 范围内独立随机，随机结果不会跨越所属侧或完整偏移边界。奇数弹左右数量相同，偶数弹随机决定多出弹体的一侧。普通非散射武器仍只发射一颗，并在完整偏移区间内随机。穿透把可额外穿过的目标数写入弹体，环境墙体仍立即销毁弹体且已命中目标不会重复受伤；连击在一次攻击内按武器 `combo_interval` 连续执行指定轮数，期间拒绝新攻击并在末轮结束后启动正式冷却。散射和连击不会额外触发能量、耐久或玩家后坐力结算。
 
 近战攻击流程为：玩家输入右键 -> `PlayerController` 读取当前近战武器并拒绝损坏武器 -> 检查能量 -> 成功开启命中框 -> 扣除能量；非训练场且未开启调试免消耗时，再固定扣除 1 点武器耐久。
 
@@ -230,7 +230,7 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 - `knockback_decay`：击退衰减速度，控制怪物被玩家武器命中后滑退多久。
 - `hit_effect_color`、`death_effect_color`：怪物受击和死亡特效颜色，只影响视觉反馈，不影响战斗数值。
 
-远程怪物额外属性包括 `projectile_scene`、`shoot_range`、`keep_distance`、`ranged_projectile_speed`、`ranged_projectile_damage`、`ranged_projectile_range`、`ranged_projectile_impact_force`、`ranged_projectile_spread_degrees`、`shoot_cooldown`、`muzzle_offset` 和视线配置。敌方弹体默认扩散为 4 度，每次发射会随机偏移。
+远程怪物额外属性包括 `projectile_scene`、`shoot_range`、`keep_distance`、`ranged_projectile_speed`、`ranged_projectile_damage`、`ranged_projectile_range`、`ranged_projectile_impact_force`、`ranged_projectile_deviation_degrees`、`shoot_cooldown`、`muzzle_offset` 和视线配置。敌方弹体默认偏移为 4 度，每次发射会随机变化。
 
 敌方远程怪物默认开火距离为 500 像素，弹体默认最大飞行距离为 520 像素，避免远程怪物在训练场中过早跨屏命中玩家。
 
@@ -254,9 +254,9 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 
 整图敌人由 `MonsterSimulationManager` 保存为虚拟记录。默认只有玩家 2400 像素范围内的记录会分批实例化，真实敌人离开 2800 像素后保存位置与生命比例并释放；管理器每 0.05 秒扫描最多 256 条记录，每批最多实例化 12 名，并以 `max_materialized_monsters = 220` 限制同时运行的真实敌人数量。HUD 左上角通过 `GameWorld.get_alive_monster_count()` 显示虚拟人口总数。
 
-每只随机生成敌人在加入场景树前分别生成尺寸倍率和属性倍率，范围由 `monster_spawn_variation_ratio` 控制，默认 0.3 即 70% 到 130%。远程怪物额外使用自身扩散参数控制弹体随机偏移。
+每只随机生成敌人在加入场景树前分别生成尺寸倍率和属性倍率，范围由 `monster_spawn_variation_ratio` 控制，默认 0.3 即 70% 到 130%。远程怪物额外使用自身偏移参数控制弹体随机角度。
 
-所有 `WeaponData` 都包含 `spread_degrees` 扩散属性。扩散值表示弹体相对瞄准方向的最大随机角度：0 表示完全精准，数值越高偏移范围越大。当前远程武器分别配置不同扩散，近战武器显式保持 0；仓库、背包和结算悬停详情都会显示该属性。
+所有 `WeaponData` 都包含 `deviation_degrees` 偏移属性。偏移值表示弹体相对瞄准方向的最大随机角度：0 表示完全精准，数值越高随机范围越大。当前远程武器分别配置不同偏移，近战武器保持默认 0；仓库、背包和结算悬停详情都会显示该属性。历史强化键 `spread_degrees` 只在 `EnhancementRules.canonicalize_stat_name()` 中作为旧存档别名迁移，新资源和新存档统一写入 `deviation_degrees`。
 
 `GameWorld` 通过 `enhancement_stone_drop_chance = 0.10` 为每次实际击杀独立判定强化石；怪物自身 `weapon_drop_chance = 0.20` 独立判定武器。强化石品质为初级 40%、中级 30%、高级 20%、极品 10%。宝箱掉落类别权重为枪械 50%、强化石 30%、修复包 20%；普通、中级、高级、极品宝箱的单件高品质概率分别为 10%、30%、55%、75%，极品宝箱另保证至少 5 件高品质物品。
 
@@ -278,14 +278,14 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 - 战斗属性：`max_health`、`current_health`、`max_energy`、`current_energy`、`energy_regeneration_per_second`、`infinite_health`、`infinite_energy`
 - 装备：`ranged_slot_count`、`starting_ranged_weapons`、`starting_melee_weapon`
 - 怪物：`max_health`、`current_health`、`weapon_drop_chance`、`attack_damage`、`toughness`、`attack_impact_force`、`move_speed`、`move_speed_random_multiplier_min`、`move_speed_random_multiplier_max`、`vision_range`、`attack_range`、`attack_cooldown`、`attack_cooldown_random_multiplier_min`、`attack_cooldown_random_multiplier_max`、`lose_target_range_multiplier`、`vision_requires_line_of_sight`、`vision_line_of_sight_collision_mask`、`vision_loss_grace_duration`、`target_memory_duration`、`target_prediction_time`、`target_prediction_max_distance`、`occlusion_break_forget_count`、`medium_memory_duration`、`long_term_region_radius`、`solid_wall_group`、`ai_update_interval`、`hide_when_simulation_inactive`、`disable_collision_when_simulation_inactive`、`tactical_search_near_radius`、`tactical_search_middle_radius`、`tactical_search_far_radius`、`search_points_before_ambush`、`patrol_route_path`、`patrol_route_loop`、`wander_radius`、`wander_speed_multiplier`、`pathfinding_enabled`、`pathfinding_cell_size`、`pathfinding_agent_radius`、`path_recalculation_min_interval`、`path_recalculation_max_interval`、`stuck_detection_time`、`knockback_decay`、`perception_component_path`、`movement_component_path`、`tactical_component_path`、`hit_effect_color`、`death_effect_color`
-- 远程怪物：`projectile_scene`、`shoot_range`、`keep_distance`、`ranged_projectile_speed`、`ranged_projectile_damage`、`ranged_projectile_range`、`ranged_projectile_impact_force`、`ranged_projectile_spread_degrees`、`shoot_cooldown`、`shoot_cooldown_random_multiplier_min`、`shoot_cooldown_random_multiplier_max`、`muzzle_offset`、`line_of_sight_collision_mask`、`projectile_parent_path`
+- 远程怪物：`projectile_scene`、`shoot_range`、`keep_distance`、`ranged_projectile_speed`、`ranged_projectile_damage`、`ranged_projectile_range`、`ranged_projectile_impact_force`、`ranged_projectile_deviation_degrees`、`shoot_cooldown`、`shoot_cooldown_random_multiplier_min`、`shoot_cooldown_random_multiplier_max`、`muzzle_offset`、`line_of_sight_collision_mask`、`projectile_parent_path`
 - 战斗地图：`grid_size`、`grid_extent`、`map_seed`、`base_floor_color`、`grid_color`、`axis_color`、`player_camera_path`、`exploration_cell_size`、`exploration_radius`、`exploration_update_interval`、`exploration_update_distance`、`boundary_wall_thickness`、`boundary_wall_color`、`extraction_spawn_time_seconds`、`extraction_map_marker_time_seconds`、`extraction_hold_duration_seconds`、`extraction_radius`、`extraction_spawn_edge_margin`、`extraction_spawn_min_distance_from_player`、`extraction_spawn_attempt_count`、`extraction_fill_color`、`extraction_ring_color`
 - 强化石掉落：`enhancement_stone_drop_chance`、`enhancement_stone_base_sell_price`、`EnhancementRules.QUALITY_WEIGHTS`、`EnhancementRules.QUALITY_CONFIGS`、`EnhancementRules.MULTIPLICATIVE_MAGNITUDE_RANGES`、`EnhancementRules.ADDITIVE_POINT_MAGNITUDE_RANGES`；`enhancement_stone_min_modifier_count`、`enhancement_stone_max_modifier_count`、`enhancement_stone_negative_modifier_chance` 仅保留旧扩展调用兼容，品质规则不再读取它们。
 - 敌人生成与加载：`monster_scene`、`monster_scenes`、`monster_spawn_count`、`monster_spawn_min_distance`、`monster_spawn_max_distance`、`monster_spawn_across_full_map`、`monster_spawn_edge_margin`、`monster_minimum_alive_count`、`monster_population_first_milestone_seconds`、`monster_population_five_minute_count`、`monster_population_second_milestone_seconds`、`monster_population_ten_minute_count`、`monster_replenish_interval`、`monster_replenish_batch_size`、`monster_spawn_variation_ratio`、`monster_parent_path`、`monster_simulation_manager_path`、`active_radius`、`sleep_hysteresis`、`update_interval`、`monsters_per_update`、`materializations_per_update`、`max_materialized_monsters`
 - 掉落物：`drop_parent_path`、`weapon_drop_scene`、`weapon_drop_table`、`dropped_weapon_scatter_radius`、`monster_drop_launch_duration_min`、`monster_drop_launch_duration_max`、`monster_drop_launch_arc_height_min`、`monster_drop_launch_arc_height_max`、`weapon_data`、`pickup_radius`、`bob_amplitude`、`bob_speed`
 - 环境生成：`environment_parent_path`、`obstacle_scenes`、`obstacle_spawn_count`、`obstacle_spawn_min_distance_from_player`、`obstacle_spawn_edge_margin`、`obstacle_spawn_min_spacing`、`obstacle_spawn_attempts_per_item`、`obstacle_scale_min`、`obstacle_scale_max`
 - 角色占位属性：`stelle_max_health`、`stelle_max_energy`、`stelle_move_speed`、`caelus_max_health`、`caelus_max_energy`、`caelus_move_speed`、`silver_wolf_max_health`、`silver_wolf_max_energy`、`silver_wolf_move_speed`
-- 武器数据：`weapon_type`、`sell_price`、`max_durability`、`current_durability`、`energy_cost`、`projectile_speed`、`bullet_range`、`ranged_damage`、`ranged_cooldown`、`spread_degrees`、`recoil_force`、`front_recoil_force`、`impact_force`、`melee_damage`、`melee_cooldown`、`melee_active_duration`
+- 武器数据：`weapon_type`、`sell_price`、`max_durability`、`current_durability`、`energy_cost`、`projectile_speed`、`bullet_range`、`ranged_damage`、`ranged_cooldown`、`deviation_degrees`、`recoil_force`、`front_recoil_force`、`impact_force`、`melee_damage`、`melee_cooldown`、`melee_active_duration`
 - 主菜单入口：`character_select_scene_path`、`game_scene_path`、`CharacterButton`、`WarehouseButton`、`ShopButton`、`ForgeButton`、`DEVELOPER_UNLOCK_SEQUENCE`
 - 全局仓库：`SAVE_PATH`、`DEFAULT_RANGED_SLOT_COUNT`、`WEAPON_RESOURCE_PATHS`、`DEFAULT_BACKPACK_WEAPON_IDS`、`DEFAULT_RANGED_WEAPON_IDS`、`DEFAULT_MELEE_WEAPON_ID`、`DEFAULT_STARTING_COINS`
 - 仓库与开发者面板：`panel_minimum_size`、`dialog_width`、`dialog_height`、`dialog_background_alpha`、`combat_panel_height`、`coin_step`、`enhancement_stone_grant_count`

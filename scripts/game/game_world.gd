@@ -29,10 +29,12 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 ## 玩家、敌人、掉落物、地图装饰都可以作为它的子节点存在。
 ## 进入战斗场景时会生成一张大型网格地图，并在地图上随机摆放墙体、建筑和怪物。
 
-## 调试网格单格尺寸；取值应大于 0，默认 64 匹配常见 2D 地图尺度，运行时修改会改变距离参照密度。
+## 地图边界计算单格尺寸；取值应大于 0，默认 64 与 grid_extent 共同定义完整玩法范围，不控制背景网格线间距。
 @export var grid_size: float = 64.0
 ## 网格地图向每个方向延伸的格数；取值应为正整数，默认 96 生成 192x192 格大型战斗地图，运行时修改会改变地图尺寸。
 @export var grid_extent: int = 96
+## 背景网格单格尺寸；单位为像素，默认 50 表示每格固定为 50×50 像素，只改变地面视觉参照密度，不影响地图边界、生成或导航范围。
+@export_range(1.0, 1024.0, 1.0, "or_greater") var background_grid_cell_size: float = 50.0
 ## 地图边框颜色；取值为 RGBA，默认更亮用于定位网格地图边界，运行时修改会影响边界识别。
 @export var axis_color: Color = Color(0.28, 0.52, 0.72, 0.62)
 ## 地图随机种子；默认 0 表示每次进入战斗场景随机生成，设置为正数可复现同一张地图。
@@ -387,18 +389,20 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
-	# 网格半边长；取值由 grid_size 和 grid_extent 计算，无固定默认值，修改会影响背景矩形和线段端点。
+	# 地图半边长；取值由 grid_size 和 grid_extent 计算，无固定默认值，修改会影响背景矩形和线段端点。
 	var half_size: float = grid_size * float(grid_extent)
 	# 背景绘制区域；取值为以世界原点居中的 Rect2，无固定默认值，修改会影响可视背景覆盖范围。
 	var play_area: Rect2 = Rect2(Vector2(-half_size, -half_size), Vector2(half_size * 2.0, half_size * 2.0))
 	draw_rect(play_area, base_floor_color, true)
 
-	# 网格线循环索引；取值范围为 -grid_extent 到 grid_extent，默认每格绘制一条水平线和垂直线。
-	for index in range(-grid_extent, grid_extent + 1):
-		# 当前网格线偏移；取值由循环索引乘单格尺寸得出，默认用于生成世界坐标线段。
-		var offset: float = float(index) * grid_size
-		draw_line(Vector2(offset, -half_size), Vector2(offset, half_size), grid_color, 1.0)
-		draw_line(Vector2(-half_size, offset), Vector2(half_size, offset), grid_color, 1.0)
+	# 有效背景网格尺寸；最低为 1 像素，异常检查器数据不会导致零步长循环。
+	var resolved_background_grid_cell_size: float = maxf(background_grid_cell_size, 1.0)
+	# 当前网格线偏移；从地图负方向边界内的首个整格倍数开始，逐格绘制到正方向边界。
+	var grid_line_offset: float = ceilf(-half_size / resolved_background_grid_cell_size) * resolved_background_grid_cell_size
+	while grid_line_offset <= half_size:
+		draw_line(Vector2(grid_line_offset, -half_size), Vector2(grid_line_offset, half_size), grid_color, 1.0)
+		draw_line(Vector2(-half_size, grid_line_offset), Vector2(half_size, grid_line_offset), grid_color, 1.0)
+		grid_line_offset += resolved_background_grid_cell_size
 
 	# 地图边框颜色；取值来自 axis_color，默认用于网格地图边界提示。
 	var border_color: Color = axis_color

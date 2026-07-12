@@ -96,6 +96,7 @@ func try_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
 		return false
 	# 连击运行参数；集中保存本次攻击数据，后续轮次无需依赖玩家当前装备槽状态。
 	weapon_data.set_meta("active_scatter_count", selected_scatter_count)
+	weapon_data.set_meta("active_has_scatter", _weapon_has_attribute(weapon_data, "has_scatter"))
 	weapon_data.set_meta("active_piercing_count", selected_piercing_count)
 	weapon_data.set_meta("active_projectile_scene", selected_projectile_scene)
 	weapon_data.set_meta("active_projectile_speed", selected_projectile_speed)
@@ -121,12 +122,17 @@ func _fire_round(direction: Vector2, weapon_data: Resource) -> bool:
 		return false
 	# 当前轮成功弹体数量；至少一颗成功生成才把该轮视为有效攻击。
 	var spawned_projectile_count: int = 0
-	# 当前轮散射数量；每颗弹体独立抽取扩散角度，因此同轮弹道不会重叠锁死。
+	# 当前轮散射数量；显式散射武器按扇形角度表生成，普通武器仍只发射一颗弹体。
 	var scatter_count: int = maxi(int(weapon_data.get_meta("active_scatter_count", 1)), 1)
-	for _projectile_index in range(scatter_count):
-		# 本颗弹体方向；独立应用武器扩散范围，散射生成的每颗子弹都受扩散属性影响。
-		var spread_degrees: float = maxf(float(weapon_data.get_meta("active_spread_degrees", 0.0)), 0.0)
-		var resolved_direction: Vector2 = direction.rotated(deg_to_rad(_spread_random.randf_range(-spread_degrees, spread_degrees)))
+	# 当前轮扩散角度；限制为非负数，表示瞄准方向两侧各自允许使用的最大角度。
+	var spread_degrees: float = maxf(float(weapon_data.get_meta("active_spread_degrees", 0.0)), 0.0)
+	# 是否为显式散射武器；散射武器固定保留中心弹，普通武器继续使用单弹随机扩散。
+	var has_scatter: bool = bool(weapon_data.get_meta("active_has_scatter", false))
+	# 当前轮弹体角度表；元素为相对瞄准方向的角度，数量与本轮弹体数一致。
+	var projectile_offsets: Array[float] = _build_scatter_offsets_degrees(scatter_count, spread_degrees) if has_scatter else [_spread_random.randf_range(-spread_degrees, spread_degrees)]
+	for projectile_offset in projectile_offsets:
+		# 本颗弹体方向；散射武器使用分层扇形角度，普通武器使用原有随机角度。
+		var resolved_direction: Vector2 = direction.rotated(deg_to_rad(projectile_offset))
 		# 本颗弹体出生位置；枪口或备用位置被墙体阻挡时只跳过该颗弹体。
 		var spawn_position: Vector2 = _get_spawn_position(resolved_direction)
 		if _is_spawn_blocked(resolved_direction, spawn_position):
@@ -157,6 +163,40 @@ func _fire_round(direction: Vector2, weapon_data: Resource) -> bool:
 		fired.emit(projectile)
 		spawned_projectile_count += 1
 	return spawned_projectile_count > 0
+
+
+func _build_scatter_offsets_degrees(scatter_count: int, spread_degrees: float) -> Array[float]:
+	## 生成显式散射武器的扇形角度表；固定包含 0 度中心弹，其余弹体在左右扩散区间内最大化相邻间距。
+	# 安全弹体数量；最低为 1，异常强化数据不会生成空射击轮次。
+	var resolved_scatter_count: int = maxi(scatter_count, 1)
+	# 安全扩散角；最低为 0，零扩散时全部弹体只能沿瞄准方向重合。
+	var resolved_spread_degrees: float = maxf(spread_degrees, 0.0)
+	# 角度结果；第一项固定为 0，保证每轮至少一颗子弹严格靠近瞄准方向。
+	var offsets: Array[float] = [0.0]
+	if resolved_scatter_count <= 1 or resolved_spread_degrees <= 0.0:
+		while offsets.size() < resolved_scatter_count:
+			offsets.append(0.0)
+		return offsets
+
+	# 中心弹之外的弹体数量；尽量平均分配到瞄准方向左右两侧。
+	var remaining_projectile_count: int = resolved_scatter_count - 1
+	# 左侧弹体数量；偶数总弹数会随机决定多出的一颗位于哪一侧，避免长期固定偏向。
+	var left_projectile_count: int = remaining_projectile_count / 2
+	# 右侧弹体数量；与左侧共同占满全部剩余弹体。
+	var right_projectile_count: int = remaining_projectile_count - left_projectile_count
+	if remaining_projectile_count % 2 == 1 and _spread_random.randi_range(0, 1) == 0:
+		left_projectile_count = right_projectile_count
+		right_projectile_count = remaining_projectile_count - left_projectile_count
+
+	for left_index in range(1, left_projectile_count + 1):
+		# 左侧角度；按本侧弹体总数等距铺到负扩散边界，最大化中心弹与相邻弹体的间距。
+		var left_offset: float = -resolved_spread_degrees * float(left_index) / float(left_projectile_count)
+		offsets.append(left_offset)
+	for right_index in range(1, right_projectile_count + 1):
+		# 右侧角度；按本侧弹体总数等距铺到正扩散边界，与左侧共同覆盖完整扇区。
+		var right_offset: float = resolved_spread_degrees * float(right_index) / float(right_projectile_count)
+		offsets.append(right_offset)
+	return offsets
 
 
 func _start_cooldown(duration: float) -> void:

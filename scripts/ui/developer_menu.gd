@@ -403,7 +403,7 @@ func _on_remove_coins_pressed() -> void:
 func _on_clear_warehouse_pressed() -> void:
 	if _clear_warehouse_confirmation == null:
 		return
-	_clear_warehouse_confirmation.present("确认清空仓库", "将永久删除仓库中的全部物品，随身背包和装备不会受影响。", "确认清空", "取消", 520)
+	_clear_warehouse_confirmation.present_adaptive("确认清空仓库", "将永久删除仓库中的全部物品，随身背包和装备不会受影响。", "确认清空", "取消", true)
 
 
 func _on_clear_warehouse_confirmed() -> void:

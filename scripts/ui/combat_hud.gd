@@ -3159,7 +3159,7 @@ func _on_return_main_menu_button_pressed() -> void:
 	# 当前逃跑损失比例；进入游戏 30 秒内为 20%，超过该时长后恢复默认 50%。
 	var loss_ratio: float = _get_current_escape_loss_ratio()
 	# 逃跑警告；根据当前存活时间显示本次实际概率，训练场已在入口处直接离开而不会打开二次确认。
-	_escape_confirmation_dialog.present("确认逃跑", "确认逃跑并返回主菜单吗？\n正式战斗中，背包物品约 %d%% 会被保留、约 %d%% 会丢失；已装备物品不参与损失。" % [roundi((1.0 - loss_ratio) * 100.0), roundi(loss_ratio * 100.0)], "确认逃跑", "取消", 520)
+	_escape_confirmation_dialog.present_adaptive("确认逃跑", "确认逃跑并返回主菜单吗？\n正式战斗中，背包物品约 %d%% 会被保留、约 %d%% 会丢失；已装备物品不参与损失。" % [roundi((1.0 - loss_ratio) * 100.0), roundi(loss_ratio * 100.0)], "确认逃跑", "取消", true)
 
 
 func _on_escape_confirmed() -> void:

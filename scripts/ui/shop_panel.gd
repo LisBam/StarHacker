@@ -389,7 +389,7 @@ func _on_purchase_requested(stock_id: String, failure_group_id: String) -> void:
 		var item_resource: Resource = (raw_entry as Dictionary).get("resource") as Resource
 		_pending_stock_id = stock_id
 		_pending_failure_group_id = failure_group_id
-		_purchase_dialog.present("确认购买", "确认花费 %d 金币购买“%s”吗？\n购买后物品将直接存入永久仓库。" % [int((raw_entry as Dictionary).get("price", 0)), str(item_resource.get("display_name")) if item_resource != null else "未知物品"], "购买", "取消", 500)
+		_purchase_dialog.present_adaptive("确认购买", "确认花费 %d 金币购买“%s”吗？\n购买后物品将直接存入永久仓库。" % [int((raw_entry as Dictionary).get("price", 0)), str(item_resource.get("display_name")) if item_resource != null else "未知物品"], "购买", "取消", true)
 		return
 	_show_status("该商品已售出或已经刷新")
 

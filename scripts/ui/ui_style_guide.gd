@@ -58,6 +58,22 @@ const DANGER_COLOR: Color = Color(1.0, 0.42, 0.48, 1.0)
 const WINDOW_CORNER_RADIUS: int = 8
 ## 子分区圆角；默认 6 像素，使内部层级略弱于主窗口。
 const SECTION_CORNER_RADIUS: int = 6
+## 弹窗最外层边框宽度；默认 2 像素，完整包围标题栏和内容区域，运行时无需动态修改。
+const DIALOG_OUTER_BORDER_WIDTH: int = 2
+## 弹窗最外层圆角；默认 10 像素，比内容面板圆角略大，形成清晰的双层窗口轮廓，运行时无需动态修改。
+const DIALOG_OUTER_CORNER_RADIUS: int = 10
+## 数量与转账弹窗按钮区底部净空；默认 8 像素，使确认和取消按钮不与内容面板边框相连，运行时无需动态修改。
+const DIALOG_ACTION_BOTTOM_CLEARANCE: float = 8.0
+## 自定义弹窗标题栏高度；默认 30 像素，为标题文字和关闭按钮提供稳定空间，运行时无需动态修改。
+const DIALOG_TITLE_HEIGHT: float = 30.0
+## 自定义弹窗标题字体大小；默认 14 像素，与项目统一控件字体一致，运行时无需动态修改。
+const DIALOG_TITLE_FONT_SIZE: int = 14
+## 自定义弹窗标题左右安全边距；默认 34 像素，避免标题文字与关闭按钮重叠，运行时无需动态修改。
+const DIALOG_TITLE_SIDE_PADDING: float = 34.0
+## 自定义弹窗关闭按钮边长；默认 26 像素，在紧凑标题栏内保持清晰点击区域，运行时无需动态修改。
+const DIALOG_CLOSE_BUTTON_SIZE: float = 26.0
+## 自定义弹窗标题栏背景；固定完全不透明的深蓝色，避免最外层标题区域透出场景背景。
+const DIALOG_TITLE_BACKGROUND_COLOR: Color = Color(0.025, 0.045, 0.065, 1.0)
 
 
 ## 为完整页面或可复用面板安装统一控件主题；调用后所有后代控件自动继承按钮、输入、滚动和分区样式。
@@ -243,6 +259,16 @@ static func create_dialog_theme(background_alpha: float = 0.92) -> Theme:
 	dialog_theme.set_stylebox("panel", "AcceptDialog", dialog_panel_style)
 	dialog_theme.set_stylebox("panel", "ConfirmationDialog", dialog_panel_style)
 	return dialog_theme
+
+
+## 创建由 DialogOuterFrame 直接绘制的最外层轮廓；中心透明，仅覆盖完全不透明的青蓝边框与阴影。
+static func create_dialog_outer_frame_style() -> StyleBoxFlat:
+	# 最外层样式；中心关闭绘制，避免覆盖弹窗正文、输入控件和按钮。
+	var outer_style: StyleBoxFlat = _create_flat_style(Color.TRANSPARENT, Color(WINDOW_BORDER_COLOR, 1.0), DIALOG_OUTER_BORDER_WIDTH, DIALOG_OUTER_CORNER_RADIUS)
+	outer_style.draw_center = false
+	outer_style.shadow_color = Color(0.0, 0.0, 0.0, 0.48)
+	outer_style.shadow_size = 8
+	return outer_style
 
 
 ## 写入指定主题类型的完整按钮状态；同一函数保证普通、主操作、危险和下拉按钮结构一致。

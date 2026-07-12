@@ -7,6 +7,8 @@ class_name CommonConfirmationDialog
 
 ## 全局窗口样式指南；为确认弹窗补充统一按钮、文字和青蓝边框视觉。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+## 弹窗最外层框架组件；直接绘制不透明标题栏、外框、标题文字和关闭按钮。
+const DIALOG_OUTER_FRAME_SCRIPT: Script = preload("res://scripts/ui/dialog_outer_frame.gd")
 
 ## 默认弹窗宽度；默认 460 像素，可容纳两行中文说明且不会大面积遮挡背景。
 @export_range(280, 760, 1) var dialog_width: int = 460
@@ -21,6 +23,7 @@ const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_apply_standard_style()
+	DIALOG_OUTER_FRAME_SCRIPT.install(self)
 
 
 func present(dialog_title: String, message: String, confirm_text: String = "确认", cancel_text: String = "取消", requested_width: int = -1, requested_height: int = 0, confirmation_enabled: bool = true) -> void:
@@ -65,9 +68,9 @@ func _apply_standard_style() -> void:
 	panel_style.set_border_width_all(border_width)
 	panel_style.set_corner_radius_all(corner_radius)
 	panel_style.content_margin_left = 18.0
-	panel_style.content_margin_top = 14.0
+	panel_style.content_margin_top = UI_STYLE_GUIDE.DIALOG_TITLE_HEIGHT + 14.0
 	panel_style.content_margin_right = 18.0
-	panel_style.content_margin_bottom = 14.0
+	panel_style.content_margin_bottom = 20.0
 	# 独立主题；同时覆盖 AcceptDialog 与 ConfirmationDialog 类型，避免引擎版本主题类型差异。
 	var dialog_theme: Theme = UI_STYLE_GUIDE.create_theme()
 	dialog_theme.set_stylebox("panel", "AcceptDialog", panel_style)

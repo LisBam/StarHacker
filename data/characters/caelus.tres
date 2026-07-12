@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="CharacterData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/character_data.gd" id="1_character"]
+
+[resource]
+script = ExtResource("1_character")
+character_id = "caelus"
+display_name = "穹"
+role = "均衡型开拓者"
+description = "生命上限较高，能量上限偏低，适合测试更稳定的近距离战斗节奏。"
+max_health = 150.0
+max_energy = 95.0
+move_speed = 300.0
+attack_power = 9.0
+defense_power = 10.0
+energy_regeneration = 18.0
+passive = "被动技能：待配置"
+active = "主动技能：待配置"

@@ -1,0 +1,56 @@
+extends Resource
+class_name CharacterData
+
+## 角色数据资源保存可选择角色的稳定标识、展示信息和基础战斗属性。
+## 将该资源保存到 data/characters 后，内容目录会自动发现并提供给角色选择、训练场和战斗属性系统。
+
+## 角色稳定标识；必须填写唯一英文 ID，修改会影响会话中的当前角色选择。
+@export var character_id: String = ""
+## 角色显示名称；默认“未命名角色”，用于角色列表、详情面板和战斗 HUD。
+@export var display_name: String = "未命名角色"
+## 角色定位；默认“未配置定位”，用于角色选择详情说明该角色的玩法方向。
+@export var role: String = "未配置定位"
+## 角色说明；默认空字符串，用于长期记录角色玩法特征和适用场景。
+@export_multiline var description: String = ""
+## 基础生命上限；默认 100，进入战斗或切换角色时应用，运行时不应动态修改模板。
+@export_range(1.0, 9999.0, 1.0, "or_greater") var max_health: float = 100.0
+## 基础能量上限；默认 100，进入战斗或切换角色时应用，运行时不应动态修改模板。
+@export_range(1.0, 9999.0, 1.0, "or_greater") var max_energy: float = 100.0
+## 基础移动速度；默认 320，装备移速比例会在该值上继续结算，运行时不应动态修改模板。
+@export_range(1.0, 2000.0, 1.0, "or_greater") var move_speed: float = 320.0
+## 基础攻击力；默认 10，装备攻击加成会在该值上继续结算，运行时不应动态修改模板。
+@export_range(0.0, 99999.0, 1.0, "or_greater") var attack_power: float = 10.0
+## 基础防御力；默认 5，装备防御加成会在该值上继续结算，运行时不应动态修改模板。
+@export_range(0.0, 99999.0, 1.0, "or_greater") var defense_power: float = 5.0
+## 基础每 5 秒生命恢复；默认 0，供角色属性面板和未来战斗恢复组件读取。
+@export_range(0.0, 99999.0, 0.1, "or_greater") var health_regeneration_per_five_seconds: float = 0.0
+## 基础视野倍率；默认 1.0 表示 100% 视野，装备视野加成会在其上继续结算。
+@export_range(0.01, 10.0, 0.01, "or_greater") var vision_range: float = 1.0
+## 基础闪避率；默认 0，使用 0 到 1 小数表示 0% 到 100%。
+@export_range(0.0, 1.0, 0.01) var dodge_chance: float = 0.0
+## 基础每秒能量恢复；默认 18，装备能量恢复会在该值上继续结算。
+@export_range(0.0, 99999.0, 0.1, "or_greater") var energy_regeneration: float = 18.0
+## 被动技能说明；默认待配置，当前用于角色选择详情占位，未来可扩展为技能资源引用。
+@export var passive: String = "被动技能：待配置"
+## 主动技能说明；默认待配置，当前用于角色选择详情占位，未来可扩展为技能资源引用。
+@export var active: String = "主动技能：待配置"
+
+
+func to_profile() -> Dictionary:
+	return {
+		"id": character_id,
+		"display_name": display_name,
+		"role": role,
+		"description": description,
+		"max_health": max_health,
+		"max_energy": max_energy,
+		"move_speed": move_speed,
+		"attack_power": attack_power,
+		"defense_power": defense_power,
+		"health_regeneration_per_five_seconds": health_regeneration_per_five_seconds,
+		"vision_range": vision_range,
+		"dodge_chance": dodge_chance,
+		"energy_regeneration": energy_regeneration,
+		"passive": passive,
+		"active": active,
+	}

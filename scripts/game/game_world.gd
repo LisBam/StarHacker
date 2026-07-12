@@ -325,6 +325,7 @@ var _has_navigation_marker: bool = false
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_random.randomize()
+	_merge_automatically_discovered_content()
 	_apply_session_state()
 	_begin_global_inventory_run()
 	_prepare_map_seed()
@@ -804,19 +805,21 @@ func _apply_selected_character() -> void:
 	if _player == null:
 		return
 
-	_player.set("player_display_name", _get_character_display_name(_selected_character_id))
+	# 当前角色档案；优先来自自动内容目录，旧场景缺少目录服务时继续使用现有导出参数。
+	var character_profile: Dictionary = _get_character_profile(_selected_character_id)
+	_player.set("player_display_name", str(character_profile.get("display_name", _get_character_display_name(_selected_character_id))))
 
 	# 玩家属性组件；默认从玩家子节点 StatsComponent 获取，缺失时跳过占位属性应用。
 	var stats_component: Node = _player.get_node_or_null("StatsComponent")
 	if stats_component != null and stats_component.has_method("configure_character_base_stats"):
 		# 固定生命上限；取值来自当前角色配置，默认用于进入场景或训练场切换角色时刷新生命。
-		var resolved_max_health: float = _get_character_max_health(_selected_character_id)
+		var resolved_max_health: float = float(character_profile.get("max_health", _get_character_max_health(_selected_character_id)))
 		# 固定能量上限；取值来自当前角色配置，默认用于进入场景或训练场切换角色时刷新能量。
-		var resolved_max_energy: float = _get_character_max_energy(_selected_character_id)
+		var resolved_max_energy: float = float(character_profile.get("max_energy", _get_character_max_energy(_selected_character_id)))
 		# 固定攻击力；取值来自当前角色配置，装备加成会由属性组件继续叠加。
-		var resolved_attack_power: float = _get_character_attack_power(_selected_character_id)
+		var resolved_attack_power: float = float(character_profile.get("attack_power", _get_character_attack_power(_selected_character_id)))
 		# 固定防御力；取值来自当前角色配置，装备加成会由属性组件继续叠加。
-		var resolved_defense_power: float = _get_character_defense_power(_selected_character_id)
+		var resolved_defense_power: float = float(character_profile.get("defense_power", _get_character_defense_power(_selected_character_id)))
 		stats_component.call("configure_character_base_stats", resolved_max_health, resolved_max_energy, resolved_attack_power, resolved_defense_power)
 
 	# 玩家移动组件；默认从玩家子节点 MovementComponent 获取，缺失时跳过速度应用。
@@ -825,7 +828,7 @@ func _apply_selected_character() -> void:
 		return
 
 	# 固定移动速度；取值来自当前角色配置，默认用于进入场景或训练场切换角色时刷新移动速度。
-	var resolved_move_speed: float = _get_character_move_speed(_selected_character_id)
+	var resolved_move_speed: float = float(character_profile.get("move_speed", _get_character_move_speed(_selected_character_id)))
 	if equipment_component.has_method("configure_base_move_speed"):
 		equipment_component.call("configure_base_move_speed", resolved_move_speed)
 
@@ -876,6 +879,10 @@ func _get_character_defense_power(character_id: String) -> float:
 
 
 func _normalize_character_id(character_id: String) -> String:
+	# 会话状态；统一复用动态角色校验，避免 GameWorld 再维护一份角色 ID 白名单。
+	var session_state: Node = _get_session_state()
+	if session_state != null and session_state.has_method("normalize_character_id"):
+		return str(session_state.call("normalize_character_id", character_id))
 	if character_id == CHARACTER_CAEULUS:
 		return CHARACTER_CAEULUS
 	if character_id == CHARACTER_SILVER_WOLF:
@@ -885,12 +892,63 @@ func _normalize_character_id(character_id: String) -> String:
 
 
 func _get_character_display_name(character_id: String) -> String:
+	# 角色档案；自动注册角色直接使用资源中的显示名称，旧角色仍保留后续内置兜底。
+	var profile: Dictionary = _get_character_profile(character_id)
+	if not profile.is_empty():
+		return str(profile.get("display_name", "角色"))
 	if character_id == CHARACTER_CAEULUS:
 		return "穹"
 	if character_id == CHARACTER_SILVER_WOLF:
 		return "银狼"
 
 	return "星"
+
+
+func _get_character_profile(character_id: String) -> Dictionary:
+	# 会话状态；角色档案由 SessionState 统一转发内容目录，保证 UI 与战斗读取完全一致。
+	var session_state: Node = _get_session_state()
+	if session_state != null and session_state.has_method("get_character_profile"):
+		return session_state.call("get_character_profile", character_id) as Dictionary
+	return {}
+
+
+func _merge_automatically_discovered_content() -> void:
+	# 内容目录；自动加载缺失时保留场景检查器中的原始怪物和掉落池，方便场景单独迁移。
+	var content_catalog: Node = get_tree().root.get_node_or_null("ContentCatalog")
+	if content_catalog == null:
+		return
+	if content_catalog.has_method("get_enemy_scene_paths"):
+		for scene_path in content_catalog.call("get_enemy_scene_paths") as PackedStringArray:
+			# 怪物场景；只合并尚未存在的资源路径，避免原有检查器列表和目录扫描产生重复权重。
+			var enemy_scene: PackedScene = load(scene_path) as PackedScene
+			if enemy_scene != null and not _packed_scene_pool_has_path(monster_scenes, scene_path):
+				monster_scenes.append(enemy_scene)
+	if content_catalog.has_method("get_weapon_paths"):
+		for weapon_path in content_catalog.call("get_weapon_paths") as PackedStringArray:
+			# 武器模板；合法自动资源会加入怪物与宝箱掉落池，实例生成时仍执行深拷贝。
+			var weapon_template: Resource = load(weapon_path) as Resource
+			if weapon_template != null and not _resource_pool_has_path(weapon_drop_table, weapon_path):
+				weapon_drop_table.append(weapon_template)
+	if content_catalog.has_method("get_item_paths"):
+		for item_path in content_catalog.call("get_item_paths") as PackedStringArray:
+			# 修复包模板；当前掉落逻辑只接收 repair_kit，其他未来道具仍可先进入商店和库存目录。
+			var item_template: Resource = load(item_path) as Resource
+			if item_template != null and str(item_template.get("item_kind")) == "repair_kit" and not _resource_pool_has_path(repair_kit_drop_table, item_path):
+				repair_kit_drop_table.append(item_template)
+
+
+func _packed_scene_pool_has_path(scene_pool: Array[PackedScene], resource_path: String) -> bool:
+	for scene_resource in scene_pool:
+		if scene_resource != null and scene_resource.resource_path == resource_path:
+			return true
+	return false
+
+
+func _resource_pool_has_path(resource_pool: Array[Resource], resource_path: String) -> bool:
+	for content_resource in resource_pool:
+		if content_resource != null and content_resource.resource_path == resource_path:
+			return true
+	return false
 
 
 func _update_survival_time(delta: float) -> void:

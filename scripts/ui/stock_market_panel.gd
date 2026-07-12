@@ -417,14 +417,21 @@ func _refresh_holdings() -> void:
 		var profit_ratio: float = current_price / average_cost - 1.0 if average_cost > 0.0 else 0.0
 		# 当前遍历盈亏颜色；与右侧持仓摘要保持一致。
 		var profit_color: String = "green" if profit > 0.0 else ("red" if profit < 0.0 else "white")
-		# 持仓卡片宿主；固定标准卡片尺寸并由滚动容器横向排列。
-		var host: Control = Control.new()
+		# 持仓卡片按钮；透明宿主只负责点击切换、悬浮动画和键盘焦点隔离，不直接执行买卖。
+		var host: Button = Button.new()
 		host.custom_minimum_size = CARD_SIZE
+		host.flat = true
+		host.focus_mode = Control.FOCUS_NONE
+		host.pressed.connect(_on_stock_selected.bind(str(stock_id)))
+		host.mouse_entered.connect(_on_holding_card_hovered.bind(host, true))
+		host.mouse_exited.connect(_on_holding_card_hovered.bind(host, false))
 		# 持仓标准卡片；通过空资源模式展示价格、数量、成本和盈亏。
 		var card: Control = ITEM_CARD_VIEW_SCRIPT.new() as Control
+		card.name = "Card"
 		card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		host.add_child(card)
 		card.call("configure", null, 1, "%s · %d股" % [str(snapshot.get("name", "股票")), quantity], "成本 %.2f  [color=%s]%+.2f / %+.2f%%[/color]" % [average_cost, profit_color, profit, profit_ratio * 100.0], "%.2f 证券币" % current_price)
+		card.call("set_visual_state", str(stock_id) == _selected_stock_id, false)
 		_holdings_container.add_child(host)
 	if _holdings_container.get_child_count() == 0:
 		# 空持仓提示；在没有任何股票时替代卡片列表。
@@ -459,6 +466,16 @@ func _on_stock_card_hovered(stock_id: String, hovered: bool) -> void:
 	var card: Control = null
 	if button != null:
 		card = button.get_node_or_null("Card") as Control
+	if card != null:
+		card.call("play_hover", button, hovered)
+
+
+func _on_holding_card_hovered(button: Button, hovered: bool) -> void:
+	## 把全部持仓卡片的鼠标状态转交标准卡片动画；按钮本身保持透明且不显示默认高亮。
+	if button == null:
+		return
+	# 持仓标准卡片；固定为按钮的 Card 子节点，重建列表期间缺失时安全跳过。
+	var card: Control = button.get_node_or_null("Card") as Control
 	if card != null:
 		card.call("play_hover", button, hovered)
 

@@ -8,5 +8,5 @@ item_id = "repair_kit_basic"
 display_name = "初级修复包"
 description = "只能对武器使用，恢复 100 点耐久。"
 icon_text = "+"
-sell_price = 20
+value = 20
 repair_amount = 100.0

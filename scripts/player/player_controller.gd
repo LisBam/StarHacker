@@ -29,10 +29,10 @@ const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat
 @export var camera_path: NodePath = ^"Camera2D"
 ## 疾跑速度倍率；取值建议大于等于 1，默认 1.55 表示按住 Shift 时移动速度提升 55%，运行时修改会影响疾跑手感。
 @export_range(1.0, 4.0, 0.05, "or_greater") var sprint_speed_multiplier: float = 1.55
-## 疾跑每秒能量消耗；取值建议大于等于 0，默认 24 表示持续疾跑会稳定消耗能量，运行时修改会影响疾跑续航。
-@export_range(0.0, 9999.0, 0.1, "or_greater") var sprint_energy_cost_per_second: float = 24.0
-## 闪避单次能量消耗；取值建议大于等于 0，默认 18 表示每次 Space 突进需要付出固定能量，运行时修改会影响闪避频率。
-@export_range(0.0, 9999.0, 0.1, "or_greater") var dodge_energy_cost: float = 18.0
+## 疾跑每秒能耗；取值建议大于等于 0，默认 24 表示持续疾跑会稳定消耗能量，运行时修改会影响疾跑续航。
+@export_range(0.0, 9999.0, 0.1, "or_greater") var sprint_energy_consumption_per_second: float = 24.0
+## 闪避单次能耗；取值建议大于等于 0，默认 18 表示每次 Space 突进需要付出固定能量，运行时修改会影响闪避频率。
+@export_range(0.0, 9999.0, 0.1, "or_greater") var dodge_energy_consumption: float = 18.0
 ## 闪避突进距离；取值建议大于 0，默认 140 像素适合当前角色尺寸，运行时修改会影响 Space 突进位移。
 @export_range(1.0, 1200.0, 1.0, "or_greater") var dodge_distance: float = 140.0
 ## 闪避持续时间；取值建议 0.05 到 0.5 秒，默认 0.16 秒，运行时修改会影响突进速度和无敌等后续扩展窗口。
@@ -102,7 +102,7 @@ func _physics_process(delta: float) -> void:
 	if _dodge_time_remaining > 0.0:
 		_move_dodge(delta)
 	else:
-		# 当前帧移动速度倍率；取值大于等于 1，默认由疾跑状态和能量消耗计算，修改会影响普通移动速度。
+		# 当前帧移动速度倍率；取值大于等于 1，默认由疾跑状态和能耗计算，修改会影响普通移动速度。
 		var movement_speed_multiplier: float = _get_movement_speed_multiplier(movement_direction, delta)
 		_movement_component.move(self, movement_direction, delta, movement_speed_multiplier, _knockback_velocity)
 		_cancel_blocked_knockback_components()
@@ -174,9 +174,9 @@ func _try_fire_ranged_weapon() -> void:
 	if current_weapon == null or not _can_use_weapon(current_weapon):
 		return
 
-	# 本次远程攻击能量消耗；取值大于等于 0，默认来自武器数据，修改会影响是否允许开火和扣能量数值。
-	var energy_cost: float = _get_weapon_energy_cost(current_weapon)
-	if _stats_component.has_method("can_spend_energy") and not _stats_component.call("can_spend_energy", energy_cost):
+	# 本次远程攻击能耗；取值大于等于 0，默认来自武器数据，修改会影响是否允许开火和扣能量数值。
+	var energy_consumption: float = _get_weapon_energy_consumption(current_weapon)
+	if _stats_component.has_method("can_spend_energy") and not _stats_component.call("can_spend_energy", energy_consumption):
 		return
 
 	# 本次远程攻击是否成功生成弹体；取值为 true/false，默认由远程攻击组件返回，修改会影响是否扣除能量。
@@ -189,7 +189,7 @@ func _try_fire_ranged_weapon() -> void:
 	_apply_weapon_front_recoil(current_weapon, _last_aim_direction)
 	_shake_screen_for_weapon_use(current_weapon)
 	if _stats_component.has_method("spend_energy"):
-		_stats_component.call("spend_energy", energy_cost)
+		_stats_component.call("spend_energy", energy_consumption)
 	_consume_weapon_durability(current_weapon)
 
 
@@ -202,9 +202,9 @@ func _try_use_melee_weapon() -> void:
 	if current_weapon == null or not _can_use_weapon(current_weapon):
 		return
 
-	# 本次近战攻击能量消耗；取值大于等于 0，默认来自武器数据，修改会影响是否允许挥击和扣能量数值。
-	var energy_cost: float = _get_weapon_energy_cost(current_weapon)
-	if _stats_component.has_method("can_spend_energy") and not _stats_component.call("can_spend_energy", energy_cost):
+	# 本次近战攻击能耗；取值大于等于 0，默认来自武器数据，修改会影响是否允许挥击和扣能量数值。
+	var energy_consumption: float = _get_weapon_energy_consumption(current_weapon)
+	if _stats_component.has_method("can_spend_energy") and not _stats_component.call("can_spend_energy", energy_consumption):
 		return
 
 	# 本次近战攻击是否成功开启命中框；取值为 true/false，默认由近战组件返回，修改会影响是否扣除能量。
@@ -216,7 +216,7 @@ func _try_use_melee_weapon() -> void:
 	_apply_weapon_front_recoil(current_weapon, _last_aim_direction)
 	_shake_screen_for_weapon_use(current_weapon)
 	if _stats_component.has_method("spend_energy"):
-		_stats_component.call("spend_energy", energy_cost)
+		_stats_component.call("spend_energy", energy_consumption)
 	_consume_weapon_durability(current_weapon)
 
 
@@ -268,7 +268,7 @@ func _handle_dodge_request(movement_direction: Vector2) -> void:
 	if movement_direction.is_zero_approx():
 		return
 
-	if not _spend_energy(dodge_energy_cost):
+	if not _spend_energy(dodge_energy_consumption):
 		return
 
 	_dodge_direction = movement_direction.normalized()
@@ -305,9 +305,9 @@ func _get_movement_speed_multiplier(movement_direction: Vector2, delta: float) -
 	if not _input_component.has_method("is_sprint_pressed") or not bool(_input_component.call("is_sprint_pressed")):
 		return 1.0
 
-	# 本帧疾跑能量消耗；取值大于等于 0，默认由每秒消耗乘 delta 得出，修改会影响疾跑扣能节奏。
-	var sprint_energy_cost: float = maxf(sprint_energy_cost_per_second, 0.0) * delta
-	if not _spend_energy(sprint_energy_cost):
+	# 本帧疾跑能耗；取值大于等于 0，默认由每秒能耗乘 delta 得出，修改会影响疾跑扣能节奏。
+	var sprint_energy_consumption: float = maxf(sprint_energy_consumption_per_second, 0.0) * delta
+	if not _spend_energy(sprint_energy_consumption):
 		return 1.0
 
 	return maxf(sprint_speed_multiplier, 1.0)
@@ -323,13 +323,13 @@ func _spend_energy(amount: float) -> bool:
 	return bool(_stats_component.call("spend_energy", amount))
 
 
-func _get_weapon_energy_cost(weapon_data: Resource) -> float:
+func _get_weapon_energy_consumption(weapon_data: Resource) -> float:
 	if weapon_data == null:
 		return 0.0
 	if weapon_data.has_method("get_effective_stat"):
-		return maxf(float(weapon_data.call("get_effective_stat", "energy_cost")), 0.0)
+		return maxf(float(weapon_data.call("get_effective_stat", "energy_consumption")), 0.0)
 
-	return maxf(float(weapon_data.get("energy_cost")), 0.0)
+	return maxf(float(weapon_data.get("energy_consumption")), 0.0)
 
 
 func apply_knockback(direction: Vector2, force: float) -> void:
@@ -370,6 +370,8 @@ func _apply_weapon_front_recoil(weapon_data: Resource, attack_direction: Vector2
 func _get_weapon_recoil_force(weapon_data: Resource) -> float:
 	if weapon_data == null:
 		return 0.0
+	if not bool(weapon_data.get("has_recoil")):
+		return 0.0
 	if weapon_data.has_method("get_effective_stat"):
 		return maxf(float(weapon_data.call("get_effective_stat", "recoil_force")), 0.0)
 
@@ -378,6 +380,8 @@ func _get_weapon_recoil_force(weapon_data: Resource) -> float:
 
 func _get_weapon_front_recoil_force(weapon_data: Resource) -> float:
 	if weapon_data == null:
+		return 0.0
+	if not bool(weapon_data.get("has_front_recoil")):
 		return 0.0
 	if weapon_data.has_method("get_effective_stat"):
 		return maxf(float(weapon_data.call("get_effective_stat", "front_recoil_force")), 0.0)

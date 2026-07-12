@@ -841,7 +841,7 @@ func _collect_outcome_metrics() -> void:
 		# 获得数量；至少为 1，堆叠资源按结算记录数量计算。
 		var gained_quantity: int = maxi(int(gained_entry.get("quantity", 1)), 1)
 		# 获得物品单位价值；缺失资源时按 0 处理。
-		var gained_unit_value: int = int(gained_resource.get("sell_price")) if gained_resource != null else 0
+		var gained_unit_value: int = int(gained_resource.call("get_effective_value")) if gained_resource != null and gained_resource.has_method("get_effective_value") else (int(gained_resource.get("value")) if gained_resource != null else 0)
 		extracted_value += gained_unit_value * gained_quantity
 		if gained_resource != null and not str(gained_resource.get("weapon_id")).is_empty():
 			extracted_weapon_value += gained_unit_value * gained_quantity
@@ -855,7 +855,7 @@ func _collect_outcome_metrics() -> void:
 		# 丢失数量；至少为 1，强化石等堆叠按实际颗数计算。
 		var quantity: int = maxi(int(entry.get("quantity", 1)), 1)
 		# 丢失物品单位价值；缺失资源时按 0 处理。
-		var unit_value: int = int(resource.get("sell_price")) if resource != null else 0
+		var unit_value: int = int(resource.call("get_effective_value")) if resource != null and resource.has_method("get_effective_value") else (int(resource.get("value")) if resource != null else 0)
 		lost_value += unit_value * quantity
 		if unit_value * quantity >= 800:
 			lost_high_value += unit_value * quantity

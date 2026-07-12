@@ -18,8 +18,8 @@ class_name EquipmentData
 @export_multiline var description: String = ""
 ## 装备图标文本；默认护盾符号，用于紧凑物品卡片。
 @export var icon_text: String = "◇"
-## 装备出售价格；默认 0，强化和耐久会共同影响实际售价。
-@export_range(0, 999999, 1) var sell_price: int = 0
+## 装备价值；默认 0，强化和耐久会共同影响玩家出售时的实际价值。
+@export_range(0, 999999, 1) var value: int = 0
 ## 最大耐久值；默认 500.0，归零后装备属性失效但物品不会消失，已存档装备按原耐久比例迁移。
 @export_range(1.0, 999999.0, 0.1, "or_greater") var max_durability: float = 500.0
 ## 当前耐久值；默认 500.0 表示新装备以满耐久创建，受到玩家伤害时由装备组件统一动态消耗。
@@ -119,19 +119,19 @@ func apply_enhancement(modifiers: Dictionary) -> bool:
 	return bool(apply_enhancement_with_result(modifiers).get("success", false))
 
 
-func get_effective_sell_price() -> int:
-	# 强化售价倍率；所有装备属性增加均提高售价，减少均降低售价，最低保留 10%。
+func get_effective_value() -> int:
+	# 强化价值倍率；所有装备属性增加均提高价值，减少均降低价值，最低保留 10%。
 	var modifier_total: float = 0.0
 	for raw_stat_name in enhancement_modifiers.keys():
 		if _is_stat_supported(str(raw_stat_name)):
 			modifier_total += float(enhancement_modifiers.get(raw_stat_name, 0.0))
-	# 耐久售价倍率；零耐久保留满耐久有效售价的 10%。
+	# 耐久价值倍率；零耐久保留满耐久有效价值的 10%。
 	var durability_ratio: float = clampf(current_durability / get_maximum_durability(), 0.0, 1.0)
-	return maxi(roundi(float(sell_price) * maxf(1.0 + modifier_total, 0.1) * lerpf(0.1, 1.0, durability_ratio)), 1) if sell_price > 0 else 0
+	return maxi(roundi(float(value) * maxf(1.0 + modifier_total, 0.1) * lerpf(0.1, 1.0, durability_ratio)), 1) if value > 0 else 0
 
 
 func get_durability_ratio() -> float:
-	# 当前耐久比例；与 WeaponData 使用同一计算规则，供耐久条、售价和通用 UI 读取稳定的 0 到 1 数值。
+	# 当前耐久比例；与 WeaponData 使用同一计算规则，供耐久条、价值和通用 UI 读取稳定的 0 到 1 数值。
 	return clampf(current_durability / get_maximum_durability(), 0.0, 1.0)
 
 

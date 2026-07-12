@@ -20,12 +20,12 @@ class_name RangedMonster
 @export_range(0.0, 5000.0, 1.0, "or_greater") var ranged_projectile_impact_force: float = 90.0
 ## 敌方弹体偏移角度；取值大于等于 0，默认 4 度，每次射击会在瞄准方向两侧随机变化。
 @export_range(0.0, 45.0, 0.1, "or_greater") var ranged_projectile_deviation_degrees: float = 4.0
-## 射击冷却；取值应大于 0，默认 1.25 秒，修改会影响远程怪物连续开火频率。
-@export_range(0.05, 10.0, 0.05) var shoot_cooldown: float = 1.25
-## 个体射击冷却最小倍率；取值建议 0.8 到 1，默认 0.85，让远程怪物射击间隔存在下限差异。
-@export_range(0.1, 3.0, 0.01) var shoot_cooldown_random_multiplier_min: float = 0.85
-## 个体射击冷却最大倍率；取值建议大于等于最小倍率，默认 1.35，让远程怪物射击间隔存在上限差异。
-@export_range(0.1, 3.0, 0.01) var shoot_cooldown_random_multiplier_max: float = 1.35
+## 冷却；取值应大于 0，默认 1.25 秒，修改会影响远程怪物连续开火频率。
+@export_range(0.05, 10.0, 0.05) var cooldown: float = 1.25
+## 个体冷却最小倍率；取值建议 0.8 到 1，默认 0.85，让远程怪物攻击间隔存在下限差异。
+@export_range(0.1, 3.0, 0.01) var cooldown_random_multiplier_min: float = 0.85
+## 个体冷却最大倍率；取值建议大于等于最小倍率，默认 1.35，让远程怪物攻击间隔存在上限差异。
+@export_range(0.1, 3.0, 0.01) var cooldown_random_multiplier_max: float = 1.35
 ## 枪口偏移；取值为相对怪物中心的局部坐标，默认向前 24 像素，修改会影响子弹出生点。
 @export var muzzle_offset: Vector2 = Vector2(24.0, 0.0)
 ## 视线遮挡检测掩码；默认检测第 5 层环境，修改会影响怪物判断能否直接射击玩家。
@@ -33,10 +33,10 @@ class_name RangedMonster
 ## 弹体父节点路径；默认留空表示挂到当前场景，指定后会影响敌方子弹所在层级。
 @export var projectile_parent_path: NodePath
 
-## 远程射击冷却剩余时间；取值大于等于 0，默认 0 表示生成后可立即开火。
-var _shoot_cooldown_remaining: float = 0.0
-## 个体射击冷却倍率；取值由出生时随机生成，默认 1 表示不改变检查器中的基础射击冷却。
-var _shoot_cooldown_multiplier: float = 1.0
+## 远程攻击冷却剩余时间；取值大于等于 0，默认 0 表示生成后可立即开火。
+var _cooldown_remaining: float = 0.0
+## 个体冷却倍率；取值由出生时随机生成，默认 1 表示不改变检查器中的基础冷却。
+var _cooldown_multiplier: float = 1.0
 
 
 func apply_spawn_variation(size_multiplier: float, attribute_multiplier: float) -> void:
@@ -49,7 +49,7 @@ func apply_spawn_variation(size_multiplier: float, attribute_multiplier: float) 
 	keep_distance *= resolved_size_multiplier
 	ranged_projectile_damage *= resolved_attribute_multiplier
 	ranged_projectile_impact_force *= resolved_attribute_multiplier
-	shoot_cooldown /= resolved_attribute_multiplier
+	cooldown /= resolved_attribute_multiplier
 
 
 func _ready() -> void:
@@ -58,16 +58,16 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	_shoot_cooldown_remaining = maxf(_shoot_cooldown_remaining - delta, 0.0)
+	_cooldown_remaining = maxf(_cooldown_remaining - delta, 0.0)
 
 
 func _randomize_individual_shooting() -> void:
-	_shoot_cooldown_multiplier = _get_randomized_multiplier(shoot_cooldown_random_multiplier_min, shoot_cooldown_random_multiplier_max)
-	_shoot_cooldown_remaining = _random.randf_range(0.0, _get_resolved_shoot_cooldown())
+	_cooldown_multiplier = _get_randomized_multiplier(cooldown_random_multiplier_min, cooldown_random_multiplier_max)
+	_cooldown_remaining = _random.randf_range(0.0, _get_resolved_cooldown())
 
 
-func _get_resolved_shoot_cooldown() -> float:
-	return maxf(shoot_cooldown, 0.05) * maxf(_shoot_cooldown_multiplier, 0.1)
+func _get_resolved_cooldown() -> float:
+	return maxf(cooldown, 0.05) * maxf(_cooldown_multiplier, 0.1)
 
 
 func _update_target_behavior(_delta: float, target_distance: float) -> void:
@@ -106,7 +106,7 @@ func _update_target_behavior(_delta: float, target_distance: float) -> void:
 
 
 func _try_fire_projectile(direction: Vector2) -> void:
-	if projectile_scene == null or _shoot_cooldown_remaining > 0.0 or direction.is_zero_approx():
+	if projectile_scene == null or _cooldown_remaining > 0.0 or direction.is_zero_approx():
 		return
 	if not is_instance_valid(_target) or not _target_is_visible:
 		return
@@ -142,7 +142,7 @@ func _try_fire_projectile(direction: Vector2) -> void:
 	if projectile.has_method("launch"):
 		projectile.call("launch", resolved_direction, ranged_projectile_speed)
 
-	_shoot_cooldown_remaining = _get_resolved_shoot_cooldown()
+	_cooldown_remaining = _get_resolved_cooldown()
 
 
 func _has_line_of_sight_to_target() -> bool:

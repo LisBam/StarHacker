@@ -178,8 +178,8 @@ text = "速度  320"
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 14)
 layout_mode = 2
-max_value = 420.0
-value = 320.0
+max_value = 140.0
+value = 106.6667
 show_percentage = false
 
 [node name="AttackValueLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent/StatsPanel/StatsMargin/StatsContent"]

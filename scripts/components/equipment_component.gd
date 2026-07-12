@@ -38,7 +38,7 @@ var _combat_camera: Camera2D
 ## 不含装备的基础相机缩放；默认进入场景时读取当前 Camera2D.zoom。
 var _base_camera_zoom: Vector2 = Vector2.ONE
 ## 不含装备的基础移速；默认 320，首次同步时从移动组件读取。
-var _base_move_speed: float = 320.0
+var _base_move_speed: float = 106.6667
 ## 当前装备移速比例；默认 0，由有效脚部装备聚合，角色面板用它换算实际速度加成。
 var _equipment_move_speed_ratio: float = 0.0
 ## 当前装备视野比例；默认 0，由有效头部装备聚合，角色面板按百分比显示。

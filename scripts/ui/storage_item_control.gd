@@ -12,7 +12,7 @@ signal repair_kit_drop_requested(repair_kit_resource: Resource, source_location:
 
 ## 拖拽数据类型标识；默认用于拒绝来自其他 UI 系统的不兼容拖拽数据。
 const DRAG_DATA_TYPE: String = "global_storage_item"
-## 统一物品详情格式化器；默认生成基础值、强化值、资源词条和动态售价信息。
+## 统一物品详情格式化器；默认生成基础值、强化值、资源词条和动态价值信息。
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
 ## 通用物品卡片视图；仓库、背包、锻造来源、物资撤离与结算必须统一复用该固定尺寸模板。
 const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
@@ -38,7 +38,7 @@ var _location: String = ""
 var _item_index: int = -1
 ## 是否允许左键快捷操作；默认 false，纯仓库模式只浏览和出售，展开背包后才启用容器互转。
 var _quick_action_enabled: bool = false
-## 当前堆叠数量；武器固定为 1，强化石取值 1 到 99，修改会影响卡片数量角标和整组售价。
+## 当前堆叠数量；武器固定为 1，强化石取值 1 到 99，修改会影响卡片数量角标和整组价值。
 var _quantity: int = 1
 ## 强化石卡片富文本；默认运行时按需创建，用于在方形资源格内直接区分绿色增强与红色削弱词条。
 ## 宽卡布局补充；强化石已与武器统一为宽卡片，该富文本仅负责品质、百分比和利弊颜色。
@@ -65,9 +65,9 @@ var _weapon_slot_visual_style_enabled: bool = false
 var _durability_bar: Control
 ## 当前绿色目标悬停补间；默认 null，新悬停状态会终止旧补间以避免缩放叠加。
 var _selection_hover_tween: Tween
-## 当前卡片价值标签；默认“售价”，物资撤离面板会改为“撤离收费”。
-var _price_label: String = "售价"
-## 当前卡片价格覆盖值；默认 -1 使用物品有效售价，物资撤离面板传入实际运费。
+## 当前卡片价值标签；默认“价值”，物资撤离面板会改为“撤离收费”。
+var _price_label: String = "价值"
+## 当前卡片数值覆盖；默认 -1 使用物品有效价值，物资撤离面板传入实际运费。
 var _displayed_price_override: int = -1
 ## 不可选目标灰色覆盖层；默认隐藏，选择状态阻止当前物品时完整覆盖按钮、富文本与耐久条。
 var _target_filter_overlay: ColorRect
@@ -79,16 +79,16 @@ var _extraction_prefix: String = ""
 var _is_drag_source_active: bool = false
 
 
-func configure(item_resource: Resource, location: String, item_index: int, quick_action_enabled: bool, extraction_prefix: String = "", quantity: int = 1, price_label: String = "售价", displayed_price_override: int = -1) -> void:
+func configure(item_resource: Resource, location: String, item_index: int, quick_action_enabled: bool, extraction_prefix: String = "", quantity: int = 1, price_label: String = "价值", displayed_price_override: int = -1) -> void:
 	_item_resource = item_resource
 	_location = location
 	_item_index = item_index
 	_quick_action_enabled = quick_action_enabled
 	_quantity = clampi(quantity, 1, 99)
-	_price_label = price_label if not price_label.is_empty() else "售价"
+	_price_label = price_label if not price_label.is_empty() else "价值"
 	_displayed_price_override = displayed_price_override
 	_extraction_prefix = extraction_prefix
-	# 物品摘要；强化石和修复包共用紧凑富文本资源卡，武器保持两列宽卡片显示分类和动态售价。
+	# 物品摘要；强化石和修复包共用紧凑富文本资源卡，武器保持两列宽卡片显示分类和动态价值。
 	# 通用模板补充：当前所有物品使用相同固定卡片，类型差异只影响摘要内容，不影响布局结构。
 	text = ""
 	if _stone_summary_label != null:
@@ -232,14 +232,14 @@ func _get_weapon_type_label() -> String:
 	return str(ITEM_DETAIL_FORMATTER.call("get_item_type_label", _item_resource))
 
 
-func _get_sell_price() -> int:
-	return int(ITEM_DETAIL_FORMATTER.call("get_item_sell_price", _item_resource))
+func _get_item_value() -> int:
+	return int(ITEM_DETAIL_FORMATTER.call("get_item_value", _item_resource))
 
 
 func _get_displayed_price() -> int:
 	if _displayed_price_override >= 0:
 		return _displayed_price_override
-	return _get_sell_price() if _is_weapon_resource() else _get_sell_price() * _quantity
+	return _get_item_value() if _is_weapon_resource() else _get_item_value() * _quantity
 
 
 func _build_item_details() -> String:
@@ -251,12 +251,12 @@ func _make_custom_tooltip(_for_text: String) -> Object:
 
 
 func _get_tooltip_price_label() -> String:
-	# 撤离卡片表面显示实际收费，悬停详情仍展示物品自身出售价格，便于玩家判断价值与运费关系。
-	return "出售价格" if _price_label in ["售价", "撤离收费"] else _price_label
+	# 撤离卡片表面显示实际收费，悬停详情仍展示物品自身价值，便于玩家判断价值与运费关系。
+	return "价值" if _price_label == "撤离收费" else _price_label
 
 
 func _get_tooltip_price_override() -> int:
-	# 撤离收费覆盖值只属于卡片摘要，详情回退资源自身售价；其他自定义价格继续按调用方覆盖显示。
+	# 撤离收费覆盖值只属于卡片摘要，详情回退资源自身价值；其他自定义数值继续按调用方覆盖显示。
 	return -1 if _price_label == "撤离收费" else _displayed_price_override
 
 

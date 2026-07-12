@@ -123,8 +123,8 @@ const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, 
 @export_range(1, 9, 1) var enhancement_stone_max_modifier_count: int = 3
 ## 强化石生成削弱词条的概率；默认 0.28，削弱方向会按属性规则决定，例如冷却增加或伤害降低。
 @export_range(0.0, 1.0, 0.01) var enhancement_stone_negative_modifier_chance: float = 0.28
-## 强化石基础出售价格；默认 30 金币，随机多词条会按词条数量增加单颗价值。
-@export_range(0, 999999, 1) var enhancement_stone_base_sell_price: int = 30
+## 强化石单词条基础价值；默认 30 金币，随机多词条会按词条数量增加单颗价值。
+@export_range(0, 999999, 1) var enhancement_stone_base_value: int = 30
 ## 品质规则兼容说明；词条数量与削弱概率现由 EnhancementRules.QUALITY_CONFIGS 统一决定，上述最小/最大词条和通用削弱概率只保留旧扩展调用兼容。
 ## 修复包死亡掉落概率；默认 0.05 表示每只被击杀怪物独立有 5% 概率掉落一个随机修复包。
 @export_range(0.0, 1.0, 0.001) var repair_kit_drop_chance: float = 0.05
@@ -216,8 +216,8 @@ const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, 
 @export_range(1.0, 9999.0, 1.0, "or_greater") var stelle_max_health: float = 130.0
 ## 星的固定能量上限；取值应大于 0，默认 110，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var stelle_max_energy: float = 110.0
-## 星的固定移动速度；取值应大于 0，默认 320，切换角色时会写入玩家移动组件。
-@export_range(1.0, 2000.0, 1.0, "or_greater") var stelle_move_speed: float = 320.0
+## 星的固定移动速度属性；默认 106.6667，按 1 点等于 3 像素/秒换算，切换角色时写入玩家移动组件。
+@export_range(1.0, 2000.0, 0.0001, "or_greater") var stelle_move_speed: float = 106.6667
 ## 星的固定攻击力；默认 10，切换角色时写入战斗属性组件并参与伤害公式。
 @export_range(0.0, 99999.0, 1.0, "or_greater") var stelle_attack_power: float = 10.0
 ## 星的固定防御力；默认 5，切换角色时写入战斗属性组件并参与承伤公式。
@@ -226,8 +226,8 @@ const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, 
 @export_range(1.0, 9999.0, 1.0, "or_greater") var caelus_max_health: float = 150.0
 ## 穹的固定能量上限；取值应大于 0，默认 95，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var caelus_max_energy: float = 95.0
-## 穹的固定移动速度；取值应大于 0，默认 300，切换角色时会写入玩家移动组件。
-@export_range(1.0, 2000.0, 1.0, "or_greater") var caelus_move_speed: float = 300.0
+## 穹的固定移动速度属性；默认 100，按 1 点等于 3 像素/秒换算，切换角色时写入玩家移动组件。
+@export_range(1.0, 2000.0, 0.0001, "or_greater") var caelus_move_speed: float = 100.0
 ## 穹的固定攻击力；默认 9，较低输出与较高生存能力形成角色差异。
 @export_range(0.0, 99999.0, 1.0, "or_greater") var caelus_attack_power: float = 9.0
 ## 穹的固定防御力；默认 10，为三名角色中最高基础防御。
@@ -236,8 +236,8 @@ const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, 
 @export_range(1.0, 9999.0, 1.0, "or_greater") var silver_wolf_max_health: float = 105.0
 ## 银狼的固定能量上限；取值应大于 0，默认 155，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var silver_wolf_max_energy: float = 155.0
-## 银狼的固定移动速度；取值应大于 0，默认 355，切换角色时会写入玩家移动组件。
-@export_range(1.0, 2000.0, 1.0, "or_greater") var silver_wolf_move_speed: float = 355.0
+## 银狼的固定移动速度属性；默认 118.3333，按 1 点等于 3 像素/秒换算，切换角色时写入玩家移动组件。
+@export_range(1.0, 2000.0, 0.0001, "or_greater") var silver_wolf_move_speed: float = 118.3333
 ## 银狼的固定攻击力；默认 11，为三名角色中最高基础攻击。
 @export_range(0.0, 99999.0, 1.0, "or_greater") var silver_wolf_attack_power: float = 11.0
 ## 银狼的固定防御力；默认 2，以较低防御平衡高攻击、能量和移速。
@@ -1806,10 +1806,10 @@ func _create_random_loot_chest_item(quality_id: String, force_high_quality: bool
 func _get_random_chest_weapon(high_quality: bool) -> Resource:
 	if weapon_drop_table.is_empty():
 		return _get_random_chest_stone(high_quality)
-	# 高品质武器池；当前以基础售价不低于 120 金币识别，覆盖脉冲步枪、散射爆能枪和磁轨炮等高价值枪械。
+	# 高品质武器池；当前以基础价值不低于 120 金币识别，覆盖脉冲步枪、散射爆能枪和磁轨炮等高价值枪械。
 	var candidate_weapons: Array[Resource] = []
 	for weapon_template in weapon_drop_table:
-		if weapon_template != null and (not high_quality or int(weapon_template.get("sell_price")) >= 120):
+		if weapon_template != null and (not high_quality or int(weapon_template.get("value")) >= 120):
 			candidate_weapons.append(weapon_template)
 	if candidate_weapons.is_empty():
 		candidate_weapons = weapon_drop_table.duplicate()
@@ -1841,11 +1841,11 @@ func _get_random_chest_stone(high_quality: bool) -> Resource:
 func _get_random_chest_repair_kit(high_quality: bool) -> Resource:
 	if repair_kit_drop_table.is_empty():
 		return _get_random_chest_stone(high_quality)
-	# 高品质修复包；选择售价最高的模板，当前为恢复 500 耐久的高级修复包。
+	# 高品质修复包；选择价值最高的模板，当前为恢复 500 耐久的高级修复包。
 	var selected_template: Resource = repair_kit_drop_table[0]
 	if high_quality:
 		for repair_template in repair_kit_drop_table:
-			if repair_template != null and int(repair_template.get("sell_price")) > int(selected_template.get("sell_price")):
+			if repair_template != null and int(repair_template.get("value")) > int(selected_template.get("value")):
 				selected_template = repair_template
 	else:
 		selected_template = repair_kit_drop_table[_random.randi_range(0, repair_kit_drop_table.size() - 1)]
@@ -2120,7 +2120,7 @@ func _try_spawn_repair_kit_drop(monster_node: Node2D) -> void:
 	var repair_kit_template: Resource = repair_kit_drop_table[repair_kit_index]
 	if repair_kit_template == null:
 		return
-	# 独立修复包；复制后保留该品质的固定耐久恢复量与售价，避免共享资源状态。
+	# 独立修复包；复制后保留该品质的固定耐久恢复量与价值，避免共享资源状态。
 	var repair_kit: Resource = repair_kit_template.duplicate(true) as Resource
 	_spawn_monster_drop_with_animation(repair_kit if repair_kit != null else repair_kit_template, monster_node.global_position)
 
@@ -2143,7 +2143,7 @@ func _create_random_enhancement_stone() -> EnhancementStoneData:
 		enhancement_stone_min_modifier_count,
 		enhancement_stone_max_modifier_count,
 		enhancement_stone_negative_modifier_chance,
-		enhancement_stone_base_sell_price
+		enhancement_stone_base_value
 	)
 
 

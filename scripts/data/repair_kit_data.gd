@@ -14,8 +14,8 @@ class_name RepairKitData
 @export_multiline var description: String = "只能对武器使用，恢复固定耐久。"
 ## 道具图标文本；默认十字标记，地面掉落与资源卡片共用该简写。
 @export var icon_text: String = "+"
-## 单个出售价格；取值大于等于 0，出售堆叠时会乘以实际数量。
-@export_range(0, 999999, 1) var sell_price: int = 20
+## 单个价值；取值大于等于 0，出售堆叠时会乘以实际数量。
+@export_range(0, 999999, 1) var value: int = 20
 ## 单个修复包恢复的耐久；取值大于 0，使用时实际恢复量不会超过武器最大耐久。
 @export_range(1.0, 10000.0, 1.0, "or_greater") var repair_amount: float = 100.0
 
@@ -24,5 +24,5 @@ func get_stack_signature() -> String:
 	return "repair_kit:%s" % item_id
 
 
-func get_effective_sell_price() -> int:
-	return maxi(sell_price, 0)
+func get_effective_value() -> int:
+	return maxi(value, 0)

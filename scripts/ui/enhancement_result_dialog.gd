@@ -72,17 +72,17 @@ func present_result(enhancement_result: Dictionary) -> void:
 		# 当前耐久颜色；上升为绿色、下降为红色，数值未变使用中性色。
 		var durability_color: String = BENEFICIAL_COLOR if durability_change > 0.0 else (DETRIMENTAL_COLOR if durability_change < 0.0 else NEUTRAL_COLOR)
 		result_lines.append("[color=%s]%s → %s（实际 %s%s）[/color]" % [durability_color, _format_number(durability_before), _format_number(durability_after), "+" if durability_change >= 0.0 else "", _format_number(durability_change)])
-	# 强化前售价；由 GlobalInventory 在应用词条前读取，避免弹窗自行复算历史状态。
-	var sell_price_before: int = maxi(int(enhancement_result.get("sell_price_before", 0)), 0)
-	# 强化后售价；包含本次随机强化产生的全部价格影响。
-	var sell_price_after: int = maxi(int(enhancement_result.get("sell_price_after", sell_price_before)), 0)
-	# 售价变化；正数显式显示加号，负数保留减号，0 表示本次词条综合后价格不变。
-	var sell_price_change: int = sell_price_after - sell_price_before
+	# 强化前价值；由库存服务在应用词条前读取，避免弹窗自行复算历史状态。
+	var value_before: int = maxi(int(enhancement_result.get("value_before", 0)), 0)
+	# 强化后价值；包含本次随机强化产生的全部属性影响。
+	var value_after: int = maxi(int(enhancement_result.get("value_after", value_before)), 0)
+	# 价值变化；正数显式显示加号，负数保留减号，0 表示本次词条综合后价值不变。
+	var value_change: int = value_after - value_before
 	result_lines.append("")
-	result_lines.append("价格变化")
-	# 价格颜色；价格上升为绿色、下降为红色、无变化使用中性色。
-	var price_color: String = BENEFICIAL_COLOR if sell_price_change > 0 else (DETRIMENTAL_COLOR if sell_price_change < 0 else NEUTRAL_COLOR)
-	result_lines.append("[color=%s]%d → %d 金币（%s%d）[/color]" % [price_color, sell_price_before, sell_price_after, "+" if sell_price_change >= 0 else "", sell_price_change])
+	result_lines.append("价值变化")
+	# 价值颜色；价值上升为绿色、下降为红色、无变化使用中性色。
+	var value_color: String = BENEFICIAL_COLOR if value_change > 0 else (DETRIMENTAL_COLOR if value_change < 0 else NEUTRAL_COLOR)
+	result_lines.append("[color=%s]%d → %d 金币（%s%d）[/color]" % [value_color, value_before, value_after, "+" if value_change >= 0 else "", value_change])
 	dialog_text = ""
 	_result_label.text = "\n".join(result_lines)
 	present_information("强化完成", "", "确定", dialog_width, dialog_height)
@@ -119,7 +119,7 @@ func _format_change_line(change: Dictionary) -> String:
 	# 带符号百分比；使用整数百分点对齐强化石生成精度。
 	# 公式类型；加算属性用“百分点”展示，乘算属性继续显示百分比，避免两种幅度被误读为同一公式。
 	var calculation_mode: String = str(change.get("calculation_mode", EnhancementRules.get_calculation_mode(stat_name)))
-	# 玩法收益；冷却、能量消耗、偏移和后坐力降低等负方向收益同样使用绿色。
+	# 玩法收益；冷却、能耗、偏移和后坐力降低等负方向收益同样使用绿色。
 	var is_beneficial: bool = EnhancementRules.is_direction_beneficial(stat_name, modifier_ratio)
 	# 词条描述；乘算属性保留 0.1% 精度，避免缩放后的一级属性被四舍五入为 0%，加算属性直接显示带符号百分点。
 	var percentage_text: String = "%s%d 点" % ["+" if modifier_ratio >= 0.0 else "-", roundi(absf(modifier_ratio))] if calculation_mode == EnhancementRules.CALCULATION_ADDITIVE_VALUE else (("%s%.1f%%" % ["+" if modifier_ratio >= 0.0 else "-", absf(modifier_ratio) * 100.0]) if calculation_mode == EnhancementRules.CALCULATION_ADDITIVE_POINTS else ("%s%.1f%%" % ["提升" if is_beneficial else "削弱", absf(modifier_ratio) * 100.0]))

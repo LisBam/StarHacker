@@ -87,7 +87,7 @@ const DEVELOPER_STONE_MIN_MODIFIER_COUNT: int = 1
 const DEVELOPER_STONE_MAX_MODIFIER_COUNT: int = 3
 ## 开发者强化石削弱词条概率；默认 0.28，与战斗掉落默认配置保持一致。
 const DEVELOPER_STONE_DETRIMENTAL_CHANCE: float = 0.28
-## 开发者强化石单词条基础售价；默认 30 金币，与战斗掉落默认配置保持一致。
+## 开发者强化石单词条基础价值；默认 30 金币，与战斗掉落默认配置保持一致。
 const DEVELOPER_STONE_BASE_SELL_PRICE: int = 30
 ## 开发者强化石兼容说明；词条数和削弱概率已由品质规则接管，上述三项随机常量仅用于保持旧调用签名稳定。
 
@@ -475,8 +475,8 @@ func get_combat_carried_value_summary() -> Dictionary:
 			continue
 		# 随身物品数量；武器和装备通常为 1，堆叠资源按实际数量累计。
 		var quantity: int = maxi(int(record.get("quantity", 1)), 1)
-		# 随身物品总价；使用库存统一有效售价，耐久和强化状态会自然反映在价值中。
-		var record_value: int = _get_resource_sell_price(item_resource) * quantity
+		# 随身物品总价值；使用库存统一有效价值，耐久和强化状态会自然反映在结果中。
+		var record_value: int = _get_resource_value(item_resource) * quantity
 		total_value += record_value
 		if _is_weapon_resource(item_resource):
 			weapon_value += record_value
@@ -496,7 +496,7 @@ func get_combat_shipping_quote(item_resource: Resource, source_location: String,
 	# 实际报价数量；旧弹窗确认后数量变化时限制到当前仍持有的数量。
 	var shipping_quantity: int = clampi(requested_quantity, 1, available_quantity)
 	# 送回价值；按物品当前有效单价乘数量累计到单局 1000 金币上限。
-	var shipping_value: int = _get_resource_sell_price(item_resource) * shipping_quantity
+	var shipping_value: int = _get_resource_value(item_resource) * shipping_quantity
 	# 运费；按总价值的 20% 向上取整，零价值物品运费保持 0。
 	var shipping_fee: int = ceili(float(shipping_value) * COMBAT_SHIPPING_FEE_RATIO) if shipping_value > 0 else 0
 	quote["value"] = shipping_value
@@ -768,7 +768,7 @@ func grant_random_enhancement_stones_to_warehouse(stone_count: int = DEVELOPER_S
 	# 请求数量；开发者菜单默认 10，外部调试调用可传入其他非负数量。
 	var resolved_stone_count: int = maxi(stone_count, 0)
 	for _stone_index in range(resolved_stone_count):
-		# 随机强化石；使用与战斗掉落相同的词条数量、削弱概率和售价规则。
+		# 随机强化石；使用与战斗掉落相同的词条数量、削弱概率和价值规则。
 		var enhancement_stone: EnhancementStoneData = EnhancementStoneData.create_random(
 			_random,
 			DEVELOPER_STONE_MIN_MODIFIER_COUNT,
@@ -953,11 +953,11 @@ func sell_storage_resource_quantity(item_resource: Resource, source_location: St
 	var stored_quantity: int = maxi(int(stored_record.get("quantity", 1)), 1)
 	# 实际出售数量；请求值限制在当前库存范围，避免旧弹窗确认后物品数量变化造成负数。
 	var sell_quantity: int = clampi(requested_quantity, 1, stored_quantity)
-	# 单件售价；武器使用强化后动态售价，强化石使用资源基础售价。
-	var unit_sell_price: int = _get_resource_sell_price(item_resource)
-	# 出售总价；堆叠资源乘以当前数量。
-	var total_sell_price: int = unit_sell_price * sell_quantity
-	if total_sell_price <= 0:
+	# 单件价值；武器使用强化后动态价值，强化石使用资源基础价值。
+	var unit_value: int = _get_resource_value(item_resource)
+	# 出售所得；堆叠资源以单件价值乘以当前数量。
+	var total_value: int = unit_value * sell_quantity
+	if total_value <= 0:
 		return false
 
 	# 剩余数量；部分出售时保留原记录与资源实例，全部出售时移除整条所有权记录。
@@ -966,7 +966,7 @@ func sell_storage_resource_quantity(item_resource: Resource, source_location: St
 		stored_record["quantity"] = remaining_quantity
 	else:
 		source_records.remove_at(record_index)
-	_coins += total_sell_price
+	_coins += total_value
 	_queue_save_inventory()
 	_emit_storage_changed(source_location)
 	coins_changed.emit()
@@ -982,13 +982,13 @@ func get_storage_resource_quantity(item_resource: Resource, source_location: Str
 	return maxi(int(source_records[record_index].get("quantity", 1)), 1)
 
 
-func get_storage_resource_sell_price(item_resource: Resource, source_location: String) -> int:
-	# 来源记录；不存在时返回 0，防止 UI 对已经移动的旧引用显示可出售价格。
+func get_storage_resource_value(item_resource: Resource, source_location: String) -> int:
+	# 来源记录；不存在时返回 0，防止 UI 对已经移动的旧引用显示可出售价值。
 	var record_index: int = _find_storage_record_index(source_location, item_resource)
 	var source_records: Array[Dictionary] = _get_storage_records(source_location)
 	if record_index < 0 or record_index >= source_records.size():
 		return 0
-	return _get_resource_sell_price(item_resource) * maxi(int(source_records[record_index].get("quantity", 1)), 1)
+	return _get_resource_value(item_resource) * maxi(int(source_records[record_index].get("quantity", 1)), 1)
 
 
 func use_enhancement_stone(stone_resource: Resource, source_location: String, weapon_resource: Resource) -> bool:
@@ -1046,8 +1046,8 @@ func use_enhancement_stone_with_result(stone_resource: Resource, source_location
 			rolled_modifiers[stat_name] = rolled_modifier_ratio
 	if rolled_modifiers.is_empty():
 		return failed_result
-	# 强化前售价；强化结果弹窗用它与强化后售价对比，数值由武器动态售价接口统一计算。
-	var sell_price_before: int = _get_resource_sell_price(weapon_resource)
+	# 强化前价值；强化结果弹窗用它与强化后价值对比，数值由物品有效价值接口统一计算。
+	var value_before: int = _get_resource_value(weapon_resource)
 	# 武器强化结果；新资源返回完整变化明细，旧扩展资源仍可通过 bool 接口完成强化。
 	var enhancement_result: Dictionary = failed_result.duplicate(true)
 	if weapon_resource.has_method("apply_enhancement_with_result"):
@@ -1059,8 +1059,8 @@ func use_enhancement_stone_with_result(stone_resource: Resource, source_location
 	enhancement_result["weapon"] = weapon_resource
 	enhancement_result["stone"] = stone_resource
 	enhancement_result["rolled_modifiers"] = rolled_modifiers
-	enhancement_result["sell_price_before"] = sell_price_before
-	enhancement_result["sell_price_after"] = _get_resource_sell_price(weapon_resource)
+	enhancement_result["value_before"] = value_before
+	enhancement_result["value_after"] = _get_resource_value(weapon_resource)
 
 	# 强化石记录；成功应用后才扣除一颗，失败不会消耗材料。
 	var stone_record: Dictionary = source_records[stone_record_index]
@@ -1648,12 +1648,12 @@ func _is_owned_weapon_resource(item_resource: Resource) -> bool:
 	return _detached_records.has(item_resource.get_instance_id())
 
 
-func _get_resource_sell_price(item_resource: Resource) -> int:
+func _get_resource_value(item_resource: Resource) -> int:
 	if item_resource == null:
 		return 0
-	if item_resource.has_method("get_effective_sell_price"):
-		return maxi(int(item_resource.call("get_effective_sell_price")), 0)
-	return maxi(int(item_resource.get("sell_price")), 0)
+	if item_resource.has_method("get_effective_value"):
+		return maxi(int(item_resource.call("get_effective_value")), 0)
+	return maxi(int(item_resource.get("value")), 0)
 
 
 func _get_resource_maximum_durability(item_resource: Resource) -> float:
@@ -2223,7 +2223,7 @@ func _serialize_record(record: Dictionary) -> Dictionary:
 		serialized_record["display_name"] = str(item_resource.get("display_name"))
 		serialized_record["description"] = str(item_resource.get("description"))
 		serialized_record["icon_text"] = str(item_resource.get("icon_text"))
-		serialized_record["sell_price"] = int(item_resource.get("sell_price"))
+		serialized_record["value"] = int(item_resource.get("value"))
 		serialized_record["modifiers"] = EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary)
 	elif _is_repair_kit(item_resource):
 		# 修复包字段；保存稳定标识与显示配置，允许未来运行时生成的道具安全恢复。
@@ -2231,7 +2231,7 @@ func _serialize_record(record: Dictionary) -> Dictionary:
 		serialized_record["display_name"] = str(item_resource.get("display_name"))
 		serialized_record["description"] = str(item_resource.get("description"))
 		serialized_record["icon_text"] = str(item_resource.get("icon_text"))
-		serialized_record["sell_price"] = int(item_resource.get("sell_price"))
+		serialized_record["value"] = int(item_resource.get("value"))
 		serialized_record["repair_amount"] = maxf(float(item_resource.get("repair_amount")), 0.0)
 	elif _is_equipment_resource(item_resource):
 		# 防具运行时字段；保存耐久和强化累计值，基础属性继续由项目模板提供。
@@ -2269,7 +2269,7 @@ func _deserialize_record(serialized_record: Dictionary) -> Dictionary:
 		enhancement_stone.display_name = EnhancementStoneData._build_display_name(enhancement_stone.quality_id, enhancement_stone.get_resolved_target_kind()) if saved_display_name.is_empty() or not ("武器强化石" in saved_display_name or "装备强化石" in saved_display_name) else saved_display_name
 		enhancement_stone.description = str(serialized_record.get("description", enhancement_stone.description))
 		enhancement_stone.icon_text = str(serialized_record.get("icon_text", enhancement_stone.icon_text))
-		enhancement_stone.sell_price = maxi(int(serialized_record.get("sell_price", 0)), 0)
+		enhancement_stone.value = maxi(int(serialized_record.get("value", serialized_record.get("sell_price", 0))), 0)
 		enhancement_stone.modifiers = EnhancementRules.normalize_modifiers(serialized_record.get("modifiers", {}) as Dictionary)
 		item_resource = enhancement_stone
 	elif item_kind == "repair_kit":
@@ -2281,7 +2281,7 @@ func _deserialize_record(serialized_record: Dictionary) -> Dictionary:
 		repair_kit.display_name = str(serialized_record.get("display_name", repair_kit.display_name))
 		repair_kit.description = str(serialized_record.get("description", repair_kit.description))
 		repair_kit.icon_text = str(serialized_record.get("icon_text", repair_kit.icon_text))
-		repair_kit.sell_price = maxi(int(serialized_record.get("sell_price", repair_kit.sell_price)), 0)
+		repair_kit.value = maxi(int(serialized_record.get("value", serialized_record.get("sell_price", repair_kit.value))), 0)
 		repair_kit.repair_amount = maxf(float(serialized_record.get("repair_amount", repair_kit.repair_amount)), 1.0)
 		item_resource = repair_kit
 	elif item_kind == "equipment":

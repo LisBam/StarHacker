@@ -367,17 +367,13 @@ func _rebuild_assets() -> void:
 		return
 	for child in _asset_container.get_children():
 		child.queue_free()
-	# 资产定义副本；已持有页按单台产出从高到低排序，可购买页保持成长阶梯顺序。
+	# 资产定义副本；两个标签页都保持官方成长阶梯顺序，便于玩家在购买与持有页面建立稳定位置记忆。
 	var definitions: Array = _service.call("get_asset_definitions") as Array if _service != null and _service.has_method("get_asset_definitions") else []
-	if _active_tab == TAB_OWNED:
-		definitions.sort_custom(func(left: Dictionary, right: Dictionary) -> bool: return int(left.get("production", 0)) > int(right.get("production", 0)))
 	for raw_definition in definitions:
 		# 资产定义；每张卡片只读取当前快照，点击时服务仍会再次校验真实状态。
 		var definition: Dictionary = raw_definition as Dictionary
 		var asset_id: String = str(definition.get("id", ""))
 		var quantity: int = int(_service.call("get_asset_quantity", asset_id)) if _service != null else 0
-		if _active_tab == TAB_OWNED and quantity <= 0:
-			continue
 		_asset_container.add_child(_create_asset_card(definition, quantity))
 	if _asset_container.get_child_count() == 0:
 		var empty_label: Label = Label.new()
@@ -396,9 +392,11 @@ func _create_asset_card(definition: Dictionary, quantity: int) -> Control:
 	# 解锁状态；永久解锁由服务持有，锁定卡片仍展示门槛以形成明确成长目标。
 	var asset_id: String = str(definition.get("id", ""))
 	var unlocked: bool = bool(_service.call("is_asset_unlocked", asset_id)) if _service != null else false
+	# 卡片激活状态；可购买页按永久解锁判断，已持有页只有数量大于 0 时显示运行中的亮色样式。
+	var card_active: bool = unlocked if _active_tab == TAB_AVAILABLE else quantity > 0
 	var style: StyleBoxFlat = StyleBoxFlat.new()
-	style.bg_color = Color(0.055, 0.085, 0.115, 0.96) if unlocked else Color(0.05, 0.055, 0.065, 0.88)
-	style.border_color = Color(0.24, 0.55, 0.68, 0.88) if unlocked else Color(0.25, 0.27, 0.30, 0.70)
+	style.bg_color = Color(0.055, 0.085, 0.115, 0.96) if card_active else Color(0.05, 0.055, 0.065, 0.88)
+	style.border_color = Color(0.24, 0.55, 0.68, 0.88) if card_active else Color(0.25, 0.27, 0.30, 0.70)
 	style.set_border_width_all(2)
 	style.set_corner_radius_all(6)
 	card.add_theme_stylebox_override("panel", style)
@@ -417,7 +415,7 @@ func _create_asset_card(definition: Dictionary, quantity: int) -> Control:
 	content.add_child(name_row)
 	var name_label: Label = Label.new()
 	name_label.add_theme_font_size_override("font_size", 17)
-	name_label.add_theme_color_override("font_color", Color(0.74, 0.92, 1.0, 1.0) if unlocked else Color(0.48, 0.50, 0.54, 1.0))
+	name_label.add_theme_color_override("font_color", Color(0.74, 0.92, 1.0, 1.0) if card_active else Color(0.48, 0.50, 0.54, 1.0))
 	name_label.text = str(definition.get("name", "未知资产"))
 	name_row.add_child(name_label)
 	# 飘字承载区；固定宽度避免高频收益文字推动名称行布局。
@@ -453,8 +451,14 @@ func _create_asset_card(definition: Dictionary, quantity: int) -> Control:
 		action_button.disabled = not unlocked
 		action_button.pressed.connect(Callable(self, "_open_quantity_dialog").bind(ACTION_BUY, asset_id))
 	else:
-		action_button.text = "出售"
-		action_button.pressed.connect(Callable(self, "_open_quantity_dialog").bind(ACTION_SELL, asset_id))
+		if quantity > 0:
+			action_button.text = "出售"
+			action_button.pressed.connect(Callable(self, "_open_quantity_dialog").bind(ACTION_SELL, asset_id))
+		else:
+			# 未持有提示；初始资产没有产出门槛，其他资产继续展示对应成长门槛。
+			var unlock_rate: int = int(definition.get("unlock_rate", 0))
+			action_button.text = "初始解锁 · 当前未持有" if unlock_rate <= 0 else "总产出达到 %s/秒后解锁" % _format_integer_value(unlock_rate)
+			action_button.disabled = true
 	content.add_child(action_button)
 	if asset_id == _pending_startup_asset_id:
 		_pending_startup_asset_id = ""

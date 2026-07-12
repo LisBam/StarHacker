@@ -9,6 +9,8 @@ signal closed
 const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
 ## 股市同款二次确认弹窗；矿场交易在数量选择后统一展示最终金额并等待再次确认。
 const COMMON_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/common_confirmation_dialog.gd")
+## 资产单台收益飘字组件；每台资产每秒生成一次独立上升淡出文字。
+const MINING_INCOME_FLOAT_EMITTER_SCRIPT: Script = preload("res://scripts/components/mining_income_float_emitter.gd")
 
 ## 可购买资产页标识；用于标签按钮与列表重建，不写入存档。
 const TAB_AVAILABLE: String = "available"
@@ -113,8 +115,6 @@ func present() -> void:
 	_displayed_balance = float(balance_before_open)
 	_refresh_all(false)
 	_animate_balance_to(current_balance)
-	if current_balance > balance_before_open:
-		_show_floating_feedback("累计新增收益 +%s" % _format_integer_value(current_balance - balance_before_open))
 	_animate_cards_in()
 
 
@@ -125,6 +125,8 @@ func _connect_services() -> void:
 		_service.connect("balance_changed", Callable(self, "_on_balance_changed"))
 	if _service.has_signal("production_changed"):
 		_service.connect("production_changed", Callable(self, "_on_production_changed"))
+	if _service.has_signal("production_settled"):
+		_service.connect("production_settled", Callable(self, "_on_production_settled"))
 	if _service.has_signal("assets_changed"):
 		_service.connect("assets_changed", Callable(self, "_on_assets_changed"))
 	if _service.has_signal("buffs_changed"):
@@ -409,7 +411,7 @@ func _create_asset_card(definition: Dictionary, quantity: int) -> Control:
 	var content: VBoxContainer = VBoxContainer.new()
 	content.add_theme_constant_override("separation", 4)
 	margin.add_child(content)
-	# 名称与收益行；每类资产名称右侧持续显示该类当前绿色收益飘字。
+	# 名称与收益行；名称右侧挂载单台收益飘字发射区域，不显示固定汇总文字。
 	var name_row: HBoxContainer = HBoxContainer.new()
 	name_row.add_theme_constant_override("separation", 8)
 	content.add_child(name_row)
@@ -418,14 +420,16 @@ func _create_asset_card(definition: Dictionary, quantity: int) -> Control:
 	name_label.add_theme_color_override("font_color", Color(0.74, 0.92, 1.0, 1.0) if unlocked else Color(0.48, 0.50, 0.54, 1.0))
 	name_label.text = str(definition.get("name", "未知资产"))
 	name_row.add_child(name_label)
-	var asset_yield_label: Label = Label.new()
-	asset_yield_label.add_theme_font_size_override("font_size", 12)
-	asset_yield_label.add_theme_color_override("font_color", Color(0.34, 1.0, 0.62, 1.0))
-	# 卡片收益；可购买页显示单台收益，已持有页显示该类资产当前总收益。
-	var displayed_asset_yield: int = int(definition.get("production", 0)) if _active_tab == TAB_AVAILABLE else quantity * int(definition.get("production", 0))
-	asset_yield_label.text = "+%s/秒" % _format_integer_value(displayed_asset_yield)
-	name_row.add_child(asset_yield_label)
-	_play_asset_yield_float(asset_yield_label)
+	# 飘字承载区；固定宽度避免高频收益文字推动名称行布局。
+	var income_float_area: Control = Control.new()
+	income_float_area.custom_minimum_size = Vector2(104.0, 24.0)
+	income_float_area.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	name_row.add_child(income_float_area)
+	# 单台收益发射器；实际持有量为 0 时保持静默，持有 N 台时每秒逻辑发射 N 次。
+	var income_emitter: Control = MINING_INCOME_FLOAT_EMITTER_SCRIPT.new() as Control
+	income_emitter.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	income_emitter.call("configure", quantity, int(definition.get("production", 0)), _show_exact_values)
+	income_float_area.add_child(income_emitter)
 	var detail_label: Label = Label.new()
 	detail_label.add_theme_font_size_override("font_size", 12)
 	detail_label.add_theme_color_override("font_color", Color(0.67, 0.72, 0.77, 1.0))
@@ -535,12 +539,17 @@ func _confirm_quantity_action() -> void:
 	_rebuild_assets()
 
 
-func _on_balance_changed(balance: int, delta: int) -> void:
+func _on_balance_changed(balance: int, _delta: int) -> void:
 	if not visible:
 		return
 	_animate_balance_to(balance)
-	if delta > 0 and _dialog_action.is_empty():
-		_show_floating_feedback("+%s" % _format_integer_value(delta))
+
+
+func _on_production_settled(earned: int, _settled_seconds: int) -> void:
+	## 每次真实产出结算都在左上余额区生成一次上升淡出收益文字，交易到账不会误触发。
+	if not visible or earned <= 0:
+		return
+	_show_floating_feedback("+%s" % _format_integer_value(earned))
 
 
 func _on_production_changed(_production: int) -> void:
@@ -647,16 +656,6 @@ func _on_exact_value_toggled(enabled: bool) -> void:
 	_refresh_balance_text()
 	_refresh_production()
 	_rebuild_assets()
-
-
-func _play_asset_yield_float(label: Label) -> void:
-	## 循环播放资产收益绿色飘字；只改变局部位置和透明度，不参与服务结算。
-	var origin_position: Vector2 = label.position
-	var tween: Tween = create_tween().set_loops()
-	tween.tween_property(label, "position:y", origin_position.y - 4.0, 0.55).set_trans(Tween.TRANS_SINE)
-	tween.parallel().tween_property(label, "modulate:a", 0.62, 0.55)
-	tween.tween_property(label, "position:y", origin_position.y, 0.55).set_trans(Tween.TRANS_SINE)
-	tween.parallel().tween_property(label, "modulate:a", 1.0, 0.55)
 
 
 func _get_asset_definition(asset_id: String) -> Dictionary:

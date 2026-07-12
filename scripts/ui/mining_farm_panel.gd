@@ -455,9 +455,8 @@ func _create_asset_card(definition: Dictionary, quantity: int) -> Control:
 			action_button.text = "出售"
 			action_button.pressed.connect(Callable(self, "_open_quantity_dialog").bind(ACTION_SELL, asset_id))
 		else:
-			# 未持有提示；初始资产没有产出门槛，其他资产继续展示对应成长门槛。
-			var unlock_rate: int = int(definition.get("unlock_rate", 0))
-			action_button.text = "初始解锁 · 当前未持有" if unlock_rate <= 0 else "总产出达到 %s/秒后解锁" % _format_integer_value(unlock_rate)
+			# 未持有提示；已持有页只表达资产所有权状态，具体解锁门槛统一留在可购买资产页展示。
+			action_button.text = "未购买"
 			action_button.disabled = true
 	content.add_child(action_button)
 	if asset_id == _pending_startup_asset_id:

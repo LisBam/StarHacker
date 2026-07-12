@@ -9,6 +9,8 @@ signal quantity_confirmed(quantity: int)
 
 ## 全局窗口样式指南；统一数量弹窗的按钮、输入、滑条和窗口描边视觉。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+## 可视进度拖动条组件；统一绘制购买、出售、移动、丢弃、送回和矿场数量选择进度。
+const PROGRESS_SLIDER_VISUAL_SCRIPT: Script = preload("res://scripts/ui/progress_slider_visual.gd")
 
 ## 出售数量模式标识；默认显示金币收益并使用“出售”确认按钮。
 const DISPLAY_MODE_SALE: String = "sale"
@@ -256,6 +258,7 @@ func _build_interface() -> void:
 	_quantity_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_quantity_slider.value_changed.connect(_on_slider_value_changed)
 	quantity_row.add_child(_quantity_slider)
+	PROGRESS_SLIDER_VISUAL_SCRIPT.install(_quantity_slider)
 	_quantity_spin_box = SpinBox.new()
 	_quantity_spin_box.min_value = 1.0
 	_quantity_spin_box.max_value = 1.0

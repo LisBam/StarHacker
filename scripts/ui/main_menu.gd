@@ -12,6 +12,8 @@ const GAME_MODE_TRAINING: String = "training"
 const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_panel.gd")
 ## 全局窗口样式指南；统一主菜单、设置页和全部局外遮罩窗口的主题与语义按钮颜色。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+## 可视进度拖动条组件；为主音量滑条绘制完整轨道、当前进度和实时滑块位置，不改变音量业务逻辑。
+const PROGRESS_SLIDER_VISUAL_SCRIPT: Script = preload("res://scripts/ui/progress_slider_visual.gd")
 ## 局外仓库面板脚本；默认在主菜单点击仓库按钮后动态创建并读取全局背包服务。
 const WAREHOUSE_PANEL_SCRIPT: Script = preload("res://scripts/ui/warehouse_panel.gd")
 ## 主菜单背包面板脚本；复用游戏内背包装备结构，局外丢弃会直接永久移除物品。
@@ -120,6 +122,7 @@ func _ready() -> void:
 	UI_STYLE_GUIDE.apply_title_label(get_node("Center/Title") as Label)
 	UI_STYLE_GUIDE.apply_title_label(_settings_title_label)
 	(get_node("Background") as ColorRect).color = UI_STYLE_GUIDE.SCREEN_BACKGROUND_COLOR
+	PROGRESS_SLIDER_VISUAL_SCRIPT.install(_master_volume_slider)
 	_master_bus_index = AudioServer.get_bus_index("Master")
 	_start_button.pressed.connect(_on_start_button_pressed)
 	_training_button.pressed.connect(_on_training_button_pressed)

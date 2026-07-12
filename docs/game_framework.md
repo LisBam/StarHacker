@@ -69,6 +69,7 @@
 - `InventoryDropArea`：接收拖到背包空白区域的武器拖拽数据，并转发给 HUD 按背包末尾投放处理。
 - `InputBindings`：全局输入绑定管理器，以 AutoLoad 单例存在，不声明同名 `class_name`，保存可配置动作、默认事件、玩家自定义事件和恢复默认逻辑，直接写入 Godot `InputMap`，允许多个动作共享同一个输入事件；同时提供单项恢复与全部恢复接口。
 - `KeyBindingPanel`：复用型按键绑定 UI，主菜单设置和暂停设置的按键绑定页面都会动态创建它，用于捕获下一次键盘或鼠标输入并调用 `InputBindings.rebind_action()`；只有当前绑定偏离项目默认值时才显示单项“默认”按钮，底部始终保留全量“恢复默认”。
+- `ProgressSliderVisual`：无业务依赖的 `HSlider` 覆盖绘制组件，统一显示未完成轨道、当前进度和滑块位置；原生滑条继续拥有范围、步长、输入和回调，组件通过逐帧轻量比较兼容 `set_value_no_signal()` 触发的外部数值同步。
 - `CombatCamera`：玩家子节点上的战斗相机，关闭 Camera2D 位置平滑并使用物理帧回调跟随玩家，避免物理移动和渲染相机不同步造成移动抖动；屏幕震动只修改相机 `offset`，不会改变玩家或相机节点真实位置。
 - `CombatHud`：除原战斗 HUD、背包和暂停职责外，负责显示左上角全地图存活怪物数量、调用全局背包完成结算，并以背包同款两级分类和双列列表展示本局首次获得物品；局内背包一级分类为“全部/武器/装备/资源”，装备二级分类为“全部/头部/躯干/腿部/脚部”，并支持装备、修复和单件/整组/部分丢弃，部分丢弃复用数量弹窗；道具目标选择会给装备栏、背包武器和背包资源中的不可选物品统一添加武器栏同款完整灰色覆盖层并阻止无效点击；F 键附近存在掉落物时优先拾取，否则管理宝箱范围提示和长按进度；物资撤离点准备完成后按闪避打开暂停式送回面板；战斗开发者菜单可请求一键解锁地图视野。
 - 成功撤离结算中的“获得物品”从结算时全部所有权记录读取本局来源数量，因此同时包含仍在背包、仍在装备栏以及已经通过物资撤离点直接送入永久仓库的物品；失败结算继续只展示实际保留的本局来源单位。
@@ -82,7 +83,7 @@
 - `EquipmentData`：四部位防具共用的数据资源，保存当前耐久、最大耐久、攻击、防御、最大生命、每 5 秒回血、闪避与强化累计值；当前 4 个基础装备模板均为这五项战斗属性配置非零初值，具体数值以 `docs/游戏机制与玩法内容.md` 的装备表为准。暴击基础字段仅保留旧资源兼容，不进入装备强化池。装备提供与 `WeaponData` 相同的 0 至 1 耐久比例接口，脚部额外支持移速，损坏后全部属性暂时失效。装备悬停详情统一显示“当前耐久 / 最大耐久”，不会在属性区重复列出耐久上限。
 - 头部装备额外支持视野百分比；`EquipmentComponent` 将相机缩放除以 `1 + 视野比例`，因此视野越高，相机高度越高，探索系统也会自动读取更大的实际世界视野。
 - `EnhancementResultDialog`：继承 `CommonConfirmationDialog` 的单按钮强化结果弹窗，仓库、局内背包和锻造共同复用通用信息确认样式。乘算词条显示“提升/削弱 xx%”，加算词条显示“±xx%”，并以强化前有效值到强化后有效值展示实际变化。
-- `SellQuantityDialog`：堆叠出售、跨容器移动、战斗内部分丢弃和物资部分送回共用数量弹窗，以 1 到当前可操作数量为范围，同步提供整数滑条和数字框；送回模式实时预览价值、20% 运费和操作后剩余额度。默认窗口为 400×170，背景透明度为 0.82，弹窗不直接修改库存。
+- `SellQuantityDialog`：堆叠出售、跨容器移动、战斗内部分丢弃和物资部分送回共用数量弹窗，以 1 到当前可操作数量为范围，同步提供整数滑条和数字框；送回模式实时预览价值、20% 运费和操作后剩余额度。滑条通过 `ProgressSliderVisual` 明确显示完整范围与当前已选比例，数字框或实时行情无信号同步数值时也会更新进度。默认窗口为 400×170，背景透明度为 0.82，弹窗不直接修改库存。
 - `DeveloperMenu`：可复用隐藏开发者调试面板；主菜单上下文通过 `GlobalInventory` 发放全部武器、全部装备、强化石、全部修复包和调整金币，战斗上下文隐藏经济操作并通过信号切换无限属性、不消耗武器耐久、获取整张地图视野和训练场设置。
 - `GlobalInventory`：全局物品所有权服务，使用唯一记录区分武器与可堆叠资源，分别维护永久仓库、随身背包、装备、局外金币、临时拖拽记录、本局快照和存档。仓库与背包的部分堆叠转移会复制独立资源实例、保留获得时间与撤离标记，并通过原子接口同时更新两侧数量；只有签名一致的强化石或同类修复包才会合并，单组上限 99；出售接口支持指定数量、整组出售和开发者清空永久仓库。
 - `MonsterSimulationManager`：维护整图轻量虚拟敌人人口，分批实例化玩家加载半径内的真实敌人，并在远离后保存位置和生命比例再释放节点；远处人口不执行任何 AI、物理、碰撞或绘制。
@@ -157,7 +158,7 @@
 
 主菜单左下角依次提供背包、仓库、商店、锻造、炒股和矿场六个局外入口，每个入口使用独立全屏遮罩和可复用面板。`MainMenu` 只负责创建、显示和关闭面板，不直接执行购买、锻造、股票交易或矿场资产结算；隐藏面板不会响应 ESC，避免多个常驻面板同时消费同一输入事件。
 
-全项目窗口视觉由无业务依赖的 `UiStyleGuide` 统一生成。主菜单、角色选择、局外背包、仓库、商店、锻造、股市、矿场、战斗背包、暂停菜单、地图、物资撤离、结算和开发者菜单共享深蓝黑背景、青蓝描边、圆角、冷色按钮、深色输入框、青蓝滑条与滚动条；顶层窗口和内部子分区使用不同边框强度。业务面板只选择主操作、危险操作或普通导航语义，不得复制整套 `StyleBoxFlat`。完整颜色值、尺寸和接入规则见 `docs/ui_style.md`。
+全项目窗口视觉由无业务依赖的 `UiStyleGuide` 统一生成。主菜单、角色选择、局外背包、仓库、商店、锻造、股市、矿场、战斗背包、暂停菜单、地图、物资撤离、结算和开发者菜单共享深蓝黑背景、青蓝描边、圆角、冷色按钮、深色输入框、青蓝滑条与滚动条；顶层窗口和内部子分区使用不同边框强度。所有玩家可操作滑条额外挂载 `ProgressSliderVisual`，以深色完整轨道、青蓝已完成轨道和圆形滑块明确显示当前比例。业务面板只选择主操作、危险操作或普通导航语义，不得复制整套 `StyleBoxFlat`。完整颜色值、尺寸和接入规则见 `docs/ui_style.md`。
 
 `ShopService` 作为 AutoLoad 独立维护普通商店、十分钟自动刷新截止时间、连续手动刷新费用和最近五次失败灰市批次，并把状态保存到 `user://shop_state.json`。商品物品状态通过 `GlobalInventory.serialize_item_snapshot()` 与 `deserialize_item_snapshot()` 复用库存版本兼容格式，购买则统一调用 `purchase_resource_to_warehouse()` 完成金币检查、扣款和入库，UI 不直接修改库存。普通商品购买后从本轮库存移除；灰市购买同时按失败批次和商品编号定位，空批次自动清理。
 
@@ -179,7 +180,7 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 
 玩家生命值降到 0 后，`CombatStatsComponent.died` 会通知 `CombatHud`。正式战斗中，每把随身背包武器和每颗堆叠资源独立以 50% 概率保留、50% 概率丢失，已装备物品、永久仓库物品和局外金币不参与损失；仓库式双列结算列表只展示本局首次获得和实际丢失物品，不展示随机保留列表，堆叠资源以 xN 显示数量。“本局获得”和“丢失物品”标题同时显示当前分区条目数与总价值，总价值按物品当前有效售价乘实际数量累计，包含强化和耐久对价格的影响。每个物品都可悬停查看完整详情。训练场死亡或从暂停菜单返回主菜单时都不会打开物品结算窗口，也不会修改永久仓库、背包或金币。
 
-暂停设置和主菜单设置共用同一条 Master 音量规则：滑条范围为 0 到 100，0 会静音 Master 总线，大于 0 时使用 `linear_to_db()` 写入音量。
+暂停设置和主菜单设置共用同一条 Master 音量规则：滑条范围为 0 到 100，0 会静音 Master 总线，大于 0 时使用 `linear_to_db()` 写入音量。两处滑条统一显示完整轨道、当前音量进度和滑块位置，拖动期间实时高亮。
 
 暂停设置和主菜单设置都采用分页结构。设置首页只显示主音量、“按键绑定”入口和返回按钮；点击“按键绑定”后切换到独立按键绑定页面，按该页“返回”只回到设置首页，不会直接关闭设置面板。绑定面板修改的是全局 `InputMap`，因此在主菜单中修改的按键会影响后续进入战斗后的玩家操作，在暂停菜单中修改的按键会立即影响当前战斗。按键绑定保存到 `user://input_bindings.cfg`，下次启动游戏时自动恢复；多个操作可以保存为相同按键或鼠标按钮。每行“默认”只恢复对应操作，底部“恢复默认”恢复全部操作；大地图项目默认键为 Q。
 
@@ -284,6 +285,7 @@ ESC 会优先关闭当前打开的交互界面；没有背包或大地图时打�
 - 商店：`automatic_refresh_interval_seconds`、`weapon_stock_count`、`melee_weapon_stock_count`、`ranged_weapon_stock_count`、`equipment_stock_count`、`resource_stock_count`、`item_stock_count`、`normal_price_multiplier_minimum`、`normal_price_multiplier_maximum`、`second_hand_firearm_chance`、`second_hand_durability_consumption_minimum`、`second_hand_durability_consumption_maximum`、`second_hand_enhancement_cumulative_chances`、`second_hand_stone_compatibility_attempts`、`manual_refresh_base_cost`、`manual_refresh_cost_growth`、`manual_refresh_maximum_cost`、`gray_market_price_multiplier_minimum`、`gray_market_price_multiplier_maximum`、`gray_market_failure_limit`、`weapon_resource_paths`、`equipment_resource_paths`、`item_resource_paths`
 - 锻造：`MAIN_WEAPON_VALUE_STEP`、`MAIN_WEAPON_MULTIPLIER_PER_STEP`、`BASE_COST_MULTIPLIER`、`SACRIFICE_WEAPON_DURABILITY_RATIO`、`COST_PER_RESTORED_DURABILITY`、`STONE_QUALITY_COSTS`、`STONE_UPGRADE_SUCCESS_RATE_PER_SACRIFICE`、`SACRIFICE_SLOT_COUNT`、`FORGE_ANIMATION_DURATION`、`FORGE_ANIMATION_ROTATIONS`、`panel_minimum_size`、`forge_slot_size`、`top_sacrifice_slot_upward_offset`、`bottom_sacrifice_slot_downward_offset`
 - 物品 UI：`ItemCardView.STANDARD_CARD_SIZE`、`ItemCardView.BORDER_WIDTH`、`ItemCardView.CORNER_RADIUS`、`ItemCardView.HOVER_SCALE`、`ItemCardView.HOVER_DURATION`、`ItemCardView.HOVER_SAFE_MARGIN`、`ItemCardView.HOVER_Z_INDEX_OFFSET`、`ItemCardView.DRAG_Z_INDEX_OFFSET`、`ItemCardView.CLICK_PRESS_SCALE`、`ItemCardView.CLICK_PRESS_DURATION`、`ItemCardView.CLICK_RELEASE_DURATION`、`ItemCardView.DRAG_SOURCE_SCALE`、`ItemCardView.DRAG_SOURCE_OPACITY`、`ItemCardView.DRAG_PREVIEW_START_SCALE`、`ItemCardView.DRAG_PREVIEW_PULSE_SCALE`、`ItemCardView.DRAG_PREVIEW_PULSE_DURATION`、`ItemCardView.DRAG_PREVIEW_TILT_RADIANS`、`ItemCardView.DISABLED_OVERLAY_COLOR`、`WeaponDurabilityBar.bar_height`、`WeaponDurabilityBar.horizontal_inset`、`WeaponDurabilityBar.bottom_inset`、`WeaponDurabilityBar.medium_threshold`、`WeaponDurabilityBar.low_threshold`
+- 拖动条 UI：`ProgressSliderVisual.minimum_slider_height`、`ProgressSliderVisual.track_width`、`ProgressSliderVisual.handle_radius`、`ProgressSliderVisual.track_background_color`、`ProgressSliderVisual.track_border_color`、`ProgressSliderVisual.progress_color`、`ProgressSliderVisual.progress_highlight_color`、`ProgressSliderVisual.handle_border_color`、`ProgressSliderVisual.handle_fill_color`、`ProgressSliderVisual.disabled_progress_color`
 - 宝箱：`loot_chest_spawn_count_min`、`loot_chest_spawn_count_max`、`loot_chest_near_building_chance`、`loot_chest_enclosed_building_weight`、`loot_chest_spawn_attempt_count`、`loot_chest_min_distance_from_player`、`loot_chest_clearance_radius`、`loot_chest_minimum_spacing`、`loot_chest_manual_drop_radius_min`、`loot_chest_manual_drop_radius_max`、`loot_chest_broken_drop_radius_min`、`loot_chest_broken_drop_radius_max`、`loot_chest_launch_duration_min`、`loot_chest_launch_duration_max`、`loot_chest_launch_arc_height_min`、`loot_chest_launch_arc_height_max`、`interaction_radius`、`minimum_hold_duration`、`LootChest.QUALITY_WEIGHTS`、`LootChest.QUALITY_CONFIGS`、`CHEST_HIGH_QUALITY_CHANCES`
 - 物资撤离：`supply_extraction_count_weights`、`supply_extraction_hold_duration_seconds`、`supply_extraction_radius`、`supply_extraction_spawn_edge_margin`、`supply_extraction_min_distance_from_player`、`supply_extraction_spawn_attempt_count`、`COMBAT_SHIPPING_VALUE_LIMIT`、`COMBAT_SHIPPING_FEE_RATIO`
 - 角色选择：`game_scene_path`、`main_menu_scene_path`、`stat_bar_maximum`、`speed_bar_maximum`

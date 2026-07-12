@@ -33,6 +33,8 @@ const SHARED_BACKPACK_PANEL_SCRIPT: Script = preload("res://scripts/ui/main_menu
 const SUPPLY_EXTRACTION_PANEL_SCRIPT: Script = preload("res://scripts/ui/supply_extraction_panel.gd")
 ## 全局窗口样式指南；统一战斗背包、暂停菜单、地图、物资撤离、开发者菜单和结算窗口视觉。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+## 可视进度拖动条组件；为暂停设置主音量滑条绘制实时进度，不接管原生输入与音量换算。
+const PROGRESS_SLIDER_VISUAL_SCRIPT: Script = preload("res://scripts/ui/progress_slider_visual.gd")
 ## 战斗开发者模式解锁序列；默认六个英文字母，输入错误时按首字母重新开始匹配。
 const DEVELOPER_UNLOCK_SEQUENCE: String = "LISBAM"
 ## 背包全部分页标识；默认显示所有背包武器，修改会影响筛选按钮与背包网格过滤。
@@ -403,6 +405,7 @@ func _ready() -> void:
 	UI_STYLE_GUIDE.apply_title_label(_death_title_label)
 	UI_STYLE_GUIDE.apply_primary_button(_death_return_main_menu_button)
 	UI_STYLE_GUIDE.apply_danger_button(_return_main_menu_button)
+	PROGRESS_SLIDER_VISUAL_SCRIPT.install(_pause_master_volume_slider)
 	_master_bus_index = AudioServer.get_bus_index("Master")
 	_bind_game_world()
 	_bind_player_components()

@@ -8,6 +8,8 @@ signal closed
 
 ## 锻造槽脚本；主锻造槽与牺牲槽共用拖拽、悬停和单击归还协议。
 const FORGE_SLOT_CONTROL_SCRIPT: Script = preload("res://scripts/ui/forge_slot_control.gd")
+## 全局窗口样式指南；统一锻造主窗口、来源查询、分区面板和操作按钮视觉。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 仓库物品卡片脚本；下半区复用仓库同款摘要、拖拽数据和完整详情。
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
 ## 装备槽物品卡片脚本；背包来源左侧装备栏必须使用真实装备槽交互协议，不能伪装成带列表下标的仓库卡片。
@@ -110,6 +112,8 @@ var _animation_start_offsets: Array[Vector2] = []
 
 func _ready() -> void:
 	custom_minimum_size = panel_minimum_size
+	UI_STYLE_GUIDE.apply_screen_theme(self)
+	UI_STYLE_GUIDE.apply_window_panel(self)
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
 	_forge_service = ForgeService.new(_global_inventory)
 	_initialize_sacrifice_entries()
@@ -151,6 +155,7 @@ func _build_interface() -> void:
 	title_label.text = "锻造"
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.add_theme_font_size_override("font_size", 25)
+	UI_STYLE_GUIDE.apply_title_label(title_label)
 	header.add_child(title_label)
 	_coins_label = Label.new()
 	_coins_label.add_theme_font_size_override("font_size", 18)
@@ -201,6 +206,7 @@ func _build_interface() -> void:
 	_forge_button = Button.new()
 	_forge_button.text = "开始锻造"
 	_forge_button.custom_minimum_size = Vector2(0.0, 42.0)
+	UI_STYLE_GUIDE.apply_primary_button(_forge_button)
 	_forge_button.pressed.connect(_on_forge_pressed)
 	preview_content.add_child(_forge_button)
 	_forge_cost_label = Label.new()

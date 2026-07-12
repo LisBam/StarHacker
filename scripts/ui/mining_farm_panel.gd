@@ -11,6 +11,8 @@ const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quant
 const COMMON_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/common_confirmation_dialog.gd")
 ## 资产单台收益飘字组件；每台资产每秒生成一次独立上升淡出文字。
 const MINING_INCOME_FLOAT_EMITTER_SCRIPT: Script = preload("res://scripts/components/mining_income_float_emitter.gd")
+## 全局窗口样式指南；为矿场基准界面补充统一按钮、滚动、进度和弹窗控件主题。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 
 ## 可购买资产页标识；用于标签按钮与列表重建，不写入存档。
 const TAB_AVAILABLE: String = "available"
@@ -89,6 +91,7 @@ var _message_dialog: AcceptDialog
 
 func _ready() -> void:
 	custom_minimum_size = panel_size
+	UI_STYLE_GUIDE.apply_screen_theme(self)
 	_service = get_tree().root.get_node_or_null("MiningFarmService")
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
 	_build_interface()
@@ -258,6 +261,7 @@ func _build_footer(root: VBoxContainer) -> void:
 	var recharge_button: Button = Button.new()
 	recharge_button.custom_minimum_size = Vector2(180.0, 42.0)
 	recharge_button.text = "充值"
+	UI_STYLE_GUIDE.apply_primary_button(recharge_button)
 	recharge_button.pressed.connect(Callable(self, "_open_quantity_dialog").bind(ACTION_RECHARGE, ""))
 	operations.add_child(recharge_button)
 	var rule_label: Label = Label.new()
@@ -449,10 +453,12 @@ func _create_asset_card(definition: Dictionary, quantity: int) -> Control:
 	if _active_tab == TAB_AVAILABLE:
 		action_button.text = "购买" if unlocked else "总产出达到 %s/秒后解锁" % _format_integer_value(int(definition.get("unlock_rate", 0)))
 		action_button.disabled = not unlocked
+		UI_STYLE_GUIDE.apply_primary_button(action_button)
 		action_button.pressed.connect(Callable(self, "_open_quantity_dialog").bind(ACTION_BUY, asset_id))
 	else:
 		if quantity > 0:
 			action_button.text = "出售"
+			UI_STYLE_GUIDE.apply_danger_button(action_button)
 			action_button.pressed.connect(Callable(self, "_open_quantity_dialog").bind(ACTION_SELL, asset_id))
 		else:
 			# 未持有提示；已持有页只表达资产所有权状态，具体解锁门槛统一留在可购买资产页展示。

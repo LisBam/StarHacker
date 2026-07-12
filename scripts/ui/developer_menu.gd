@@ -11,6 +11,9 @@ signal weapon_durability_consumption_toggled(disabled: bool)
 signal training_settings_requested
 signal map_vision_requested
 
+## 全局窗口样式指南；统一主菜单与战斗开发者窗口、调试分区和高风险操作视觉。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+
 ## 菜单最小尺寸；默认 520x580，适合在主菜单中央显示资源操作和调试信息开关。
 @export var panel_minimum_size: Vector2 = Vector2(520.0, 640.0)
 ## 战斗调试上下文面板高度；默认 580 像素，用于容纳无限属性、地图视野和训练设置入口，运行时通常不动态修改。
@@ -85,6 +88,8 @@ var _clear_warehouse_confirmation: CommonConfirmationDialog
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	custom_minimum_size = panel_minimum_size
+	UI_STYLE_GUIDE.apply_screen_theme(self)
+	UI_STYLE_GUIDE.apply_window_panel(self)
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
 	_stock_market_service = get_tree().root.get_node_or_null("StockMarketService")
 	_build_interface()
@@ -136,6 +141,7 @@ func _build_interface() -> void:
 	title_label.text = "开发者菜单"
 	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title_label.add_theme_font_size_override("font_size", 26)
+	UI_STYLE_GUIDE.apply_title_label(title_label)
 	content.add_child(title_label)
 	# 隐藏入口提示；明确该菜单属于调试能力，避免误认为正式经济系统入口。
 	_hint_label = Label.new()
@@ -186,12 +192,14 @@ func _build_interface() -> void:
 	_remove_coins_button = Button.new()
 	_remove_coins_button.custom_minimum_size = Vector2(0.0, 46.0)
 	_remove_coins_button.text = "一键减少 %d 金币" % coin_step
+	UI_STYLE_GUIDE.apply_danger_button(_remove_coins_button)
 	_remove_coins_button.pressed.connect(_on_remove_coins_pressed)
 	content.add_child(_remove_coins_button)
 	_economy_controls.append(_remove_coins_button)
 	_clear_warehouse_button = Button.new()
 	_clear_warehouse_button.custom_minimum_size = Vector2(0.0, 46.0)
 	_clear_warehouse_button.text = "清空仓库物品"
+	UI_STYLE_GUIDE.apply_danger_button(_clear_warehouse_button)
 	_clear_warehouse_button.pressed.connect(_on_clear_warehouse_pressed)
 	content.add_child(_clear_warehouse_button)
 	_economy_controls.append(_clear_warehouse_button)
@@ -229,6 +237,7 @@ func _build_interface() -> void:
 	_clear_stock_holdings_button = Button.new()
 	_clear_stock_holdings_button.custom_minimum_size = Vector2(0.0, 42.0)
 	_clear_stock_holdings_button.text = "清空全部持仓"
+	UI_STYLE_GUIDE.apply_danger_button(_clear_stock_holdings_button)
 	_clear_stock_holdings_button.pressed.connect(_on_clear_stock_holdings_pressed)
 	content.add_child(_clear_stock_holdings_button)
 	_economy_controls.append(_clear_stock_holdings_button)

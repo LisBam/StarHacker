@@ -9,6 +9,8 @@ const CHARACTER_STELLE: String = "stelle"
 const CHARACTER_CAEULUS: String = "caelus"
 ## 银狼角色标识；默认与 SessionState 保持一致，修改会影响银狼按钮的选择目标。
 const CHARACTER_SILVER_WOLF: String = "silver_wolf"
+## 全局窗口样式指南；统一角色列表、详情分区、属性条和底部操作按钮的视觉。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 
 ## 游戏场景路径；默认进入当前战斗承载场景，只允许填写 tscn 资源，运行时通常不动态修改。
 @export_file("*.tscn") var game_scene_path: String = "res://scenes/game/game_world.tscn"
@@ -59,6 +61,11 @@ var _selected_character_id: String = CHARACTER_STELLE
 
 
 func _ready() -> void:
+	UI_STYLE_GUIDE.apply_screen_theme(self)
+	UI_STYLE_GUIDE.apply_primary_button(_confirm_button)
+	UI_STYLE_GUIDE.apply_title_label(_title_label)
+	UI_STYLE_GUIDE.apply_title_label(_character_name_label)
+	(get_node("Background") as ColorRect).color = UI_STYLE_GUIDE.SCREEN_BACKGROUND_COLOR
 	_stelle_button.toggle_mode = true
 	_caelus_button.toggle_mode = true
 	_silver_wolf_button.toggle_mode = true

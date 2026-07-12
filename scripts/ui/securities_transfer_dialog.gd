@@ -6,6 +6,9 @@ class_name SecuritiesTransferDialog
 
 signal transfer_confirmed(amount: int, is_deposit: bool)
 
+## 全局窗口样式指南；统一证券转账弹窗的按钮、输入、滑条和窗口描边视觉。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+
 ## 弹窗默认宽度；默认 400 像素，与股票买卖数量窗口保持一致，运行时无需动态修改。
 @export_range(320, 640, 1) var dialog_width: int = 400
 ## 弹窗默认高度；默认 170 像素，与股票买卖数量窗口保持一致并完整容纳滑条、数字输入和结果摘要，运行时无需动态修改。
@@ -135,7 +138,7 @@ func _build_interface() -> void:
 
 func _apply_dialog_visual_style() -> void:
 	## 应用半透明深色窗口样式；规格与股票数量弹窗一致，保持转账入口视觉统一。
-	var dialog_theme: Theme = Theme.new()
+	var dialog_theme: Theme = UI_STYLE_GUIDE.create_theme()
 	# 窗口面板样式；透明度由检查器参数统一控制。
 	var dialog_panel_style: StyleBoxFlat = StyleBoxFlat.new()
 	dialog_panel_style.bg_color = Color(0.035, 0.045, 0.055, dialog_background_alpha)

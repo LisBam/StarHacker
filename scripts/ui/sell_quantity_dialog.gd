@@ -7,6 +7,9 @@ class_name SellQuantityDialog
 
 signal quantity_confirmed(quantity: int)
 
+## 全局窗口样式指南；统一数量弹窗的按钮、输入、滑条和窗口描边视觉。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+
 ## 出售数量模式标识；默认显示金币收益并使用“出售”确认按钮。
 const DISPLAY_MODE_SALE: String = "sale"
 ## 移动数量模式标识；跨仓库和背包拖拽堆叠时显示移动方向与实际数量。
@@ -270,7 +273,7 @@ func _build_interface() -> void:
 
 func _apply_dialog_visual_style() -> void:
 	# 弹窗主题；半透明深色背景、细边框和圆角同时应用于出售与移动模式。
-	var dialog_theme: Theme = Theme.new()
+	var dialog_theme: Theme = UI_STYLE_GUIDE.create_theme()
 	# 弹窗面板样式；透明度由检查器参数统一控制，便于后续按整体 UI 风格调整。
 	var dialog_panel_style: StyleBoxFlat = StyleBoxFlat.new()
 	dialog_panel_style.bg_color = Color(0.035, 0.045, 0.055, dialog_background_alpha)

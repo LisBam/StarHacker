@@ -27,6 +27,7 @@
 | `ShopService` | 生成普通商店与灰市库存，维护刷新状态 | `user://shop_state.json` |
 | `StockMarketService` | 维护行情、事件、证券币和对局行为影响 | `user://stock_market_state.json` |
 | `MiningFarmService` | 维护算力币、矿场资产、在线收益和临时增益 | `user://mining_farm_state.json` |
+| `SaveArchiveService` | 按白名单封装与恢复全部已落盘存档，不解析业务内容；导入前备份并在成功后重启 | 玩家选择的 `.hqisave`；导入备份位于 `user://save_import_backup_<时间戳>/` |
 | `SceneTransition` | 统一场景切换和黑屏过渡 | 无 |
 
 服务是数据所有者，面板只读取快照、发出命令并响应信号。新增跨场景状态时先确认归属，不得在多个 UI 脚本中各保存一份可变副本。
@@ -78,6 +79,7 @@
 ### 3.4 UI 层
 
 - `CombatHud` 负责局内信息、暂停、地图、拾取提示、物资撤离和结算编排，不直接拥有库存数据。
+- 主菜单与暂停设置复用 `SaveTransferControl` 提供存档导出、导入和文件选择；控件只调用 `SaveArchiveService`，不直接访问各业务存档。
 - `SharedBackpackPanel` 同时服务主菜单和战斗 HUD；上下文只决定丢弃等少量业务差异。
 - `InventoryQuery` 为仓库、背包、商店、锻造与结算提供无副作用的分类、强化词条筛选、套装筛选、搜索和排序结果；`EquipmentSetFilterControl` 统一维护套装多选 UI，不拥有库存数据。
 - `ItemCardView`、`WeaponDurabilityBar` 和 `ItemDetailFormatter` 统一物品展示，宿主只提供操作协议。
@@ -158,6 +160,9 @@ ContentCatalog 模板
 - 存档版本常量与迁移代码位于对应服务脚本。文档只保留仍会被读取的迁移规则，不维护已经失效的历史流水账。
 - 普通高频变化可合并写入；货币兑换、股票成交等跨资产操作应立即保存，缩短文件间状态不一致窗口。
 - 测试不得直接覆盖日常 `user://` 数据，具体隔离要求见 `docs/功能验证测试规范.md`。
+- 存档导出使用 `.hqisave` 单文件保存 `character_unlocks.json`、`input_bindings.cfg`、`debug_settings.cfg`、`global_inventory.json`、`shop_state.json`、`stock_market_state.json` 与 `mining_farm_state.json` 的原始字节；尚未生成的文件不写入归档。
+- 存档导入只接受格式版本 1 与固定文件白名单。服务先完成 JSON、文件名和 Base64 内容校验，再写入同目录临时文件，完整备份当前存档后替换正式文件；归档中缺失的模块文件会按快照语义移除，成功后重启游戏统一加载。
+- 战斗暂停设置导出只包含已经落盘的数据，不强制保存正式战斗中的临时背包、装备与耐久变化，继续遵守本局成功、失败或正常退出结算后统一持久化的所有权规则。
 
 ## 6. 参数管理
 
@@ -201,6 +206,7 @@ ContentCatalog 模板
 - 组件通过明确接口和信号通信，不直接访问无关面板或服务内部字段。
 - 聚合脚本可通过 `NodePath` 获取可替换组件；动态返回值应显式标注局部变量类型。
 - 新增变量必须遵守项目注释规范；不得改名或删除已有变量与注释来完成无关整理。
+- 新增持久化服务或存档文件时，必须同步更新 `SaveArchiveService.SAVE_FILE_NAMES` 白名单与本文存档清单，否则该模块不会进入导出和导入快照。
 
 ### 7.6 角色技能
 

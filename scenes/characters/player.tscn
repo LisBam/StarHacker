@@ -1,4 +1,4 @@
-[gd_scene load_steps=20 format=3 uid="uid://b8ap3osklnsmt"]
+[gd_scene load_steps=21 format=3 uid="uid://b8ap3osklnsmt"]
 
 [ext_resource type="Script" uid="uid://mkfqfypf8jpw" path="res://scripts/player/player_controller.gd" id="1_player_controller"]
 [ext_resource type="Script" uid="uid://dy2ap8k4mwko" path="res://scripts/components/player_input_component.gd" id="2_player_input"]
@@ -19,6 +19,7 @@
 [ext_resource type="Script" path="res://scripts/components/skill_charge_bar.gd" id="25_skill_charge_bar"]
 [ext_resource type="Script" path="res://scripts/components/weapon_charge_component.gd" id="26_weapon_charge"]
 [ext_resource type="Script" path="res://scripts/components/temporary_buff_component.gd" id="27_temporary_buff"]
+[ext_resource type="Script" path="res://scripts/components/dodge_feedback_component.gd" id="28_dodge_feedback"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_body"]
 radius = 18.0
@@ -100,6 +101,10 @@ script = ExtResource("26_weapon_charge")
 
 [node name="TemporaryBuffComponent" type="Node" parent="."]
 script = ExtResource("27_temporary_buff")
+
+[node name="DodgeFeedbackComponent" type="Node" parent="."]
+script = ExtResource("28_dodge_feedback")
+visual_node_paths = Array[NodePath]([NodePath("../Body"), NodePath("../Core")])
 
 [node name="HitboxShape" type="CollisionShape2D" parent="MeleeAttackComponent" unique_id=1235241484]
 position = Vector2(56, 0)

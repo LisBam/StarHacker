@@ -39,6 +39,14 @@ var path_destination_refresh_distance: float = 64.0
 var path_waypoint_arrive_distance: float = 28.0
 ## 路径目标随机半径；取值建议 0 到 64，默认 18，只在目标可见时轻微分散怪物终点。
 var path_random_goal_radius: float = 18.0
+## 分散目标节点组；默认 skill_targets，只有宿主自身也属于该组时才计算同阵营站位分离。
+var separation_group: StringName = &"skill_targets"
+## 分散检测半径；默认 64 像素，范围内同组单位会按距离产生远离方向，0 表示关闭。
+var separation_radius: float = 64.0
+## 分散移动速度；默认 90 像素/秒，作为基础移动之外的站位修正并受最终速度限制。
+var separation_speed: float = 90.0
+## 单次分散最大邻居数；默认 8，用于限制高密度敌群的节点遍历成本。
+var separation_max_neighbors: int = 8
 ## 单次路径最大路点数；取值建议 8 到 160，默认 96，修改会影响远距离寻路缓存长度。
 var path_max_point_count: int = 96
 ## 卡住判定时间；取值建议 0.3 到 1.2 秒，默认 0.75，避免正常转角减速被误判为卡住。
@@ -78,6 +86,8 @@ var _path_recalculate_remaining: float = 0.0
 var _avoidance_side_bias: int = 1
 ## 当前卡住累计时间；取值大于等于 0，默认 0，持续移动失败时累加并触发重算路径。
 var _stuck_time: float = 0.0
+## 最近一次 AI 更新计算出的分散速度；默认零向量，在两次低频决策之间复用以保持逐帧移动平滑。
+var _separation_velocity: Vector2 = Vector2.ZERO
 
 
 func initialize(actor: CharacterBody2D, random_source: RandomNumberGenerator) -> void:
@@ -109,6 +119,13 @@ func apply_configuration(settings: Dictionary) -> void:
 	path_destination_refresh_distance = maxf(float(settings.get("path_destination_refresh_distance", path_destination_refresh_distance)), 1.0)
 	path_waypoint_arrive_distance = maxf(float(settings.get("path_waypoint_arrive_distance", path_waypoint_arrive_distance)), 1.0)
 	path_random_goal_radius = maxf(float(settings.get("path_random_goal_radius", path_random_goal_radius)), 0.0)
+	# 原始分散组；只接受 StringName 或 String，异常类型沿用现有配置。
+	var raw_separation_group: Variant = settings.get("separation_group", separation_group)
+	if raw_separation_group is StringName or raw_separation_group is String:
+		separation_group = StringName(str(raw_separation_group))
+	separation_radius = maxf(float(settings.get("separation_radius", separation_radius)), 0.0)
+	separation_speed = maxf(float(settings.get("separation_speed", separation_speed)), 0.0)
+	separation_max_neighbors = maxi(int(settings.get("separation_max_neighbors", separation_max_neighbors)), 1)
 	path_max_point_count = maxi(int(settings.get("path_max_point_count", path_max_point_count)), 1)
 	stuck_detection_time = maxf(float(settings.get("stuck_detection_time", stuck_detection_time)), 0.05)
 	stuck_minimum_movement = maxf(float(settings.get("stuck_minimum_movement", stuck_minimum_movement)), 0.0)
@@ -119,6 +136,7 @@ func apply_configuration(settings: Dictionary) -> void:
 
 func update(delta: float) -> void:
 	_path_recalculate_remaining = maxf(_path_recalculate_remaining - delta, 0.0)
+	_refresh_separation_velocity()
 
 
 func set_spawn_position(spawn_position: Vector2) -> void:
@@ -269,13 +287,56 @@ func move_with_external_velocity(desired_velocity: Vector2, delta: float) -> voi
 
 	# 移动前位置；取值为当前全局坐标，默认用于移动后判断怪物是否卡住。
 	var previous_position: Vector2 = _actor.global_position
-	_actor.velocity = desired_velocity + _knockback_velocity
+	# 分散后的基础速度；有主动移动时不超过原移动速度与分散速度较大值，静止攻击时仍允许小幅拉开站位。
+	var separated_velocity: Vector2 = desired_velocity + _separation_velocity
+	# 分散后速度上限；追击时保持原移动速度上限，原地站位调整时最多使用分散速度。
+	var maximum_separated_speed: float = maxf(desired_velocity.length(), separation_speed)
+	if separated_velocity.length() > maximum_separated_speed and maximum_separated_speed > 0.0:
+		separated_velocity = separated_velocity.normalized() * maximum_separated_speed
+	_actor.velocity = separated_velocity + _knockback_velocity
 	_actor.move_and_slide()
 	# 本帧实际位移；取值为 move_and_slide 后的位置差，默认用于卡墙检测。
 	var moved_distance: float = _actor.global_position.distance_to(previous_position)
-	_actor.velocity = desired_velocity
-	_update_stuck_state(desired_velocity, moved_distance, delta)
+	_actor.velocity = separated_velocity
+	_update_stuck_state(separated_velocity, moved_distance, delta)
 	_decay_knockback(delta)
+
+
+func _refresh_separation_velocity() -> void:
+	## 计算同组近邻产生的距离加权分离速度；不读取索敌目标，因此追击、攻击站位和巡逻都可复用。
+	_separation_velocity = Vector2.ZERO
+	if not is_instance_valid(_actor) or separation_group.is_empty() or not _actor.is_in_group(separation_group) or separation_radius <= 0.0 or separation_speed <= 0.0:
+		return
+	# 分离方向累计；距离越近权重越高，重合时使用实例 ID 生成稳定方向避免零向量无法分开。
+	var separation_direction: Vector2 = Vector2.ZERO
+	# 已处理近邻数；达到配置上限后停止遍历，避免敌群规模线性放大单只怪物开销。
+	var neighbor_count: int = 0
+	for raw_neighbor in _actor.get_tree().get_nodes_in_group(separation_group):
+		# 当前近邻候选；只接受有效 Node2D，后续继续排除自身、离树和死亡单位。
+		var neighbor: Node2D = raw_neighbor as Node2D
+		if neighbor == null or neighbor == _actor or not is_instance_valid(neighbor) or not neighbor.is_inside_tree():
+			continue
+		if neighbor.has_method("is_dead") and bool(neighbor.call("is_dead")):
+			continue
+		# 近邻偏移；从邻居指向宿主，长度用于半径过滤和距离权重。
+		var neighbor_offset: Vector2 = _actor.global_position - neighbor.global_position
+		# 近邻距离；取值 0 至分散半径，超出半径的单位不贡献分散方向。
+		var neighbor_distance: float = neighbor_offset.length()
+		if neighbor_distance > separation_radius:
+			continue
+		if neighbor_distance <= 0.001:
+			# 重合分离角度；由两个实例 ID 稳定生成，避免完全重合时方向每次随机跳变。
+			var stable_angle: float = fmod(float(_actor.get_instance_id() ^ neighbor.get_instance_id()), 360.0)
+			neighbor_offset = Vector2.RIGHT.rotated(deg_to_rad(stable_angle))
+			neighbor_distance = 0.0
+		# 距离权重；重合为 1，接近半径边缘平滑降到 0。
+		var distance_weight: float = 1.0 - clampf(neighbor_distance / separation_radius, 0.0, 1.0)
+		separation_direction += neighbor_offset.normalized() * distance_weight
+		neighbor_count += 1
+		if neighbor_count >= separation_max_neighbors:
+			break
+	if not separation_direction.is_zero_approx():
+		_separation_velocity = separation_direction.limit_length(1.0) * separation_speed
 
 
 func get_steered_direction_to(destination: Vector2, randomize_path_goal: bool) -> Vector2:

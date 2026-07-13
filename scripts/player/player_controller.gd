@@ -335,7 +335,7 @@ func _update_weapon_attack_input(delta: float) -> void:
 		# 对应攻击键是否仍按住；松开时释放当前快照，武器切换不会改变已开始蓄力的来源。
 		var attack_held: bool = fire_held if charging_mode == "ranged" else melee_held
 		if attack_held:
-			_weapon_charge_component.call("update_charge", delta)
+			_weapon_charge_component.call("update_charge", delta, _last_aim_direction)
 			return
 		_release_charged_weapon_attack(charging_mode)
 		return
@@ -343,7 +343,7 @@ func _update_weapon_attack_input(delta: float) -> void:
 	var ranged_weapon: Resource = _equipment_component.call("get_current_ranged_weapon") as Resource if _equipment_component.has_method("get_current_ranged_weapon") else null
 	if (fire_requested or fire_held) and ranged_weapon != null and bool(ranged_weapon.get("has_charge_effect")):
 		# 是否成功开始远程武器蓄力；资源或组件状态异常时保持原有不攻击语义，不绕过组件直接结算。
-		var ranged_charge_started: bool = bool(_weapon_charge_component.call("begin_charge", ranged_weapon, ATTACK_MODE_RANGED))
+		var ranged_charge_started: bool = bool(_weapon_charge_component.call("begin_charge", ranged_weapon, ATTACK_MODE_RANGED, _last_aim_direction))
 		if ranged_charge_started and not fire_held:
 			_release_charged_weapon_attack(ATTACK_MODE_RANGED)
 		return
@@ -353,7 +353,7 @@ func _update_weapon_attack_input(delta: float) -> void:
 	var melee_weapon: Resource = _equipment_component.call("get_melee_weapon") as Resource if _equipment_component.has_method("get_melee_weapon") else null
 	if melee_requested and melee_weapon != null and bool(melee_weapon.get("has_charge_effect")):
 		# 是否成功开始近战武器蓄力；极短单击已经松开时在同一物理帧立即生成最低蓄力释放快照。
-		var melee_charge_started: bool = bool(_weapon_charge_component.call("begin_charge", melee_weapon, ATTACK_MODE_MELEE))
+		var melee_charge_started: bool = bool(_weapon_charge_component.call("begin_charge", melee_weapon, ATTACK_MODE_MELEE, _last_aim_direction))
 		if melee_charge_started and not melee_held:
 			_release_charged_weapon_attack(ATTACK_MODE_MELEE)
 	elif melee_requested:
@@ -1138,6 +1138,12 @@ func _on_health_restored(amount: float) -> void:
 		return
 	# 飘字父节点；优先当前战斗场景，使玩家节点重配或技能行为释放后文字仍能完整播放。
 	var effect_parent: Node = get_tree().current_scene if get_tree().current_scene != null else get_tree().root
-	# 回血显示值；整数保持紧凑，非整数保留一位，避免小数治疗被四舍五入成 +0。
-	var display_amount: String = str(roundi(amount)) if is_equal_approx(amount, roundf(amount)) else "%.1f" % amount
+	# 回血显示值；统一四舍五入为整数，正数治疗最低显示 +1，避免界面出现小数或有效治疗显示为 +0。
+	var display_amount: String = str(maxi(roundi(amount), 1))
 	FLOATING_TEXT_POPUP_SCRIPT.spawn_text(effect_parent, global_position + healing_float_offset, "+%s" % display_amount, healing_float_color)
+
+
+func smooth_camera_after_teleport(previous_position: Vector2) -> void:
+	## 通知玩家相机以传送前位置作为画面起点快速追赶；相机组件缺失时传送逻辑保持正常。
+	if _camera != null and _camera.has_method("smooth_after_owner_teleport"):
+		_camera.call("smooth_after_owner_teleport", previous_position, global_position)

@@ -19,5 +19,11 @@ class_name SilverWolfPhantomRealitySkillData
 @export_range(1.0, 128.0, 1.0, "or_greater") var teleport_search_step: float = 18.0
 ## 墙内目标最近空地最大搜索半径；默认 600 像素，找不到时本段技能释放失败且不消费资源。
 @export_range(1.0, 3000.0, 1.0, "or_greater") var teleport_max_search_radius: float = 600.0
+## 返回点虚影颜色；默认浅蓝且透明，用于区分真实角色并持续标记二段回溯位置。
+@export var phantom_marker_modulate: Color = Color(0.55, 0.88, 1.0, 0.42)
+## 返回点虚影单次呼吸时长；默认 0.8 秒，循环缩放只提供位置提示，不改变技能窗口或传送判定。
+@export_range(0.1, 5.0, 0.05) var phantom_marker_pulse_duration: float = 0.8
+## 返回点虚影最小呼吸缩放；默认 0.92，数值越小虚影的呼吸变化越明显。
+@export_range(0.5, 1.0, 0.01) var phantom_marker_minimum_scale: float = 0.92
 ## 致命伤害自动回溯后的本次冷却额外比例；默认 0.99，使 9 秒根冷却按 1.99 倍结算为 17.91 秒。
 @export_range(0.0, 10.0, 0.01, "or_greater") var lethal_cooldown_extension_ratio: float = 0.99

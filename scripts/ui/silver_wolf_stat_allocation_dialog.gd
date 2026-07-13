@@ -28,6 +28,8 @@ const ATTRIBUTE_DEFINITIONS: Array[Dictionary] = [
 @export_range(160.0, 420.0, 1.0) var slider_minimum_width: float = 260.0
 ## 数字框箭头单次调整点数；默认 10，运行时通常不修改，手动输入和滑条仍允许任意整数。
 @export_range(1.0, 100.0, 1.0) var arrow_adjustment_step: float = 10.0
+## 滑条总点数吸附距离；默认 3 点，拖动后距离合法总点数不超过该值时自动吸附到刚好守恒，数字框输入不触发吸附。
+@export_range(0.0, 20.0, 1.0) var slider_total_snap_distance: float = 3.0
 
 ## 五维共同基准值；默认 99，setup 时由被动技能资源覆盖。
 var _base_attribute_value: float = 99.0
@@ -197,6 +199,22 @@ func _sync_attribute_controls(attribute_key: String, value: float, source_is_sli
 	var attribute_input: SpinBox = _attribute_inputs.get(attribute_key) as SpinBox
 	# 当前滑条；用于拖动调整和显示在合法区间内的位置。
 	var attribute_slider: HSlider = _attribute_sliders.get(attribute_key) as HSlider
+	if source_is_slider and attribute_slider != null:
+		# 其余四项总和；当前拖动项达到“目标总点数减其余项”时，五维总和恰好合法。
+		var other_attributes_total: int = 0
+		for raw_attribute_key in _attribute_inputs.keys():
+			if str(raw_attribute_key) == attribute_key:
+				continue
+			# 其他属性输入；有效时把当前整数值加入守恒计算，异常控件不阻断本项拖动。
+			var other_input: SpinBox = _attribute_inputs.get(raw_attribute_key) as SpinBox
+			if other_input != null:
+				other_attributes_total += roundi(other_input.value)
+		# 当前项合法吸附值；只有该值位于本项范围内且拖动进入配置距离时才接管滑条数值。
+		var snap_value: float = float(roundi(_total_attribute_points) - other_attributes_total)
+		# 吸附值是否合法；必须位于当前滑条最小值与最大值之间，不能为了总点数越过单项边界。
+		var snap_value_is_legal: bool = snap_value >= attribute_slider.min_value and snap_value <= attribute_slider.max_value
+		if snap_value_is_legal and absf(integer_value - snap_value) <= maxf(slider_total_snap_distance, 0.0):
+			integer_value = snap_value
 	if attribute_input != null and (source_is_slider or not is_equal_approx(attribute_input.value, integer_value)):
 		attribute_input.value = integer_value
 	if attribute_slider != null and (not source_is_slider or not is_equal_approx(attribute_slider.value, integer_value)):

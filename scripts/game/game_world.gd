@@ -2058,7 +2058,9 @@ func _spawn_monster_batch(requested_count: int = -1) -> void:
 		monster.global_position = spawn_position
 		if monster.has_signal("died"):
 			monster.connect("died", Callable(self, "_on_monster_died").bind(monster))
-		if monster.has_method("set_target"):
+		if monster.has_method("set_primary_target"):
+			monster.call("set_primary_target", _player)
+		elif monster.has_method("set_target"):
 			monster.call("set_target", _player)
 		if _monster_simulation_manager != null and _monster_simulation_manager.has_method("register_monster"):
 			_monster_simulation_manager.call("register_monster", monster)

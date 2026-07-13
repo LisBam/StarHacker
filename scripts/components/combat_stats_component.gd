@@ -65,6 +65,8 @@ var _equipment_critical_damage: float = 0.0
 var _health_regeneration_elapsed: float = 0.0
 ## 技能攻防倍率来源；键为技能稳定 ID，值为包含 attack 与 defense 比例的字典，多个被动来源分别连乘生效。
 var _skill_stat_multipliers: Dictionary = {}
+## 技能固定攻防加成来源；键为稳定来源 ID，值保存 attack 与 defense 点数，多个来源直接相加。
+var _skill_flat_stat_bonuses: Dictionary = {}
 ## 消耗品临时闪避率；默认 0，使用 0 至 1 小数表示百分点，由 TemporaryBuffComponent 整体覆盖且不写入装备属性。
 var _temporary_dodge_chance: float = 0.0
 ## 消耗品临时每秒能量恢复；默认 0，由 TemporaryBuffComponent 整体覆盖并与角色基础、装备恢复直接相加。
@@ -247,11 +249,35 @@ func is_dead() -> bool:
 
 
 func get_attack_power() -> float:
-	return maxf((attack_power + _equipment_attack_power) * _get_equipment_set_stat_multiplier("attack_power") * _get_combined_skill_multiplier("attack"), 0.0)
+	return maxf((attack_power + _equipment_attack_power) * _get_equipment_set_stat_multiplier("attack_power") * _get_combined_skill_multiplier("attack") + _get_combined_skill_flat_bonus("attack"), 0.0)
 
 
 func get_defense_power() -> float:
-	return maxf((defense_power + _equipment_defense_power) * _get_equipment_set_stat_multiplier("defense_power") * _get_combined_skill_multiplier("defense"), 0.0)
+	return maxf((defense_power + _equipment_defense_power) * _get_equipment_set_stat_multiplier("defense_power") * _get_combined_skill_multiplier("defense") + _get_combined_skill_flat_bonus("defense"), 0.0)
+
+
+func set_skill_flat_stat_bonus(source_id: String, attack_bonus: float, defense_bonus: float) -> void:
+	## 设置单个技能来源的固定攻防点数；相同来源覆盖旧值，负值按 0 处理。
+	var normalized_source_id: String = source_id.strip_edges()
+	if normalized_source_id.is_empty():
+		return
+	_skill_flat_stat_bonuses[normalized_source_id] = {"attack": maxf(attack_bonus, 0.0), "defense": maxf(defense_bonus, 0.0)}
+	stats_changed.emit()
+
+
+func remove_skill_flat_stat_bonus(source_id: String) -> void:
+	## 移除指定固定攻防来源；不存在时保持幂等。
+	if _skill_flat_stat_bonuses.erase(source_id.strip_edges()):
+		stats_changed.emit()
+
+
+func _get_combined_skill_flat_bonus(stat_name: String) -> float:
+	## 累加全部技能固定点数；未知属性名没有贡献。
+	var combined_bonus: float = 0.0
+	for raw_bonus in _skill_flat_stat_bonuses.values():
+		if raw_bonus is Dictionary:
+			combined_bonus += maxf(float((raw_bonus as Dictionary).get(stat_name, 0.0)), 0.0)
+	return combined_bonus
 
 
 func set_equipment_set_stat_multipliers(multipliers: Dictionary) -> void:

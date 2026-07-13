@@ -19,6 +19,8 @@ const MAXIMUM_HALF_ANGLE_DEGREES: float = 180.0
 const KINEMATIC_DISTANCE_FACTOR: float = 2.0
 ## 银河全垒打标记元数据键；迷迷命中带有该标记的目标时可减少“我的伙伴”冷却。
 const GRAND_SLAM_MARK_META: StringName = &"stelle_grand_slam_marked"
+## 银河全垒打标记到期时间元数据键；值为 Time.get_ticks_msec() 同一时钟下的毫秒时间戳。
+const GRAND_SLAM_MARK_EXPIRES_META: StringName = &"stelle_grand_slam_mark_expires_msec"
 
 ## 当前施法者；默认 null，由主动技能组件创建行为后注入，执行时必须仍是有效 Node2D。
 var _caster: Node2D
@@ -112,6 +114,7 @@ func execute(context: Dictionary) -> bool:
 		_current_impact_force = impact_force
 		target.call("apply_damage", cast_damage, self)
 		target.set_meta(GRAND_SLAM_MARK_META, true)
+		target.set_meta(GRAND_SLAM_MARK_EXPIRES_META, Time.get_ticks_msec() + roundi(maxf(float(_skill_data.get("mark_duration")), 0.01) * 1000.0))
 		if _caster.has_method("notify_skill_target_hit"):
 			_caster.call("notify_skill_target_hit", str(_skill_data.get("skill_id")), target)
 	_spawn_cast_effect(cast_direction)

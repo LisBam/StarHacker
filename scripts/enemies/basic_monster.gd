@@ -32,6 +32,12 @@ const TARGET_AI_STATE_SEARCHING: int = 2
 const TARGET_AI_STATE_BLOCKADE: int = 3
 ## 玩家物理层位掩码；固定为第 1 层，用于从怪物碰撞掩码中移除玩家并建立双向碰撞例外。
 const PLAYER_PHYSICS_LAYER_MASK: int = 1
+## 玩家最高优先级战斗目标组；敌人优先选择视野范围内的玩家，再考虑友方单位。
+const PLAYER_COMBAT_TARGET_GROUP: StringName = &"player_combat_target"
+## 玩家友方战斗目标组；玩家不在有效视野范围时，敌人选择其中最近的存活单位。
+const FRIENDLY_COMBAT_TARGET_GROUP: StringName = &"friendly_units"
+## 伤害来源向上解析最大层数；固定 8 层足以跨过弹体、攻击组件和技能行为，并避免异常父链无限遍历。
+const DAMAGE_INSTIGATOR_PARENT_SEARCH_LIMIT: int = 8
 
 ## 怪物显示名称；默认“基础怪物”用于内容识别与后续图鉴界面，新怪物场景应填写设计文档中的正式名称。
 @export var display_name: String = "基础怪物"
@@ -244,6 +250,10 @@ const PLAYER_PHYSICS_LAYER_MASK: int = 1
 
 ## 当前追击目标；取值为 Node2D 或 null，默认由 GameWorld 设置，修改会影响怪物追击和攻击对象。
 var _target: Node2D
+## 关卡注入的主要玩家目标；默认 null，普通候选选择始终给予该目标最高优先级。
+var _primary_target: Node2D
+## 最近一次受伤触发的仇恨目标；默认 null，在目标存活且未超出脱战范围时优先于普通玩家优先规则。
+var _damage_retaliation_target: Node2D
 ## 当前是否已锁定目标；取值为 true/false，默认 false，修改会影响怪物是否追击视野内玩家。
 var _has_target: bool = false
 ## 当前目标是否处于可见状态；取值为 true/false，默认 false，墙体遮挡时会变为 false。
@@ -342,6 +352,7 @@ func _physics_process(delta: float) -> void:
 
 
 func _update_ai_decision(delta: float) -> void:
+	_refresh_combat_target()
 	if _movement_component != null:
 		_movement_component.call("update", delta)
 	if _perception_component != null:
@@ -405,6 +416,81 @@ func set_target(target_node: Node) -> void:
 		_tactical_component.call("reset_intelligence")
 	_sync_perception_state()
 	_clear_navigation_path()
+
+
+func set_primary_target(target_node: Node) -> void:
+	## 注入敌人的主要玩家目标并立即应用；受伤仇恨只改变当前目标，不覆盖该长期引用。
+	_primary_target = target_node as Node2D
+	_damage_retaliation_target = null
+	set_target(_primary_target)
+
+
+func get_current_target() -> Node2D:
+	## 返回当前实际索敌目标；供调试、自动验证和未来仇恨界面查询。
+	return _target
+
+
+func _refresh_combat_target() -> void:
+	## 按“有效受伤仇恨、视野内玩家、最近友方、现有记忆目标”的顺序选择当前感知对象。
+	if _is_valid_retaliation_target(_damage_retaliation_target):
+		if _target != _damage_retaliation_target:
+			set_target(_damage_retaliation_target)
+		return
+	_damage_retaliation_target = null
+	var player_candidate: Node2D = _primary_target if _is_valid_combat_target(_primary_target) else _find_first_valid_target_in_group(PLAYER_COMBAT_TARGET_GROUP)
+	if _is_target_in_acquisition_range(player_candidate):
+		_primary_target = player_candidate
+		if _target != player_candidate:
+			set_target(player_candidate)
+		return
+	var friendly_candidate: Node2D = _find_nearest_valid_target_in_group(FRIENDLY_COMBAT_TARGET_GROUP)
+	if friendly_candidate != null:
+		if _target != friendly_candidate:
+			set_target(friendly_candidate)
+		return
+	if not _is_valid_combat_target(_target):
+		set_target(null)
+
+
+func _find_first_valid_target_in_group(group_name: StringName) -> Node2D:
+	## 返回目标组中首个存活战斗单位；玩家组正常只包含当前玩家实例。
+	for raw_candidate in get_tree().get_nodes_in_group(group_name):
+		var candidate: Node2D = raw_candidate as Node2D
+		if _is_valid_combat_target(candidate):
+			return candidate
+	return null
+
+
+func _find_nearest_valid_target_in_group(group_name: StringName) -> Node2D:
+	## 返回基础视野内最近存活目标；等距时保留节点组中的先出现者。
+	var nearest_target: Node2D
+	var nearest_distance_squared: float = maxf(vision_range, 0.0) * maxf(vision_range, 0.0)
+	for raw_candidate in get_tree().get_nodes_in_group(group_name):
+		var candidate: Node2D = raw_candidate as Node2D
+		if not _is_valid_combat_target(candidate):
+			continue
+		var distance_squared: float = global_position.distance_squared_to(candidate.global_position)
+		if distance_squared <= nearest_distance_squared:
+			nearest_distance_squared = distance_squared
+			nearest_target = candidate
+	return nearest_target
+
+
+func _is_target_in_acquisition_range(candidate: Node2D) -> bool:
+	## 普通候选必须在基础视野半径内；墙体仍由感知组件决定是否真正进入可见追击。
+	return _is_valid_combat_target(candidate) and global_position.distance_to(candidate.global_position) <= maxf(vision_range, 0.0)
+
+
+func _is_valid_combat_target(candidate: Node2D) -> bool:
+	## 合法目标必须仍在树中、可受伤且未死亡；玩家与友方使用相同接口协议。
+	if not is_instance_valid(candidate) or not candidate.is_inside_tree() or not candidate.has_method("apply_damage"):
+		return false
+	return not (candidate.has_method("is_dead") and bool(candidate.call("is_dead")))
+
+
+func _is_valid_retaliation_target(candidate: Node2D) -> bool:
+	## 受伤仇恨持续到目标失效或超出脱战范围，避免下一次普通决策立即切回玩家。
+	return _is_valid_combat_target(candidate) and global_position.distance_to(candidate.global_position) <= maxf(vision_range * lose_target_range_multiplier, vision_range)
 
 
 func _add_target_collision_exception(target_node: Node) -> void:
@@ -591,6 +677,7 @@ func apply_damage(damage: float, source: Node) -> void:
 	var damage_result: Dictionary = COMBAT_DAMAGE_CALCULATOR_SCRIPT.calculate_damage(damage, _get_source_combat_value(source, "get_attack_power", 100.0), defense_power, _get_source_combat_value(source, "get_critical_chance", 0.0), _get_source_combat_value(source, "get_critical_damage_multiplier", 1.5))
 	# 最终伤害；生命与飘字统一使用同一个整数结果。
 	var final_damage: float = float(damage_result.get("damage", 0))
+	_update_target_from_damage_source(source)
 	# 护盾结算后的生命伤害；同一次伤害允许击破护盾后把剩余值继续传给生命。
 	var health_damage: float = float(_shield_component.call("absorb_damage", final_damage)) if _shield_component != null and _shield_component.has_method("absorb_damage") else final_damage
 	current_health = clampf(current_health - health_damage, 0.0, max_health)
@@ -601,6 +688,47 @@ func apply_damage(damage: float, source: Node) -> void:
 		_begin_death_sequence()
 	else:
 		_spawn_hit_effect()
+
+
+func _update_target_from_damage_source(source: Node) -> void:
+	## 伤害来源实际单位比当前目标更近时建立受伤仇恨；相等距离保持原目标，避免边界抖动。
+	var instigator: Node2D = _resolve_damage_instigator(source)
+	if not _is_valid_combat_target(instigator):
+		return
+	var instigator_distance_squared: float = global_position.distance_squared_to(instigator.global_position)
+	var current_distance_squared: float = global_position.distance_squared_to(_target.global_position) if _is_valid_combat_target(_target) else INF
+	if instigator_distance_squared >= current_distance_squared:
+		return
+	_damage_retaliation_target = instigator
+	set_target(instigator)
+
+
+func _resolve_damage_instigator(source: Node) -> Node2D:
+	## 从伤害组件、弹体或技能行为解析实际玩家/友方单位；只接受两个合法战斗目标组。
+	if source == null:
+		return null
+	if source.has_method("get_damage_instigator"):
+		var declared_instigator: Node2D = source.call("get_damage_instigator") as Node2D
+		if _is_player_or_friendly_target(declared_instigator):
+			return declared_instigator
+	var current_node: Node = source
+	for _search_index in range(DAMAGE_INSTIGATOR_PARENT_SEARCH_LIMIT):
+		if current_node == null:
+			break
+		var current_candidate: Node2D = current_node as Node2D
+		if _is_player_or_friendly_target(current_candidate):
+			return current_candidate
+		if current_node.owner != null:
+			var owner_candidate: Node2D = current_node.owner as Node2D
+			if _is_player_or_friendly_target(owner_candidate):
+				return owner_candidate
+		current_node = current_node.get_parent()
+	return null
+
+
+func _is_player_or_friendly_target(candidate: Node2D) -> bool:
+	## 受伤改索敌只接受玩家阵营战斗单位，环境、宝箱和其他敌人伤害不会污染目标。
+	return is_instance_valid(candidate) and (candidate.is_in_group(PLAYER_COMBAT_TARGET_GROUP) or candidate.is_in_group(FRIENDLY_COMBAT_TARGET_GROUP))
 
 
 func get_attack_power() -> float:

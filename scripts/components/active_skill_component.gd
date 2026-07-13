@@ -544,6 +544,13 @@ func reduce_cooldown_remaining(slot_index: int, seconds: float) -> void:
 	cooldowns_changed.emit()
 
 
+func refresh_all_cooldowns() -> void:
+	## 立即清空全部主动技能冷却；角色专属刷新效果使用，不改变技能资源、阶段或装备冷却缩减。
+	for slot_index in range(_cooldown_remaining.size()):
+		_cooldown_remaining[slot_index] = 0.0
+	cooldowns_changed.emit()
+
+
 func set_cooldown_paused_source(slot_index: int, source_id: String, paused: bool) -> void:
 	## 设置指定槽的独立冷却暂停来源；所有来源清空后下一帧恢复递减，暂停不改变 HUD 的剩余秒数。
 	if slot_index < 0 or slot_index >= _cooldown_pause_sources.size():

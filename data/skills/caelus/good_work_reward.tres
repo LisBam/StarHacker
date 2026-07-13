@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="CaelusGoodWorkRewardSkillData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/caelus_good_work_reward_skill_data.gd" id="1_data"]
+[ext_resource type="Script" path="res://scripts/skills/caelus_good_work_reward_behavior.gd" id="2_behavior"]
+
+[resource]
+script = ExtResource("1_data")
+skill_id = "caelus_good_work_reward"
+display_name = "好活当赏"
+description = "当你在6s内累计受到6次伤害后，若你在此6s内未使用武器，则立即获得66（+6%防御力）点护盾。"
+behavior_script = ExtResource("2_behavior")
+tracking_window = 6.0
+required_hit_count = 6
+trigger_cooldown = 6.0
+base_shield_amount = 66.0
+defense_power_ratio = 0.06

@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="CaelusStardustAceSkillData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/caelus_stardust_ace_skill_data.gd" id="1_data"]
+[ext_resource type="Script" path="res://scripts/skills/caelus_stardust_ace_behavior.gd" id="2_behavior"]
+
+[resource]
+script = ExtResource("1_data")
+skill_id = "caelus_stardust_ace"
+display_name = "星尘王牌"
+description = "进入“星尘王牌”状态。该状态下，你的每点护盾都能提供1点防御力，且你使用武器时，消耗所有护盾：若该武器来自近战武器槽，则对所有命中的敌人造成等同于50%消耗护盾值的伤害；若该武器来自远程武器槽，则对第一个命中的敌人造成等同于消耗护盾值的伤害。当你使用武器或释放技能的5s后，退出“星尘王牌”状态。"
+behavior_script = ExtResource("2_behavior")
+targeting_mode = 2
+cooldown_duration = 40.0
+energy_cost = 40.0
+cast_range = 1.0
+target_group = &"skill_targets"
+can_charge = false
+effect_duration = 5.0
+melee_shield_damage_ratio = 0.5
+ranged_shield_damage_ratio = 1.0
+damage_formula_attack_power = 100.0

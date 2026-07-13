@@ -20,6 +20,8 @@ class_name StelleGalacticGrandSlamSkillData
 @export_range(0.0, 3000.0, 1.0, "or_greater") var base_front_recoil_distance: float = 80.0
 ## 满蓄力释放前坐力；单位为理论位移像素，默认 150，0 至满蓄力之间按蓄力比例线性插值。
 @export_range(0.0, 3000.0, 1.0, "or_greater") var maximum_front_recoil_distance: float = 150.0
+## 命中标记持续时间；默认 10 秒，迷迷只在当前时间早于到期时间时触发冷却缩减。
+@export_range(0.01, 120.0, 0.01, "or_greater") var mark_duration: float = 10.0
 ## 统一伤害公式使用的来源攻击力；默认 100，使“10（+20%当前攻击力）”先组成技能威力，再只按目标防御结算而不重复乘算当前攻击力。
 @export_range(0.0, 99999.0, 1.0, "or_greater") var damage_formula_attack_power: float = 100.0
 ## 挥击是否受环境遮挡；默认 true，墙体或建筑位于角色和目标之间时不会隔墙命中。

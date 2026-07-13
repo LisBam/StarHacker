@@ -12,8 +12,8 @@ class_name CaelusFirewallChargeSkillData
 @export_range(0.0, 1.0, 0.01) var charge_damage_reduction_ratio: float = 0.80
 ## 撞击基础威力；默认 10 点，与当前最终防御力比例共同组成统一伤害公式前的技能威力。
 @export_range(0.0, 99999.0, 0.1, "or_greater") var base_damage: float = 10.0
-## 当前防御力转化比例；默认 0.20 表示撞击额外加入释放瞬间最终防御力的 20%。
-@export_range(0.0, 10.0, 0.01, "or_greater") var defense_power_ratio: float = 0.20
+## 当前防御力转化比例；默认 0.05 表示撞击额外加入释放瞬间最终防御力的 5%。
+@export_range(0.0, 10.0, 0.01, "or_greater") var defense_power_ratio: float = 0.05
 ## 撞击冲击力；单位为目标理论位移像素，默认 50，方向根据目标位于冲锋轴线哪一侧选择对应垂直方向。
 @export_range(0.0, 5000.0, 1.0, "or_greater") var impact_force: float = 50.0
 ## 撞击检测半径；默认 42 像素，覆盖玩家与当前基础怪物碰撞半径之和并留出 7 像素物理帧容差。

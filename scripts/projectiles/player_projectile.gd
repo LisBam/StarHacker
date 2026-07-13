@@ -45,6 +45,8 @@ var _critical_damage: float = 1.5
 var _hit_target_ids: Dictionary = {}
 ## 已命中碰撞体 RID；默认只在发生穿透后追加，扫掠射线会排除它们以继续检测后方目标。
 var _excluded_collision_rids: Array[RID] = []
+## 弹体伤害的实际发起单位；默认 null，由远程攻击组件在生成时注入玩家，供敌人受伤改索敌使用。
+var _damage_instigator: Node
 ## 弹射随机源；每颗弹体独立随机化，用于在合法反射半平面内生成不同弹道。
 var _bounce_random: RandomNumberGenerator = RandomNumberGenerator.new()
 
@@ -105,6 +107,16 @@ func configure_combat_attributes(new_attack_power: float, new_critical_chance: f
 	_attack_power = maxf(new_attack_power, 0.0)
 	_critical_chance = clampf(new_critical_chance, 0.0, 1.0)
 	_critical_damage = maxf(new_critical_damage, 1.0)
+
+
+func set_damage_instigator(instigator: Node) -> void:
+	## 注入弹体所属战斗单位；引用只在弹体生命周期内使用，不改变碰撞层或伤害数值。
+	_damage_instigator = instigator
+
+
+func get_damage_instigator() -> Node:
+	## 返回实际发射者；敌人不会把独立弹体节点误当作长期追击目标。
+	return _damage_instigator
 
 
 func get_attack_power() -> float:

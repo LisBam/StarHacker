@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="StelleCoordinatedDanceLightSkillData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/stelle_coordinated_dance_light_skill_data.gd" id="1_data"]
+[ext_resource type="Script" path="res://scripts/skills/stelle_coordinated_dance_light_behavior.gd" id="2_behavior"]
+
+[resource]
+script = ExtResource("1_data")
+skill_id = "stelle_coordinated_dance_light"
+display_name = "同协舞灯"
+description = "进入“同协舞灯”状态持续10s。该状态下，自己周围的所有友方单位每次造成伤害都能回复自身2（+1%目标最大生命值）的血量，每0.5秒最多触发1次。"
+behavior_script = ExtResource("2_behavior")
+targeting_mode = 2
+cooldown_duration = 60.0
+energy_cost = 40.0
+cast_range = 1.0
+target_group = &"skill_targets"
+can_charge = false
+effect_duration = 10.0
+trigger_interval = 0.5
+base_heal_amount = 2.0
+max_health_heal_ratio = 0.01
+friendly_effect_radius = 500.0

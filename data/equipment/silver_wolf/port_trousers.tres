@@ -18,3 +18,4 @@ defense_power = 20.0
 max_health = 25.0
 health_regeneration_per_five_seconds = 20.0
 dodge_chance = 0.05
+cooldown_reduction = 0.05

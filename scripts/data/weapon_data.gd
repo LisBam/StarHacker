@@ -97,6 +97,7 @@ const FIXED_DURABILITY_COST_PER_USE: float = 1.0
 ## 近战命中框激活时长；取值应大于 0，默认 0.12 秒，修改会影响近战判定窗口。
 @export_range(0.01, 2.0, 0.01) var melee_active_duration: float = 0.12
 ## 是否拥有蓄力效果；默认 false，开启后按住对应攻击键蓄力、松开释放，未开启武器保持原有点击或连射逻辑。
+## 检查器说明：勾选此项后才会读取最大蓄力时间、蓄力减速、蓄力减伤与三项满蓄增幅；关闭时这些参数完全不参与输入、数值或资源消耗结算。
 @export var has_charge_effect: bool = false
 ## 武器最大蓄力时间；取值大于 0 秒，默认 1 秒，仅 has_charge_effect 开启时使用，达到上限后保持满蓄力直到松开。
 @export_range(0.01, 30.0, 0.01, "or_greater") var maximum_charge_duration: float = 1.0

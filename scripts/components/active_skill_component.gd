@@ -44,12 +44,18 @@ var _root_skill_resources: Array = []
 var _behavior_instances: Array = []
 ## 当前技能冷却剩余时间；元素为大于等于 0 的秒数，与技能槽保持同下标。
 var _cooldown_remaining: Array[float] = []
+## 每个技能槽当前有效冷却总时长；元素已包含腿部冷却缩减，供 HUD 按实际冷却比例绘制遮罩。
+var _cooldown_durations: Array[float] = []
+## 每个技能槽未应用装备缩减前的冷却总时长；元素已包含技能专属的延长或缩短倍率，装备变化时用它重算当前进度。
+var _cooldown_base_durations: Array[float] = []
 ## 每个技能槽等待下一段的剩余时间；取值大于等于 0，零表示当前没有已开启的多段释放窗口。
 var _follow_up_remaining: Array[float] = []
 ## 每个技能槽整套多段技能共享的运行时状态；行为可通过释放上下文保存记录位置、生命等阶段间数据。
 var _chain_states: Array[Dictionary] = []
 ## 每个技能槽本次完成时使用的根技能冷却倍率；默认 1，特殊结算可在最终段前设置并在进入冷却后自动复位。
 var _completion_cooldown_multipliers: Array[float] = []
+## 当前装备提供的主动技能冷却缩减；使用 0 到 1 小数，默认 0，不影响武器冷却或后续段释放窗口。
+var _equipment_cooldown_reduction: float = 0.0
 ## 当前正在瞄准的技能槽；取值 -1 或有效下标，默认 -1 表示没有按住任何主动技能。
 var _active_slot_index: int = -1
 ## 当前技能按住累计蓄力时间；取值大于等于 0 秒，默认 0，只有技能允许蓄力时才参与释放比例。
@@ -129,6 +135,8 @@ func configure_skills(skill_resources: Array) -> void:
 	_root_skill_resources.clear()
 	_behavior_instances.clear()
 	_cooldown_remaining.clear()
+	_cooldown_durations.clear()
+	_cooldown_base_durations.clear()
 	_follow_up_remaining.clear()
 	_chain_states.clear()
 	_completion_cooldown_multipliers.clear()
@@ -145,6 +153,8 @@ func configure_skills(skill_resources: Array) -> void:
 		var behavior_instance: Node = _create_behavior_instance(skill_data)
 		_behavior_instances.append(behavior_instance)
 		_cooldown_remaining.append(0.0)
+		_cooldown_durations.append(0.0)
+		_cooldown_base_durations.append(0.0)
 		_follow_up_remaining.append(0.0)
 		_chain_states.append({})
 		_completion_cooldown_multipliers.append(1.0)
@@ -153,6 +163,8 @@ func configure_skills(skill_resources: Array) -> void:
 		_root_skill_resources.append(null)
 		_behavior_instances.append(null)
 		_cooldown_remaining.append(0.0)
+		_cooldown_durations.append(0.0)
+		_cooldown_base_durations.append(0.0)
 		_follow_up_remaining.append(0.0)
 		_chain_states.append({})
 		_completion_cooldown_multipliers.append(1.0)
@@ -200,12 +212,10 @@ func is_follow_up_pending(slot_index: int) -> bool:
 
 func get_cooldown_ratio(slot_index: int) -> float:
 	## 返回指定槽 0 至 1 的冷却比例；1 表示刚释放，0 表示可用或空槽。
-	# 当前技能资源；缺失时没有可计算的冷却总时长。
-	var skill_data: Resource = get_skill_resource(slot_index)
-	if skill_data == null:
+	if slot_index < 0 or slot_index >= _cooldown_durations.size():
 		return 0.0
-	# 冷却总时长；小于等于 0 的技能始终返回 0。
-	var cooldown_duration: float = maxf(float(skill_data.get("cooldown_duration")), 0.0)
+	# 当前有效冷却总时长；已包含冷却缩减与本次技能专属倍率，小于等于 0 的技能始终返回 0。
+	var cooldown_duration: float = maxf(_cooldown_durations[slot_index], 0.0)
 	return clampf(get_cooldown_remaining(slot_index) / cooldown_duration, 0.0, 1.0) if cooldown_duration > 0.0 else 0.0
 
 
@@ -465,7 +475,13 @@ func _complete_skill_chain(slot_index: int) -> void:
 	# 本次完成冷却倍率；最低为 0，允许专属技能免除冷却或延长冷却，不会影响后续释放。
 	var completion_multiplier: float = maxf(_completion_cooldown_multipliers[slot_index], 0.0)
 	_completion_cooldown_multipliers[slot_index] = 1.0
-	_cooldown_remaining[slot_index] = maxf(float(root_skill_data.get("cooldown_duration")), 0.0) * completion_multiplier if root_skill_data != null else 0.0
+	# 装备缩减前冷却时长；根技能基础 CD 与本次技能专属倍率先相乘，避免二者互相覆盖。
+	var base_cooldown_duration: float = maxf(float(root_skill_data.get("cooldown_duration")), 0.0) * completion_multiplier if root_skill_data != null else 0.0
+	_cooldown_base_durations[slot_index] = base_cooldown_duration
+	# 实际冷却时长；腿部装备冷却缩减只在整套技能完成并进入 CD 时应用，后续段窗口不受影响。
+	var resolved_cooldown_duration: float = _get_effective_cooldown_duration(base_cooldown_duration)
+	_cooldown_durations[slot_index] = resolved_cooldown_duration
+	_cooldown_remaining[slot_index] = resolved_cooldown_duration
 	skill_loadout_changed.emit()
 	cooldowns_changed.emit()
 
@@ -497,6 +513,36 @@ func scale_cooldown_remaining(slot_index: int, multiplier: float) -> void:
 		return
 	_cooldown_remaining[slot_index] = maxf(_cooldown_remaining[slot_index] * maxf(multiplier, 0.0), 0.0)
 	cooldowns_changed.emit()
+
+
+func set_equipment_cooldown_reduction(reduction_ratio: float) -> void:
+	## 设置腿部装备提供的主动技能冷却缩减；换装或装备损坏时保留当前 CD 百分比并用新的缩减结果重算剩余秒数。
+	# 有效缩减比例；范围限制为 0 至 1，默认 0 表示玩家不穿腿部装备时的基础状态。
+	var resolved_reduction: float = clampf(reduction_ratio, 0.0, 1.0)
+	if is_equal_approx(_equipment_cooldown_reduction, resolved_reduction):
+		return
+	_equipment_cooldown_reduction = resolved_reduction
+	# 冷却槽索引；遍历所有技能槽，使换装时已经开始的冷却也按原有进度连续变化。
+	for slot_index in range(_cooldown_remaining.size()):
+		# 旧有效冷却时长；为 0 时没有可保留的进度，直接写入新的总时长即可。
+		var previous_duration: float = maxf(_cooldown_durations[slot_index], 0.0)
+		# 当前冷却进度；1 表示刚进入冷却，0 表示已完成，读取前限制防止历史异常数据放大时间。
+		var remaining_ratio: float = clampf(_cooldown_remaining[slot_index] / previous_duration, 0.0, 1.0) if previous_duration > 0.0 else 0.0
+		# 重新计算后的有效冷却时长；使用已记录的技能专属倍率结果，不重新读取或改写资源模板。
+		var updated_duration: float = _get_effective_cooldown_duration(_cooldown_base_durations[slot_index])
+		_cooldown_durations[slot_index] = updated_duration
+		_cooldown_remaining[slot_index] = updated_duration * remaining_ratio
+	cooldowns_changed.emit()
+
+
+func get_equipment_cooldown_reduction() -> float:
+	## 返回当前由装备聚合后的冷却缩减比例；供角色面板、测试或未来效果查询，默认值为 0。
+	return clampf(_equipment_cooldown_reduction, 0.0, 1.0)
+
+
+func _get_effective_cooldown_duration(base_cooldown_duration: float) -> float:
+	## 计算装备缩减后的技能总冷却；100% 冷却缩减允许结果为 0，主动技能组件会把它视为立即可用。
+	return maxf(base_cooldown_duration, 0.0) * (1.0 - clampf(_equipment_cooldown_reduction, 0.0, 1.0))
 
 
 func execute_pending_stage_immediately(slot_index: int, context_overrides: Dictionary = {}) -> bool:

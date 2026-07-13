@@ -85,6 +85,7 @@ const ADDITIVE_POINT_STATS: Dictionary = {
 	"critical_chance": CALCULATION_ADDITIVE_POINTS,
 	"critical_damage": CALCULATION_ADDITIVE_POINTS,
 	"dodge_chance": CALCULATION_ADDITIVE_POINTS,
+	"cooldown_reduction": CALCULATION_ADDITIVE_POINTS,
 }
 ## 加算数值属性目录；这些属性直接累加实际点数，不按基础值百分比换算。
 const ADDITIVE_VALUE_STATS: Dictionary = {
@@ -172,6 +173,12 @@ const ADDITIVE_POINT_MAGNITUDE_RANGES: Dictionary = {
 		QUALITY_HIGH: {"beneficial_min": 0.018, "beneficial_max": 0.035, "detrimental_min": 0.005, "detrimental_max": 0.020},
 		QUALITY_SUPREME: {"beneficial_min": 0.025, "beneficial_max": 0.050, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
+	"cooldown_reduction": {
+		QUALITY_LOW: {"beneficial_min": 0.010, "beneficial_max": 0.040, "detrimental_min": 0.040, "detrimental_max": 0.080},
+		QUALITY_MEDIUM: {"beneficial_min": 0.020, "beneficial_max": 0.060, "detrimental_min": 0.040, "detrimental_max": 0.060},
+		QUALITY_HIGH: {"beneficial_min": 0.030, "beneficial_max": 0.080, "detrimental_min": 0.030, "detrimental_max": 0.050},
+		QUALITY_SUPREME: {"beneficial_min": 0.050, "beneficial_max": 0.100, "detrimental_min": 0.0, "detrimental_max": 0.0},
+	},
 }
 ## 强化数值保存精度；0.001 对应 0.1 个百分点，可完整保存闪避率等小数区间。
 const MODIFIER_VALUE_PRECISION: float = 0.001
@@ -205,6 +212,7 @@ const STAT_KEYS: Array[String] = [
 	"max_health",
 	"health_regeneration_per_five_seconds",
 	"dodge_chance",
+	"cooldown_reduction",
 	"move_speed",
 	"vision_range",
 	"scatter_count",
@@ -215,8 +223,8 @@ const STAT_KEYS: Array[String] = [
 ]
 ## 武器强化石属性池；只包含武器能够应用的属性。
 const WEAPON_STAT_KEYS: Array[String] = ["damage", "cooldown", "energy_consumption", "attack_distance", "projectile_speed", "deviation_degrees", "recoil_force", "front_recoil_force", "impact_force", "melee_active_duration", "critical_chance", "critical_damage", "max_durability", "scatter_count", "piercing_count", "bounce_count", "combo_count"]
-## 装备强化石属性池；移速仅脚部可应用，视野仅头部可应用。
-const EQUIPMENT_STAT_KEYS: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance", "move_speed", "vision_range", "energy_regeneration"]
+## 装备强化石属性池；冷却缩减仅腿部、移速仅脚部、视野仅头部、能量恢复仅躯干可应用。
+const EQUIPMENT_STAT_KEYS: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance", "cooldown_reduction", "move_speed", "vision_range", "energy_regeneration"]
 ## 属性中文名称；键为统一属性名，值用于强化石、搜索、筛选和武器详情。
 const STAT_LABELS: Dictionary = {
 	"damage": "伤害",
@@ -237,6 +245,7 @@ const STAT_LABELS: Dictionary = {
 	"max_health": "最大生命值",
 	"health_regeneration_per_five_seconds": "每5秒回血值",
 	"dodge_chance": "闪避率",
+	"cooldown_reduction": "冷却缩减",
 	"move_speed": "移速",
 	"vision_range": "视野",
 	"scatter_count": "散射",
@@ -265,6 +274,7 @@ const BENEFICIAL_DIRECTIONS: Dictionary = {
 	"max_health": 1,
 	"health_regeneration_per_five_seconds": 1,
 	"dodge_chance": 1,
+	"cooldown_reduction": 1,
 	"move_speed": 1,
 	"vision_range": 1,
 	"scatter_count": 1,

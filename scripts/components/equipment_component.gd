@@ -14,6 +14,8 @@ signal armor_equipment_changed(armor_slot: String, equipment_data: Resource)
 @export var inventory_component_path: NodePath = ^"../InventoryComponent"
 ## 套装组件路径；默认指向同级 EquipmentSetComponent，修改会影响套装属性是否进入玩家最终属性聚合。
 @export var equipment_set_component_path: NodePath = ^"../EquipmentSetComponent"
+## 主动技能组件路径；默认指向同级 ActiveSkillComponent，腿部冷却缩减会通过其公开接口影响技能 CD，运行时通常不动态修改。
+@export var active_skill_component_path: NodePath = ^"../ActiveSkillComponent"
 ## 远程武器槽数量；取值建议 1 到 8，默认 2 满足双远程武器需求，运行时修改后需要重新初始化槽位。
 @export_range(1, 8, 1) var ranged_slot_count: int = 2
 ## 开局远程武器列表；默认空数组，最多按 ranged_slot_count 装入，修改会影响玩家初始远程装备。
@@ -39,6 +41,8 @@ var _movement_component: Node
 var _combat_camera: Camera2D
 ## 装备套装组件缓存；只读取当前套装属性结果，不持有套装件数或物品所有权。
 var _equipment_set_component: Node
+## 主动技能组件缓存；只接收装备聚合后的冷却缩减，不读取或修改具体技能资源。
+var _active_skill_component: Node
 ## 不含装备的基础相机缩放；默认进入场景时读取当前 Camera2D.zoom。
 var _base_camera_zoom: Vector2 = Vector2.ONE
 ## 不含装备的基础移速；默认 320，首次同步时从移动组件读取。
@@ -59,6 +63,7 @@ func _ready() -> void:
 	_movement_component = owner.get_node_or_null("MovementComponent") if owner != null else get_node_or_null("../MovementComponent")
 	_combat_camera = owner.get_node_or_null("Camera2D") as Camera2D if owner != null else get_node_or_null("../Camera2D") as Camera2D
 	_equipment_set_component = get_node_or_null(equipment_set_component_path)
+	_active_skill_component = get_node_or_null(active_skill_component_path)
 	if _movement_component != null and _movement_component.has_method("get_max_speed"):
 		_base_move_speed = float(_movement_component.call("get_max_speed"))
 	if _combat_camera != null:
@@ -367,7 +372,7 @@ func _sync_from_global_inventory() -> void:
 
 func _apply_armor_attributes() -> void:
 	# 聚合属性；损坏装备不提供任何加成，避免零耐久仍持续生效。
-	var attributes: Dictionary = {"attack_power": 0.0, "defense_power": 0.0, "max_health": 0.0, "health_regeneration_per_five_seconds": 0.0, "energy_regeneration": 0.0, "dodge_chance": 0.0, "move_speed": 0.0, "vision_range": 0.0, "critical_chance": 0.0, "critical_damage": 0.0}
+	var attributes: Dictionary = {"attack_power": 0.0, "defense_power": 0.0, "max_health": 0.0, "health_regeneration_per_five_seconds": 0.0, "energy_regeneration": 0.0, "dodge_chance": 0.0, "cooldown_reduction": 0.0, "move_speed": 0.0, "vision_range": 0.0, "critical_chance": 0.0, "critical_damage": 0.0}
 	# 四部位装备；同一快照同时用于普通属性与套装统计，避免一次刷新读取到不同装备状态。
 	var armor_equipment: Dictionary = get_armor_equipment_resources()
 	for armor_slot in ["head", "body", "legs", "feet"]:
@@ -392,6 +397,10 @@ func _apply_armor_attributes() -> void:
 		# 套装最终属性倍率；与直接点数分开结算，使“提高20%防御力”作用于角色基础与全部装备防御合计值。
 		var set_attribute_multipliers: Dictionary = _equipment_set_component.call("get_active_attribute_multipliers", armor_equipment) as Dictionary if _equipment_set_component != null and _equipment_set_component.has_method("get_active_attribute_multipliers") else {}
 		_stats_component.call("set_equipment_set_stat_multipliers", set_attribute_multipliers)
+	if _active_skill_component != null and _active_skill_component.has_method("set_equipment_cooldown_reduction"):
+		# 实际技能冷却缩减；取有效腿部属性总和并限制为 0 至 100%，损坏或卸下腿部装备会在同一刷新中恢复默认 0。
+		var cooldown_reduction: float = clampf(float(attributes.get("cooldown_reduction", 0.0)), 0.0, 1.0)
+		_active_skill_component.call("set_equipment_cooldown_reduction", cooldown_reduction)
 	_equipment_move_speed_ratio = maxf(float(attributes.get("move_speed", 0.0)), 0.0)
 	_equipment_vision_range_ratio = maxf(float(attributes.get("vision_range", 0.0)), 0.0)
 	_apply_movement_and_vision_attributes()

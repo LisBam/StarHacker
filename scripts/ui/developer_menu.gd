@@ -49,6 +49,8 @@ var _grant_weapons_button: Button
 var _grant_equipment_button: Button
 ## 随机强化石按钮；默认运行时创建，点击后向永久仓库发放 10 颗随机强化石。
 var _grant_stones_button: Button
+## 自定义强化石展开按钮；默认运行时创建，点击后显示或收起详细配置，避免主菜单初始展示过长设置表单。
+var _custom_stone_toggle_button: Button
 ## 自定义强化石配置容器；默认运行时创建，包含品质、适用对象和三条可选词条，战斗开发者上下文会统一隐藏。
 var _custom_stone_controls_container: VBoxContainer
 ## 自定义强化石品质选项；默认初级，玩家可从初级、中级、高级、极品中选择实际品质。
@@ -323,14 +325,21 @@ func _build_interface() -> void:
 
 
 func _build_custom_stone_controls(content: VBoxContainer) -> void:
-	# 自定义强化石容器；独立归入局外经济区，战斗开发者菜单会通过统一控件列表隐藏。
+	# 自定义强化石展开按钮；默认只显示入口，玩家明确点击后才创建视觉上的配置流程。
+	_custom_stone_toggle_button = Button.new()
+	_custom_stone_toggle_button.text = "自定义强化石效果"
+	_custom_stone_toggle_button.custom_minimum_size = Vector2(0.0, 46.0)
+	_custom_stone_toggle_button.pressed.connect(_on_custom_stone_toggle_pressed)
+	content.add_child(_custom_stone_toggle_button)
+	_economy_controls.append(_custom_stone_toggle_button)
+	# 自定义强化石容器；独立归入局外经济区，初始隐藏，战斗开发者菜单会通过统一控件列表隐藏。
 	_custom_stone_controls_container = VBoxContainer.new()
 	_custom_stone_controls_container.add_theme_constant_override("separation", 8)
 	content.add_child(_custom_stone_controls_container)
 	_economy_controls.append(_custom_stone_controls_container)
 	# 分区标题；明确这些选项只影响即将发放的一颗开发者强化石，不会改写随机掉落规则。
 	var custom_stone_title: Label = Label.new()
-	custom_stone_title.text = "自定义强化石效果"
+	custom_stone_title.text = "自定义强化石配置"
 	custom_stone_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	custom_stone_title.add_theme_font_size_override("font_size", 18)
 	_custom_stone_controls_container.add_child(custom_stone_title)
@@ -360,6 +369,18 @@ func _build_custom_stone_controls(content: VBoxContainer) -> void:
 	_grant_custom_stone_button.custom_minimum_size = Vector2(0.0, 42.0)
 	_grant_custom_stone_button.pressed.connect(_on_grant_custom_stone_pressed)
 	_custom_stone_controls_container.add_child(_grant_custom_stone_button)
+	_custom_stone_controls_container.visible = false
+
+
+func _on_custom_stone_toggle_pressed() -> void:
+	## 切换自定义强化石配置的可见性；入口按钮始终保留，防止收起后无法再次打开。
+	if _custom_stone_controls_container == null:
+		return
+	# 展开后的可见性；默认从隐藏切换为显示，后续每次点击在两种稳定状态间反转。
+	var should_show_controls: bool = not _custom_stone_controls_container.visible
+	_custom_stone_controls_container.visible = should_show_controls
+	if _custom_stone_toggle_button != null:
+		_custom_stone_toggle_button.text = "收起自定义强化石效果" if should_show_controls else "自定义强化石效果"
 
 
 func _create_custom_stone_selector(label_text: String) -> OptionButton:
@@ -425,6 +446,8 @@ func _refresh_availability() -> void:
 	_grant_weapons_button.disabled = not service_available
 	_grant_equipment_button.disabled = not service_available
 	_grant_stones_button.disabled = not service_available
+	if _custom_stone_toggle_button != null:
+		_custom_stone_toggle_button.disabled = not service_available
 	if _grant_custom_stone_button != null:
 		_grant_custom_stone_button.disabled = not service_available
 	_grant_all_items_button.disabled = not service_available

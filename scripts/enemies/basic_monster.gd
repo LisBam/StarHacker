@@ -317,6 +317,8 @@ func _exit_tree() -> void:
 
 func _physics_process(delta: float) -> void:
 	if _is_dying:
+		# 死亡尸体外部位移；保留击杀一击已经结算的冲击速度直到自然衰减，使模型可被冲击力击退但不会重新执行 AI 或攻击。
+		_move_with_external_velocity(delta)
 		return
 	_attack_cooldown_remaining = maxf(_attack_cooldown_remaining - delta, 0.0)
 	_ai_accumulated_delta += delta
@@ -671,11 +673,9 @@ func _begin_death_sequence() -> void:
 		return
 	_is_dying = true
 	velocity = Vector2.ZERO
-	set_physics_process(false)
 	_remove_target_collision_exception(_target)
-	for collision_shape in _collision_shapes:
-		if is_instance_valid(collision_shape):
-			collision_shape.set_deferred("disabled", true)
+	# 尸体战斗层；设为 0 后不会再被玩家弹体、攻击或目标查询当作敌人，但保留环境碰撞掩码以使冲击位移能够被墙体阻挡。
+	collision_layer = 0
 	_spawn_death_effect()
 	died.emit()
 	# 死亡动画初始透明度；保存当前 alpha，避免场景为特殊颜色或半透明模型时突然变亮。

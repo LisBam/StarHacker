@@ -144,6 +144,7 @@ static func _append_equipment_lines(detail_lines: Array[String], item_resource: 
 		["health_regeneration_per_five_seconds", 1, "", 1.0],
 		["energy_regeneration", 1, "", 1.0],
 		["dodge_chance", 1, "%", 100.0],
+		["cooldown_reduction", 1, "%", 100.0],
 		["move_speed", 0, "%", 100.0],
 		["vision_range", 0, "%", 100.0],
 		["critical_chance", 0, "%", 100.0],
@@ -159,7 +160,9 @@ static func _append_equipment_lines(detail_lines: Array[String], item_resource: 
 		var suffix: String = str(stat_spec[2])
 		# 显示倍率；底层百分比小数乘 100 后再进入统一文本格式化流程。
 		var display_multiplier: float = float(stat_spec[3])
-		_append_weapon_stat_line(detail_lines, item_resource, stat_name, decimals, suffix, display_multiplier, true)
+		# 零值显示规则；腿部的冷却缩减即使基础为 0% 也需要显示，便于玩家识别该部位可被对应强化石提升。
+		var skip_zero_unmodified: bool = not (stat_name == "cooldown_reduction" and str(item_resource.get("equipment_slot")) == "legs")
+		_append_weapon_stat_line(detail_lines, item_resource, stat_name, decimals, suffix, display_multiplier, skip_zero_unmodified)
 
 
 static func _append_equipment_set_lines(detail_lines: Array[String], item_resource: Resource) -> void:

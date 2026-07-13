@@ -36,6 +36,8 @@ class_name EquipmentData
 @export_range(0.0, 99999.0, 0.1, "or_greater") var health_regeneration_per_five_seconds: float = 0.0
 ## 闪避率；使用 0 到 1 小数，默认 0，受到攻击时独立判定。
 @export_range(0.0, 1.0, 0.01) var dodge_chance: float = 0.0
+## 技能冷却缩减；使用 0 到 1 小数，默认 0 表示不缩短主动技能冷却，0.05 表示主动技能基础冷却时间减少 5%，仅腿部装备支持且可被强化石在运行时动态改变。
+@export_range(0.0, 1.0, 0.001) var cooldown_reduction: float = 0.0
 ## 移速加成比例；使用 0 到 1 小数，默认 0，仅脚部装备支持，0.06 表示提高 6%。
 @export_range(0.0, 10.0, 0.01, "or_greater") var move_speed: float = 0.0
 ## 视野加成比例；使用 0 到 1 小数，默认 0，仅头部装备支持，数值越高相机视野越广。
@@ -47,19 +49,23 @@ class_name EquipmentData
 ## 暴击伤害倍率增量；默认 0，0.1 表示在基础 150% 上增加 10 个百分点。
 @export_range(0.0, 9.0, 0.01, "or_greater") var critical_damage: float = 0.0
 ## 累计强化百分比；键为统一属性名，值为相对基础值的小数比例。
-## 加算属性补充：暴击率、暴击伤害和闪避率的值表示直接百分点偏移，例如 0.015 表示 1.5 个百分点。
+## 加算属性补充：暴击率、暴击伤害、闪避率和冷却缩减的值表示直接百分点偏移，例如 0.015 表示 1.5 个百分点。
 @export var enhancement_modifiers: Dictionary = {}
 
 ## 装备通用强化属性；所有部位均可应用。
 const COMMON_ENHANCEMENT_STATS: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance"]
 ## 脚部专属强化属性；其他部位不会消费该词条。
 const FEET_ENHANCEMENT_STATS: Array[String] = ["move_speed"]
+## 腿部专属强化属性；冷却缩减可从 0 基础值开始按加算百分点叠加，其他部位不会消费该词条。
+const LEGS_ENHANCEMENT_STATS: Array[String] = ["cooldown_reduction"]
 ## 头部专属强化属性；其他部位不会消费视野词条。
 const HEAD_ENHANCEMENT_STATS: Array[String] = ["vision_range"]
 ## 躯干专属强化属性；其他部位不会消费能量恢复词条。
 const BODY_ENHANCEMENT_STATS: Array[String] = ["energy_regeneration"]
 ## 仅基础装备可提供的属性；暴击率与暴击伤害可以保留资源基础配置，但装备强化石不会生成或应用对应词条。
 const BASE_ONLY_STATS: Array[String] = ["critical_chance", "critical_damage"]
+## 允许从零基础强化的属性；这些能力由部位资格定义而不是模板初始值决定，默认 0 仍能消费对应强化石。
+const ZERO_BASE_ENHANCEMENT_STATS: Array[String] = ["cooldown_reduction"]
 
 
 func get_base_stat(stat_name: String) -> float:
@@ -76,7 +82,7 @@ func get_maximum_durability() -> float:
 
 
 func get_effective_stat(stat_name: String) -> float:
-	# 分类公式；暴击率、暴击伤害与闪避率直接加算百分点，其余装备属性继续按基础值乘算。
+	# 分类公式；暴击率、暴击伤害、闪避率与冷却缩减直接加算百分点，其余装备属性继续按基础值乘算。
 	return EnhancementRules.calculate_effective_stat(get_base_stat(stat_name), stat_name, get_enhancement_ratio(stat_name))
 
 
@@ -147,12 +153,12 @@ func set_current_durability(value: float) -> void:
 
 func _is_stat_supported(stat_name: String) -> bool:
 	# 部位允许状态；通用属性适用于所有装备，专属属性只允许对应部位参与共有属性判断。
-	var is_allowed_for_slot: bool = stat_name in COMMON_ENHANCEMENT_STATS or (equipment_slot == "feet" and stat_name in FEET_ENHANCEMENT_STATS) or (equipment_slot == "head" and stat_name in HEAD_ENHANCEMENT_STATS) or (equipment_slot == "body" and stat_name in BODY_ENHANCEMENT_STATS)
+	var is_allowed_for_slot: bool = stat_name in COMMON_ENHANCEMENT_STATS or (equipment_slot == "feet" and stat_name in FEET_ENHANCEMENT_STATS) or (equipment_slot == "legs" and stat_name in LEGS_ENHANCEMENT_STATS) or (equipment_slot == "head" and stat_name in HEAD_ENHANCEMENT_STATS) or (equipment_slot == "body" and stat_name in BODY_ENHANCEMENT_STATS)
 	if not is_allowed_for_slot:
 		return false
-	# 基础属性值；只有非零基础值代表目标实际拥有该属性，强化石不能把零值凭空变为新能力。
+	# 基础属性值；通常只有非零基础值代表目标实际拥有该属性，零基础白名单属性可由部位资格开启强化。
 	var base_property_value: Variant = get(stat_name)
-	return base_property_value != null and not is_zero_approx(float(base_property_value))
+	return base_property_value != null and (not is_zero_approx(float(base_property_value)) or stat_name in ZERO_BASE_ENHANCEMENT_STATS)
 
 
 func _is_stat_available(stat_name: String) -> bool:

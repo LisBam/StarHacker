@@ -139,7 +139,7 @@ func _format_change_line(change: Dictionary) -> String:
 
 func _format_stat_value(stat_name: String, value: float, include_sign: bool = false) -> String:
 	# 百分比显示属性；底层使用 0 到 1 小数或倍率，结果弹窗统一转换为百分数以匹配物品详情。
-	var percentage_stats: Array[String] = ["critical_chance", "critical_damage", "dodge_chance", "move_speed", "vision_range"]
+	var percentage_stats: Array[String] = ["critical_chance", "critical_damage", "dodge_chance", "cooldown_reduction", "move_speed", "vision_range"]
 	# 显示倍率；百分比属性乘 100，其他属性保持原始数值。
 	var display_multiplier: float = 100.0 if stat_name in percentage_stats else 1.0
 	# 单位后缀；持续时间使用秒、偏移使用角度、百分比属性使用百分号。

@@ -264,6 +264,9 @@ func notify_weapon_runtime_state_changed(weapon_data: Resource) -> void:
 
 
 func consume_armor_durability_on_hit() -> void:
+	## 正式战斗受击时消耗防具耐久；训练场属于无损测试环境，任何命中都直接跳过防具耐久变化。
+	if _should_skip_armor_durability_consumption():
+		return
 	# 是否有耐久变化；只在实际变化后刷新属性和排队存档。
 	var changed: bool = false
 	# 本次防具耐久总消耗；四部位实际变化量相加后交给股市行为统计。
@@ -293,6 +296,12 @@ func consume_armor_durability_on_hit() -> void:
 				stock_market_service.call("record_run_metric", "broken_armor", newly_broken_count)
 		_apply_armor_attributes()
 		equipment_changed.emit()
+
+
+func _should_skip_armor_durability_consumption() -> bool:
+	## 返回当前是否为训练场；缺少会话服务时按正式战斗处理，使隔离组件测试保持显式可预测。
+	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
+	return session_state != null and session_state.has_method("is_training_mode") and bool(session_state.call("is_training_mode"))
 
 
 func _initialize_equipment_slots() -> void:

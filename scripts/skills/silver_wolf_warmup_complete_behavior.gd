@@ -48,6 +48,11 @@ func execute(_context: Dictionary) -> bool:
 	return true
 
 
+func can_activate() -> bool:
+	## 返回热身结束是否已经解锁且尚未完成；主动技能组件用该状态阻止输入并驱动无文字禁用滤镜。
+	return not _completed and _skill_data != null and _accumulated_damage >= maxf(float(_skill_data.get("unlock_damage_total")), 1.0)
+
+
 func _on_damage_received(amount: float, _source: Node) -> void:
 	_accumulated_damage += maxf(amount, 0.0)
 
@@ -69,11 +74,11 @@ func _on_projectile_fired(projectile: Node2D) -> void:
 
 
 func _show_dialog() -> void:
-	## 暂停游戏并以当前五维为下限提供额外 99 点分配。
+	## 暂停游戏并以当前基础面板五维作为初始显示，在相对 99 点基准的正负 40%范围内分配额外 99 点。
 	if is_instance_valid(_dialog):
 		return
 	_dialog = ALLOCATION_DIALOG_SCRIPT.new() as ConfirmationDialog
-	_dialog.call("setup_additional_allocation", _caster.call("get_current_attribute_allocation_snapshot"), int(_skill_data.get("additional_attribute_points")))
+	_dialog.call("setup_additional_allocation", _caster.call("get_current_attribute_allocation_snapshot"), int(_skill_data.get("additional_attribute_points")), float(_skill_data.get("base_attribute_value")), float(_skill_data.get("maximum_adjustment_ratio")), float(_skill_data.get("allocation_step")))
 	_dialog.connect("allocation_confirmed", Callable(self, "_on_allocation_confirmed"))
 	(get_tree().current_scene if get_tree().current_scene != null else get_tree().root).add_child(_dialog)
 	_dialog.title = "热身结束"

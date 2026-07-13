@@ -1,7 +1,7 @@
 extends "res://scripts/data/active_skill_data.gd"
 class_name CaelusFirewallChargeSkillData
 
-## 炎墙，冲锋！数据集中保存冲锋时长、速度、防御力伤害转化、减伤、碰撞半径与冲击力。
+## 炎枪，冲锋！数据集中保存冲锋时长、速度、防御力伤害转化、减伤、碰撞半径与冲击力。
 
 ## 冲锋基础持续时间；默认 1 秒，释放时再加本次实际蓄力秒数。
 @export_range(0.01, 30.0, 0.01, "or_greater") var base_charge_duration: float = 1.0

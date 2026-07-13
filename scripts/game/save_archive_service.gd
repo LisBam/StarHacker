@@ -11,6 +11,8 @@ const ARCHIVE_EXTENSION: String = "lisbamsave"
 const BACKUP_DIRECTORY_PREFIX: String = "save_import_backup_"
 ## 临时导入文件后缀；默认 temp_import，所有文件验证并写入成功后才替换正式存档。
 const IMPORT_TEMPORARY_SUFFIX: String = ".temp_import"
+## 游戏英文名；写入归档元数据便于跨语言环境识别，不参与兼容校验或导入资格判断。
+const GAME_ENGLISH_NAME: String = "Star Hacker"
 ## 项目允许导出与导入的存档文件白名单；新增持久化服务时必须同步追加，避免遗漏或允许任意路径写入。
 const SAVE_FILE_NAMES: Array[String] = [
 	"character_unlocks.json",
@@ -49,6 +51,7 @@ func export_archive(destination_path: String) -> Dictionary:
 	var archive_data: Dictionary = {
 		"archive_version": ARCHIVE_VERSION,
 		"project_name": str(ProjectSettings.get_setting("application/config/name", "")),
+		"project_name_en": str(ProjectSettings.get_setting("application/config/name_en", GAME_ENGLISH_NAME)),
 		"exported_unix_time": int(Time.get_unix_time_from_system()),
 		"files": archived_files,
 	}

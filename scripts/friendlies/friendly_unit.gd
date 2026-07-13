@@ -33,6 +33,9 @@ func _ready() -> void:
 	# 友方不属于玩家技能目标组，避免玩家武器和主动技能误伤；presence_units 仍保留以参与单位计数被动。
 	active_skill_target_group = &""
 	super._ready()
+	# 阵营组最终清理；兼容旧场景预先写入的组与外部生成器误配置，确保友方永远不会被登记为敌人或玩家目标。
+	remove_from_group(&"skill_targets")
+	remove_from_group(&"player_combat_target")
 	add_to_group(&"friendly_units")
 	spawn_weight = 0.0
 
@@ -46,6 +49,22 @@ func set_follow_owner(owner_node: Node) -> void:
 	## 注入或替换友方单位跟随的玩家；非 Node2D 输入会清空跟随目标但不影响当前战斗目标。
 	_follow_owner = owner_node as Node2D
 	_is_following_owner = false
+
+
+func set_primary_target(_target_node: Node) -> void:
+	## 友方不接受基础怪物的玩家主要目标注入；即使外部生成器误用敌人初始化入口也只会保持无战斗目标。
+	set_target(null)
+
+
+func set_target(target_node: Node) -> void:
+	## 只允许 hostile_target_group 中的合法敌人进入感知组件；玩家、其他友方和未知单位会被拒绝。
+	if target_node == null:
+		super.set_target(null)
+		return
+	var candidate: Node2D = target_node as Node2D
+	if not _is_hostile_target(candidate):
+		return
+	super.set_target(candidate)
 
 
 func get_follow_owner() -> Node2D:
@@ -119,9 +138,7 @@ func _find_nearest_hostile_target() -> Node2D:
 	var nearest_distance_squared: float = maxf(vision_range, 0.0) * maxf(vision_range, 0.0)
 	for raw_target in get_tree().get_nodes_in_group(hostile_target_group):
 		var candidate: Node2D = raw_target as Node2D
-		if candidate == null or candidate == self or not candidate.has_method("apply_damage"):
-			continue
-		if candidate.has_method("is_dead") and bool(candidate.call("is_dead")):
+		if candidate == self or not _is_hostile_target(candidate):
 			continue
 		# 候选距离平方；等距时保留先出现者，保证目标选择稳定。
 		var distance_squared: float = global_position.distance_squared_to(candidate.global_position)
@@ -133,6 +150,9 @@ func _find_nearest_hostile_target() -> Node2D:
 
 func _try_attack_target() -> void:
 	## 复用基础攻击结算，并在一次攻击确实开始后派发伤害事件供召唤技能响应标记目标。
+	if not _is_hostile_target(_target):
+		set_target(null)
+		return
 	# 攻击前目标；同步缓存避免基础攻击后目标状态变化导致事件对象不一致。
 	var attacked_target: Node = _target
 	# 攻击前是否可释放；基础方法仍负责最终合法性检查和冷却写入。
@@ -140,6 +160,15 @@ func _try_attack_target() -> void:
 	super._try_attack_target()
 	if was_ready:
 		damage_dealt.emit(attacked_target, attack_damage)
+
+
+func _is_hostile_target(candidate: Node2D) -> bool:
+	## 返回候选是否属于敌对目标组且仍可受伤；该检查同时保护索敌、外部目标注入和最终攻击入口。
+	if not is_instance_valid(candidate) or candidate == self or not candidate.is_inside_tree():
+		return false
+	if not candidate.is_in_group(hostile_target_group) or not candidate.has_method("apply_damage"):
+		return false
+	return not (candidate.has_method("is_dead") and bool(candidate.call("is_dead")))
 
 
 func _get_resolved_attack_cooldown() -> float:

@@ -1,4 +1,4 @@
-[gd_scene load_steps=23 format=3]
+[gd_scene load_steps=24 format=3]
 
 [ext_resource type="Script" path="res://scripts/game/game_world.gd" id="1_game_world"]
 [ext_resource type="PackedScene" path="res://scenes/characters/player.tscn" id="2_player"]
@@ -22,6 +22,14 @@
 [ext_resource type="Resource" path="res://data/items/repair_kit_medium.tres" id="25_repair_kit_medium"]
 [ext_resource type="Resource" path="res://data/items/repair_kit_advanced.tres" id="26_repair_kit_advanced"]
 [ext_resource type="PackedScene" path="res://scenes/environment/loot_chest.tscn" id="27_loot_chest"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_shield_inner_border"]
+bg_color = Color(0, 0, 0, 0)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(1, 1, 1, 0.92)
 
 [node name="GameWorld" type="Node2D"]
 script = ExtResource("1_game_world")
@@ -136,6 +144,20 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 color = Color(1, 1, 1, 0.34)
+
+[node name="ShieldInnerBorder" type="Panel" parent="BattleHUD/Root/BottomDock/BarsPanel/BarsMargin/BarsContent/HealthBar/ShieldOverlay"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 1.0
+offset_top = 1.0
+offset_right = -1.0
+offset_bottom = -1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_shield_inner_border")
 
 [node name="EnergyLabel" type="Label" parent="BattleHUD/Root/BottomDock/BarsPanel/BarsMargin/BarsContent"]
 unique_name_in_owner = true

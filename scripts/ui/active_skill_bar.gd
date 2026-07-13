@@ -1,7 +1,7 @@
 extends HBoxContainer
 class_name ActiveSkillBar
 
-## 主动技能栏显示三个技能槽的当前实际按键、技能名称与剩余冷却。
+## 主动技能栏显示三个技能槽的当前实际按键、技能名称、剩余冷却与专属发动条件状态。
 ## 它只读取 ActiveSkillComponent 和 InputBindings，不处理技能输入、能量或释放结果。
 
 ## 标签单轴尺寸安全下限；固定 1 像素，避免检查器内边距超过槽尺寸后生成负区域。
@@ -151,6 +151,9 @@ func _refresh_shared_slot_content() -> void:
 		# 内容透明度；空槽使用原有 0.42 默认值，已配置技能保持完全可读。
 		var content_opacity: float = 1.0 if skill_data != null else empty_slot_opacity
 		_slot_views[slot_index].call("configure_hud_content", slot_minimum_size, _get_action_display_text(action_name), skill_name, detail_text, null, content_opacity)
+		# 专属发动条件；未解锁或已经永久完成的技能只覆盖禁用滤镜，不追加状态文字。
+		var activation_condition_met: bool = bool(_active_skill_component.call("is_skill_activation_condition_met", slot_index)) if skill_data != null and _active_skill_component != null and _active_skill_component.has_method("is_skill_activation_condition_met") else skill_data != null
+		_slot_views[slot_index].call("set_disabled_state", skill_data != null and not activation_condition_met)
 
 
 func _add_skill_slot(_slot_index: int) -> void:
@@ -220,6 +223,10 @@ func _refresh_cooldowns() -> void:
 			# 遮罩文字；只在剩余时间大于零时显示一位小数秒数。
 			var display_text: String = "%ss" % String.num(display_remaining, cooldown_decimal_places) if display_remaining > 0.0 else ""
 			_slot_views[slot_index].call("set_state_overlay", display_remaining > 0.0, display_color, display_text)
+			# 发动条件状态；逐帧读取使伤害累计达到阈值时无需重建技能栏即可移除禁用滤镜。
+			var skill_data: Resource = _active_skill_component.call("get_skill_resource", slot_index) as Resource if _active_skill_component != null and _active_skill_component.has_method("get_skill_resource") else null
+			var activation_condition_met: bool = bool(_active_skill_component.call("is_skill_activation_condition_met", slot_index)) if skill_data != null and _active_skill_component != null and _active_skill_component.has_method("is_skill_activation_condition_met") else skill_data != null
+			_slot_views[slot_index].call("set_disabled_state", skill_data != null and not activation_condition_met)
 		return
 	for slot_index in range(_cooldown_overlays.size()):
 		# 当前剩余冷却；组件缺失或无效槽按 0 处理。

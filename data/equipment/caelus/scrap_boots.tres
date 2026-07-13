@@ -16,6 +16,6 @@ current_durability = 500.0
 attack_power = 10.0
 defense_power = 30.0
 max_health = 50.0
-health_regeneration_per_five_seconds = 4.0
+health_regeneration_per_five_seconds = 3.0
 dodge_chance = 0.02
 move_speed = 0.05

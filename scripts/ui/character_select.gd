@@ -278,10 +278,10 @@ func _refresh_skill_cards(container: VBoxContainer, card_cache: Array[Control], 
 		var skill_name: String = str(skill_resource.get("display_name")).strip_edges()
 		# 技能说明；允许为空，卡片会统一显示“暂无技能描述”。
 		var skill_description: String = str(skill_resource.get("description")).strip_edges()
-		# 基础冷却；被动资源没有该字段时按 0 秒展示，主动资源读取 cooldown_duration。
-		var cooldown_seconds: float = float(skill_resource.get("cooldown_duration")) if skill_type == "主动" else 0.0
-		# 基础能耗；被动资源没有该字段时按 0 展示，主动资源读取整数 energy_cost。
-		var energy_cost: int = int(skill_resource.get("energy_cost")) if skill_type == "主动" else 0
+		# 基础冷却；主动与派生被动资源都按实际字段读取，完全没有该字段的普通被动按 0 处理并由卡片隐藏徽章。
+		var cooldown_seconds: float = maxf(float(skill_resource.get("cooldown_duration")), 0.0) if "cooldown_duration" in skill_resource else 0.0
+		# 基础能耗；主动与派生被动资源都按实际字段读取，没有该字段的普通被动按 0 处理并由卡片隐藏徽章。
+		var energy_cost: int = maxi(int(skill_resource.get("energy_cost")), 0) if "energy_cost" in skill_resource else 0
 		_add_skill_card(container, card_cache, skill_name, skill_description, skill_type, cooldown_seconds, energy_cost)
 	if not card_cache.is_empty():
 		return

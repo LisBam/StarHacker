@@ -148,6 +148,8 @@ var _player: Node
 var _game_world: Node
 ## 战斗属性组件缓存；默认从玩家子节点 StatsComponent 获取，允许为空但生命和能量无法刷新。
 var _stats_component: Node
+## 玩家护盾组件缓存；默认从玩家子节点 ShieldComponent 获取，允许为空并按无护盾状态显示。
+var _shield_component: Node
 ## 装备组件缓存；默认从玩家子节点 EquipmentComponent 获取，允许为空但装备栏无法刷新。
 var _equipment_component: Node
 ## 背包组件缓存；默认从玩家子节点 InventoryComponent 获取，允许为空但背包网格无法刷新。
@@ -335,6 +337,8 @@ var _settlement_subcategory: String = InventoryQuery.SUBCATEGORY_ALL
 @onready var _health_label: Label = %HealthLabel
 ## 生命条缓存；默认绑定 HealthBar，显示当前生命比例，节点缺失会导致生命条无法刷新。
 @onready var _health_bar: ProgressBar = %HealthBar
+## 护盾白色滤镜缓存；默认覆盖生命条完整区域，仅在当前护盾大于 0 时显示。
+@onready var _shield_overlay: ColorRect = %ShieldOverlay
 ## 能量文本缓存；默认绑定 EnergyLabel，显示当前能量和最大能量，节点缺失会导致能量文本无法刷新。
 @onready var _energy_label: Label = %EnergyLabel
 ## 能量条缓存；默认绑定 EnergyBar，显示当前能量比例，节点缺失会导致能量条无法刷新。
@@ -557,6 +561,7 @@ func _bind_player_components() -> void:
 		_player.connect("weapon_attack_succeeded", Callable(self, "_on_weapon_attack_succeeded"))
 
 	_stats_component = _player.get_node_or_null("StatsComponent")
+	_shield_component = _player.get_node_or_null("ShieldComponent")
 	_equipment_component = _player.get_node_or_null("EquipmentComponent")
 	_inventory_component = _player.get_node_or_null("InventoryComponent")
 	_input_component = _player.get_node_or_null("InputComponent")
@@ -571,6 +576,8 @@ func _bind_player_components() -> void:
 			_stats_component.connect("died", Callable(self, "_on_player_died"))
 		if _stats_component.has_method("is_dead") and bool(_stats_component.call("is_dead")):
 			_on_player_died()
+	if _shield_component != null and _shield_component.has_signal("shield_changed"):
+		_shield_component.connect("shield_changed", Callable(self, "_on_shield_changed"))
 
 	if _equipment_component != null:
 		_equipment_component.connect("equipment_changed", Callable(self, "_on_equipment_changed"))
@@ -675,6 +682,7 @@ func _refresh_stats() -> void:
 		_health_label.text = "生命 -- / --"
 		_energy_label.text = "能量 -- / --"
 		_health_bar.value = 0.0
+		_shield_overlay.visible = false
 		_energy_bar.value = 0.0
 		return
 
@@ -686,9 +694,12 @@ func _refresh_stats() -> void:
 	var current_energy: float = float(_stats_component.get("current_energy"))
 	# 最大能量值；取值来自属性组件，默认 1 防止除零，修改会影响能量文本和进度条上限。
 	var max_energy: float = maxf(float(_stats_component.get("max_energy")), 1.0)
+	# 当前护盾值；组件缺失时为 0，只有正值才追加到生命文本并启用白色滤镜。
+	var current_shield: float = maxf(float(_shield_component.get("current_shield")), 0.0) if _shield_component != null else 0.0
 
-	_health_label.text = "生命 %d / %d" % [roundi(current_health), roundi(max_health)]
+	_health_label.text = "生命 %d / %d  护盾 %d" % [roundi(current_health), roundi(max_health), roundi(current_shield)] if current_shield > 0.0 else "生命 %d / %d" % [roundi(current_health), roundi(max_health)]
 	_health_bar.value = current_health / max_health * 100.0
+	_shield_overlay.visible = current_shield > 0.0
 	_energy_label.text = "能量 %s / %s" % [_format_energy_display_value(current_energy), _format_energy_display_value(max_energy)]
 	_energy_bar.value = current_energy / max_energy * 100.0
 
@@ -696,6 +707,11 @@ func _refresh_stats() -> void:
 func _format_energy_display_value(value: float) -> String:
 	## 格式化战斗 HUD 能量数值；整数不显示无意义的小数，0.1 精度的非整数值保留一位小数。
 	return str(roundi(value)) if is_equal_approx(value, roundf(value)) else "%.1f" % value
+
+
+func _on_shield_changed(_current_shield: float, _max_shield: float) -> void:
+	## 护盾变化与生命变化共享同一刷新入口，确保文本和白色滤镜在同一帧同步更新。
+	_refresh_stats()
 
 
 func _rebuild_equipment_slots() -> void:

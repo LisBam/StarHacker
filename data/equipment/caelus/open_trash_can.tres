@@ -18,4 +18,4 @@ defense_power = 30.0
 max_health = 40.0
 health_regeneration_per_five_seconds = 1.0
 dodge_chance = 0.01
-energy_regeneration = 6.0
+energy_regeneration = 3.0

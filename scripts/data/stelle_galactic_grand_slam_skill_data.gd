@@ -6,8 +6,8 @@ class_name StelleGalacticGrandSlamSkillData
 
 ## 固定基础威力；默认 10 点，与攻击力加成共同组成进入统一攻防公式前的技能威力。
 @export_range(0.0, 99999.0, 0.1, "or_greater") var base_damage: float = 10.0
-## 当前攻击力转化比例；默认 0.20 表示额外加入当前最终攻击力的 20%，运行时会读取技能释放瞬间的属性。
-@export_range(0.0, 10.0, 0.01, "or_greater") var attack_power_ratio: float = 0.20
+## 当前攻击力转化比例；默认 0.10 表示额外加入当前最终攻击力的 10%，运行时会读取技能释放瞬间的属性。
+@export_range(0.0, 10.0, 0.01, "or_greater") var attack_power_ratio: float = 0.10
 ## 基础冲击力；默认 150 点理论位移，命中目标后由目标自身按韧性与击退衰减统一换算，运行时可调整。
 @export_range(0.0, 3000.0, 1.0, "or_greater") var impact_force: float = 150.0
 ## 基础击退距离；默认 100 像素，目标会通过自身击退衰减换算初速度，墙体仍可阻挡实际位移。

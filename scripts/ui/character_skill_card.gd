@@ -46,6 +46,8 @@ var _skill_type: String = "主动"
 var _cooldown_seconds: float = 0.0
 ## 技能能量消耗；取值大于等于 0，默认 0，由宿主从技能资源读取，只用于展示。
 var _energy_cost: int = 0
+## 是否显示冷却与能耗徽章；默认 true，衍生单位详情卡只保留类型徽章时设为 false。
+var _show_cost_badges: bool = true
 ## 卡片展开状态；默认 false 表示只显示第一行，点击标题行后切换说明可见性。
 var _expanded: bool = false
 ## 标题行悬停状态；默认 false，鼠标进入标题行后用于提高卡片背景亮度。
@@ -61,8 +63,12 @@ var _skill_name_label: Label
 var _type_badge_label: Label
 ## 冷却徽章标签；显示“CD xxs”格式的基础冷却时间。
 var _cooldown_badge_label: Label
+## 冷却徽章面板；衍生单位详情卡会隐藏整个面板，技能卡保持显示。
+var _cooldown_badge_panel: PanelContainer
 ## 能耗徽章标签；显示“能耗 xx”格式的整数能量消耗。
 var _energy_badge_label: Label
+## 能耗徽章面板；衍生单位详情卡会隐藏整个面板，技能卡保持显示。
+var _energy_badge_panel: PanelContainer
 ## 技能说明标签；默认隐藏，展开后自动换行显示完整技能说明。
 var _description_label: Label
 
@@ -81,6 +87,17 @@ func configure(skill_name: String, skill_description: String, skill_type: String
 	_skill_type = skill_type.strip_edges() if not skill_type.strip_edges().is_empty() else "主动"
 	_cooldown_seconds = maxf(cooldown_seconds, 0.0)
 	_energy_cost = maxi(energy_cost, 0)
+	_show_cost_badges = true
+	if _interface_ready:
+		_refresh_display()
+
+
+func configure_detail_card(title: String, detail_text: String, type_text: String) -> void:
+	## 配置不含冷却与能耗的通用展开卡片；当前用于角色展示中的衍生单位分类。
+	_skill_name = title.strip_edges() if not title.strip_edges().is_empty() else "未命名单位"
+	_skill_description = detail_text.strip_edges()
+	_skill_type = type_text.strip_edges() if not type_text.strip_edges().is_empty() else "衍生单位"
+	_show_cost_badges = false
 	if _interface_ready:
 		_refresh_display()
 
@@ -130,13 +147,13 @@ func _build_interface() -> void:
 	_type_badge_label = type_badge.get_child(0) as Label
 	header_content.add_child(type_badge)
 	# 冷却徽章；统一使用弱青蓝色，数值来自技能资源基础冷却。
-	var cooldown_badge: PanelContainer = _create_badge_panel(UI_STYLE_GUIDE.CHARACTER_SKILL_COOLDOWN_BADGE_COLOR)
-	_cooldown_badge_label = cooldown_badge.get_child(0) as Label
-	header_content.add_child(cooldown_badge)
+	_cooldown_badge_panel = _create_badge_panel(UI_STYLE_GUIDE.CHARACTER_SKILL_COOLDOWN_BADGE_COLOR)
+	_cooldown_badge_label = _cooldown_badge_panel.get_child(0) as Label
+	header_content.add_child(_cooldown_badge_panel)
 	# 能耗徽章；使用暖黄色弱背景，帮助与冷却信息快速区分。
-	var energy_badge: PanelContainer = _create_badge_panel(UI_STYLE_GUIDE.CHARACTER_SKILL_ENERGY_BADGE_COLOR)
-	_energy_badge_label = energy_badge.get_child(0) as Label
-	header_content.add_child(energy_badge)
+	_energy_badge_panel = _create_badge_panel(UI_STYLE_GUIDE.CHARACTER_SKILL_ENERGY_BADGE_COLOR)
+	_energy_badge_label = _energy_badge_panel.get_child(0) as Label
+	header_content.add_child(_energy_badge_panel)
 	_description_label = Label.new()
 	_description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_description_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -177,6 +194,8 @@ func _refresh_display() -> void:
 	_type_badge_label.text = _skill_type
 	_cooldown_badge_label.text = "CD %s" % _format_seconds(_cooldown_seconds)
 	_energy_badge_label.text = "能耗 %d" % _energy_cost
+	_cooldown_badge_panel.visible = _show_cost_badges
+	_energy_badge_panel.visible = _show_cost_badges
 	_description_label.text = _skill_description if not _skill_description.is_empty() else "暂无技能描述"
 	# 类型徽章父面板；被动使用紫蓝底，主动使用青蓝底，未知类型继续按主动视觉处理。
 	var type_badge_panel: PanelContainer = _type_badge_label.get_parent() as PanelContainer

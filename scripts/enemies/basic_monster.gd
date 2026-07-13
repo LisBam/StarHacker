@@ -20,6 +20,8 @@ const ENEMY_TACTICAL_COMPONENT_SCRIPT: Script = preload("res://scripts/component
 const COMBAT_DAMAGE_CALCULATOR_SCRIPT: Script = preload("res://scripts/components/combat_damage_calculator.gd")
 ## 伤害飘字脚本；怪物受伤时在世界坐标生成上浮文本。
 const DAMAGE_NUMBER_POPUP_SCRIPT: Script = preload("res://scripts/effects/damage_number_popup.gd")
+## 通用护盾组件脚本；基础单位进入场景时动态挂载，所有敌人与继承出的友方单位共享同一承伤协议。
+const SHIELD_COMPONENT_SCRIPT: Script = preload("res://scripts/components/shield_component.gd")
 ## AI 空闲状态；默认表示怪物没有玩家记忆，会回到出生点附近巡逻或待机警戒。
 const TARGET_AI_STATE_IDLE: int = 0
 ## AI 可见追击状态；默认表示怪物拥有无遮挡视线，会直接锁定玩家并寻路追击。
@@ -39,6 +41,10 @@ const PLAYER_PHYSICS_LAYER_MASK: int = 1
 @export_range(1.0, 9999.0, 1.0, "or_greater") var max_health: float = 60.0
 ## 当前血量；取值会被限制在 0 到 max_health，默认 60 表示满血生成，运行时修改会影响怪物当前生存状态。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var current_health: float = 60.0
+## 最大护盾值；取值大于等于 0，默认 0 表示该单位没有初始护盾，运行时修改需同步调用护盾组件配置入口。
+@export_range(0.0, 99999.0, 1.0, "or_greater") var max_shield: float = 0.0
+## 当前护盾值；取值限制在 0 到 max_shield，默认 0，单位生成后由独立护盾组件维护。
+@export_range(0.0, 99999.0, 1.0, "or_greater") var current_shield: float = 0.0
 ## 武器基础掉落概率；取值为 0 到 1，默认 0.03 表示 3%，结算时还会乘该怪物的掉落倍率。
 @export_range(0.0, 1.0, 0.001) var weapon_drop_chance: float = 0.03
 ## 掉落倍率；取值应大于等于 0，默认 1.0 不改变武器、装备、强化石和道具概率，1.5 表示每类概率均变为基础值的 1.5 倍，可在运行时动态修改。
@@ -258,6 +264,8 @@ var _perception_component: Node
 var _movement_component: Node
 ## 战术组件实例；取值为 Node 或 null，默认从 tactical_component_path 获取，负责本怪物独立搜查和伏击点。
 var _tactical_component: Node
+## 护盾组件实例；默认在 ready 时创建并注入场景配置，伤害先由该组件吸收再结算生命。
+var _shield_component: Node
 ## 出生尺寸倍率；取值通常为 0.7 到 1.3，默认 1，供调试和其他系统读取本敌人的体型波动。
 var _spawn_size_multiplier: float = 1.0
 ## 出生属性倍率；取值通常为 0.7 到 1.3，默认 1，统一作用于生命、伤害、移速、攻击距离和攻击节奏。
@@ -297,6 +305,7 @@ func _ready() -> void:
 	# 怪物实体碰撞只保留环境层；即使旧场景或运行时生成路径仍包含玩家层，也会在进入场景树时统一清除。
 	collision_mask &= ~PLAYER_PHYSICS_LAYER_MASK
 	current_health = clampf(current_health, 0.0, max_health)
+	_resolve_shield_component()
 	_random.randomize()
 	if not active_skill_target_group.is_empty():
 		add_to_group(active_skill_target_group)
@@ -582,7 +591,9 @@ func apply_damage(damage: float, source: Node) -> void:
 	var damage_result: Dictionary = COMBAT_DAMAGE_CALCULATOR_SCRIPT.calculate_damage(damage, _get_source_combat_value(source, "get_attack_power", 100.0), defense_power, _get_source_combat_value(source, "get_critical_chance", 0.0), _get_source_combat_value(source, "get_critical_damage_multiplier", 1.5))
 	# 最终伤害；生命与飘字统一使用同一个整数结果。
 	var final_damage: float = float(damage_result.get("damage", 0))
-	current_health = clampf(current_health - final_damage, 0.0, max_health)
+	# 护盾结算后的生命伤害；同一次伤害允许击破护盾后把剩余值继续传给生命。
+	var health_damage: float = float(_shield_component.call("absorb_damage", final_damage)) if _shield_component != null and _shield_component.has_method("absorb_damage") else final_damage
+	current_health = clampf(current_health - health_damage, 0.0, max_health)
 	health_changed.emit(current_health, max_health)
 	DAMAGE_NUMBER_POPUP_SCRIPT.spawn_damage_number(get_tree().current_scene, global_position, final_damage, bool(damage_result.get("is_critical", false)), get_instance_id())
 	_apply_knockback_from_source(source)
@@ -594,6 +605,51 @@ func apply_damage(damage: float, source: Node) -> void:
 
 func get_attack_power() -> float:
 	return maxf(attack_power, 0.0)
+
+
+func get_defense_power() -> float:
+	## 返回当前单位防御力；友方攻击、技能详情和通用战斗查询通过该接口读取。
+	return maxf(defense_power, 0.0)
+
+
+func get_shield_component() -> Node:
+	## 返回当前单位护盾组件；调用方无需依赖运行时动态子节点名称。
+	return _shield_component
+
+
+func get_current_shield() -> float:
+	## 返回当前护盾值；组件缺失时返回 0，便于通用 UI 与单位详情安全查询。
+	return maxf(float(_shield_component.get("current_shield")), 0.0) if _shield_component != null else 0.0
+
+
+func heal(amount: float) -> void:
+	## 回复单位生命值；正数会被最大生命夹取，死亡流程开始后不允许复活。
+	if amount <= 0.0 or _is_dying or current_health <= 0.0:
+		return
+	current_health = clampf(current_health + amount, 0.0, max_health)
+	health_changed.emit(current_health, max_health)
+
+
+func _resolve_shield_component() -> void:
+	## 创建或复用独立护盾组件，并把场景导出值作为单位生成时的初始状态。
+	_shield_component = get_node_or_null("ShieldComponent")
+	if _shield_component == null:
+		_shield_component = SHIELD_COMPONENT_SCRIPT.new()
+		_shield_component.name = "ShieldComponent"
+		add_child(_shield_component)
+	if _shield_component.has_signal("shield_changed"):
+		_shield_component.connect("shield_changed", Callable(self, "_on_shield_changed"))
+	_shield_component.set("max_shield", maxf(max_shield, 0.0))
+	if _shield_component.has_method("set_shield"):
+		_shield_component.call("set_shield", clampf(current_shield, 0.0, maxf(max_shield, 0.0)))
+	else:
+		_shield_component.set("current_shield", clampf(current_shield, 0.0, maxf(max_shield, 0.0)))
+
+
+func _on_shield_changed(new_current_shield: float, new_max_shield: float) -> void:
+	## 镜像组件值到导出字段，使调试器、序列化查询和旧代码读取到实时护盾状态。
+	current_shield = maxf(new_current_shield, 0.0)
+	max_shield = maxf(new_max_shield, 0.0)
 
 
 func get_critical_chance() -> float:

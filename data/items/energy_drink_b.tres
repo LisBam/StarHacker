@@ -6,9 +6,9 @@
 script = ExtResource("1_consumable")
 item_id = "energy_drink_b"
 display_name = "B型能量饮料"
-description = "使用后提高5%的闪避率持续60s。"
+description = "使用后提高2.5%的闪避率持续60s。"
 icon_text = "B"
 value = 40
 effect_stat = "dodge_chance"
-effect_amount = 0.05
+effect_amount = 0.025
 duration_seconds = 60.0

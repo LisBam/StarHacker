@@ -43,6 +43,8 @@ class_name CharacterData
 @export var passive_skills: Array[Resource] = []
 ## 主动技能资源数组；默认空表示三个技能槽都为空，最多按数组顺序把前三项配置到技能一、二、三。
 @export var active_skills: Array[Resource] = []
+## 衍生单位资源数组；默认空时角色展示隐藏该分类，每项应提供名称、类型和完整详情接口。
+@export var derived_units: Array[Resource] = []
 
 
 func to_profile() -> Dictionary:
@@ -65,4 +67,5 @@ func to_profile() -> Dictionary:
 		"active": active,
 		"passive_skills": passive_skills.duplicate(),
 		"active_skills": active_skills.duplicate(),
+		"derived_units": derived_units.duplicate(),
 	}

@@ -1,0 +1,52 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/friendlies/friendly_unit.gd" id="1_friendly"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_mimi"]
+radius = 16.0
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_damage"]
+radius = 18.0
+
+[node name="Mimi" type="CharacterBody2D"]
+collision_layer = 64
+collision_mask = 16
+script = ExtResource("1_friendly")
+display_name = "迷迷"
+spawn_weight = 0.0
+max_health = 200.0
+current_health = 200.0
+attack_damage = 20.0
+attack_power = 100.0
+defense_power = 100.0
+toughness = 0.0
+attack_impact_force = 15.0
+attack_front_recoil_force = 10.0
+move_speed = 150.0
+move_speed_random_multiplier_min = 1.0
+move_speed_random_multiplier_max = 1.0
+vision_range = 500.0
+attack_range = 60.0
+attack_cooldown = 1.0
+attack_cooldown_random_multiplier_min = 1.0
+attack_cooldown_random_multiplier_max = 1.0
+movable = true
+
+[node name="Body" type="Polygon2D" parent="."]
+color = Color(1, 0.78, 0.28, 1)
+polygon = PackedVector2Array(0, -20, 17, -8, 14, 14, 0, 21, -14, 14, -17, -8)
+
+[node name="Core" type="Polygon2D" parent="."]
+color = Color(1, 0.98, 0.82, 1)
+polygon = PackedVector2Array(0, -8, 8, 0, 0, 9, -8, 0)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_mimi")
+
+[node name="DamageReceiver" type="Area2D" parent="."]
+collision_layer = 64
+collision_mask = 0
+monitoring = false
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="DamageReceiver"]
+shape = SubResource("CircleShape2D_damage")

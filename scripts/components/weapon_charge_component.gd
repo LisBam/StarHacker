@@ -50,6 +50,7 @@ func release_charge() -> Dictionary:
 		return {}
 	# 最大蓄力时间；与累计阶段使用相同下限，保证释放比例可预测。
 	var maximum_duration: float = maxf(float(_charging_weapon.get("maximum_charge_duration")), 0.01)
+	# 最低蓄力释放语义；按下与松开都发生在相邻物理帧之间时累计时间保持 0，但仍返回完整快照并执行武器基础攻击。
 	# 释放结果；保存清理前的武器、通道、时间和比例，比例限制到 0 至 1。
 	var release_context: Dictionary = {
 		"weapon": _charging_weapon,

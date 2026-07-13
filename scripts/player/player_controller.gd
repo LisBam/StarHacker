@@ -256,17 +256,22 @@ func _update_weapon_attack_input(delta: float) -> void:
 	if _active_skill_component != null and _active_skill_component.has_method("is_aiming") and bool(_active_skill_component.call("is_aiming")):
 		if _weapon_charge_component != null:
 			_weapon_charge_component.call("cancel_charge")
+		_discard_weapon_press_requests()
 		return
 	if _forced_movement_remaining > 0.0:
 		if _weapon_charge_component != null:
 			_weapon_charge_component.call("cancel_charge")
+		_discard_weapon_press_requests()
 		return
 	if _dodge_time_remaining > 0.0:
 		if _weapon_charge_component != null:
 			_weapon_charge_component.call("cancel_charge")
+		_discard_weapon_press_requests()
 		return
 	if _weapon_charge_component == null:
-		if _input_component.is_fire_requested():
+		# 远程攻击按下请求；兼容只提供持续状态的旧输入组件，极短单击通过新接口保留一次攻击机会。
+		var fallback_fire_requested: bool = bool(_input_component.call("consume_fire_request")) if _input_component.has_method("consume_fire_request") else false
+		if fallback_fire_requested or _input_component.is_fire_requested():
 			_try_fire_ranged_weapon()
 		if _input_component.consume_melee_request():
 			_try_use_melee_weapon()
@@ -275,35 +280,70 @@ func _update_weapon_attack_input(delta: float) -> void:
 	var combat_input_enabled: bool = bool(_input_component.call("is_combat_input_enabled")) if _input_component.has_method("is_combat_input_enabled") else true
 	if not combat_input_enabled or _is_stats_dead():
 		_weapon_charge_component.call("cancel_charge")
+		_discard_weapon_press_requests()
 		return
+	# 远程攻击单次按下请求；与持续按住状态分离，保证完整单击落在两个物理帧之间时仍被消费一次。
+	var fire_requested: bool = bool(_input_component.call("consume_fire_request")) if _input_component.has_method("consume_fire_request") else false
+	# 远程攻击当前按住状态；用于继续累计远程武器蓄力或保持普通武器连续射击。
+	var fire_held: bool = bool(_input_component.call("is_fire_requested"))
 	# 近战单次按下请求；每帧只消费一次，普通武器立即攻击，可蓄力武器进入按住状态。
 	var melee_requested: bool = bool(_input_component.call("consume_melee_request"))
+	# 近战攻击当前按住状态；与单次请求分离，极短单击可以在未保持按住时直接按最低蓄力释放。
+	var melee_held: bool = bool(_input_component.call("is_melee_pressed"))
 	if bool(_weapon_charge_component.call("is_charging")):
 		# 蓄力攻击通道；决定当前应继续读取左键还是右键保持状态。
 		var charging_mode: String = str(_weapon_charge_component.call("get_attack_mode"))
 		# 对应攻击键是否仍按住；松开时释放当前快照，武器切换不会改变已开始蓄力的来源。
-		var attack_held: bool = bool(_input_component.call("is_fire_requested")) if charging_mode == "ranged" else bool(_input_component.call("is_melee_pressed"))
+		var attack_held: bool = fire_held if charging_mode == "ranged" else melee_held
 		if attack_held:
 			_weapon_charge_component.call("update_charge", delta)
 			return
-		# 释放上下文；组件先清理减速与减伤，再由控制器执行一次成本结算。
-		var release_context: Dictionary = _weapon_charge_component.call("release_charge") as Dictionary
-		var released_weapon: Resource = release_context.get("weapon") as Resource
-		_execute_weapon_attack(released_weapon, str(release_context.get("attack_mode", charging_mode)), float(release_context.get("charge_ratio", 0.0)))
+		_release_charged_weapon_attack(charging_mode)
 		return
 	# 当前远程武器；只在左键按住时读取，可蓄力武器开始蓄力，普通武器沿用冷却控制的连续射击。
 	var ranged_weapon: Resource = _equipment_component.call("get_current_ranged_weapon") as Resource if _equipment_component.has_method("get_current_ranged_weapon") else null
-	if _input_component.is_fire_requested() and ranged_weapon != null and bool(ranged_weapon.get("has_charge_effect")):
-		_weapon_charge_component.call("begin_charge", ranged_weapon, "ranged")
+	if (fire_requested or fire_held) and ranged_weapon != null and bool(ranged_weapon.get("has_charge_effect")):
+		# 是否成功开始远程武器蓄力；资源或组件状态异常时保持原有不攻击语义，不绕过组件直接结算。
+		var ranged_charge_started: bool = bool(_weapon_charge_component.call("begin_charge", ranged_weapon, "ranged"))
+		if ranged_charge_started and not fire_held:
+			_release_charged_weapon_attack("ranged")
 		return
-	if _input_component.is_fire_requested():
+	if fire_requested or fire_held:
 		_try_fire_ranged_weapon()
 	# 当前近战武器；普通近战保持单次请求语义，可蓄力近战从第一次按下开始累计。
 	var melee_weapon: Resource = _equipment_component.call("get_melee_weapon") as Resource if _equipment_component.has_method("get_melee_weapon") else null
 	if melee_requested and melee_weapon != null and bool(melee_weapon.get("has_charge_effect")):
-		_weapon_charge_component.call("begin_charge", melee_weapon, "melee")
+		# 是否成功开始近战武器蓄力；极短单击已经松开时在同一物理帧立即生成最低蓄力释放快照。
+		var melee_charge_started: bool = bool(_weapon_charge_component.call("begin_charge", melee_weapon, "melee"))
+		if melee_charge_started and not melee_held:
+			_release_charged_weapon_attack("melee")
 	elif melee_requested:
 		_try_use_melee_weapon()
+
+
+func _discard_weapon_press_requests() -> void:
+	## 丢弃当前尚未消费的武器按下边沿；技能瞄准、强制移动、冲刺、输入关闭或死亡期间的单击不能在限制解除后延迟补发。
+	if _input_component == null:
+		return
+	if _input_component.has_method("consume_fire_request"):
+		_input_component.call("consume_fire_request")
+	if _input_component.has_method("consume_melee_request"):
+		_input_component.call("consume_melee_request")
+
+
+func _release_charged_weapon_attack(fallback_attack_mode: String) -> bool:
+	## 统一把当前武器蓄力转换为一次攻击；零物理帧单击会得到 0 秒、0% 的最低蓄力快照，仍正常执行基础攻击。
+	# 释放上下文；组件先清理蓄力减速、减伤与进度条，再由控制器执行唯一一次攻击成本结算。
+	var release_context: Dictionary = _weapon_charge_component.call("release_charge") as Dictionary if _weapon_charge_component != null else {}
+	if release_context.is_empty():
+		return false
+	# 本次释放武器；固定取蓄力开始时缓存的资源，切换装备不会把进度错误应用到另一把武器。
+	var released_weapon: Resource = release_context.get("weapon") as Resource
+	# 本次释放通道；快照缺失时回退调用方提供的 ranged 或 melee，保证兼容旧蓄力组件。
+	var released_attack_mode: String = str(release_context.get("attack_mode", fallback_attack_mode))
+	# 本次蓄力比例；单击最低值为 0，长按按组件累计结果限制到 0 至 1。
+	var released_charge_ratio: float = clampf(float(release_context.get("charge_ratio", 0.0)), 0.0, 1.0)
+	return _execute_weapon_attack(released_weapon, released_attack_mode, released_charge_ratio)
 
 
 func _execute_weapon_attack(weapon_data: Resource, requested_mode: String, charge_ratio: float) -> bool:

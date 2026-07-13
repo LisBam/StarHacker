@@ -83,7 +83,7 @@ var _targeting_refresh_remaining: float = 0.0
 
 func _ready() -> void:
 	set_process(true)
-	set_process_unhandled_input(true)
+	set_process_input(true)
 	if _input_component != null and _input_component.has_signal("combat_input_enabled_changed"):
 		_input_component.connect("combat_input_enabled_changed", Callable(self, "_on_combat_input_enabled_changed"))
 
@@ -113,7 +113,8 @@ func _process(delta: float) -> void:
 		_update_targeting(skill_data)
 
 
-func _unhandled_input(event: InputEvent) -> void:
+func _input(event: InputEvent) -> void:
+	## 在 GUI 与未处理输入阶段之前接收主动技能动作；战斗输入开关仍负责菜单隔离，确保极短按下与松开都不会因同帧事件被其他控件消费而丢失。
 	if not _is_combat_input_enabled() or _is_caster_dead():
 		return
 	for slot_index in range(skill_actions.size()):
@@ -323,6 +324,7 @@ func _release_active_skill() -> void:
 	var maximum_charge_duration: float = maxf(float(skill_data.get("maximum_charge_duration")), MINIMUM_CHARGE_DURATION)
 	# 本次蓄力比例；不可蓄力技能固定为 0，可蓄力技能限制到 0 至 1。
 	var charge_ratio: float = clampf(_charge_elapsed / maximum_charge_duration, 0.0, 1.0) if bool(skill_data.get("can_charge")) else 0.0
+	# 最低蓄力释放语义；按下与松开之间尚未经过处理帧时，0 秒与 0% 仍是合法上下文，行为必须按基础效果执行而不是视为取消。
 	# 施法上下文；具体行为只读取公开字段，不能修改组件内部活动状态。
 	var context: Dictionary = {
 		"caster": get_parent() as Node2D,

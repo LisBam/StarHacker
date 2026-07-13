@@ -39,8 +39,12 @@ signal combat_input_enabled_changed(enabled: bool)
 
 ## 鼠标左键持续状态；取值为 true/false，默认 false 表示未按下，修改会影响远程攻击是否连续触发。
 var _left_mouse_down: bool = false
+## 远程攻击按下请求缓存；取值为 true/false，默认 false，记录任意有效绑定的一次按下边沿，保证按下与松开都发生在物理帧之间时仍能执行最低蓄力或普通单发攻击。
+var _fire_press_requested: bool = false
 ## 鼠标右键单次请求缓存；取值为 true/false，默认 false 表示无待处理近战，消费后清空以避免一次点击重复攻击。
 var _right_mouse_requested: bool = false
+## 近战攻击按下请求缓存；取值为 true/false，默认 false，记录任意有效绑定的一次按下边沿，保证改键后的极短单击不会依赖物理帧轮询。
+var _melee_press_requested: bool = false
 ## 鼠标右键按住状态；取值为 true/false，默认 false，物理回退输入在按下与松开事件中维护，供可蓄力近战武器读取。
 var _right_mouse_down: bool = false
 ## 冲刺单次请求缓存；取值为 true/false，默认 false 表示无待处理冲刺，消费后清空以避免一次按键重复突进。
@@ -57,11 +61,20 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not _combat_input_enabled:
 		return
 
+	# 远程攻击动作按下边沿；直接按当前 InputMap 绑定识别，鼠标或键盘改键都写入同一单次请求缓存。
+	if _is_event_action_pressed(event, fire_action):
+		_fire_press_requested = true
+	# 近战攻击动作按下边沿；与物理鼠标兜底分开保存，避免有效 InputMap 绑定跳过单击缓存。
+	if _is_event_action_pressed(event, melee_action):
+		_melee_press_requested = true
+
 	if event is InputEventMouseButton:
 		# 当前鼠标按钮事件；取值来自本帧输入事件强转，默认由事件系统提供，修改会影响左右键状态解析。
 		var mouse_event: InputEventMouseButton = event as InputEventMouseButton
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT and _should_use_physical_fallback(fire_action):
 			_left_mouse_down = mouse_event.pressed
+			if mouse_event.pressed:
+				_fire_press_requested = true
 		elif mouse_event.button_index == MOUSE_BUTTON_RIGHT and _should_use_physical_fallback(melee_action):
 			_right_mouse_down = mouse_event.pressed
 			if mouse_event.pressed:
@@ -117,14 +130,28 @@ func is_fire_requested() -> bool:
 	return _left_mouse_down or _is_action_pressed(fire_action) or (_should_use_physical_fallback(fire_action) and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT))
 
 
+func consume_fire_request() -> bool:
+	## 消费一次远程攻击按下请求；按住状态仍由 is_fire_requested 独立提供，调用方可据此区分极短单击与持续输入。
+	if not _combat_input_enabled:
+		_fire_press_requested = false
+		return false
+
+	# 本帧远程攻击请求结果；缓存只表示至少发生过一次有效按下，消费后立即清空以防连续物理帧重复执行同一单击。
+	var requested: bool = _fire_press_requested or _is_action_just_pressed(fire_action)
+	_fire_press_requested = false
+	return requested
+
+
 func consume_melee_request() -> bool:
 	if not _combat_input_enabled:
 		_right_mouse_requested = false
+		_melee_press_requested = false
 		return false
 
 	# 本帧近战请求结果；取值为 true/false，默认由缓存和 InputMap 合成，修改会影响右键点击是否产生一次近战。
-	var requested: bool = _right_mouse_requested or _is_action_just_pressed(melee_action)
+	var requested: bool = _right_mouse_requested or _melee_press_requested or _is_action_just_pressed(melee_action)
 	_right_mouse_requested = false
+	_melee_press_requested = false
 	return requested
 
 
@@ -198,7 +225,9 @@ func set_combat_input_enabled(enabled: bool) -> void:
 		return
 
 	_left_mouse_down = false
+	_fire_press_requested = false
 	_right_mouse_requested = false
+	_melee_press_requested = false
 	_right_mouse_down = false
 	_dodge_requested = false
 	_ranged_slot_request = -1
@@ -216,6 +245,15 @@ func _is_action_pressed(action_name: StringName) -> bool:
 
 func _is_action_just_pressed(action_name: StringName) -> bool:
 	return InputMap.has_action(action_name) and Input.is_action_just_pressed(action_name)
+
+
+func _is_event_action_pressed(event: InputEvent, action_name: StringName) -> bool:
+	## 判断单个输入事件是否为指定动作的首次按下；过滤空动作、缺失映射与键盘回响，避免按住改键重复生成单击请求。
+	if action_name.is_empty() or not InputMap.has_action(action_name):
+		return false
+	if event is InputEventKey and (event as InputEventKey).echo:
+		return false
+	return event.is_action_pressed(action_name, false)
 
 
 func _should_use_physical_fallback(action_name: StringName) -> bool:

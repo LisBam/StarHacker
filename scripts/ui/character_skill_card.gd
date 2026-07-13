@@ -194,8 +194,10 @@ func _refresh_display() -> void:
 	_type_badge_label.text = _skill_type
 	_cooldown_badge_label.text = "CD %s" % _format_seconds(_cooldown_seconds)
 	_energy_badge_label.text = "能耗 %d" % _energy_cost
-	_cooldown_badge_panel.visible = _show_cost_badges
-	_energy_badge_panel.visible = _show_cost_badges
+	# 冷却徽章可见性；主动技能保持完整展示，被动技能仅在确实配置正冷却时显示。
+	_cooldown_badge_panel.visible = _show_cost_badges and (_skill_type != "被动" or _cooldown_seconds > 0.0)
+	# 能耗徽章可见性；主动技能保持完整展示，被动技能仅在确实配置正能耗时显示。
+	_energy_badge_panel.visible = _show_cost_badges and (_skill_type != "被动" or _energy_cost > 0)
 	_description_label.text = _skill_description if not _skill_description.is_empty() else "暂无技能描述"
 	# 类型徽章父面板；被动使用紫蓝底，主动使用青蓝底，未知类型继续按主动视觉处理。
 	var type_badge_panel: PanelContainer = _type_badge_label.get_parent() as PanelContainer

@@ -47,7 +47,7 @@ var _synchronizing_attribute_controls: bool = false
 var _total_label: Label
 ## 主内容容器；默认 null，ready 时创建并承载五行属性与总点数提示。
 var _content_box: VBoxContainer
-## 自定义初始属性；默认空表示使用我的主场共同基准，热身结束时保存当前五维作为额外分配下限。
+## 自定义初始属性；默认空表示使用我的主场共同基准，热身结束时保存当前基础面板五维作为初始显示值。
 var _custom_initial_attributes: Dictionary = {}
 ## 自定义额外点数；默认 0，热身结束时为 99，并加入当前五维总和。
 var _custom_extra_points: int = 0
@@ -76,14 +76,19 @@ func setup(base_attribute_value: float, maximum_adjustment_ratio: float, allocat
 	_maximum_adjustment_ratio = clampf(maximum_adjustment_ratio, 0.0, 1.0)
 	_allocation_step = maxf(roundf(allocation_step), 1.0)
 	_total_attribute_points = float(roundi(_base_attribute_value) * ATTRIBUTE_DEFINITIONS.size())
+	_custom_initial_attributes.clear()
+	_custom_extra_points = 0
 	if is_node_ready():
 		_apply_input_limits()
 
 
-func setup_additional_allocation(initial_attributes: Dictionary, extra_points: int) -> void:
-	## 配置基于当前五维的额外点数分配；每项不得低于当前值，单项最多取得全部额外点数。
+func setup_additional_allocation(initial_attributes: Dictionary, extra_points: int, base_attribute_value: float = 99.0, maximum_adjustment_ratio: float = 0.40, allocation_step: float = 1.0) -> void:
+	## 配置第二次五维分配；当前基础值只作为初始显示，单项仍可在共同基准的正负比例范围内自由增减。
 	_custom_initial_attributes = initial_attributes.duplicate(true)
 	_custom_extra_points = maxi(extra_points, 0)
+	_base_attribute_value = maxf(base_attribute_value, 1.0)
+	_maximum_adjustment_ratio = clampf(maximum_adjustment_ratio, 0.0, 1.0)
+	_allocation_step = maxf(roundf(allocation_step), 1.0)
 	var initial_total: int = 0
 	for definition in ATTRIBUTE_DEFINITIONS:
 		initial_total += roundi(float(_custom_initial_attributes.get(str(definition.get("key", "")), 0.0)))
@@ -153,9 +158,12 @@ func _apply_input_limits() -> void:
 		var attribute_slider: HSlider = _attribute_sliders.get(attribute_key) as HSlider
 		if attribute_input == null or attribute_slider == null:
 			continue
-		var custom_default: float = float(roundi(float(_custom_initial_attributes.get(attribute_key, default_value)))) if not _custom_initial_attributes.is_empty() else default_value
-		var resolved_minimum: float = custom_default if not _custom_initial_attributes.is_empty() else minimum_value
-		var resolved_maximum: float = custom_default + float(_custom_extra_points) if not _custom_initial_attributes.is_empty() else maximum_value
+		# 当前显示值；第二次分配从基础面板现值开始，但异常旧值会限制到当前合法的正负浮动范围内。
+		var custom_default: float = clampf(float(roundi(float(_custom_initial_attributes.get(attribute_key, default_value)))), minimum_value, maximum_value) if not _custom_initial_attributes.is_empty() else default_value
+		# 单项最小值；首次和第二次分配都相对共同基准计算，第二次不再把当前值错误地当作不可降低下限。
+		var resolved_minimum: float = minimum_value
+		# 单项最大值；第二次使用提高后的 40%范围，额外点数只改变总点数目标而不绕过单项上限。
+		var resolved_maximum: float = maximum_value
 		attribute_input.min_value = resolved_minimum
 		attribute_input.max_value = resolved_maximum
 		attribute_input.step = 1.0

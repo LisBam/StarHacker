@@ -21,6 +21,6 @@ attack_power = 90.0
 defense_power = 120.0
 energy_regeneration = 15.0
 passive = "拾荒：成功撤离时，获得地图上掉落物总价值20%的金币。\n\n好活当赏：6秒内累计受到6次伤害且未使用武器时获得护盾。"
-active = "炎墙，冲锋！：冲锋撞击造成10（+5%防御力）点威力。\n\n不灭的琥珀：为自己和周围友方提供限时护盾。\n\n星尘王牌：护盾转化为防御力，并可在武器攻击时消耗为附加伤害。"
+active = "炎枪，冲锋！：冲锋撞击造成10（+5%防御力）点威力。\n\n不灭的琥珀：为自己和周围友方提供限时护盾。\n\n星尘王牌：护盾转化为防御力，并可在武器攻击时消耗为附加伤害。"
 passive_skills = Array[Resource]([ExtResource("2_scavenging"), ExtResource("4_good_work_reward")])
 active_skills = Array[Resource]([ExtResource("3_firewall_charge"), ExtResource("5_immortal_amber"), ExtResource("6_stardust_ace")])

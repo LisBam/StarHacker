@@ -18,6 +18,8 @@ signal skill_target_hit(skill_id: String, target: Node)
 
 ## 战斗爆发特效脚本；默认通过路径预加载，避免依赖 Godot 全局类名缓存解析顺序。
 const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat_burst_effect.gd")
+## 通用世界飘字脚本；玩家实际回血时生成绿色正数反馈，不让属性组件直接依赖 UI 表现。
+const FLOATING_TEXT_POPUP_SCRIPT: Script = preload("res://scripts/effects/floating_text_popup.gd")
 ## 疾跑自然回能阻止来源 ID；固定值只属于本玩家控制器，停止疾跑时通过同一 ID 恢复属性组件自然回能。
 const SPRINT_ENERGY_REGENERATION_BLOCK_SOURCE_ID: String = "player_sprint"
 ## 远程攻击通道标识；固定 ranged，与输入、武器数据和攻击组件协议保持一致。
@@ -87,6 +89,10 @@ const ATTACK_MODE_MELEE: String = "melee"
 @export var hit_effect_color: Color = Color(0.55, 0.90, 1.0, 0.95)
 ## 玩家死亡特效颜色；默认偏红白色，修改会影响玩家死亡时的爆发特效颜色。
 @export var death_effect_color: Color = Color(1.0, 0.35, 0.46, 1.0)
+## 玩家回血飘字颜色；默认亮绿色，和矿场收益等正向数值反馈保持一致，运行时通常不动态修改。
+@export var healing_float_color: Color = Color(0.34, 1.0, 0.46, 1.0)
+## 玩家回血飘字世界偏移；默认向上 12 像素，避免文字起点覆盖角色模型中心，修改只影响视觉位置。
+@export var healing_float_offset: Vector2 = Vector2(0.0, -12.0)
 
 ## 最近一次有效瞄准方向；取值为单位向量，默认向右保证鼠标贴近角色时仍有攻击方向，修改会影响无有效鼠标方向时的攻击朝向。
 var _last_aim_direction: Vector2 = Vector2.RIGHT
@@ -158,6 +164,12 @@ var _is_sprinting: bool = false
 func _enter_tree() -> void:
 	## 注册玩家为敌人最高优先级战斗目标；稳定节点组避免敌人按场景节点名硬编码查找玩家。
 	add_to_group(&"player_combat_target")
+
+
+func _ready() -> void:
+	## 监听属性组件的实际治疗结果；所有装备回血、技能治疗和后续治疗来源自动复用同一绿色飘字。
+	if _stats_component != null and _stats_component.has_signal("healed"):
+		_stats_component.connect("healed", Callable(self, "_on_health_restored"))
 
 
 func _physics_process(delta: float) -> void:
@@ -1096,11 +1108,36 @@ func apply_character_base_attribute_allocation(attributes: Dictionary) -> bool:
 
 
 func get_current_attribute_allocation_snapshot() -> Dictionary:
-	## 返回五维分配弹窗使用的当前属性快照；热身结束以这些值为下限并额外提供 99 点。
+	## 返回五维分配弹窗使用的当前基础面板值；装备、套装和技能加成不会污染第二次分配的初始显示。
+	# 战斗属性快照；每个五维字段提供 base、equipment 与 total，热身结束只读取 base。
+	var stats_snapshot: Dictionary = _stats_component.call("get_character_attribute_snapshot") as Dictionary if _stats_component != null and _stats_component.has_method("get_character_attribute_snapshot") else {}
+	# 移动属性快照；装备组件保存角色基础移速与装备比例，第二次分配只读取 base。
+	var movement_snapshot: Dictionary = _equipment_component.call("get_character_attribute_snapshot") as Dictionary if _equipment_component != null and _equipment_component.has_method("get_character_attribute_snapshot") else {}
+	# 基础生命字段；异常组件缺失时回退当前属性，保证隔离场景仍可打开弹窗。
+	var max_health_snapshot: Dictionary = stats_snapshot.get("max_health", {}) as Dictionary
+	# 基础能量字段；能量当前没有装备上限加成，但仍通过统一快照读取。
+	var max_energy_snapshot: Dictionary = stats_snapshot.get("max_energy", {}) as Dictionary
+	# 基础攻击字段；不包含装备、套装和技能倍率贡献。
+	var attack_snapshot: Dictionary = stats_snapshot.get("attack_power", {}) as Dictionary
+	# 基础防御字段；不包含装备、套装和技能倍率贡献。
+	var defense_snapshot: Dictionary = stats_snapshot.get("defense_power", {}) as Dictionary
+	# 基础移速字段；不包含脚部装备比例与临时技能点数。
+	var move_speed_snapshot: Dictionary = movement_snapshot.get("move_speed", {}) as Dictionary
 	return {
-		"max_health": float(_stats_component.get("max_health")) if _stats_component != null else 0.0,
-		"max_energy": float(_stats_component.get("max_energy")) if _stats_component != null else 0.0,
-		"attack_power": float(_stats_component.get("attack_power")) if _stats_component != null else 0.0,
-		"defense_power": float(_stats_component.get("defense_power")) if _stats_component != null else 0.0,
-		"move_speed": float(_movement_component.call("get_max_speed")) if _movement_component != null and _movement_component.has_method("get_max_speed") else 0.0,
+		"max_health": float(max_health_snapshot.get("base", _stats_component.get("max_health") if _stats_component != null else 0.0)),
+		"max_energy": float(max_energy_snapshot.get("base", _stats_component.get("max_energy") if _stats_component != null else 0.0)),
+		"attack_power": float(attack_snapshot.get("base", _stats_component.get("attack_power") if _stats_component != null else 0.0)),
+		"defense_power": float(defense_snapshot.get("base", _stats_component.get("defense_power") if _stats_component != null else 0.0)),
+		"move_speed": float(move_speed_snapshot.get("base", _movement_component.call("get_max_speed") if _movement_component != null and _movement_component.has_method("get_max_speed") else 0.0)),
 	}
+
+
+func _on_health_restored(amount: float) -> void:
+	## 为本次实际恢复量生成绿色正数飘字；治疗来源与数值结算继续由独立属性或技能组件负责。
+	if amount <= 0.0:
+		return
+	# 飘字父节点；优先当前战斗场景，使玩家节点重配或技能行为释放后文字仍能完整播放。
+	var effect_parent: Node = get_tree().current_scene if get_tree().current_scene != null else get_tree().root
+	# 回血显示值；整数保持紧凑，非整数保留一位，避免小数治疗被四舍五入成 +0。
+	var display_amount: String = str(roundi(amount)) if is_equal_approx(amount, roundf(amount)) else "%.1f" % amount
+	FLOATING_TEXT_POPUP_SCRIPT.spawn_text(effect_parent, global_position + healing_float_offset, "+%s" % display_amount, healing_float_color)

@@ -1,6 +1,6 @@
 # 游戏基础框架
 
-本文档说明《崩坏：量子骇袭》的运行入口、系统分层、数据流、持久化边界和扩展协议。玩家规则与数值以 `docs/游戏机制与玩法内容.md` 为准；内容创建、敌人 AI、股市、矿场和 UI 分别由对应模块文档维护。
+本文档说明《星穹骇客（Star Hacker）》的运行入口、系统分层、数据流、持久化边界和扩展协议。玩家规则与数值以 `docs/游戏机制与玩法内容.md` 为准；内容创建、敌人 AI、股市、矿场和 UI 分别由对应模块文档维护。
 
 ## 1. 运行入口
 
@@ -19,6 +19,7 @@
 
 | 服务 | 核心职责 | 持久化 |
 | --- | --- | --- |
+| `SaveLocationMigration` | 游戏重命名后在其他服务读取前，把旧项目名目录中的白名单持久化文件迁移到新 `user://` | `user://save_location_migration_v1.complete`；仅为一次性完成标记 |
 | `ContentCatalog` | 启动时扫描角色、武器、装备、道具、怪物和扩展包清单，按角色解锁状态过滤内容池 | 无 |
 | `SessionState` | 保存当前游戏模式、已确认角色与永久角色/扩展包解锁状态 | `user://character_unlocks.json`；角色选择和解锁永久保存，模式仅运行期 |
 | `InputBindings` | 管理默认与自定义输入映射 | `user://input_bindings.cfg` |
@@ -167,9 +168,10 @@ ContentCatalog 模板
 - `SessionState` 把已解锁角色稳定 ID 与最后确认的 `selected_character_id` 写入 `user://character_unlocks.json`；角色档案中的 `unlocked_by_default` 每次启动都会补入，旧存档不能回锁默认角色，无效或已锁定的旧角色选择会回退为星。
 - 资源实例同时保存稳定 ID、资源路径和运行时字段，以支持内容重命名与旧记录恢复。
 - 存档版本常量与迁移代码位于对应服务脚本。文档只保留仍会被读取的迁移规则，不维护已经失效的历史流水账。
+- 项目从旧名称改为“星穹骇客”后，`SaveLocationMigration` 作为第一项 AutoLoad 运行：若新目录没有迁移完成标记，则从同级旧项目目录复制 7 个持久化白名单文件，再由其余服务按各自版本规则读取。迁移不删除旧目录，不复制未知文件，任一复制失败时不写标记并在下次启动重试。
 - 普通高频变化可合并写入；货币兑换、股票成交等跨资产操作应立即保存，缩短文件间状态不一致窗口。
 - 测试不得直接覆盖日常 `user://` 数据，具体隔离要求见 `docs/功能验证测试规范.md`。
-- 存档导出使用 `.lisbamsave` 单文件保存 `character_unlocks.json`、`input_bindings.cfg`、`debug_settings.cfg`、`global_inventory.json`、`shop_state.json`、`stock_market_state.json` 与 `mining_farm_state.json` 的原始字节；尚未生成的文件不写入归档。
+- 存档导出使用默认名 `Star_Hacker_save_<本地时间>.lisbamsave`，保存 `character_unlocks.json`、`input_bindings.cfg`、`debug_settings.cfg`、`global_inventory.json`、`shop_state.json`、`stock_market_state.json` 与 `mining_farm_state.json` 的原始字节；尚未生成的文件不写入归档。根元数据同时保存项目中文名与英文名，只用于人工识别，不参与兼容校验。
 - 存档导入只接受格式版本 1 与固定文件白名单。服务先完成 JSON、文件名和 Base64 内容校验，再写入同目录临时文件，完整备份当前存档后替换正式文件；归档中缺失的模块文件会按快照语义移除，成功后重启游戏统一加载。
 - 战斗暂停设置导出只包含已经落盘的数据，不强制保存正式战斗中的临时背包、装备与耐久变化，继续遵守本局成功、失败或正常退出结算后统一持久化的所有权规则。
 
@@ -229,5 +231,5 @@ ContentCatalog 模板
 
 - 任意战斗单位可挂载 `ShieldComponent`。伤害入口先调用 `absorb_damage()`，只把返回的溢出伤害交给生命系统；护盾归零不触发死亡，生命归零仍是唯一死亡条件。
 - 玩家预制体固定挂载护盾组件；`BasicMonster` 会为敌人及其派生单位动态补齐同一组件，因此旧场景无需复制承伤逻辑。
-- 友方单位继承 `BasicMonster` 的感知、寻路、攻击、承伤和死亡流程，`FriendlyUnit` 只负责敌对目标组、玩家跟随、可移动开关和远距回传。
+- 友方单位继承 `BasicMonster` 的感知、寻路、攻击、承伤和死亡流程，`FriendlyUnit` 负责敌对目标组、玩家目标注入拒绝、攻击前阵营复核、玩家跟随、可移动开关和远距回传。
 - `CharacterData.derived_units` 保存角色技能衍生单位的只读资料。角色展示按需显示“衍生单位”，运行时实例仍由具体召唤技能创建和清理。

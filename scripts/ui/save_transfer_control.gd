@@ -4,6 +4,11 @@ class_name SaveTransferControl
 ## 存档传输控件为主菜单与暂停设置提供统一的导出、导入文件选择和结果提示。
 ## 控件只调用 SaveArchiveService 的公开接口，不读取任何业务存档文件，也不持有游戏数据副本。
 
+## 存档文件类型说明；固定同时展示中文名与英文名，供系统原生文件对话框识别本游戏归档。
+const SAVE_ARCHIVE_TYPE_DESCRIPTION: String = "星穹骇客（Star Hacker）存档"
+## 默认导出文件名前缀；使用英文名避免跨平台文件系统或外部备份工具处理中文路径时出现兼容问题。
+const DEFAULT_EXPORT_FILE_PREFIX: String = "Star_Hacker_save_"
+
 ## 操作按钮最小高度；默认 42 像素，与设置页按键绑定及返回按钮保持一致，运行时无需动态修改。
 @export_range(24.0, 96.0, 1.0) var button_minimum_height: float = 42.0
 ## 状态文本自动隐藏时间；默认 4 秒，0 表示保持到下一次操作，修改只影响提示可见时长。
@@ -74,7 +79,7 @@ func _build_controls() -> void:
 	export_dialog.access = FileDialog.ACCESS_FILESYSTEM
 	export_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
 	export_dialog.use_native_dialog = true
-	export_dialog.add_filter("*.lisbamsave", "崩坏：量子骇袭存档")
+	export_dialog.add_filter("*.lisbamsave", SAVE_ARCHIVE_TYPE_DESCRIPTION)
 	export_dialog.file_selected.connect(_on_export_file_selected)
 	add_child(export_dialog)
 	_export_dialog = export_dialog
@@ -83,7 +88,7 @@ func _build_controls() -> void:
 	import_dialog.access = FileDialog.ACCESS_FILESYSTEM
 	import_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
 	import_dialog.use_native_dialog = true
-	import_dialog.add_filter("*.lisbamsave", "崩坏：量子骇袭存档")
+	import_dialog.add_filter("*.lisbamsave", SAVE_ARCHIVE_TYPE_DESCRIPTION)
 	import_dialog.file_selected.connect(_on_import_file_selected)
 	add_child(import_dialog)
 	_import_dialog = import_dialog
@@ -94,7 +99,7 @@ func _on_export_button_pressed() -> void:
 		return
 	# 默认文件名；使用本地时间避免连续备份互相覆盖，玩家仍可在系统对话框中修改。
 	var time_data: Dictionary = Time.get_datetime_dict_from_system()
-	_export_dialog.current_file = "HQI_save_%04d%02d%02d_%02d%02d%02d.lisbamsave" % [int(time_data.year), int(time_data.month), int(time_data.day), int(time_data.hour), int(time_data.minute), int(time_data.second)]
+	_export_dialog.current_file = DEFAULT_EXPORT_FILE_PREFIX + ("%04d%02d%02d_%02d%02d%02d.lisbamsave" % [int(time_data.year), int(time_data.month), int(time_data.day), int(time_data.hour), int(time_data.minute), int(time_data.second)])
 	_export_dialog.popup_centered_ratio(0.72)
 
 

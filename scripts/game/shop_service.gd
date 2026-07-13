@@ -13,7 +13,8 @@ const SAVE_PATH: String = "user://shop_state.json"
 ## 扩展包内容补充：版本 3 重建旧普通商品池，使已默认解锁的角色扩展包内容进入下一份库存。
 ## 星内容精简补充：版本 4 删除旧资源后重建普通商品池并继续保留已经读取的灰市失败批次。
 ## 解锁过滤补充：版本 5 重建普通商品池，确保历史商品不能在内容后来归入锁定扩展包后继续出现在普通商店。
-const SAVE_VERSION: int = 5
+## 装备扩容补充：版本 6 重建普通商品池，使旧存档立即使用每轮 10 件装备的新数量。
+const SAVE_VERSION: int = 6
 ## 强化石随机生成的单词条基础价值；默认 30 金币，与战斗掉落规则一致。
 const STONE_BASE_SELL_PRICE: int = 30
 ## 强化石随机生成兼容最少词条数；实际词条数由品质规则决定，该值用于保持统一调用签名。
@@ -31,8 +32,8 @@ const STONE_DETRIMENTAL_CHANCE: float = 0.28
 @export_range(1, 30, 1) var melee_weapon_stock_count: int = 5
 ## 普通商店每次刷新的远程武器数量；默认 5 把，只从 ranged 武器池抽取。
 @export_range(1, 30, 1) var ranged_weapon_stock_count: int = 5
-## 普通商店每次刷新的装备商品数量；默认 5 件，四个部位等概率抽取并允许重复。
-@export_range(1, 30, 1) var equipment_stock_count: int = 5
+## 普通商店每次刷新的装备商品数量；默认 10 件，四个部位等概率抽取并允许重复。
+@export_range(1, 30, 1) var equipment_stock_count: int = 10
 ## 普通商店每次刷新的强化石数量；默认 10 颗，品质、适用类型和词条均独立随机。
 @export_range(1, 30, 1) var resource_stock_count: int = 10
 ## 普通商店每次刷新的道具数量；默认 5 个，从已配置修复包模板中等概率抽取。

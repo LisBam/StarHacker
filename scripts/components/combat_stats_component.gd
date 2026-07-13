@@ -6,6 +6,8 @@ class_name CombatStatsComponent
 ## UI 通过信号同步显示，不需要轮询玩家节点。
 
 signal health_changed(current_health: float, max_health: float)
+## 生命实际恢复信号；只在正数治疗确实提高当前生命时派发实际恢复量，玩家视觉反馈不会显示溢出治疗。
+signal healed(amount: float)
 signal energy_changed(current_energy: float, max_energy: float)
 signal stats_changed
 ## 能量实际消费信号；每次成功扣除正数能量时派发，限时技能可精确统计期间总消耗而不受自然恢复影响。
@@ -187,8 +189,13 @@ func take_damage(amount: float) -> void:
 func heal(amount: float) -> void:
 	if amount <= 0.0:
 		return
-
+	# 治疗前生命值；用于扣除上限溢出并只反馈本次真实增加量。
+	var previous_health: float = current_health
 	set_health(current_health + amount)
+	# 实际恢复量；满血治疗固定为 0，不生成误导性的绿色飘字。
+	var restored_health: float = maxf(current_health - previous_health, 0.0)
+	if restored_health > 0.0:
+		healed.emit(restored_health)
 
 
 func set_health(value: float) -> void:

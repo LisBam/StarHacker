@@ -10,13 +10,15 @@ config_version=5
 
 [application]
 
-config/name="崩坏：量子骇袭"
+config/name="星穹骇客"
+config/name_en="Star Hacker"
 run/main_scene="res://scenes/ui/main_menu.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
 config/icon="res://icon.svg"
 
 [autoload]
 
+SaveLocationMigration="*res://scripts/game/save_location_migration.gd"
 ContentCatalog="*res://scripts/game/content_catalog.gd"
 SessionState="*res://scripts/game/session_state.gd"
 InputBindings="*res://scripts/game/input_bindings.gd"
@@ -36,7 +38,7 @@ window/stretch/mode="canvas_items"
 
 [dotnet]
 
-project/assembly_name="崩坏：量子骇袭"
+project/assembly_name="StarHacker"
 
 [input]
 

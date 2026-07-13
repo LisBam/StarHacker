@@ -199,6 +199,20 @@ func get_slot_count() -> int:
 	return skill_actions.size()
 
 
+func is_skill_activation_condition_met(slot_index: int) -> bool:
+	## 返回指定技能的专属发动条件是否满足；普通技能默认可发动，行为可通过 can_activate() 声明局内解锁条件。
+	var skill_data: Resource = get_skill_resource(slot_index)
+	if skill_data == null or slot_index < 0 or slot_index >= _behavior_instances.size():
+		return false
+	# 当前技能行为；缺失行为不具备可执行入口，应与空槽一样显示为不可发动。
+	var behavior_instance: Node = _behavior_instances[slot_index] as Node
+	if not is_instance_valid(behavior_instance):
+		return false
+	if behavior_instance.has_method("can_activate"):
+		return bool(behavior_instance.call("can_activate"))
+	return true
+
+
 func get_cooldown_remaining(slot_index: int) -> float:
 	## 返回指定槽剩余冷却秒数；无效下标按 0 处理，不会阻止其他技能释放。
 	if slot_index < 0 or slot_index >= _cooldown_remaining.size():
@@ -280,7 +294,7 @@ func _try_begin_skill(slot_index: int) -> void:
 		return
 	# 待启动技能；空槽、冷却中或行为节点缺失时不进入瞄准状态。
 	var skill_data: Resource = get_skill_resource(slot_index)
-	if skill_data == null or get_cooldown_remaining(slot_index) > 0.0:
+	if skill_data == null or get_cooldown_remaining(slot_index) > 0.0 or not is_skill_activation_condition_met(slot_index):
 		return
 	if slot_index >= _behavior_instances.size() or _behavior_instances[slot_index] == null:
 		return

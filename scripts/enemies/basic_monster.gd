@@ -53,6 +53,10 @@ const PLAYER_PHYSICS_LAYER_MASK: int = 1
 @export_range(0.0, 100.0, 1.0) var toughness: float = 0.0
 ## 攻击冲击力；单位为目标单次无碰撞理论位移像素，1 点对应 1 像素，默认 180 表示命中玩家时产生 180 像素理论位移。
 @export_range(0.0, 5000.0, 1.0, "or_greater") var attack_impact_force: float = 180.0
+## 攻击前坐力；单位为怪物自身单次无碰撞理论位移像素，默认 0 表示近战攻击后不沿攻击方向前冲，可在运行时动态修改以制作突进型攻击。
+@export_range(0.0, 5000.0, 1.0, "or_greater") var attack_front_recoil_force: float = 0.0
+## 攻击后坐力；单位为怪物自身单次无碰撞理论位移像素，默认 0 表示攻击后不向攻击反方向后退，可在运行时动态修改以制作射击反冲。
+@export_range(0.0, 5000.0, 1.0, "or_greater") var attack_recoil_force: float = 0.0
 ## 移动速度；取值建议大于 0，默认 150 像素每秒，运行时修改会影响怪物追击速度。
 @export_range(1.0, 2000.0, 1.0, "or_greater") var move_speed: float = 150.0
 ## 个体移动速度最小倍率；取值建议 0.5 到 1，默认 0.88，让同类怪物移动速度存在下限差异。
@@ -221,6 +225,12 @@ const PLAYER_PHYSICS_LAYER_MASK: int = 1
 @export var hit_effect_color: Color = Color(1.0, 0.45, 0.28, 0.95)
 ## 怪物死亡特效颜色；默认亮橙色，修改会影响怪物死亡时的爆发反馈。
 @export var death_effect_color: Color = Color(1.0, 0.82, 0.34, 1.0)
+## 怪物攻击特效颜色；默认橙白色，修改会影响攻击命中时围绕怪物播放的短促冲击反馈。
+@export var attack_effect_color: Color = Color(1.0, 0.68, 0.32, 0.9)
+## 死亡动画持续时间；单位为秒，默认 0.52 秒，使掉落结算后尸体仍能完成冲击、旋转和淡出，运行时动态修改会影响后续死亡动画。
+@export_range(0.05, 5.0, 0.01, "or_greater") var death_animation_duration: float = 0.52
+## 死亡动画旋转角度；单位为度，默认 18 度，让尸体在淡出前形成倒地感，设为 0 可只保留淡出。
+@export_range(-180.0, 180.0, 1.0) var death_animation_rotation_degrees: float = 18.0
 ## 通用主动技能目标组；默认 skill_targets，空值表示该怪物不能被锁定或范围技能枚举，运行时通常不动态修改。
 @export var active_skill_target_group: StringName = &"skill_targets"
 ## 视野存在感技能计数组；默认 skill_presence_units，空值表示该怪物不参与此类被动计数，运行时通常不动态修改。
@@ -260,6 +270,8 @@ var _ai_accumulated_delta: float = 0.0
 var _simulation_active: bool = true
 ## 怪物碰撞形状缓存；默认由 ready 收集所有后代 CollisionShape2D，休眠切换时统一启用或禁用。
 var _collision_shapes: Array[CollisionShape2D] = []
+## 当前是否正在死亡动画中；默认 false，生命归零后置为 true，阻止重复受伤、攻击或重复派发死亡结算。
+var _is_dying: bool = false
 
 
 func apply_spawn_variation(size_multiplier: float, attribute_multiplier: float) -> void:
@@ -304,6 +316,8 @@ func _exit_tree() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if _is_dying:
+		return
 	_attack_cooldown_remaining = maxf(_attack_cooldown_remaining - delta, 0.0)
 	_ai_accumulated_delta += delta
 	_ai_update_remaining = maxf(_ai_update_remaining - delta, 0.0)
@@ -559,7 +573,7 @@ func _get_resolved_attack_cooldown() -> float:
 
 
 func apply_damage(damage: float, source: Node) -> void:
-	if damage <= 0.0 or current_health <= 0.0:
+	if damage <= 0.0 or current_health <= 0.0 or _is_dying:
 		return
 
 	# 伤害结算结果；旧来源缺少接口时使用 100 攻击、0% 暴击和 150% 暴伤。
@@ -571,9 +585,7 @@ func apply_damage(damage: float, source: Node) -> void:
 	DAMAGE_NUMBER_POPUP_SCRIPT.spawn_damage_number(get_tree().current_scene, global_position, final_damage, bool(damage_result.get("is_critical", false)))
 	_apply_knockback_from_source(source)
 	if current_health <= 0.0:
-		_spawn_death_effect()
-		died.emit()
-		queue_free()
+		_begin_death_sequence()
 	else:
 		_spawn_hit_effect()
 
@@ -605,13 +617,78 @@ func _get_source_combat_value(source: Node, method_name: String, fallback_value:
 
 
 func _try_attack_target() -> void:
-	if _attack_cooldown_remaining > 0.0 or not is_instance_valid(_target):
+	if _is_dying or _attack_cooldown_remaining > 0.0 or not is_instance_valid(_target):
 		return
 
 	if _target.has_method("apply_damage"):
 		_target.call("apply_damage", attack_damage, self)
+	_apply_attack_motion(_get_attack_direction())
+	_spawn_attack_effect()
 
 	_attack_cooldown_remaining = _get_resolved_attack_cooldown()
+
+
+func _get_attack_direction() -> Vector2:
+	## 返回本次攻击使用的单位方向；优先读取怪物到当前目标的朝向，目标异常时回退现有速度与固定右向量。
+	if is_instance_valid(_target):
+		# 目标相对方向；取值为怪物中心指向当前目标的向量，非零时用于前坐与后坐效果。
+		var target_direction: Vector2 = _target.global_position - global_position
+		if not target_direction.is_zero_approx():
+			return target_direction.normalized()
+	if not velocity.is_zero_approx():
+		return velocity.normalized()
+	return Vector2.RIGHT
+
+
+func _apply_attack_motion(attack_direction: Vector2) -> void:
+	## 结算攻击自反馈位移；前坐与后坐可同时配置，分别沿攻击方向与反方向写入移动组件的外部速度。
+	if _movement_component == null or attack_direction.is_zero_approx():
+		return
+	# 前坐理论距离；取值为检查器配置，0 表示本次攻击不向前冲。
+	var front_recoil_distance: float = maxf(attack_front_recoil_force, 0.0)
+	# 后坐理论距离；取值为检查器配置，0 表示本次攻击不后退。
+	var recoil_distance: float = maxf(attack_recoil_force, 0.0)
+	if front_recoil_distance > 0.0:
+		_apply_self_motion_distance(attack_direction, front_recoil_distance)
+	if recoil_distance > 0.0:
+		_apply_self_motion_distance(-attack_direction, recoil_distance)
+
+
+func _apply_self_motion_distance(direction: Vector2, motion_distance: float) -> void:
+	## 将自身坐力的理论位移转换为移动组件所需初速度；自反馈不受自身韧性影响，墙体仍会截断真实位移。
+	if _movement_component == null or direction.is_zero_approx() or motion_distance <= 0.0:
+		return
+	# 有效速度衰减；取值至少为 1，确保异常配置不会导致换算公式除零或静止。
+	var resolved_knockback_decay: float = maxf(knockback_decay, 1.0)
+	# 自反馈初速度；依据匀减速公式，使无碰撞场景下的最终移动距离与坐力点数一致。
+	var motion_initial_speed: float = sqrt(2.0 * resolved_knockback_decay * motion_distance)
+	_movement_component.call("apply_knockback", direction.normalized(), motion_initial_speed)
+
+
+func _begin_death_sequence() -> void:
+	## 启动死亡反馈与延迟回收；死亡信号仍在开始时派发以保证掉落只结算一次，模型则保留到动画完成后再释放。
+	if _is_dying:
+		return
+	_is_dying = true
+	velocity = Vector2.ZERO
+	set_physics_process(false)
+	_remove_target_collision_exception(_target)
+	for collision_shape in _collision_shapes:
+		if is_instance_valid(collision_shape):
+			collision_shape.set_deferred("disabled", true)
+	_spawn_death_effect()
+	died.emit()
+	# 死亡动画初始透明度；保存当前 alpha，避免场景为特殊颜色或半透明模型时突然变亮。
+	var original_alpha: float = modulate.a
+	# 死亡动画终点颜色；保留 RGB，仅把透明度降为零以自然淡出整个模型。
+	var fade_target: Color = Color(modulate.r, modulate.g, modulate.b, 0.0)
+	# 动画补间；与怪物节点绑定，场景清理时会自动停止，不依赖外部计时器。
+	var death_tween: Tween = create_tween()
+	death_tween.set_parallel(true)
+	death_tween.tween_property(self, "modulate", fade_target, maxf(death_animation_duration, 0.05))
+	death_tween.tween_property(self, "rotation", rotation + deg_to_rad(death_animation_rotation_degrees), maxf(death_animation_duration, 0.05))
+	death_tween.finished.connect(queue_free)
+	modulate.a = original_alpha
 
 
 func _has_vision_line_of_sight_to_target() -> bool:
@@ -848,6 +925,11 @@ func get_tactical_preferred_distance() -> float:
 
 func _spawn_hit_effect() -> void:
 	_spawn_combat_burst(_resolve_effect_parent(), global_position, hit_effect_color, 26.0, 0.16, 6)
+
+
+func _spawn_attack_effect() -> void:
+	## 播放怪物攻击瞬间的冲击反馈；它独立于命中特效，即使目标免疫、闪避或伤害入口未实现也能表达攻击坐力。
+	_spawn_combat_burst(_resolve_effect_parent(), global_position, attack_effect_color, 20.0, 0.12, 4)
 
 
 func _spawn_death_effect() -> void:

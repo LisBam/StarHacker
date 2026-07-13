@@ -214,6 +214,41 @@ static func create_random(random_source: RandomNumberGenerator, minimum_modifier
 	return enhancement_stone
 
 
+static func create_custom(quality: String, requested_target_kind: String, beneficial_stat_name_one: String, beneficial_stat_name_two: String = "", detrimental_stat_name: String = "", base_value: int = VALUE_PER_MODIFIER) -> EnhancementStoneData:
+	## 创建由开发者明确指定品质和词条方向的强化石；空的第二增强或削弱词条会被忽略，重复或不属于目标类型的词条不会写入资源。
+	# 实际品质；仅接受规则目录中的四种稳定标识，异常输入安全回退初级。
+	var resolved_quality: String = quality if quality in EnhancementRules.QUALITY_ORDER else EnhancementRules.QUALITY_LOW
+	# 实际适用类型；武器与装备必须使用各自的属性池，异常输入统一回退武器。
+	var resolved_target_kind: String = requested_target_kind if requested_target_kind in ["weapon", "equipment"] else "weapon"
+	# 可选属性池；只允许写入可被目标类型实际应用的属性，避免生成无法使用的开发者物品。
+	var supported_stat_names: Array[String] = EnhancementRules.WEAPON_STAT_KEYS if resolved_target_kind == "weapon" else EnhancementRules.EQUIPMENT_STAT_KEYS
+	# 自定义方向词典；键为属性名，值为与属性收益方向一致或相反的实际方向标识。
+	var custom_modifiers: Dictionary = {}
+	# 第一条加强属性；属于必填项，缺失或不兼容时无法生成强化石。
+	var resolved_beneficial_one: String = EnhancementRules.canonicalize_stat_name(beneficial_stat_name_one)
+	if resolved_beneficial_one.is_empty() or not (resolved_beneficial_one in supported_stat_names):
+		return null
+	custom_modifiers[resolved_beneficial_one] = EnhancementRules.get_beneficial_direction(resolved_beneficial_one)
+	# 第二条加强属性；为空、重复或不兼容时直接忽略，保证第一条配置仍可正常生成。
+	var resolved_beneficial_two: String = EnhancementRules.canonicalize_stat_name(beneficial_stat_name_two)
+	if not resolved_beneficial_two.is_empty() and resolved_beneficial_two in supported_stat_names and not custom_modifiers.has(resolved_beneficial_two):
+		custom_modifiers[resolved_beneficial_two] = EnhancementRules.get_beneficial_direction(resolved_beneficial_two)
+	# 削弱属性；使用对应收益方向的反向值，重复或不兼容时忽略，避免同一属性同时出现正负词条。
+	var resolved_detrimental_stat: String = EnhancementRules.canonicalize_stat_name(detrimental_stat_name)
+	if not resolved_detrimental_stat.is_empty() and resolved_detrimental_stat in supported_stat_names and not custom_modifiers.has(resolved_detrimental_stat):
+		custom_modifiers[resolved_detrimental_stat] = -EnhancementRules.get_beneficial_direction(resolved_detrimental_stat)
+
+	# 自定义强化石资源；与随机石共用品质、名称、堆叠、价值和使用时幅度规则，避免形成第二套强化结算。
+	var enhancement_stone: EnhancementStoneData = EnhancementStoneData.new()
+	enhancement_stone.quality_id = resolved_quality
+	enhancement_stone.target_kind = resolved_target_kind
+	enhancement_stone.display_name = _build_display_name(resolved_quality, resolved_target_kind)
+	enhancement_stone.description = "开发者自定义：用于强化%s，词条方向将按所选品质的正式规则结算。" % ("装备" if resolved_target_kind == "equipment" else "武器")
+	enhancement_stone.value = maxi(base_value, 0) * custom_modifiers.size()
+	enhancement_stone.modifiers = custom_modifiers
+	return enhancement_stone
+
+
 static func _take_weighted_stat(random_source: RandomNumberGenerator, available_stats: Array[String]) -> String:
 	# 总权重；常规属性贡献 1，稀有属性贡献 0.2，修改规则目录会自动影响所有强化石来源。
 	var total_weight: float = 0.0

@@ -7,7 +7,7 @@
 script = ExtResource("1_data")
 skill_id = "silver_wolf_double_speed"
 display_name = "二倍速"
-description = "你的攻速提高99%且你的移速增加99点，持续9s。期间每次受到攻击，效果持续时间-2s且效果降低20%。持续时间结束时，若二倍速期间没有受到攻击，则回复期间消耗的能量，并使该技能剩余CD减少10%。"
+description = "你的攻速提高99%且你的移速增加99点，持续9s。期间每次受到攻击，效果持续时间-2s且效果降低20%。持续时间结束时，若二倍速期间没有受到攻击，则回复期间消耗的能量，并使该技能剩余CD减少20%。"
 behavior_script = ExtResource("2_behavior")
 targeting_mode = 2
 cooldown_duration = 99.0
@@ -20,6 +20,6 @@ attack_speed_bonus_ratio = 0.99
 move_speed_attribute_bonus = 99.0
 duration_loss_per_hit = 2.0
 effect_loss_ratio_per_hit = 0.2
-no_hit_cooldown_reduction_ratio = 0.1
+no_hit_cooldown_reduction_ratio = 0.2
 no_hit_feedback_text = "COMBO!"
 no_hit_feedback_color = Color(0.24, 1, 0.42, 1)

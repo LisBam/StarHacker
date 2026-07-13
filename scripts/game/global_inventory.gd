@@ -787,6 +787,18 @@ func grant_random_enhancement_stones_to_warehouse(stone_count: int = DEVELOPER_S
 	return granted_count
 
 
+func grant_custom_enhancement_stone_to_warehouse(quality_id: String, target_kind: String, beneficial_stat_name_one: String, beneficial_stat_name_two: String = "", detrimental_stat_name: String = "") -> bool:
+	## 向永久仓库发放一颗开发者自定义强化石；品质与词条方向由调用方选择，但创建、堆叠和存档仍共用正式强化石协议。
+	# 自定义强化石；无第一条合法加强词条时创建会返回空，库存不保存任何无效资源。
+	var enhancement_stone: EnhancementStoneData = EnhancementStoneData.create_custom(quality_id, target_kind, beneficial_stat_name_one, beneficial_stat_name_two, detrimental_stat_name, DEVELOPER_STONE_BASE_SELL_PRICE)
+	if enhancement_stone == null:
+		return false
+	_insert_record_with_stack_merge(_warehouse_records, _create_record(enhancement_stone))
+	_queue_save_inventory()
+	warehouse_changed.emit()
+	return true
+
+
 func grant_random_enhancement_stones_to_warehouse_gradually(stone_count: int, batch_size: int = 25) -> int:
 	## 按帧分批向永久仓库生成随机强化石；全部完成后只保存并派发一次仓库变化，避免大量 UI 重建。
 	# 实际发放数量；每颗成功创建并插入仓库后加一。

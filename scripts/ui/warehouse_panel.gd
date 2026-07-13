@@ -434,8 +434,6 @@ func _rebuild_storage_content() -> void:
 	# 任意即时重建都会接管同帧已排队任务；延迟回调随后安全跳过，避免业务显式刷新与库存信号各重建一次。
 	_refresh_queued = false
 	_refresh_pending = false
-	_clear_container(_warehouse_item_list)
-	_clear_container(_carried_item_list)
 	_clear_container(_loadout_list)
 	if _global_inventory == null:
 		_coins_label.text = "金币：不可用"
@@ -453,16 +451,29 @@ func _rebuild_storage_content() -> void:
 	var visible_warehouse_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(warehouse_entries, _storage_primary_category, _storage_subcategory, _storage_search_edit.text, _stone_attribute_filter, _storage_sort_mode, _equipment_set_filter_control.get_selected_set_ids())
 	# 已查询背包条目；使用同一查询条件保证上下区域对比一致。
 	var visible_backpack_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(backpack_entries, _storage_primary_category, _storage_subcategory, _storage_search_edit.text, _stone_attribute_filter, _storage_sort_mode, _equipment_set_filter_control.get_selected_set_ids())
-	_build_storage_entries(visible_warehouse_entries, "warehouse", _warehouse_item_list)
+	_sync_storage_entries(visible_warehouse_entries, "warehouse", _warehouse_item_list)
 	if _backpack_expanded:
-		_build_storage_entries(visible_backpack_entries, "backpack", _carried_item_list)
+		_sync_storage_entries(visible_backpack_entries, "backpack", _carried_item_list)
 		_build_loadout_entries()
+	else:
+		_sync_storage_entries([], "backpack", _carried_item_list)
 
 
-func _build_storage_entries(entries: Array, location: String, target_container: Container) -> void:
+func _sync_storage_entries(entries: Array, location: String, target_container: Container) -> void:
+	## 按资源实例复用仓库或背包卡片；移动、转移和堆叠变化只更新必要节点，筛选与排序后的显示顺序仍以 entries 为准。
 	if target_container == null:
 		return
+	# 现有卡片表；键为资源实例编号，值为仍可复用的 StorageItemControl，空状态文本和异常节点不进入复用表。
+	var existing_controls: Dictionary = {}
+	for child in target_container.get_children():
+		if child == null or child.is_queued_for_deletion() or not child.has_method("get_item_resource"):
+			continue
+		# 现有卡片资源；实例身份在容器移动前后保持稳定，用于避免同名或同类物品错误复用。
+		var existing_resource: Resource = child.call("get_item_resource") as Resource
+		if existing_resource != null:
+			existing_controls[existing_resource.get_instance_id()] = child
 	if entries.is_empty():
+		_clear_container(target_container)
 		# 空容器提示；根据所在区域明确物品安全属性和快捷转移方向。
 		var empty_state_label: Label = Label.new()
 		empty_state_label.text = "当前分类没有永久仓库物品" if location == "warehouse" else "当前分类没有随身背包物品，可用 Shift+点击或拖入上方仓库物品"
@@ -471,21 +482,42 @@ func _build_storage_entries(entries: Array, location: String, target_container: 
 		target_container.add_child(empty_state_label)
 		return
 
-	# 展示条目索引；取值为列表所有有效下标，用于拖拽排序和上下移动按钮目标计算。
+		return
+	# 本轮保留控件集合；键为控件实例编号，用于移除筛选后不可见或已经转出当前容器的旧卡片。
+	var retained_control_ids: Dictionary = {}
+	# 展示条目索引；取值为列表所有有效下标，用于同步筛选排序后的视觉顺序和真实来源下标。
 	for visible_index in range(entries.size()):
 		# 展示条目原始值；取值应为 Dictionary，异常数据不会生成可操作控件。
 		var raw_entry: Variant = entries[visible_index]
 		if raw_entry is Dictionary:
 			# 真实来源下标；查询排序不会改变库存数组，拖拽和点击仍使用原始记录索引。
 			var source_index: int = int((raw_entry as Dictionary).get("source_index", visible_index))
-			_build_storage_entry_row(raw_entry as Dictionary, location, source_index, entries.size(), target_container)
+			# 条目物品资源；缺失资源不会占用显示位置，也不会保留旧卡片。
+			var item_resource: Resource = (raw_entry as Dictionary).get("resource") as Resource
+			if item_resource == null:
+				continue
+			# 复用控件；同一资源仍位于当前容器时直接更新上下文，否则只为新进入当前容器的物品创建一张卡片。
+			var item_control: Button = existing_controls.get(item_resource.get_instance_id()) as Button
+			if item_control == null:
+				item_control = _create_storage_entry_control(raw_entry as Dictionary, location, source_index)
+				target_container.add_child(item_control)
+			else:
+				_update_storage_entry_control(item_control, raw_entry as Dictionary, location, source_index)
+			retained_control_ids[item_control.get_instance_id()] = true
+			target_container.move_child(item_control, mini(visible_index, target_container.get_child_count() - 1))
+	# 过期子节点；移除未被本轮条目复用的卡片与旧空状态文本，避免隐藏筛选项继续参与布局。
+	for child in target_container.get_children():
+		if child != null and not retained_control_ids.has(child.get_instance_id()):
+			target_container.remove_child(child)
+			child.queue_free()
 
 
-func _build_storage_entry_row(entry: Dictionary, location: String, entry_index: int, _entry_count: int, target_container: Container) -> void:
+func _create_storage_entry_control(entry: Dictionary, location: String, entry_index: int) -> Button:
+	## 创建首次进入当前可见容器的物品卡片并连接一次稳定信号；后续刷新由上下文更新接口复用该节点。
 	# 条目物品资源；取值应为 Resource，缺失时忽略该行避免产生无效转移请求。
 	var item_resource: Resource = entry.get("resource") as Resource
 	if item_resource == null:
-		return
+		return null
 
 	# 物品数量；武器固定为 1，强化石按 1 到 99 显示在方形资源格中。
 	# 通用模板补充：强化石数量规则保持不变，但显示区域现与所有物品统一为 160×72 卡片。
@@ -502,7 +534,23 @@ func _build_storage_entry_row(entry: Dictionary, location: String, entry_index: 
 	item_control.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
 	item_control.connect("enhancement_drop_requested", Callable(self, "_on_enhancement_drop_requested"))
 	item_control.connect("repair_kit_drop_requested", Callable(self, "_on_repair_kit_drop_requested"))
-	target_container.add_child(item_control)
+	return item_control
+
+
+func _update_storage_entry_control(item_control: Button, entry: Dictionary, location: String, entry_index: int) -> void:
+	## 更新复用卡片的容器、真实下标、数量与目标选择状态；未变化的资源详情和视觉节点保持原样。
+	if item_control == null:
+		return
+	# 条目物品资源；与现有卡片实例身份一致，作为完整配置回退和目标资格判断的数据来源。
+	var item_resource: Resource = entry.get("resource") as Resource
+	if item_resource == null:
+		return
+	# 物品数量；堆叠资源限制为 1 至 99，数量变化时卡片组件会自动执行必要的完整内容刷新。
+	var quantity: int = clampi(int(entry.get("quantity", 1)), 1, 99)
+	# 上次撤离前缀；状态变化时由卡片组件刷新文字，普通移动只更新来源下标。
+	var extraction_prefix: String = "[上次撤离] " if bool(entry.get("is_last_extraction", false)) else ""
+	item_control.call("update_storage_context", item_resource, location, entry_index, _backpack_expanded, extraction_prefix, quantity)
+	item_control.call("set_weapon_target_selection_state", _is_weapon_target_selection_active(), _is_pending_item_usable_on_weapon(item_resource))
 
 
 func _build_loadout_entries() -> void:

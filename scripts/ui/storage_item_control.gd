@@ -112,6 +112,25 @@ func configure(item_resource: Resource, location: String, item_index: int, quick
 	_refresh_enhancement_target_highlight()
 
 
+func update_storage_context(item_resource: Resource, location: String, item_index: int, quick_action_enabled: bool, extraction_prefix: String = "", quantity: int = 1) -> void:
+	## 复用现有卡片并同步库存上下文；资源、数量或显示前缀变化时执行完整配置，仅下标或容器变化时只更新拖拽数据，避免长列表移动物品后重复生成详情与视觉节点。
+	# 实际数量；与完整配置保持相同的 1 至 99 堆叠范围，异常调用不会写入非法卡片状态。
+	var resolved_quantity: int = clampi(quantity, 1, 99)
+	if _item_resource != item_resource or _quantity != resolved_quantity or _extraction_prefix != extraction_prefix:
+		configure(item_resource, location, item_index, quick_action_enabled, extraction_prefix, resolved_quantity)
+		return
+	_location = location
+	_item_index = item_index
+	_quick_action_enabled = quick_action_enabled
+	# 鼠标指针形态；移动后按最新容器与下标恢复可操作状态，不重新创建悬停动画或详情控件。
+	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if not _location.is_empty() and _item_index >= 0 else Control.CURSOR_ARROW
+
+
+func get_item_resource() -> Resource:
+	## 返回当前卡片绑定的资源实例；库存面板通过实例身份复用节点，不得通过该引用直接修改物品所有权。
+	return _item_resource
+
+
 func set_enhancement_target_highlight(enabled: bool) -> void:
 	_enhancement_target_highlight = enabled and _is_weapon_resource()
 	_weapon_target_selection_active = _enhancement_target_highlight

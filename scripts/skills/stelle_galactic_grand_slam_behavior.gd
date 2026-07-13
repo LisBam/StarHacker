@@ -80,6 +80,12 @@ func execute(context: Dictionary) -> bool:
 	var base_knockback_distance: float = maxf(float(_skill_data.get("knockback_distance")), 0.0)
 	# 本次期望击退距离；0 蓄力为 100，满蓄力默认为 180 像素。
 	var knockback_distance: float = base_knockback_distance * (1.0 + maxf(float(_skill_data.get("maximum_charge_knockback_bonus_ratio")), 0.0) * charge_ratio)
+	# 基础冲击力；新资源以理论位移点数直接传给目标统一结算，旧击退距离字段仅在资源把冲击力明确设为 0 时作为兼容回退。
+	var base_impact_force: float = maxf(float(_skill_data.get("impact_force")), 0.0)
+	if base_impact_force <= 0.0:
+		base_impact_force = base_knockback_distance
+	# 本次实际冲击力；未蓄力为 150，满蓄力按 80% 提升至 270，怪物会再按自身韧性折算理论位移。
+	var impact_force: float = base_impact_force * (1.0 + maxf(float(_skill_data.get("maximum_charge_knockback_bonus_ratio")), 0.0) * charge_ratio)
 	_current_attack_power = maxf(float(_skill_data.get("damage_formula_attack_power")), 0.0)
 	_current_critical_chance = float(_stats_component.call("get_equipment_critical_chance")) if _stats_component != null and _stats_component.has_method("get_equipment_critical_chance") else 0.0
 	_current_critical_damage_multiplier = maxf(BASE_CRITICAL_DAMAGE_MULTIPLIER + (float(_stats_component.call("get_equipment_critical_damage")) if _stats_component != null and _stats_component.has_method("get_equipment_critical_damage") else 0.0), 1.0)
@@ -101,7 +107,7 @@ func execute(context: Dictionary) -> bool:
 			continue
 		if bool(_skill_data.get("blocked_by_environment")) and not _has_clear_path_to(target):
 			continue
-		_current_impact_force = _calculate_impact_force_for_distance(target, knockback_distance)
+		_current_impact_force = impact_force
 		target.call("apply_damage", cast_damage, self)
 	_spawn_cast_effect(cast_direction)
 	return true

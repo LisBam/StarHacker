@@ -8,6 +8,14 @@ const ATTACK_SPEED_SOURCE_ID: String = "silver_wolf_double_speed"
 const MOVE_SPEED_SOURCE_ID: String = "silver_wolf_double_speed"
 ## 世界飘字脚本；无伤完成时用于生成绿色 COMBO! 反馈。
 const FLOATING_TEXT_POPUP_SCRIPT: Script = preload("res://scripts/effects/floating_text_popup.gd")
+## 持续头顶状态文本脚本；二倍速生效期间用它显示跟随银狼的固定 2× 标记。
+const OVERHEAD_STATUS_TEXT_SCRIPT: Script = preload("res://scripts/effects/overhead_status_text.gd")
+## 二倍速头顶状态文字；固定使用 2×，只在本技能持续期间显示。
+const DOUBLE_SPEED_STATUS_TEXT: String = "2×"
+## 二倍速头顶状态颜色；青蓝色与银狼技能的数码视觉保持一致，不参与任何数值或伤害结算。
+const DOUBLE_SPEED_STATUS_COLOR: Color = Color(0.38, 0.88, 1.0, 1.0)
+## 二倍速头顶状态偏移；向上 52 像素与角色模型保持间距，避免遮挡脚下攻击或受击反馈。
+const DOUBLE_SPEED_STATUS_OFFSET: Vector2 = Vector2(0.0, -52.0)
 
 ## 当前施法者；默认 null，由主动技能组件注入并提供攻速、移速和受击信号接口。
 var _caster: Node2D
@@ -27,6 +35,8 @@ var _effect_strength: float = 0.0
 var _was_hit: bool = false
 ## 本次效果期间实际消费能量总量；默认 0，由 energy_spent 信号累计，不受自然能量恢复影响。
 var _energy_spent_during_effect: float = 0.0
+## 二倍速头顶状态节点；默认 null，效果开始时创建并在任何结束路径回收，独立于短时飘字生命周期。
+var _overhead_status_text: Node2D
 
 
 func _ready() -> void:
@@ -55,6 +65,7 @@ func execute(context: Dictionary) -> bool:
 	_was_hit = false
 	_energy_spent_during_effect = 0.0
 	_apply_current_strength()
+	_show_overhead_status_text()
 	set_process(true)
 	return true
 
@@ -100,6 +111,7 @@ func _finish_effect(allow_no_hit_reward: bool) -> void:
 		return
 	_remaining_duration = 0.0
 	set_process(false)
+	_clear_overhead_status_text()
 	if is_instance_valid(_caster):
 		if _caster.has_method("remove_attack_speed_bonus_source"):
 			_caster.call("remove_attack_speed_bonus_source", ATTACK_SPEED_SOURCE_ID)
@@ -115,6 +127,32 @@ func _finish_effect(allow_no_hit_reward: bool) -> void:
 		# 飘字父节点；优先当前场景，使反馈脱离行为节点生命周期完成播放。
 		var effect_parent: Node = get_tree().current_scene if get_tree().current_scene != null else get_tree().root
 		FLOATING_TEXT_POPUP_SCRIPT.spawn_text(effect_parent, _caster.global_position, str(_skill_data.get("no_hit_feedback_text")), _skill_data.get("no_hit_feedback_color") as Color)
+
+
+func _show_overhead_status_text() -> void:
+	## 创建或刷新二倍速期间的头顶 2× 标记；标记挂到当前场景，避免技能行为节点重建时错失世界坐标绘制。
+	_clear_overhead_status_text()
+	if not is_instance_valid(_caster):
+		return
+	# 世界特效父节点；优先当前场景，缺失时回退根节点，使独立测试场景也可显示状态文本。
+	var effect_parent: Node = get_tree().current_scene if get_tree().current_scene != null else get_tree().root
+	# 二倍速状态文本；脚本实例化失败时只缺少视觉反馈，不影响攻速、移速或无伤奖励结算。
+	var status_text: Node2D = OVERHEAD_STATUS_TEXT_SCRIPT.new() as Node2D
+	if effect_parent == null or status_text == null:
+		return
+	effect_parent.add_child(status_text)
+	status_text.call("configure", _caster, DOUBLE_SPEED_STATUS_TEXT, DOUBLE_SPEED_STATUS_COLOR, DOUBLE_SPEED_STATUS_OFFSET)
+	_overhead_status_text = status_text
+
+
+func _clear_overhead_status_text() -> void:
+	## 回收当前二倍速头顶标记；节点已被场景自动销毁时只清空引用，不会影响其他技能的独立标记。
+	if is_instance_valid(_overhead_status_text):
+		if _overhead_status_text.has_method("dispose"):
+			_overhead_status_text.call("dispose")
+		else:
+			_overhead_status_text.queue_free()
+	_overhead_status_text = null
 
 
 func shutdown() -> void:

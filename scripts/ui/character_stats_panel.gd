@@ -16,6 +16,7 @@ const ATTRIBUTE_ROWS: Array[Dictionary] = [
 	{"key": "move_speed", "label": "移速", "percent": false},
 	{"key": "vision_range", "label": "视野", "percent": true},
 	{"key": "dodge_chance", "label": "闪避率", "percent": true},
+	{"key": "cooldown_reduction", "label": "冷却缩减", "percent": true},
 	{"key": "energy_regeneration", "label": "能量恢复", "percent": false}
 ]
 
@@ -89,6 +90,7 @@ func refresh() -> void:
 		if value_label == null:
 			continue
 		# 是否使用百分比；视野和闪避率将内部比例转换为玩家易读的百分点。
+		# 冷却缩减同样使用内部比例；新属性沿用既有百分比格式，确保 0.05 在角色面板显示为 5%。
 		var is_percent: bool = bool(row_definition.get("percent", false))
 		# 套装、技能与临时额外值；非零来源分别标注，避免百分比套装或消耗品被误归入装备点数。
 		var set_value: float = float(attribute_values.get("set", 0.0))
@@ -175,7 +177,7 @@ func _get_menu_snapshot() -> Dictionary:
 	var equipment_move_speed: float = base_move_speed * maxf(float(equipment_attributes.get("move_speed", 0.0)), 0.0)
 	# 属性快照；局外没有受伤状态，当前生命等于含装备加成的总生命上限。
 	var snapshot: Dictionary = {}
-	for attribute_key in ["max_health", "attack_power", "defense_power", "health_regeneration_per_five_seconds", "dodge_chance", "energy_regeneration"]:
+	for attribute_key in ["max_health", "attack_power", "defense_power", "health_regeneration_per_five_seconds", "dodge_chance", "cooldown_reduction", "energy_regeneration"]:
 		# 基础属性；每 5 秒回血、闪避默认为 0，能量恢复由角色档案提供 18。
 		var base_value: float = float(profile.get(attribute_key, 0.0))
 		# 装备属性；由有效四部位装备直接加算。
@@ -203,7 +205,7 @@ func _get_menu_snapshot() -> Dictionary:
 func _get_menu_equipment_attributes() -> Dictionary:
 	## 聚合局外四部位装备的角色面板属性，严格跳过损坏装备。
 	# 聚合属性；键与装备数据字段及角色面板快照保持一致。
-	var attributes: Dictionary = {"attack_power": 0.0, "defense_power": 0.0, "max_health": 0.0, "health_regeneration_per_five_seconds": 0.0, "energy_regeneration": 0.0, "dodge_chance": 0.0, "move_speed": 0.0, "vision_range": 0.0}
+	var attributes: Dictionary = {"attack_power": 0.0, "defense_power": 0.0, "max_health": 0.0, "health_regeneration_per_five_seconds": 0.0, "energy_regeneration": 0.0, "dodge_chance": 0.0, "cooldown_reduction": 0.0, "move_speed": 0.0, "vision_range": 0.0}
 	if _global_inventory == null or not _global_inventory.has_method("get_armor_equipment_resources"):
 		return attributes
 	# 四部位装备；键为 head、body、legs、feet，值允许为空。

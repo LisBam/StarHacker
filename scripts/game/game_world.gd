@@ -241,7 +241,9 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 ## 星扩展包数值补充：当前权威基础能量上限为 100，资源档案可继续覆盖该隔离场景兜底值。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var stelle_max_energy: float = 100.0
 ## 星的固定移动速度属性；默认 106.6667，按 1 点等于 3 像素/秒换算，切换角色时写入玩家移动组件。
+## 当前星移速按 1 点等于 2 像素/秒换算；100 点基础移速在战斗中对应 200 像素/秒。
 ## 星扩展包数值补充：当前权威基础移速为 100 点，等效实际速度 300 像素/秒。
+## 当前星扩展包数值补充：权威基础移速保持 100 点，等效实际速度按新换算为 200 像素/秒。
 @export_range(1.0, 2000.0, 0.0001, "or_greater") var stelle_move_speed: float = 100.0
 ## 星的固定攻击力；默认 10，切换角色时写入战斗属性组件并参与伤害公式。
 ## 星扩展包数值补充：当前权威基础攻击力为 100，资源档案可继续覆盖该隔离场景兜底值。
@@ -254,6 +256,7 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 ## 穹的固定能量上限；取值应大于 0，默认 95，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var caelus_max_energy: float = 80.0
 ## 穹的固定移动速度属性；默认 100，按 1 点等于 3 像素/秒换算，切换角色时写入玩家移动组件。
+## 当前穹移速按 1 点等于 2 像素/秒换算；90 点基础移速在战斗中对应 180 像素/秒。
 @export_range(1.0, 2000.0, 0.0001, "or_greater") var caelus_move_speed: float = 90.0
 ## 穹的固定攻击力；默认 9，较低输出与较高生存能力形成角色差异。
 @export_range(0.0, 99999.0, 1.0, "or_greater") var caelus_attack_power: float = 90.0
@@ -264,6 +267,7 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 ## 银狼的固定能量上限；取值应大于 0，默认 155，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var silver_wolf_max_energy: float = 99.0
 ## 银狼的固定移动速度属性；默认 118.3333，按 1 点等于 3 像素/秒换算，切换角色时写入玩家移动组件。
+## 当前银狼移速按 1 点等于 2 像素/秒换算；99 点基础移速在战斗中对应 198 像素/秒。
 @export_range(1.0, 2000.0, 0.0001, "or_greater") var silver_wolf_move_speed: float = 99.0
 ## 银狼的固定攻击力；默认 11，为三名角色中最高基础攻击。
 @export_range(0.0, 99999.0, 1.0, "or_greater") var silver_wolf_attack_power: float = 99.0

@@ -49,7 +49,8 @@ const FIXED_DURABILITY_COST_PER_USE: float = 1.0
 ## 每轮射击生成的弹体总数；默认 1 表示单弹体，只有 has_scatter 为 true 时参与战斗与强化结算。
 @export_range(1, 100, 1, "or_greater") var scatter_count: int = 1
 ## 是否具有穿透属性；默认 false，只有显式启用的远程武器才能穿透目标并接受穿透强化。
-@export var has_piercing: bool = false
+## 远程攻击通道默认持有穿透属性；默认 true 但穿透次数为 0，因此首个命中后仍销毁，同时允许直接接受穿透强化。
+@export var has_piercing: bool = true
 ## 每颗弹体可额外穿过的目标数量；默认 0 表示命中首个目标后销毁，只有 has_piercing 为 true 时参与战斗与强化结算。
 @export_range(0, 100, 1, "or_greater") var piercing_count: int = 0
 ## 是否具有弹射属性；默认 false，只有显式启用的远程武器才能在碰撞后改变弹道并接受弹射强化。

@@ -40,11 +40,14 @@ const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat
 ## 战斗相机路径；默认指向玩家子节点 Camera2D，必须解析到提供 add_shake 方法的节点，修改会影响屏幕震动反馈。
 @export var camera_path: NodePath = ^"Camera2D"
 ## 疾跑速度倍率；取值建议大于等于 1，默认 1.55 表示按住 Shift 时移动速度提升 55%，运行时修改会影响疾跑手感。
-@export_range(1.0, 4.0, 0.05, "or_greater") var sprint_speed_multiplier: float = 1.55
+## 当前疾跑速度倍率；默认 1.5 表示按住 Shift 时移动速度提升 50%，运行时修改会同时影响能量支出成功后的实际移动速度。
+@export_range(1.0, 4.0, 0.05, "or_greater") var sprint_speed_multiplier: float = 1.5
 ## 疾跑每秒能耗；取值建议大于等于 0，默认 24 表示持续疾跑会稳定消耗能量，运行时修改会影响疾跑续航。
-@export_range(0.0, 9999.0, 0.1, "or_greater") var sprint_energy_consumption_per_second: float = 24.0
+## 当前疾跑每秒能耗；默认 20 表示每个实际疾跑秒稳定消费 20 点能量，能量不足当前帧不会获得疾跑倍率。
+@export_range(0.0, 9999.0, 0.1, "or_greater") var sprint_energy_consumption_per_second: float = 20.0
 ## 冲刺单次能耗；取值建议大于等于 0，默认 18 表示每次 Space 突进需要付出固定能量，运行时修改会影响冲刺频率。
-@export_range(0.0, 9999.0, 0.1, "or_greater") var dodge_energy_consumption: float = 18.0
+## 当前冲刺单次能耗；默认 20 表示每次成功 Space 突进固定消费 20 点能量，支付失败不会打断已有蓄力。
+@export_range(0.0, 9999.0, 0.1, "or_greater") var dodge_energy_consumption: float = 20.0
 ## 冲刺距离；取值建议大于 0，默认 140 像素适合当前角色尺寸，运行时修改会影响 Space 突进位移。
 @export_range(1.0, 1200.0, 1.0, "or_greater") var dodge_distance: float = 140.0
 ## 冲刺持续时间；取值建议 0.05 到 0.5 秒，默认 0.16 秒；该时间只控制突进位移，不提供无敌效果。
@@ -574,7 +577,7 @@ func start_forced_movement(direction: Vector2, duration_seconds: float, bonus_mo
 	_forced_movement_remaining = maxf(duration_seconds, 0.0)
 	# 当前移动速度属性；由移动组件保存角色基础值及装备倍率结算后的基础属性，技能额外值直接相加。
 	var current_move_speed_attribute: float = float(_movement_component.call("get_max_speed")) if _movement_component.has_method("get_max_speed") else 100.0
-	_forced_movement_speed = maxf(current_move_speed_attribute + bonus_move_speed_attribute, 0.0) * 3.0
+	_forced_movement_speed = maxf(current_move_speed_attribute + bonus_move_speed_attribute, 0.0) * 2.0
 	_forced_movement_blocked_this_frame = false
 	_dodge_time_remaining = 0.0
 	_dodge_direction = Vector2.ZERO

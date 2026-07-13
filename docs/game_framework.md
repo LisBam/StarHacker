@@ -46,7 +46,7 @@
 | 组件 | 单一职责 |
 | --- | --- |
 | `PlayerInputComponent` | 把 InputMap 转换为移动、瞄准、攻击、疾跑和冲刺意图；内部 `dodge` ID 仅用于旧按键存档兼容 |
-| `ActiveSkillComponent` | 管理三个主动技能槽的按下、瞄准、锁定、蓄力、松手释放、能量与冷却 |
+| `ActiveSkillComponent` | 管理三个主动技能槽的按下、瞄准、锁定、蓄力、松手释放、能量与冷却；训练场可临时禁用主动技能冷却 |
 | `PassiveSkillComponent` | 按角色资源同时创建多个被动行为，并在角色切换时清理各自长期状态 |
 | `SkillTargetingVisual` | 绘制方向、位置和锁定目标范围，不参与目标合法性或命中结算 |
 | `SkillChargeBar` | 显示角色头顶蓄力比例，由武器与主动技能共用，不拥有蓄力时间 |

@@ -545,7 +545,7 @@ text = "返回"
 [node name="TestSettingsPanel" type="PanelContainer" parent="BattleHUD/Root/PauseOverlay"]
 unique_name_in_owner = true
 visible = false
-custom_minimum_size = Vector2(420, 414)
+custom_minimum_size = Vector2(420, 464)
 layout_mode = 1
 anchors_preset = -1
 anchor_left = 0.5
@@ -553,9 +553,9 @@ anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
 offset_left = -210.0
-offset_top = -207.0
+offset_top = -232.0
 offset_right = 210.0
-offset_bottom = 207.0
+offset_bottom = 232.0
 grow_horizontal = 2
 grow_vertical = 2
 
@@ -611,6 +611,12 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 38)
 layout_mode = 2
 text = "无限血量"
+
+[node name="ActiveSkillNoCooldownCheckButton" type="CheckButton" parent="BattleHUD/Root/PauseOverlay/TestSettingsPanel/TestSettingsMargin/TestSettingsContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 38)
+layout_mode = 2
+text = "角色主动技能无冷却"
 
 [node name="TestSettingsSpacer" type="Control" parent="BattleHUD/Root/PauseOverlay/TestSettingsPanel/TestSettingsMargin/TestSettingsContent"]
 custom_minimum_size = Vector2(0, 8)

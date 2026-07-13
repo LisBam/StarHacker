@@ -5,7 +5,8 @@ class_name TopDownMovementComponent
 ## acceleration 控制起步手感，friction 控制松开方向后的刹停速度，max_speed 控制可读属性点。
 
 ## 移动速度属性点到像素速度的换算倍率；固定为 3，使 100 点移速等效于旧规则的 300 像素/秒。
-const MOVE_SPEED_TO_PIXELS_PER_SECOND: float = 3.0
+## 当前移动速度属性点换算倍率；固定为 2，使 100 点移速对应 200 像素/秒，疾跑与强制移动均复用这一基准。
+const MOVE_SPEED_TO_PIXELS_PER_SECOND: float = 2.0
 ## 最大移动速度属性；取值建议大于 0，默认 106.6667 对应 320 像素/秒，运行时修改会影响角色最高速度。
 @export_range(1.0, 2000.0, 0.0001, "or_greater") var max_speed: float = 106.6667
 ## 加速度；取值建议大于 0，默认 2200 让角色起步迅速，运行时修改会影响按键后的提速手感。

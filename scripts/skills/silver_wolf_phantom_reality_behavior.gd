@@ -65,7 +65,9 @@ func _create_return_position_phantom(chain_state: Dictionary, marker_position: V
 	# 虚影根节点；挂到当前战斗场景以保持在传送前世界位置，不跟随玩家继续移动。
 	var phantom_root: Node2D = Node2D.new()
 	phantom_root.name = "SilverWolfPhantomRealityReturnMarker"
-	phantom_root.z_index = _caster.z_index - 1
+	# 虚影使用独立世界绘制层；GameWorld 自身会在零层绘制整张地图背景，必须置于其上方才能实际可见。
+	phantom_root.z_as_relative = false
+	phantom_root.z_index = maxi(_caster.z_index + 1, 1)
 	# 虚影颜色；资源可调整透明度和色调，所有复制图形共享同一标记语义。
 	var phantom_modulate: Color = _skill_data.get("phantom_marker_modulate") as Color
 	for visual_name in PHANTOM_VISUAL_NODE_NAMES:

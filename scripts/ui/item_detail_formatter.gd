@@ -317,7 +317,7 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 	# 最大耐久；取值至少为 1，避免旧资源字段缺失造成无效比例。
 	var max_durability: float = float(item_resource.call("get_maximum_durability")) if item_resource.has_method("get_maximum_durability") else maxf(float(item_resource.get("max_durability")), 1.0)
 	# 单次耐久消耗；每把武器独立配置，成功射击或近战使用时按该浮点数扣除。
-	# 固定消耗显示补充：所有武器统一消耗 1 点，因此详情不再展示没有区分价值的“耐久消耗”字段。
+	# 固定消耗显示补充：耐久成本由普通/混合类型规则固定决定，不是资源可强化字段，因此详情不重复展示“耐久消耗”属性行。
 	detail_lines.append("耐久：%.1f / %.1f" % [current_durability, max_durability])
 	if item_resource.has_method("is_broken") and bool(item_resource.call("is_broken")):
 		detail_lines.append("[color=%s]状态：损坏，无法使用[/color]" % NEGATIVE_COLOR)

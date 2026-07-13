@@ -91,7 +91,7 @@ func try_attack(direction: Vector2, weapon_data: Resource = null, attack_modifie
 	# 本次武器暴击伤害；默认 1.5 表示 150%。
 	var selected_critical_damage: float = _get_weapon_float(weapon_data, "critical_damage", 1.5) + _get_stats_float("get_equipment_critical_damage", 0.0)
 
-	if _cooldown_remaining > 0.0 or _active_remaining > 0.0 or direction.is_zero_approx():
+	if not can_attack(direction, weapon_data):
 		return false
 
 	rotation = direction.angle() + rotation_offset
@@ -109,6 +109,11 @@ func try_attack(direction: Vector2, weapon_data: Resource = null, attack_modifie
 	_set_hitbox_enabled(true)
 	attack_started.emit(direction)
 	return true
+
+
+func can_attack(direction: Vector2, _weapon_data: Resource = null) -> bool:
+	## 返回组件当前是否具备开始一次近战攻击的基础条件；武器参数不改变冷却与命中窗口可用性，仅为统一攻击组件协议保留。
+	return _cooldown_remaining <= 0.0 and _active_remaining <= 0.0 and not direction.is_zero_approx()
 
 
 func _finish_attack() -> void:

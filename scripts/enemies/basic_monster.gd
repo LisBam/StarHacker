@@ -33,6 +33,8 @@ const PLAYER_PHYSICS_LAYER_MASK: int = 1
 
 ## 怪物显示名称；默认“基础怪物”用于内容识别与后续图鉴界面，新怪物场景应填写设计文档中的正式名称。
 @export var display_name: String = "基础怪物"
+## 生成权重；取值大于等于 0，默认 100 用于未配置旧场景，GameWorld 按全部可用怪物权重占比抽取类型，0 可保留场景但禁止自然生成。
+@export_range(0.0, 100000.0, 1.0, "or_greater") var spawn_weight: float = 100.0
 ## 最大血量；取值应大于 0，默认 60 用于训练场怪物强度，运行时修改会影响怪物承伤能力。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var max_health: float = 60.0
 ## 当前血量；取值会被限制在 0 到 max_health，默认 60 表示满血生成，运行时修改会影响怪物当前生存状态。

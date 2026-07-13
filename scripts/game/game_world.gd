@@ -330,6 +330,8 @@ var _supply_extraction_ready: bool = false
 var _monster_replenish_remaining: float = 0.0
 ## 是否由训练工具暂停自动补怪；默认 false，正式模式使用开发者清怪后保持为空，手动重生怪物时恢复人口曲线补充。
 var _monster_replenishment_paused_by_training_tools: bool = false
+## 怪物场景生成权重缓存；键为场景资源路径或临时实例 ID，值为根节点的 spawn_weight，避免每只虚拟敌人重复读取场景状态。
+var _monster_scene_spawn_weights: Dictionary = {}
 ## 玩家导航标点位置；取值为世界坐标，仅在 _has_navigation_marker 为 true 时有效。
 var _navigation_marker_position: Vector2 = Vector2.ZERO
 ## 是否存在玩家导航标点；默认 false，大地图左键设置后由大小地图共同读取。
@@ -2068,11 +2070,48 @@ func _has_monster_scene_available() -> bool:
 
 func _get_random_monster_scene() -> PackedScene:
 	if not monster_scenes.is_empty():
-		# 怪物场景随机下标；取值为 0 到怪物场景池末尾，默认用于混合生成近战和远程怪物。
-		var scene_index: int = _random.randi_range(0, monster_scenes.size() - 1)
-		return monster_scenes[scene_index]
+		# 全部有效权重；按怪物场景根节点配置的 spawn_weight 加总，权重越高越容易被抽中。
+		var total_spawn_weight: float = 0.0
+		for candidate_scene in monster_scenes:
+			# 候选场景；空项不计入权重，避免损坏的检查器数组影响其它已注册怪物。
+			var packed_scene: PackedScene = candidate_scene as PackedScene
+			if packed_scene != null:
+				total_spawn_weight += _get_monster_scene_spawn_weight(packed_scene)
+		if total_spawn_weight > 0.0:
+			# 本次随机阈值；落在每个场景累积权重区间内即选择该类型，概率严格等于其权重占总权重比例。
+			var selection_threshold: float = _random.randf_range(0.0, total_spawn_weight)
+			var accumulated_weight: float = 0.0
+			for candidate_scene in monster_scenes:
+				var packed_scene: PackedScene = candidate_scene as PackedScene
+				if packed_scene == null:
+					continue
+				accumulated_weight += _get_monster_scene_spawn_weight(packed_scene)
+				if accumulated_weight > 0.0 and selection_threshold <= accumulated_weight:
+					return packed_scene
+		# 全部权重为零；保留场景注册资格但不自然生成，符合单个场景权重为 0 的同一语义。
+		return null
 
 	return monster_scene
+
+
+func _get_monster_scene_spawn_weight(monster_packed_scene: PackedScene) -> float:
+	## 读取怪物场景根节点的生成权重；使用 PackedScene 状态而不实例化敌人，避免抽取概率时创建临时 AI 节点。
+	if monster_packed_scene == null:
+		return 0.0
+	# 缓存键；资源路径稳定时跨同一局共享，运行时临时场景没有路径则使用实例 ID 隔离。
+	var cache_key: String = monster_packed_scene.resource_path if not monster_packed_scene.resource_path.is_empty() else str(monster_packed_scene.get_instance_id())
+	if _monster_scene_spawn_weights.has(cache_key):
+		return maxf(float(_monster_scene_spawn_weights.get(cache_key, 0.0)), 0.0)
+	# 场景根节点状态；怪物配置全部写在根节点，缺失字段时使用 100 的兼容默认权重。
+	var scene_state: SceneState = monster_packed_scene.get_state()
+	var resolved_weight: float = 100.0
+	if scene_state != null and scene_state.get_node_count() > 0:
+		for property_index in range(scene_state.get_node_property_count(0)):
+			if str(scene_state.get_node_property_name(0, property_index)) == "spawn_weight":
+				resolved_weight = maxf(float(scene_state.get_node_property_value(0, property_index)), 0.0)
+				break
+	_monster_scene_spawn_weights[cache_key] = resolved_weight
+	return resolved_weight
 
 
 func clear_monsters() -> void:

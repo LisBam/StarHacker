@@ -7,6 +7,8 @@ signal allocation_confirmed(attributes: Dictionary)
 
 ## 全局 UI 样式指南；弹窗主题与项目其他确认窗口保持相同字号、颜色和按钮规格。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+## 通用滑条视觉组件；只补充轨道与滑块绘制，HSlider 仍是本弹窗唯一的输入和数值所有者。
+const PROGRESS_SLIDER_VISUAL_SCRIPT: Script = preload("res://scripts/ui/progress_slider_visual.gd")
 ## 五维字段定义；顺序决定弹窗从上到下的显示和结果字典键，不在运行时动态修改。
 const ATTRIBUTE_DEFINITIONS: Array[Dictionary] = [
 	{"key": "max_health", "label": "最大生命值"},
@@ -104,6 +106,7 @@ func _build_content() -> void:
 		attribute_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		attribute_slider.value_changed.connect(_on_slider_value_changed.bind(attribute_key))
 		row.add_child(attribute_slider)
+		PROGRESS_SLIDER_VISUAL_SCRIPT.install(attribute_slider)
 		# 属性数值输入；最小值、最大值、步长和默认值由统一配置函数写入。
 		var attribute_input: SpinBox = SpinBox.new()
 		attribute_input.custom_minimum_size = Vector2(spin_box_width, row_minimum_height)

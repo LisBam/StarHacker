@@ -53,7 +53,7 @@
 | `WeaponChargeComponent` | 维护可蓄力武器的时间、移动倍率与蓄力期间减伤，不执行攻击成本 |
 | `TemporaryBuffComponent` | 管理消耗品限时效果、同 ID 刷新和到期属性清理 |
 | `TopDownMovementComponent` | 合成输入速度与外部击退并执行角色物理移动 |
-| `CombatStatsComponent` | 维护生命、能量、攻防、恢复和死亡状态 |
+| `CombatStatsComponent` | 维护生命、能量、攻防、恢复和死亡状态；支持按稳定来源临时暂停自然能量恢复 |
 | `RangedAttackComponent` | 校验攻击条件、为普通或散射攻击构造弹体偏移，并把穿透、弹射、连击参数传入弹体 |
 | `MeleeAttackComponent` | 管理近战命中框、命中去重、冲击和敌方弹体清除 |
 | `EquipmentComponent` | 代理装备槽并聚合有效战斗属性 |

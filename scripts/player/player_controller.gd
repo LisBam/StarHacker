@@ -12,6 +12,8 @@ signal movement_speed_attribute_bonus_changed
 
 ## 战斗爆发特效脚本；默认通过路径预加载，避免依赖 Godot 全局类名缓存解析顺序。
 const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat_burst_effect.gd")
+## 疾跑自然回能阻止来源 ID；固定值只属于本玩家控制器，停止疾跑时通过同一 ID 恢复属性组件自然回能。
+const SPRINT_ENERGY_REGENERATION_BLOCK_SOURCE_ID: String = "player_sprint"
 
 ## 玩家显示名称；默认值为“角色”，会由当前选择角色覆盖，运行时修改会影响后续 UI 展示文本。
 @export var player_display_name: String = "角色"
@@ -99,6 +101,8 @@ var _forced_movement_remaining: float = 0.0
 var _forced_movement_speed: float = 0.0
 ## 本物理帧强制移动是否被环境墙体阻挡；默认 false，仅在强制移动 move_and_slide 后按碰撞法线更新。
 var _forced_movement_blocked_this_frame: bool = false
+## 当前是否已经成功支付疾跑能耗；默认 false，状态变化时同步暂停或恢复自然能量回复，确保疾跑净耗能符合配置值。
+var _is_sprinting: bool = false
 
 ## 输入组件实例缓存；默认在 ready 阶段按路径获取，保持动态类型以降低脚本类名缓存依赖，修改会影响移动与攻击输入读取。
 @onready var _input_component = get_node(input_component_path)
@@ -142,8 +146,10 @@ func _physics_process(delta: float) -> void:
 	_handle_dodge_request(movement_direction)
 	_update_weapon_attack_input(delta)
 	if _forced_movement_remaining > 0.0:
+		_set_sprinting_state(false)
 		_move_forced_movement(delta)
 	elif _dodge_time_remaining > 0.0:
+		_set_sprinting_state(false)
 		_move_dodge(delta)
 	else:
 		# 当前帧移动速度倍率；取值大于等于 1，默认由疾跑状态和能耗计算，修改会影响普通移动速度。
@@ -429,11 +435,15 @@ func _move_dodge(delta: float) -> void:
 func _get_movement_speed_multiplier(movement_direction: Vector2, delta: float) -> float:
 	# 综合移动倍率；默认 1，疾跑、蓄力、技能和套装效果依次连乘，互不覆盖其他来源。
 	var resolved_multiplier: float = 1.0
+	# 本帧是否成功进入疾跑；只有满足移动、输入与能量支付条件时才暂停自然回能并应用疾跑倍率。
+	var sprinting_this_frame: bool = false
 	if not movement_direction.is_zero_approx() and _input_component.has_method("is_sprint_pressed") and bool(_input_component.call("is_sprint_pressed")):
 		# 本帧疾跑能耗；取值大于等于 0，只有成功支付时才应用疾跑倍率。
 		var sprint_energy_consumption: float = maxf(sprint_energy_consumption_per_second, 0.0) * delta
 		if _spend_energy(sprint_energy_consumption):
+			sprinting_this_frame = true
 			resolved_multiplier *= maxf(sprint_speed_multiplier, 1.0)
+	_set_sprinting_state(sprinting_this_frame)
 	if _weapon_charge_component != null and _weapon_charge_component.has_method("get_movement_speed_multiplier"):
 		resolved_multiplier *= maxf(float(_weapon_charge_component.call("get_movement_speed_multiplier")), 0.0)
 	if _temporary_buff_component != null and _temporary_buff_component.has_method("get_move_speed_multiplier"):
@@ -645,6 +655,15 @@ func _spend_energy(amount: float) -> bool:
 		return true
 
 	return bool(_stats_component.call("spend_energy", amount))
+
+
+func _set_sprinting_state(enabled: bool) -> void:
+	## 同步疾跑状态与自然回能阻止来源；只在实际状态变化时调用属性组件，避免每个物理帧重复改写字典。
+	if _is_sprinting == enabled:
+		return
+	_is_sprinting = enabled
+	if _stats_component != null and _stats_component.has_method("set_energy_regeneration_blocked_source"):
+		_stats_component.call("set_energy_regeneration_blocked_source", SPRINT_ENERGY_REGENERATION_BLOCK_SOURCE_ID, _is_sprinting)
 
 
 func _get_weapon_energy_consumption(weapon_data: Resource) -> float:

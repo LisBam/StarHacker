@@ -10,6 +10,8 @@ const GAME_MODE_HACK: String = "hack"
 const GAME_MODE_TRAINING: String = "training"
 ## 按键绑定面板脚本；默认用于主菜单设置中动态创建可重绑定操作列表。
 const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_panel.gd")
+## 存档传输控件脚本；默认用于主菜单设置中复用导出、导入文件选择和结果提示。
+const SAVE_TRANSFER_CONTROL_SCRIPT: Script = preload("res://scripts/ui/save_transfer_control.gd")
 ## 全局窗口样式指南；统一主菜单、设置页和全部局外遮罩窗口的主题与语义按钮颜色。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 可视进度拖动条组件；为主音量滑条绘制完整轨道、当前进度和实时滑块位置，不改变音量业务逻辑。
@@ -86,6 +88,8 @@ var _key_binding_page: VBoxContainer
 var _key_binding_back_button: Button
 ## 设置首页控件列表；元素为 Control，默认用于在多页设置之间统一隐藏或显示首页内容。
 var _settings_home_controls: Array[Control] = []
+## 主菜单存档传输控件；默认运行时插入设置首页，导入成功后由全局服务重启游戏。
+var _save_transfer_control: Control
 ## 仓库全屏遮罩；默认运行时创建并隐藏，打开时阻止主菜单其他按钮接收鼠标输入。
 var _warehouse_overlay: Control
 ## 仓库面板实例；默认由 WarehousePanel 脚本创建，关闭后复用而不重复构建服务数据。
@@ -657,10 +661,18 @@ func _build_key_binding_navigation() -> void:
 	_settings_content.add_child(key_binding_button)
 	_settings_content.move_child(key_binding_button, maxi(_settings_content.get_child_count() - 3, 0))
 	_key_binding_button = key_binding_button
+	# 存档传输控件；主菜单导出可覆盖全部已经落盘的永久状态，导入由服务自动备份旧文件。
+	var save_transfer_control: Control = SAVE_TRANSFER_CONTROL_SCRIPT.new() as Control
+	if save_transfer_control != null:
+		save_transfer_control.name = "MainMenuSaveTransferControl"
+		_settings_content.add_child(save_transfer_control)
+		_settings_content.move_child(save_transfer_control, maxi(_settings_content.get_child_count() - 3, 0))
+		_save_transfer_control = save_transfer_control
 	_settings_home_controls = [
 		_settings_title_label,
 		_master_volume_row,
 		_key_binding_button,
+		_save_transfer_control,
 		_settings_spacer,
 		_settings_back_button,
 	]

@@ -584,7 +584,7 @@ func apply_damage(damage: float, source: Node) -> void:
 	var final_damage: float = float(damage_result.get("damage", 0))
 	current_health = clampf(current_health - final_damage, 0.0, max_health)
 	health_changed.emit(current_health, max_health)
-	DAMAGE_NUMBER_POPUP_SCRIPT.spawn_damage_number(get_tree().current_scene, global_position, final_damage, bool(damage_result.get("is_critical", false)))
+	DAMAGE_NUMBER_POPUP_SCRIPT.spawn_damage_number(get_tree().current_scene, global_position, final_damage, bool(damage_result.get("is_critical", false)), get_instance_id())
 	_apply_knockback_from_source(source)
 	if current_health <= 0.0:
 		_begin_death_sequence()

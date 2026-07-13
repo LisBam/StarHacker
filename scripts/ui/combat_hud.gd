@@ -9,6 +9,8 @@ class_name CombatHud
 const WEAPON_SLOT_CONTROL_SCRIPT: Script = preload("res://scripts/ui/weapon_slot_control.gd")
 ## 按键绑定面板脚本；默认用于暂停设置中动态创建可重绑定操作列表。
 const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_panel.gd")
+## 存档传输控件脚本；默认用于暂停设置复用导出、导入文件选择和安全重启流程。
+const SAVE_TRANSFER_CONTROL_SCRIPT: Script = preload("res://scripts/ui/save_transfer_control.gd")
 ## 结算物品控件脚本；默认复用仓库的标准物品摘要与完整悬停详情，但结算列表不启用点击和拖拽。
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
 ## 通用物品卡片视图；战斗装备栏、背包与结算列表统一读取其固定尺寸，禁止场景内单独覆盖。
@@ -290,6 +292,8 @@ var _pause_key_binding_page: VBoxContainer
 var _pause_key_binding_back_button: Button
 ## 暂停设置首页控件列表；元素为 Control，默认用于在设置首页和按键绑定页之间切换可见性。
 var _pause_settings_home_controls: Array[Control] = []
+## 暂停设置存档传输控件；默认运行时创建，导出仅包含各服务已经落盘的持久化状态。
+var _pause_save_transfer_control: Control
 ## 战斗开发者全屏遮罩；默认运行时创建并隐藏，暂停界面完成 LISBAM 序列后显示。
 var _combat_developer_overlay: Control
 ## 战斗开发者菜单实例；默认复用 DeveloperMenu 并切换到无限属性与训练工具上下文。
@@ -1769,10 +1773,18 @@ func _build_pause_key_binding_navigation() -> void:
 	_pause_settings_content.add_child(key_binding_button)
 	_pause_settings_content.move_child(key_binding_button, maxi(_pause_settings_content.get_child_count() - 3, 0))
 	_pause_key_binding_button = key_binding_button
+	# 存档传输控件；战斗中不强制保存本局临时所有权，继续遵守结算后统一落盘的框架规则。
+	var save_transfer_control: Control = SAVE_TRANSFER_CONTROL_SCRIPT.new() as Control
+	if save_transfer_control != null:
+		save_transfer_control.name = "PauseSaveTransferControl"
+		_pause_settings_content.add_child(save_transfer_control)
+		_pause_settings_content.move_child(save_transfer_control, maxi(_pause_settings_content.get_child_count() - 3, 0))
+		_pause_save_transfer_control = save_transfer_control
 	_pause_settings_home_controls = [
 		get_node("Root/PauseOverlay/PauseSettingsPanel/PauseSettingsMargin/PauseSettingsContent/PauseSettingsTitle") as Control,
 		get_node("Root/PauseOverlay/PauseSettingsPanel/PauseSettingsMargin/PauseSettingsContent/PauseMasterVolumeRow") as Control,
 		_pause_key_binding_button,
+		_pause_save_transfer_control,
 		get_node("Root/PauseOverlay/PauseSettingsPanel/PauseSettingsMargin/PauseSettingsContent/PauseSettingsSpacer") as Control,
 		_pause_settings_back_button,
 	]

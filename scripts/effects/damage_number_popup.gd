@@ -17,19 +17,50 @@ class_name DamageNumberPopup
 @export_range(8, 160, 1) var maximum_font_size: int = 32
 ## 对数缩放强度；默认 3.8，降低伤害提升时字号增长速度。
 @export_range(0.1, 20.0, 0.1) var logarithmic_scale_strength: float = 3.8
+## 同目标飘字横向偏移步长；默认 18 像素，相邻伤害依次左右错开，运行时修改只影响可读性。
+@export_range(0.0, 120.0, 1.0) var horizontal_offset_step: float = 18.0
+## 同目标飘字纵向分层步长；默认 12 像素，使连续伤害即使数值宽度较大也不会完全重叠。
+@export_range(0.0, 120.0, 1.0) var vertical_offset_step: float = 12.0
+## 同目标最多使用的错位槽数量；默认 6，超过后循环使用并依靠旧飘字已上浮的距离保持可读。
+@export_range(1, 24, 1) var offset_lane_count: int = 6
+
+## 每个受击目标当前仍存活的伤害飘字弱引用；键为目标实例 ID，值为 WeakRef 数组，用于计算下一次错位槽。
+static var _active_popups_by_target: Dictionary = {}
 
 
-static func spawn_damage_number(parent_node: Node, world_position: Vector2, damage_value: float, is_critical: bool) -> void:
+static func spawn_damage_number(parent_node: Node, world_position: Vector2, damage_value: float, is_critical: bool, target_instance_id: int = 0) -> void:
+	## 生成伤害飘字并按受击目标分配错位槽；target_instance_id 为 0 时保持独立居中显示。
 	if parent_node == null or damage_value <= 0.0:
 		return
 	# 飘字实例；由脚本直接创建，避免受击对象依赖额外场景。
 	var popup: DamageNumberPopup = DamageNumberPopup.new()
 	parent_node.add_child(popup)
 	popup.global_position = world_position
-	popup._play(damage_value, is_critical)
+	# 错位槽索引；同一目标的存活飘字越多，下一段伤害使用越靠后的交错位置。
+	var offset_lane: int = _register_popup(target_instance_id, popup)
+	popup._play(damage_value, is_critical, offset_lane)
 
 
-func _play(damage_value: float, is_critical: bool) -> void:
+static func _register_popup(target_instance_id: int, popup: DamageNumberPopup) -> int:
+	## 清理已释放弱引用并登记新飘字；返回登记前的活动数量作为稳定错位槽。
+	if target_instance_id <= 0:
+		return 0
+	# 目标活动弱引用；失效节点不会被静态字典强引用，目标销毁后也可在下次命中时自然清理。
+	var active_references: Array = _active_popups_by_target.get(target_instance_id, []) as Array
+	# 仍有效的弱引用；每项必须解析到场景树内 DamageNumberPopup 才参与槽位计数。
+	var valid_references: Array = []
+	for popup_reference in active_references:
+		if popup_reference is WeakRef and is_instance_valid((popup_reference as WeakRef).get_ref()):
+			valid_references.append(popup_reference)
+	# 错位槽；当前有效数量即为新飘字序号，随后登记自身弱引用供后续伤害读取。
+	var offset_lane: int = valid_references.size()
+	valid_references.append(weakref(popup))
+	_active_popups_by_target[target_instance_id] = valid_references
+	return offset_lane
+
+
+func _play(damage_value: float, is_critical: bool, offset_lane: int) -> void:
+	## 配置伤害文本、字号和错位轨迹；同一目标的连续命中会在左右与高度上交替展开。
 	text = str(maxi(roundi(damage_value), 1))
 	modulate = critical_damage_color if is_critical else normal_damage_color
 	horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -38,7 +69,16 @@ func _play(damage_value: float, is_critical: bool) -> void:
 	# 非线性字号；对数增长保证高伤害更大但不会无限膨胀。
 	var resolved_font_size: int = clampi(roundi(float(minimum_font_size) + log(maxf(damage_value, 0.0) + 1.0) * logarithmic_scale_strength), minimum_font_size, maximum_font_size)
 	add_theme_font_size_override("font_size", resolved_font_size)
+	# 有效错位槽；限制槽数量防止极高攻速让文字横向无限远离受击目标。
+	var resolved_lane: int = posmod(offset_lane, maxi(offset_lane_count, 1))
+	# 横向方向；首段居中，后续依次右、左交替，并按层数逐步增加距离。
+	var horizontal_direction: float = 0.0 if resolved_lane == 0 else (1.0 if resolved_lane % 2 == 1 else -1.0)
+	# 横向层级；槽 1/2 使用一倍偏移，槽 3/4 使用两倍偏移。
+	var horizontal_layer: float = float((resolved_lane + 1) / 2)
+	# 初始错位；纵向随槽位上移，确保同时两段伤害至少产生轻微可辨偏移。
+	var spawn_offset: Vector2 = Vector2(horizontal_direction * horizontal_layer * horizontal_offset_step, -float(resolved_lane) * vertical_offset_step)
 	position -= Vector2(42.0, 26.0)
+	position += spawn_offset
 	custom_minimum_size = Vector2(84.0, 52.0)
 	# 上浮淡出补间；目标死亡后仍可独立播放完成。
 	var tween: Tween = create_tween()

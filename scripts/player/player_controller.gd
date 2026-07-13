@@ -37,6 +37,8 @@ const SPRINT_ENERGY_REGENERATION_BLOCK_SOURCE_ID: String = "player_sprint"
 @export var temporary_buff_component_path: NodePath = ^"TemporaryBuffComponent"
 ## 主动技能组件路径；默认指向 ActiveSkillComponent，用于在技能瞄准或蓄力期间屏蔽武器输入，避免共享蓄力条互相覆盖。
 @export var active_skill_component_path: NodePath = ^"ActiveSkillComponent"
+## 闪避视觉反馈组件路径；默认指向 DodgeFeedbackComponent，只在装备或套装概率闪避成功后播放透明与 MISS 飘字。
+@export var dodge_feedback_component_path: NodePath = ^"DodgeFeedbackComponent"
 ## 瞄准旋转轴路径；默认指向 AimPivot，必须解析到 Node2D，修改会影响武器朝向和枪口位置。
 @export var aim_pivot_path: NodePath = ^"AimPivot"
 ## 战斗相机路径；默认指向玩家子节点 Camera2D，必须解析到提供 add_shake 方法的节点，修改会影响屏幕震动反馈。
@@ -126,6 +128,8 @@ var _is_sprinting: bool = false
 @onready var _temporary_buff_component: Node = get_node_or_null(temporary_buff_component_path)
 ## 主动技能组件实例缓存；默认按路径解析，允许为空，缺失时武器输入保持独立场景兼容行为。
 @onready var _active_skill_component: Node = get_node_or_null(active_skill_component_path)
+## 闪避反馈组件实例缓存；默认按路径解析，允许为空，缺失时闪避判定仍正常但不播放视觉反馈。
+@onready var _dodge_feedback_component: Node = get_node_or_null(dodge_feedback_component_path)
 ## 瞄准轴节点缓存；默认按 aim_pivot_path 获取 Node2D，运行时跟随鼠标方向旋转，修改会影响武器视觉和枪口朝向。
 @onready var _aim_pivot: Node2D = get_node(aim_pivot_path) as Node2D
 ## 战斗相机节点缓存；默认按 camera_path 获取，允许为空，缺失时只跳过屏幕震动不影响移动和攻击。
@@ -168,6 +172,7 @@ func apply_damage(damage: float, source: Node) -> void:
 	if _equipment_set_component != null and _equipment_set_component.has_method("get_recent_kill_dodge_chance_bonus"):
 		dodge_chance += maxf(float(_equipment_set_component.call("get_recent_kill_dodge_chance_bonus")), 0.0)
 	if dodge_chance > 0.0 and randf() < clampf(dodge_chance, 0.0, EnhancementRules.DODGE_CHANCE_MAXIMUM):
+		_play_dodge_feedback()
 		return
 
 	# 统一伤害计算器；敌方攻击力与玩家防御力在此完成结算。
@@ -789,6 +794,12 @@ func _shake_screen(amount: float) -> void:
 
 func _spawn_player_hit_effect() -> void:
 	_spawn_combat_burst(_resolve_effect_parent(), global_position, hit_effect_color, 30.0, 0.18, 7)
+
+
+func _play_dodge_feedback() -> void:
+	## 通知独立视觉组件播放闪避反馈；该入口不修改伤害间隔、无敌状态、能量或闪避概率。
+	if _dodge_feedback_component != null and _dodge_feedback_component.has_method("play_feedback"):
+		_dodge_feedback_component.call("play_feedback", global_position, _resolve_effect_parent())
 
 
 func _spawn_player_death_effect() -> void:

@@ -7,6 +7,8 @@ class_name PlayerController
 signal weapon_durability_changed(weapon_data: Resource)
 ## 玩家实际受到一次未闪避攻击后派发；技能可据此缩短持续时间，但不得从信号回调重复扣除生命或防具耐久。
 signal damage_received(final_damage: float, source: Node)
+## 玩家固定移速技能来源变化后派发；角色面板据此即时刷新“技能”移速分项，不参与实际移动结算。
+signal movement_speed_attribute_bonus_changed
 
 ## 战斗爆发特效脚本；默认通过路径预加载，避免依赖 Godot 全局类名缓存解析顺序。
 const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat_burst_effect.gd")
@@ -461,12 +463,18 @@ func set_movement_speed_attribute_bonus_source(source_id: String, bonus_attribut
 	var normalized_source_id: String = source_id.strip_edges()
 	if normalized_source_id.is_empty():
 		return
-	_movement_speed_attribute_bonus_sources[normalized_source_id] = maxf(bonus_attribute, 0.0)
+	# 标准移速加成；相同来源数值未变化时不重复刷新角色面板。
+	var resolved_bonus_attribute: float = maxf(bonus_attribute, 0.0)
+	if is_equal_approx(float(_movement_speed_attribute_bonus_sources.get(normalized_source_id, -1.0)), resolved_bonus_attribute):
+		return
+	_movement_speed_attribute_bonus_sources[normalized_source_id] = resolved_bonus_attribute
+	movement_speed_attribute_bonus_changed.emit()
 
 
 func remove_movement_speed_attribute_bonus_source(source_id: String) -> void:
 	## 移除指定固定移速属性来源；不存在时保持幂等，不影响装备比例、疾跑或其他移动倍率。
-	_movement_speed_attribute_bonus_sources.erase(source_id.strip_edges())
+	if _movement_speed_attribute_bonus_sources.erase(source_id.strip_edges()):
+		movement_speed_attribute_bonus_changed.emit()
 
 
 func _get_movement_speed_attribute_bonus() -> float:
@@ -475,6 +483,11 @@ func _get_movement_speed_attribute_bonus() -> float:
 	for raw_bonus in _movement_speed_attribute_bonus_sources.values():
 		total_bonus += maxf(float(raw_bonus), 0.0)
 	return maxf(total_bonus, 0.0)
+
+
+func get_movement_speed_attribute_bonus() -> float:
+	## 返回全部技能提供的固定移速属性点；角色面板使用该公开入口显示“技能”分项。
+	return _get_movement_speed_attribute_bonus()
 
 
 func get_current_move_speed_attribute() -> float:

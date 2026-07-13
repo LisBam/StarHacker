@@ -11,4 +11,4 @@ description = "进入游戏时，你可分配你面板上的基础属性，每�
 behavior_script = ExtResource("2_behavior")
 base_attribute_value = 99.0
 maximum_adjustment_ratio = 0.2
-allocation_step = 0.1
+allocation_step = 1.0

@@ -6,6 +6,7 @@ class_name EquipmentStorageSlotControl
 
 signal item_drop_requested(drag_data: Dictionary, target_location: String, target_index: int)
 signal item_selected(item_resource: Resource)
+signal quick_unequip_requested
 signal enhancement_drop_requested(stone_resource: Resource, source_location: String, weapon_resource: Resource)
 signal repair_kit_drop_requested(repair_kit_resource: Resource, source_location: String, weapon_resource: Resource)
 
@@ -99,7 +100,11 @@ func refresh_durability() -> void:
 
 func _on_pressed() -> void:
 	if _item_resource != null and not _weapon_target_selection_blocked:
-		item_selected.emit(_item_resource)
+		# Shift 快速卸下；强化石或修复包目标选择期间保持普通选择，避免快捷键绕过道具使用流程。
+		if Input.is_key_pressed(KEY_SHIFT) and not _enhancement_target_highlight:
+			quick_unequip_requested.emit()
+		else:
+			item_selected.emit(_item_resource)
 
 
 func _get_drag_data(_at_position: Vector2) -> Variant:

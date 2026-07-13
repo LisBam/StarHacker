@@ -16,6 +16,8 @@ const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.g
 const STORAGE_DROP_AREA_SCRIPT: Script = preload("res://scripts/ui/storage_drop_area.gd")
 ## 局外装备拖拽槽脚本；默认负责远近战类型校验以及装备栏双向拖拽数据生成。
 const EQUIPMENT_STORAGE_SLOT_SCRIPT: Script = preload("res://scripts/ui/equipment_storage_slot_control.gd")
+## 套装筛选控件脚本；装备分类使用统一多选套装筛选，不在仓库内复制查询规则。
+const EQUIPMENT_SET_FILTER_CONTROL_SCRIPT: Script = preload("res://scripts/ui/equipment_set_filter_control.gd")
 ## 物品详情格式化器；用于识别武器、强化石和动态价值，避免仓库面板重复拼接属性文本。
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
 ## 强化结果弹窗脚本；仓库和局内背包共用同一数值说明格式。
@@ -103,6 +105,8 @@ var _storage_sort_option: OptionButton
 var _stone_attribute_option: OptionButton
 ## 清空强化属性筛选按钮；默认只在资源分类显示，用于一次移除所有多选条件。
 var _stone_attribute_clear_button: Button
+## 套装多选筛选控件；同时作用于永久仓库与展开后的随身背包列表。
+var _equipment_set_filter_control: EquipmentSetFilterControl
 ## 当前强化属性筛选键集合；默认空数组表示不过滤具体属性，多项按并集匹配。
 var _stone_attribute_filter: Array[String] = []
 ## 当前展示排序；默认 acquired_time，可切换 item_value 且不修改真实库存顺序。
@@ -279,6 +283,9 @@ func _build_storage_interface() -> void:
 	_stone_attribute_clear_button.custom_minimum_size = Vector2(92.0, 36.0)
 	_stone_attribute_clear_button.pressed.connect(_on_clear_stone_attribute_filter_pressed)
 	query_bar.add_child(_stone_attribute_clear_button)
+	_equipment_set_filter_control = EQUIPMENT_SET_FILTER_CONTROL_SCRIPT.new() as EquipmentSetFilterControl
+	_equipment_set_filter_control.filters_changed.connect(_on_equipment_set_filters_changed)
+	query_bar.add_child(_equipment_set_filter_control)
 
 	# 一级分类栏；全部入口同时展示武器和资源，二级分类由下一行根据主分类动态生成。
 	var primary_filter_bar: HBoxContainer = HBoxContainer.new()
@@ -402,12 +409,13 @@ func _rebuild_storage_content() -> void:
 	var warehouse_entries: Array = _global_inventory.call("get_warehouse_entries")
 	# 随身背包条目；顺序只影响当前携带布局，进入战斗后由 HUD 读取同一数组。
 	var backpack_entries: Array = _global_inventory.call("get_backpack_entries")
+	_equipment_set_filter_control.configure_entries(warehouse_entries + backpack_entries)
 	_coins_label.text = "金币：%d" % int(_global_inventory.call("get_coins"))
 	_storage_summary_label.text = _get_storage_summary_text(warehouse_entries, backpack_entries)
 	# 已查询仓库条目；按当前多层分类、关键词、属性和排序生成展示副本。
-	var visible_warehouse_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(warehouse_entries, _storage_primary_category, _storage_subcategory, _storage_search_edit.text, _stone_attribute_filter, _storage_sort_mode)
+	var visible_warehouse_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(warehouse_entries, _storage_primary_category, _storage_subcategory, _storage_search_edit.text, _stone_attribute_filter, _storage_sort_mode, _equipment_set_filter_control.get_selected_set_ids())
 	# 已查询背包条目；使用同一查询条件保证上下区域对比一致。
-	var visible_backpack_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(backpack_entries, _storage_primary_category, _storage_subcategory, _storage_search_edit.text, _stone_attribute_filter, _storage_sort_mode)
+	var visible_backpack_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(backpack_entries, _storage_primary_category, _storage_subcategory, _storage_search_edit.text, _stone_attribute_filter, _storage_sort_mode, _equipment_set_filter_control.get_selected_set_ids())
 	_build_storage_entries(visible_warehouse_entries, "warehouse", _warehouse_item_list)
 	if _backpack_expanded:
 		_build_storage_entries(visible_backpack_entries, "backpack", _carried_item_list)
@@ -493,6 +501,7 @@ func _create_storage_equipment_slot(slot_label: String, location: String, weapon
 	slot_control.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
 	slot_control.connect("item_selected", Callable(self, "_on_enhancement_weapon_selected"))
 	slot_control.connect("item_selected", Callable(self, "_on_repair_kit_weapon_selected"))
+	slot_control.connect("quick_unequip_requested", Callable(self, "_on_quick_unequip_requested").bind(location))
 	slot_control.connect("enhancement_drop_requested", Callable(self, "_on_enhancement_drop_requested"))
 	slot_control.connect("repair_kit_drop_requested", Callable(self, "_on_repair_kit_drop_requested"))
 	slot_control.call("set_weapon_target_selection_state", _is_weapon_target_selection_active(), _is_pending_item_usable_on_weapon(item_resource))
@@ -565,6 +574,7 @@ func _on_storage_primary_category_pressed(category_name: String) -> void:
 	_storage_primary_category = category_name
 	_storage_subcategory = InventoryQuery.SUBCATEGORY_ALL
 	_clear_stone_attribute_filter()
+	_equipment_set_filter_control.clear_filters(false)
 	_rebuild_storage_subcategory_buttons()
 	_refresh_storage_category_buttons()
 	_rebuild_storage_content()
@@ -589,7 +599,19 @@ func _refresh_storage_category_buttons() -> void:
 			subcategory_button.set_pressed_no_signal(str(category_name) == _storage_subcategory)
 	_stone_attribute_option.visible = _storage_primary_category == InventoryQuery.PRIMARY_RESOURCES
 	_stone_attribute_clear_button.visible = _storage_primary_category == InventoryQuery.PRIMARY_RESOURCES
+	_equipment_set_filter_control.visible = _storage_primary_category == InventoryQuery.PRIMARY_EQUIPMENT
 	_stone_attribute_clear_button.disabled = _stone_attribute_filter.is_empty()
+
+
+func _on_equipment_set_filters_changed(_selected_set_ids: Array[String]) -> void:
+	## 套装筛选变化后同时刷新仓库与背包两区，不修改任一容器真实顺序。
+	_rebuild_storage_content()
+
+
+func _on_quick_unequip_requested(equipment_location: String) -> void:
+	## Shift+点击装备栏时直接卸到随身背包；仓库是否展开不影响物品所有权目标。
+	if _global_inventory != null and not equipment_location.is_empty():
+		_global_inventory.call("transfer_equipment_to_storage", equipment_location, "backpack")
 
 
 func _on_storage_search_changed(_new_text: String) -> void:

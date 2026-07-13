@@ -12,6 +12,8 @@ const SHOP_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/shop_item_con
 const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
 ## 全局窗口样式指南；统一商店主窗口、频道标签、查询控件和状态区域视觉。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+## 套装筛选控件脚本；商店装备分类复用库存统一多选套装筛选。
+const EQUIPMENT_SET_FILTER_CONTROL_SCRIPT: Script = preload("res://scripts/ui/equipment_set_filter_control.gd")
 ## 普通商店通道标识；显示随机刷新武器与资源，并允许金币手动刷新。
 const CHANNEL_NORMAL: String = "normal"
 ## 灰市通道标识；显示最近五次撤离失败中实际遗失且尚未购回的物品。
@@ -54,6 +56,8 @@ var _search_edit: LineEdit
 var _stone_attribute_option: OptionButton
 ## 强化属性筛选清空按钮；默认只在资源分类显示，无已选条件时禁用。
 var _stone_attribute_clear_button: Button
+## 套装多选筛选控件；普通商店与灰市都按当前商品列表动态提供可选套装。
+var _equipment_set_filter_control: EquipmentSetFilterControl
 ## 一级分类按钮表；键为分类标识，值为对应按钮，用于同步禁用状态。
 var _primary_buttons: Dictionary = {}
 ## 二级分类按钮表；每次一级分类变化后重建。
@@ -197,6 +201,9 @@ func _build_interface() -> void:
 	_stone_attribute_clear_button.custom_minimum_size = Vector2(92.0, 36.0)
 	_stone_attribute_clear_button.pressed.connect(_clear_stone_attribute_filter)
 	query_bar.add_child(_stone_attribute_clear_button)
+	_equipment_set_filter_control = EQUIPMENT_SET_FILTER_CONTROL_SCRIPT.new() as EquipmentSetFilterControl
+	_equipment_set_filter_control.filters_changed.connect(_on_equipment_set_filters_changed)
+	query_bar.add_child(_equipment_set_filter_control)
 	# 一级分类栏；与仓库相同显示全部、武器和资源。
 	var primary_bar: HBoxContainer = HBoxContainer.new()
 	primary_bar.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -295,6 +302,7 @@ func _refresh_category_buttons() -> void:
 	_gray_channel_button.disabled = _current_channel == CHANNEL_GRAY
 	_stone_attribute_option.visible = _primary_category == InventoryQuery.PRIMARY_RESOURCES
 	_stone_attribute_clear_button.visible = _primary_category == InventoryQuery.PRIMARY_RESOURCES
+	_equipment_set_filter_control.visible = _primary_category == InventoryQuery.PRIMARY_EQUIPMENT
 	_refresh_stone_attribute_filter_display()
 	# 刷新栏；通过名称查找固定父节点，灰市通道不显示自动或手动刷新控制。
 	var refresh_bar: Control = _refresh_countdown_label.get_parent() as Control
@@ -309,8 +317,9 @@ func _rebuild_content() -> void:
 		return
 	# 当前通道条目；普通商店会先检查十分钟自动刷新，灰市按最近失败批次平铺。
 	var source_entries: Array = _shop_service.call("get_shop_entries") if _current_channel == CHANNEL_NORMAL else _shop_service.call("get_gray_market_entries")
+	_equipment_set_filter_control.configure_entries(source_entries)
 	# 可见条目；复用仓库同款分类、搜索和强化属性方向筛选。
-	var visible_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(source_entries, _primary_category, _subcategory, _search_edit.text, _stone_attribute_filter, _sort_mode)
+	var visible_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(source_entries, _primary_category, _subcategory, _search_edit.text, _stone_attribute_filter, _sort_mode, _equipment_set_filter_control.get_selected_set_ids())
 	if visible_entries.is_empty():
 		# 空状态；占满双列宽度需要添加两个控件中的第一个提示，当前文本已足够明确通道与分类。
 		# 流式布局补充：空状态由居中容器承载，不再依赖双列占位规则。
@@ -364,6 +373,7 @@ func _on_primary_category_pressed(category_name: String) -> void:
 	_primary_category = category_name
 	_subcategory = InventoryQuery.SUBCATEGORY_ALL
 	_clear_stone_attribute_filter(false)
+	_equipment_set_filter_control.clear_filters(false)
 	_rebuild_subcategory_buttons()
 	_rebuild_content()
 
@@ -404,6 +414,11 @@ func _clear_stone_attribute_filter(rebuild_content: bool = true) -> void:
 	_refresh_stone_attribute_filter_display()
 	if rebuild_content:
 		_rebuild_content()
+
+
+func _on_equipment_set_filters_changed(_selected_set_ids: Array[String]) -> void:
+	## 套装多选变化后刷新当前商店通道，不触发商品重抽或购买状态变化。
+	_rebuild_content()
 
 
 func _refresh_stone_attribute_filter_display() -> void:

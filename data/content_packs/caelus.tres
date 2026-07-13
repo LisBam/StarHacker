@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="ContentPackData" load_steps=12 format=3]
+[gd_resource type="Resource" script_class="ContentPackData" load_steps=13 format=3]
 
 [ext_resource type="Script" path="res://scripts/data/content_pack_data.gd" id="1_pack"]
 [ext_resource type="Resource" path="res://data/weapons/caelus/flame_lance.tres" id="2_flame_lance"]
@@ -11,6 +11,7 @@
 [ext_resource type="Resource" path="res://data/items/energy_drink_b.tres" id="9_drink_b"]
 [ext_resource type="Resource" path="res://data/items/energy_drink_c.tres" id="10_drink_c"]
 [ext_resource type="PackedScene" path="res://scenes/enemies/caelus/vagrant.tscn" id="11_vagrant"]
+[ext_resource type="PackedScene" path="res://scenes/enemies/caelus/heavy_vagrant.tscn" id="12_heavy_vagrant"]
 
 [resource]
 script = ExtResource("1_pack")
@@ -20,4 +21,4 @@ character_id = "caelus"
 weapon_resources = Array[Resource]([ExtResource("2_flame_lance"), ExtResource("3_cheering_stick")])
 equipment_resources = Array[Resource]([ExtResource("4_head"), ExtResource("5_body"), ExtResource("6_legs"), ExtResource("7_feet")])
 item_resources = Array[Resource]([ExtResource("8_drink_a"), ExtResource("9_drink_b"), ExtResource("10_drink_c")])
-enemy_scenes = Array[PackedScene]([ExtResource("11_vagrant")])
+enemy_scenes = Array[PackedScene]([ExtResource("11_vagrant"), ExtResource("12_heavy_vagrant")])

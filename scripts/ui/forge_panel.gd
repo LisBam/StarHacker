@@ -16,6 +16,8 @@ const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_it
 const EQUIPMENT_STORAGE_SLOT_SCRIPT: Script = preload("res://scripts/ui/equipment_storage_slot_control.gd")
 ## 通用物品卡片视图；锻造槽位布局读取其固定尺寸，禁止再使用独立正方形槽位规格。
 const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
+## 套装筛选控件脚本；锻造来源装备分类复用统一多选套装筛选。
+const EQUIPMENT_SET_FILTER_CONTROL_SCRIPT: Script = preload("res://scripts/ui/equipment_set_filter_control.gd")
 ## 锻造结果弹窗脚本；展示强化前后属性、价格与额外耐久恢复。
 const ENHANCEMENT_RESULT_DIALOG_SCRIPT: Script = preload("res://scripts/ui/enhancement_result_dialog.gd")
 ## 背包来源标识；与 GlobalInventory 公开接口保持一致。
@@ -84,6 +86,8 @@ var _sort_option: OptionButton
 var _stone_attribute_option: OptionButton
 ## 清空强化属性筛选按钮；默认只在资源分类显示，点击后一次移除全部勾选条件。
 var _stone_attribute_clear_button: Button
+## 套装多选筛选控件；按当前背包或仓库可用条目动态列出套装。
+var _equipment_set_filter_control: EquipmentSetFilterControl
 ## 一级分类按钮表；用于同步当前武器或资源分类的选中状态。
 var _primary_buttons: Dictionary = {}
 ## 二级分类按钮表；根据一级分类动态重建。
@@ -274,6 +278,9 @@ func _build_interface() -> void:
 	_stone_attribute_clear_button.custom_minimum_size = Vector2(92.0, 34.0)
 	_stone_attribute_clear_button.pressed.connect(_on_clear_stone_attribute_filter_pressed)
 	query_bar.add_child(_stone_attribute_clear_button)
+	_equipment_set_filter_control = EQUIPMENT_SET_FILTER_CONTROL_SCRIPT.new() as EquipmentSetFilterControl
+	_equipment_set_filter_control.filters_changed.connect(_on_equipment_set_filters_changed)
+	query_bar.add_child(_equipment_set_filter_control)
 	# 分类栏；保持背包仓库同款一级与二级结构。
 	var category_columns: VBoxContainer = VBoxContainer.new()
 	category_columns.add_theme_constant_override("separation", 3)
@@ -498,8 +505,9 @@ func _rebuild_inventory_items() -> void:
 	var source_entries: Array = _global_inventory.call("get_backpack_entries") if _current_source == SOURCE_BACKPACK else _global_inventory.call("get_warehouse_entries")
 	# 可选择条目；移除已选武器并扣减同堆强化石已占用数量，防止一个物品被重复放入超过库存。
 	var available_entries: Array[Dictionary] = _build_available_entries(source_entries)
+	_equipment_set_filter_control.configure_entries(available_entries)
 	# 可见条目；分类、搜索、属性方向和排序与背包仓库完全一致。
-	var visible_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(available_entries, _primary_category, _subcategory, _search_edit.text, _stone_attribute_filter, _sort_mode)
+	var visible_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(available_entries, _primary_category, _subcategory, _search_edit.text, _stone_attribute_filter, _sort_mode, _equipment_set_filter_control.get_selected_set_ids())
 	if visible_entries.is_empty():
 		var empty_label: Label = Label.new()
 		empty_label.text = "当前来源与分类没有可放入的物品"
@@ -560,7 +568,14 @@ func _rebuild_equipment_items() -> void:
 		# 锻造装备栏只灰显不可用物品；可用装备保持原色，不使用修复目标选择的绿色高亮。
 		item_control.call("set_weapon_target_selection_state", not item_selectable, false)
 		item_control.connect("item_selected", Callable(self, "_on_inventory_item_pressed").bind(equipment_location))
+		item_control.connect("quick_unequip_requested", Callable(self, "_on_quick_unequip_requested").bind(equipment_location))
 		_equipment_grid.add_child(item_control)
+
+
+func _on_quick_unequip_requested(equipment_location: String) -> void:
+	## Shift+点击锻造来源装备栏时直接卸回随身背包，并刷新可用候选与已选槽位校验。
+	if _global_inventory != null and not equipment_location.is_empty() and bool(_global_inventory.call("transfer_equipment_to_storage", equipment_location, SOURCE_BACKPACK)):
+		_refresh_all()
 
 
 func _get_equipment_location_label(equipment_location: String) -> String:
@@ -842,6 +857,7 @@ func _refresh_source_and_category_buttons() -> void:
 		(_subcategory_buttons[category_name] as Button).disabled = str(category_name) == _subcategory
 	_stone_attribute_option.visible = _primary_category == InventoryQuery.PRIMARY_RESOURCES
 	_stone_attribute_clear_button.visible = _primary_category == InventoryQuery.PRIMARY_RESOURCES
+	_equipment_set_filter_control.visible = _primary_category == InventoryQuery.PRIMARY_EQUIPMENT
 	_stone_attribute_clear_button.disabled = _stone_attribute_filter.is_empty()
 
 
@@ -857,6 +873,7 @@ func _on_primary_category_pressed(category_name: String) -> void:
 	_primary_category = category_name
 	_subcategory = InventoryQuery.SUBCATEGORY_ALL
 	_clear_stone_attribute_filter()
+	_equipment_set_filter_control.clear_filters(false)
 	_rebuild_subcategory_buttons()
 	_rebuild_inventory_items()
 
@@ -909,6 +926,11 @@ func _clear_stone_attribute_filter() -> void:
 		if not str(_stone_attribute_option.get_item_metadata(item_index)).is_empty():
 			_stone_attribute_option.get_popup().set_item_checked(item_index, false)
 	_refresh_stone_attribute_filter_display()
+
+
+func _on_equipment_set_filters_changed(_selected_set_ids: Array[String]) -> void:
+	## 套装筛选变化后刷新当前锻造来源候选，不改变已放入锻造槽的物品。
+	_rebuild_inventory_items()
 
 
 func _refresh_stone_attribute_filter_display() -> void:

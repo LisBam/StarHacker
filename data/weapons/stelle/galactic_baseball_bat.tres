@@ -16,5 +16,5 @@ attack_distance = 80.0
 cooldown = 0.5
 has_front_recoil = true
 front_recoil_force = 30.0
-impact_force = 30.0
+impact_force = 50.0
 melee_damage = 20.0

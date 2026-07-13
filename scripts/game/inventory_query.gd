@@ -58,7 +58,7 @@ static func get_stone_attribute_direction_group_label(direction: int) -> String:
 	return "“%s”属性" % EnhancementRules.get_direction_symbol(direction)
 
 
-static func filter_and_sort_entries(entries: Array, primary_category: String, subcategory: String, search_keyword: String, stone_attribute: Variant, sort_mode: String) -> Array[Dictionary]:
+static func filter_and_sort_entries(entries: Array, primary_category: String, subcategory: String, search_keyword: String, stone_attribute: Variant, sort_mode: String, equipment_set_filter: Variant = []) -> Array[Dictionary]:
 	# 标准化搜索词；忽略首尾空格和英文大小写，中文关键词保持原样。
 	var normalized_keyword: String = search_keyword.strip_edges().to_lower()
 	# 查询结果；每项复制展示字段并附加真实 source_index，供排序视图中的拖拽仍能操作正确记录。
@@ -75,12 +75,46 @@ static func filter_and_sort_entries(entries: Array, primary_category: String, su
 			continue
 		if not _matches_stone_attribute(entry, stone_attribute):
 			continue
+		if not _matches_equipment_set(entry, equipment_set_filter):
+			continue
 		if not normalized_keyword.is_empty() and not _build_search_text(entry).contains(normalized_keyword):
 			continue
 		result.append(entry)
 
 	_sort_entries(result, sort_mode)
 	return result
+
+
+static func collect_equipment_set_filter_options(entries: Array) -> Array[Dictionary]:
+	## 收集条目中全部套装的稳定 ID 与显示名称；重复套装只返回一次，并按显示名称排序供筛选控件复用。
+	# 套装名称表；键为稳定 set_id，值为玩家可见名称，避免同套装四件装备生成四个选项。
+	var labels_by_set_id: Dictionary = {}
+	for raw_entry in entries:
+		if not (raw_entry is Dictionary):
+			continue
+		# 当前装备资源；只有 item_kind=equipment 且配置有效套装引用时进入筛选选项。
+		var item_resource: Resource = (raw_entry as Dictionary).get("resource") as Resource
+		if item_resource == null or str(item_resource.get("item_kind")) != "equipment":
+			continue
+		# 套装资源；旧无套装装备保持可浏览，但不会生成空筛选项。
+		var equipment_set: Resource = item_resource.get("equipment_set") as Resource
+		if equipment_set == null:
+			continue
+		# 套装稳定 ID；空 ID 回退资源路径，保证合法旧资源仍可被精确筛选。
+		var set_id: String = str(equipment_set.get("set_id")).strip_edges()
+		if set_id.is_empty():
+			set_id = equipment_set.resource_path
+		if set_id.is_empty():
+			continue
+		# 套装显示名；缺失时回退稳定 ID，筛选功能不依赖具体中文文本。
+		var display_name: String = str(equipment_set.get("display_name")).strip_edges()
+		labels_by_set_id[set_id] = display_name if not display_name.is_empty() else set_id
+	# 套装选项；结构固定包含 id 与 label，独立控件无需读取装备资源字段。
+	var options: Array[Dictionary] = []
+	for raw_set_id in labels_by_set_id.keys():
+		options.append({"id": str(raw_set_id), "label": str(labels_by_set_id.get(raw_set_id, raw_set_id))})
+	options.sort_custom(func(first: Dictionary, second: Dictionary) -> bool: return str(first.get("label", "")) < str(second.get("label", "")))
+	return options
 
 
 static func _matches_category(entry: Dictionary, primary_category: String, subcategory: String) -> bool:
@@ -136,6 +170,34 @@ static func _matches_stone_attribute(entry: Dictionary, stone_attribute: Variant
 	return false
 
 
+static func _matches_equipment_set(entry: Dictionary, equipment_set_filter: Variant) -> bool:
+	## 判断装备是否命中套装多选筛选；空条件不过滤，非装备和无套装装备在存在条件时不显示。
+	# 标准筛选 ID；兼容 Array 与 PackedStringArray，忽略空值和重复项。
+	var selected_set_ids: Array[String] = []
+	if equipment_set_filter is Array or equipment_set_filter is PackedStringArray:
+		for raw_set_id in equipment_set_filter:
+			var selected_set_id: String = str(raw_set_id).strip_edges()
+			if not selected_set_id.is_empty() and selected_set_id not in selected_set_ids:
+				selected_set_ids.append(selected_set_id)
+	elif equipment_set_filter is String and not str(equipment_set_filter).strip_edges().is_empty():
+		selected_set_ids.append(str(equipment_set_filter).strip_edges())
+	if selected_set_ids.is_empty():
+		return true
+	# 条目装备；筛选开启后只保留配置套装的穿戴装备。
+	var item_resource: Resource = entry.get("resource") as Resource
+	if item_resource == null or str(item_resource.get("item_kind")) != "equipment":
+		return false
+	# 套装资源；无套装装备不会命中任何具体套装 ID。
+	var equipment_set: Resource = item_resource.get("equipment_set") as Resource
+	if equipment_set == null:
+		return false
+	# 实际套装 ID；规则与选项收集保持一致，空稳定 ID 回退资源路径。
+	var actual_set_id: String = str(equipment_set.get("set_id")).strip_edges()
+	if actual_set_id.is_empty():
+		actual_set_id = equipment_set.resource_path
+	return actual_set_id in selected_set_ids
+
+
 static func _normalize_stone_attribute_filters(stone_attribute: Variant) -> Array[String]:
 	# 标准化筛选结果；每个非空键只保留一次，避免 UI 重复勾选造成无意义查询开销。
 	var normalized_filters: Array[String] = []
@@ -182,6 +244,12 @@ static func _build_search_text(entry: Dictionary) -> String:
 		for stat_name in EnhancementRules.STAT_KEYS:
 			if modifiers.has(stat_name):
 				search_parts.append(EnhancementRules.build_modifier_token(stat_name, modifiers.get(stat_name, 0.0)))
+	if str(item_resource.get("item_kind")) == "equipment":
+		# 套装搜索文本；允许直接输入“开拓者套装”“骇客套装”等显示名定位全部部件。
+		var equipment_set: Resource = item_resource.get("equipment_set") as Resource
+		if equipment_set != null:
+			search_parts.append(str(equipment_set.get("set_id")))
+			search_parts.append(str(equipment_set.get("display_name")))
 	return " ".join(search_parts).to_lower()
 
 

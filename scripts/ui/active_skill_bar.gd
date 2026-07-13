@@ -6,6 +6,8 @@ class_name ActiveSkillBar
 
 ## 标签单轴尺寸安全下限；固定 1 像素，避免检查器内边距超过槽尺寸后生成负区域。
 const MINIMUM_LABEL_AXIS_SIZE: float = 1.0
+## 局内共享紧凑槽位视图；主动技能与右侧武器栏通过同一组件统一外观和状态接口。
+const COMBAT_HUD_SLOT_VIEW_SCRIPT: Script = preload("res://scripts/ui/combat_hud_slot_view.gd")
 
 ## 单个技能槽最小尺寸；默认 150×58 像素，三个槽并排时适配 1280×720 战斗 HUD。
 @export var slot_minimum_size: Vector2 = Vector2(150.0, 58.0)
@@ -60,6 +62,8 @@ var _key_labels: Array[Label] = []
 var _cooldown_overlays: Array[ColorRect] = []
 ## 每个技能槽的冷却文本；元素为 Label，显示一位小数剩余秒数。
 var _cooldown_labels: Array[Label] = []
+## 每个技能槽的共享局内视图；元素顺序与技能组件槽位一致，名称、按键、能耗和遮罩统一由该组件显示。
+var _slot_views: Array[Control] = []
 
 
 func _ready() -> void:
@@ -85,6 +89,10 @@ func _process(_delta: float) -> void:
 
 func refresh() -> void:
 	## 刷新技能名称、按键与冷却；组件缺失或空技能槽明确显示“空技能槽”。
+	if not _slot_views.is_empty():
+		_refresh_shared_slot_content()
+		_refresh_cooldowns()
+		return
 	if _name_labels.is_empty():
 		_rebuild_slots()
 	for slot_index in range(_name_labels.size()):
@@ -108,10 +116,41 @@ func _rebuild_slots() -> void:
 	_key_labels.clear()
 	_cooldown_overlays.clear()
 	_cooldown_labels.clear()
+	_slot_views.clear()
 	# 技能槽数量；默认三个，组件公开其他数量时按其实际值创建。
 	var slot_count: int = int(_active_skill_component.call("get_slot_count")) if _active_skill_component != null and _active_skill_component.has_method("get_slot_count") else fallback_slot_count
 	for slot_index in range(maxi(slot_count, 0)):
-		_add_skill_slot(slot_index)
+		_add_shared_skill_slot(slot_index)
+
+
+func _add_shared_skill_slot(_slot_index: int) -> void:
+	## 创建一个共享局内槽位视图；具体技能内容由 refresh() 统一写入，槽位本身不处理输入。
+	# 共享槽位实例；与右侧武器栏复用相同脚本和外观接口。
+	var slot_view: Control = COMBAT_HUD_SLOT_VIEW_SCRIPT.new() as Control
+	if slot_view == null:
+		return
+	slot_view.custom_minimum_size = slot_minimum_size
+	add_child(slot_view)
+	_slot_views.append(slot_view)
+
+
+func _refresh_shared_slot_content() -> void:
+	## 把当前技能按键、名称与能耗写入共享槽位；按键在共享组件顶部居中显示。
+	for slot_index in range(_slot_views.size()):
+		# 当前技能资源；空槽使用统一占位文本并降低全部文字透明度。
+		var skill_data: Resource = _active_skill_component.call("get_skill_resource", slot_index) as Resource if _active_skill_component != null and _active_skill_component.has_method("get_skill_resource") else null
+		# 技能动作；优先读取组件公开动作名，缺失时回退通用槽位命名。
+		var action_name: StringName = StringName("active_skill_%d" % (slot_index + 1))
+		if _active_skill_component != null and _active_skill_component.has_method("get_skill_action_name"):
+			action_name = StringName(str(_active_skill_component.call("get_skill_action_name", slot_index)))
+		# 技能名称；空资源明确显示空技能槽，避免误认为 HUD 加载失败。
+		var skill_name: String = str(skill_data.get("display_name")) if skill_data != null else "空技能槽"
+		# 技能能耗；有资源时始终显示整数能耗，空槽不显示辅助信息。
+		var energy_cost: float = maxf(float(skill_data.get("energy_cost")), 0.0) if skill_data != null else 0.0
+		var detail_text: String = "能耗 %d" % roundi(energy_cost) if skill_data != null else ""
+		# 内容透明度；空槽使用原有 0.42 默认值，已配置技能保持完全可读。
+		var content_opacity: float = 1.0 if skill_data != null else empty_slot_opacity
+		_slot_views[slot_index].call("configure_hud_content", slot_minimum_size, _get_action_display_text(action_name), skill_name, detail_text, null, content_opacity)
 
 
 func _add_skill_slot(_slot_index: int) -> void:
@@ -168,6 +207,20 @@ func _add_skill_slot(_slot_index: int) -> void:
 
 
 func _refresh_cooldowns() -> void:
+	if not _slot_views.is_empty():
+		for slot_index in range(_slot_views.size()):
+			# 当前剩余冷却；组件缺失或无效槽按 0 处理。
+			var shared_cooldown_remaining: float = float(_active_skill_component.call("get_cooldown_remaining", slot_index)) if _active_skill_component != null and _active_skill_component.has_method("get_cooldown_remaining") else 0.0
+			# 后续段剩余窗口；大于零时使用青蓝遮罩，表示当前槽仍可继续释放。
+			var shared_follow_up_remaining: float = float(_active_skill_component.call("get_follow_up_remaining", slot_index)) if _active_skill_component != null and _active_skill_component.has_method("get_follow_up_remaining") else 0.0
+			# 遮罩剩余时间；后续段优先于普通冷却显示。
+			var display_remaining: float = shared_follow_up_remaining if shared_follow_up_remaining > 0.0 else shared_cooldown_remaining
+			# 遮罩颜色；后续段使用原青蓝色，普通冷却使用原黑色。
+			var display_color: Color = follow_up_overlay_color if shared_follow_up_remaining > 0.0 else cooldown_overlay_color
+			# 遮罩文字；只在剩余时间大于零时显示一位小数秒数。
+			var display_text: String = "%ss" % String.num(display_remaining, cooldown_decimal_places) if display_remaining > 0.0 else ""
+			_slot_views[slot_index].call("set_state_overlay", display_remaining > 0.0, display_color, display_text)
+		return
 	for slot_index in range(_cooldown_overlays.size()):
 		# 当前剩余冷却；组件缺失或无效槽按 0 处理。
 		var cooldown_remaining: float = float(_active_skill_component.call("get_cooldown_remaining", slot_index)) if _active_skill_component != null and _active_skill_component.has_method("get_cooldown_remaining") else 0.0

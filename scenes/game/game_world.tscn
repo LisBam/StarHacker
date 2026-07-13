@@ -73,7 +73,7 @@ mouse_filter = 2
 script = ExtResource("9_minimap_control")
 
 [node name="BottomDock" type="VBoxContainer" parent="BattleHUD/Root"]
-custom_minimum_size = Vector2(390, 118)
+custom_minimum_size = Vector2(390, 64)
 layout_mode = 1
 anchors_preset = -1
 anchor_left = 0.5
@@ -81,7 +81,7 @@ anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
 offset_left = -195.0
-offset_top = -126.0
+offset_top = -74.0
 offset_right = 195.0
 offset_bottom = -10.0
 grow_horizontal = 2
@@ -140,30 +140,41 @@ max_value = 100.0
 value = 100.0
 show_percentage = false
 
-[node name="WeaponPanel" type="PanelContainer" parent="BattleHUD/Root/BottomDock"]
-layout_mode = 2
+[node name="WeaponPanel" type="PanelContainer" parent="BattleHUD/Root"]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -382.0
+offset_top = -74.0
+offset_right = -18.0
+offset_bottom = -10.0
+grow_horizontal = 0
+grow_vertical = 0
 
-[node name="WeaponMargin" type="MarginContainer" parent="BattleHUD/Root/BottomDock/WeaponPanel"]
+[node name="WeaponMargin" type="MarginContainer" parent="BattleHUD/Root/WeaponPanel"]
 layout_mode = 2
 theme_override_constants/margin_left = 6
 theme_override_constants/margin_top = 5
 theme_override_constants/margin_right = 6
 theme_override_constants/margin_bottom = 5
 
-[node name="WeaponRows" type="HBoxContainer" parent="BattleHUD/Root/BottomDock/WeaponPanel/WeaponMargin"]
+[node name="WeaponRows" type="HBoxContainer" parent="BattleHUD/Root/WeaponPanel/WeaponMargin"]
 layout_mode = 2
 theme_override_constants/separation = 6
 alignment = 1
 
-[node name="RangedSlots" type="HBoxContainer" parent="BattleHUD/Root/BottomDock/WeaponPanel/WeaponMargin/WeaponRows"]
+[node name="RangedSlots" type="HBoxContainer" parent="BattleHUD/Root/WeaponPanel/WeaponMargin/WeaponRows"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 5
 
-[node name="SlotDivider" type="VSeparator" parent="BattleHUD/Root/BottomDock/WeaponPanel/WeaponMargin/WeaponRows"]
+[node name="SlotDivider" type="VSeparator" parent="BattleHUD/Root/WeaponPanel/WeaponMargin/WeaponRows"]
 layout_mode = 2
 
-[node name="MeleeSlotHost" type="HBoxContainer" parent="BattleHUD/Root/BottomDock/WeaponPanel/WeaponMargin/WeaponRows"]
+[node name="MeleeSlotHost" type="HBoxContainer" parent="BattleHUD/Root/WeaponPanel/WeaponMargin/WeaponRows"]
 unique_name_in_owner = true
 layout_mode = 2
 

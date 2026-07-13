@@ -48,6 +48,8 @@ var _equipment_max_health: float = 0.0
 var _equipment_health_regeneration_per_five_seconds: float = 0.0
 ## 装备每秒能量恢复加成；默认 0，由有效躯干装备整体覆盖并叠加到基础恢复速度。
 var _equipment_energy_regeneration: float = 0.0
+## 能量自然恢复阻止来源表；键为稳定来源 ID、值为 true，任一来源存在时暂停自然回能但不影响主动耗能与无限能量。
+var _energy_regeneration_blocked_sources: Dictionary = {}
 ## 装备闪避率；默认 0，受到攻击时由玩家控制器独立判定。
 var _equipment_dodge_chance: float = 0.0
 ## 装备暴击率加成；默认 0，与当前武器暴击率相加。
@@ -85,6 +87,9 @@ func _process(delta: float) -> void:
 			heal(_equipment_health_regeneration_per_five_seconds)
 	if infinite_energy:
 		set_energy(max_energy)
+		return
+	if not _energy_regeneration_blocked_sources.is_empty():
+		# 自然回能阻止；疾跑等持续主动耗能期间不与回能相抵，解除全部来源后下一帧恢复原有结算。
 		return
 
 	# 当前每秒能量恢复；基础值与装备加成直接相加，每 1 点装备属性对应每秒额外恢复 1 点能量。
@@ -200,6 +205,18 @@ func set_infinite_energy(enabled: bool) -> void:
 	infinite_energy = enabled
 	if infinite_energy:
 		set_energy(max_energy)
+
+
+func set_energy_regeneration_blocked_source(source_id: String, blocked: bool) -> void:
+	## 设置一个独立的自然能量恢复阻止来源；相同来源重复写入保持幂等，所有来源清除后才恢复每秒能量结算。
+	# 标准化来源 ID；空字符串不具备稳定所有权，直接忽略以避免无法清理的阻止状态。
+	var normalized_source_id: String = source_id.strip_edges()
+	if normalized_source_id.is_empty():
+		return
+	if blocked:
+		_energy_regeneration_blocked_sources[normalized_source_id] = true
+	else:
+		_energy_regeneration_blocked_sources.erase(normalized_source_id)
 
 
 func is_infinite_health_enabled() -> bool:

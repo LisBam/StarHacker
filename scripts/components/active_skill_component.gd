@@ -56,6 +56,8 @@ var _chain_states: Array[Dictionary] = []
 var _completion_cooldown_multipliers: Array[float] = []
 ## 当前装备提供的主动技能冷却缩减；使用 0 到 1 小数，默认 0，不影响武器冷却或后续段释放窗口。
 var _equipment_cooldown_reduction: float = 0.0
+## 是否由训练场设置禁用主动技能冷却；默认 false，开启时所有技能立即可用且后续释放不会写入冷却，不会保存到角色或装备数据。
+var _cooldown_disabled: bool = false
 ## 当前正在瞄准的技能槽；取值 -1 或有效下标，默认 -1 表示没有按住任何主动技能。
 var _active_slot_index: int = -1
 ## 当前技能按住累计蓄力时间；取值大于等于 0 秒，默认 0，只有技能允许蓄力时才参与释放比例。
@@ -419,6 +421,15 @@ func _select_target_nearest_to_mouse(skill_data: Resource, mouse_world_position:
 func _update_cooldowns(delta: float) -> void:
 	# 是否有冷却数值发生变化；仅在至少一项递减时派发统一信号，避免空闲状态产生无意义通知。
 	var changed: bool = false
+	if _cooldown_disabled:
+		# 无冷却模式残留清理；开启开关后任何已经开始的主动技能冷却都在本帧归零。
+		for slot_index in range(_cooldown_remaining.size()):
+			if _cooldown_remaining[slot_index] > 0.0:
+				_cooldown_remaining[slot_index] = 0.0
+				changed = true
+		if changed:
+			cooldowns_changed.emit()
+		return
 	for slot_index in range(_cooldown_remaining.size()):
 		if _cooldown_remaining[slot_index] <= 0.0:
 			continue
@@ -481,7 +492,8 @@ func _complete_skill_chain(slot_index: int) -> void:
 	# 实际冷却时长；腿部装备冷却缩减只在整套技能完成并进入 CD 时应用，后续段窗口不受影响。
 	var resolved_cooldown_duration: float = _get_effective_cooldown_duration(base_cooldown_duration)
 	_cooldown_durations[slot_index] = resolved_cooldown_duration
-	_cooldown_remaining[slot_index] = resolved_cooldown_duration
+	# 训练场无冷却开关；仅跳过本次进入冷却，资源冷却与装备缩减结果仍保留给关闭开关后的下一次释放使用。
+	_cooldown_remaining[slot_index] = 0.0 if _cooldown_disabled else resolved_cooldown_duration
 	skill_loadout_changed.emit()
 	cooldowns_changed.emit()
 
@@ -538,6 +550,23 @@ func set_equipment_cooldown_reduction(reduction_ratio: float) -> void:
 func get_equipment_cooldown_reduction() -> float:
 	## 返回当前由装备聚合后的冷却缩减比例；供角色面板、测试或未来效果查询，默认值为 0。
 	return clampf(_equipment_cooldown_reduction, 0.0, 1.0)
+
+
+func set_cooldown_disabled(enabled: bool) -> void:
+	## 设置训练场主动技能无冷却状态；开启时清除已有冷却，关闭后不追溯已经跳过的冷却且后续释放恢复正常结算。
+	if _cooldown_disabled == enabled:
+		return
+	_cooldown_disabled = enabled
+	if _cooldown_disabled:
+		# 剩余冷却清理；每个有效槽立即可再次释放，HUD 会在同一信号周期移除冷却遮罩。
+		for slot_index in range(_cooldown_remaining.size()):
+			_cooldown_remaining[slot_index] = 0.0
+	cooldowns_changed.emit()
+
+
+func is_cooldown_disabled() -> bool:
+	## 返回当前是否处于训练场主动技能无冷却状态；仅供训练场界面同步开关，不用于装备冷却缩减计算。
+	return _cooldown_disabled
 
 
 func _get_effective_cooldown_duration(base_cooldown_duration: float) -> float:

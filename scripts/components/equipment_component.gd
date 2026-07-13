@@ -221,8 +221,11 @@ func configure_base_move_speed(new_base_move_speed: float) -> void:
 
 func get_character_attribute_snapshot() -> Dictionary:
 	## 返回角色面板所需的移速与视野三值结构，保持展示结果和装备实际应用公式一致。
+	## 冷却缩减快照在同一返回字典中额外提供，角色面板可直接显示腿部装备的有效百分比。
 	# 装备实际移速；比例属性换算为速度点数，确保面板不直接显示内部小数比例。
 	var equipment_move_speed: float = _base_move_speed * _equipment_move_speed_ratio
+	# 装备实际冷却缩减；有效腿部装备属性已在刷新时聚合并限制为 0 至 100%，角色基础值固定为 0。
+	var equipment_cooldown_reduction: float = _active_skill_component.call("get_equipment_cooldown_reduction") if _active_skill_component != null and _active_skill_component.has_method("get_equipment_cooldown_reduction") else 0.0
 	return {
 		"move_speed": {
 			"base": _base_move_speed,
@@ -233,6 +236,11 @@ func get_character_attribute_snapshot() -> Dictionary:
 			"base": 1.0,
 			"equipment": _equipment_vision_range_ratio,
 			"total": 1.0 + _equipment_vision_range_ratio
+		},
+		"cooldown_reduction": {
+			"base": 0.0,
+			"equipment": clampf(equipment_cooldown_reduction, 0.0, 1.0),
+			"total": clampf(equipment_cooldown_reduction, 0.0, 1.0)
 		}
 	}
 

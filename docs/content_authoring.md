@@ -40,7 +40,7 @@
 - 武器基础经济与攻击节奏字段统一使用 `value`、`energy_consumption` 和 `cooldown`，分别对应玩家物品价值、单次攻击能耗和攻击冷却；新资源不得继续声明旧 `sell_price`、`energy_cost`、`ranged_cooldown` 或 `melee_cooldown`。
 - 普通武器攻击范围统一填写 `attack_distance`，新资源不得继续声明旧 `bullet_range`。混合武器额外填写 `ranged_attack_distance` 与 `melee_attack_distance`，冲击额外填写 `ranged_impact_force` 与 `melee_impact_force`；伤害继续使用 `ranged_damage` 与 `melee_damage`。三组双通道基础值各自独立，但分别共享唯一的 `attack_distance`、`impact_force`、`damage` 强化累计比例。
 - 武器效果使用显式能力字段。可蓄力武器开启 `has_charge_effect`，并配置最大蓄力时间、蓄力移动倍率、蓄力减伤及满蓄伤害/冲击/坐力增幅；检查器悬停该开关会说明其启用范围。未开启时这些参数不参与输入和结算。蓄力增伤与玩家其他“增伤/造成的伤害提高”比例进入同一加算乘区，蓄力减伤与其他“免伤/受到的伤害降低”比例也进入同一加算乘区。效果只改变攻击参数，不得在资源或效果组件中直接扣除能量与耐久。
-- 散射、穿透、弹射、连击、后坐力和前坐力都使用显式持有开关。弹射填写 `has_bounce + bounce_count`，每点允许弹体在墙体或穿透目标命中后额外弹射一次；未持有穿透的弹体命中敌人仍会消失。后坐力填写 `has_recoil + recoil_force`，前坐力填写 `has_front_recoil + front_recoil_force`；坐力数值单位为单次无碰撞理论位移像素，1 点对应 1 像素。两者互斥，一把武器至多启用其中一种，未启用的坐力数值不显示、不生效且不能强化。
+- 散射、弹射、连击、后坐力和前坐力都使用显式持有开关。远程与混合武器的远程攻击通道默认持有 `has_piercing=true`，但 `piercing_count=0` 表示命中首个目标后销毁；填写正数后才额外穿过对应数量目标。弹射填写 `has_bounce + bounce_count`，每点允许弹体在墙体或穿透目标命中后额外弹射一次。后坐力填写 `has_recoil + recoil_force`，前坐力填写 `has_front_recoil + front_recoil_force`；坐力数值单位为单次无碰撞理论位移像素，1 点对应 1 像素。两者互斥，一把武器至多启用其中一种，未启用的坐力数值不显示、不生效且不能强化。
 - 武器冲击力填写 `impact_force`，单位同样为目标单次无碰撞理论位移像素，1 点对应无韧性目标的 1 像素；命中怪物时先按目标韧性减少理论位移，再使用目标自身的击退衰减换算初速度。
 - 装备资源必须使用 `EquipmentData` 或兼容脚本，`item_kind` 必须为 `equipment`，`equipment_id` 不得为空。
 - 腿部装备可填写 `cooldown_reduction`，使用 0 到 1 小数表示主动技能 CD 缩减比例；默认 0，端口网裤为 0.05。该属性与暴击率、暴击伤害和闪避率同属加算百分点，只有腿部可消费对应强化石；它允许从 0 基础值开始强化，不能用于武器攻击冷却。
@@ -52,7 +52,7 @@
 - 怪物目录中的场景必须能够加载为 `PackedScene`，根节点必须填写非负 `spawn_weight`；`GameWorld` 以全部可用场景的权重占比抽取类型，0 可保留场景但不会自然生成。复制当前的 `res://scenes/enemies/stelle/voidranger_reaver.tscn` 或 `res://scenes/enemies/stelle/voidranger_eliminator.tscn` 可以分别复用近战、远程生成协议，并通过默认 1.0 的 `drop_multiplier` 调整该怪物全部掉落概率；完全不同的根节点或脚本必须自行实现 GameWorld、MonsterSimulationManager 和死亡掉落所需接口，未声明掉落倍率时按 1.0 处理。
 - 近战怪物需要攻击自推进时在根节点填写 `attack_front_recoil_force`；远程怪物需要开火后退时填写 `attack_recoil_force`。两者单位均为无碰撞理论位移像素，默认 0；同一怪物可以同时配置两项，前坐沿攻击方向、后坐沿反方向。死亡模型默认在 `death_animation_duration=0.52` 秒内旋转 `death_animation_rotation_degrees=18` 度并淡出，必须保留 `died` 信号的即时掉落语义。
 - 角色资源必须使用 `CharacterData` 或提供兼容的 `character_id` 与 `to_profile()`；基础属性在进入战斗和训练场切换角色时应用。`passive_skills` 可引用多个 `PassiveSkillData` 兼容资源并全部生效，`active_skills` 按顺序装入当前三个主动槽；旧 `passive` 与 `active` 字符串只作为未迁移档案的详情兜底。技能资源、行为接口、目标组和验证步骤见 `docs/skill_system.md`。
-- 角色 `move_speed` 使用属性点而非直接像素速度，运行时按 `1 点 = 3 像素/秒` 换算；例如填写 `100` 等效旧规则的 `300` 速度，装备移速比例继续作用于属性点。
+- 角色 `move_speed` 使用属性点而非直接像素速度，运行时按 `1 点 = 2 像素/秒` 换算；例如填写 `100` 等效实际速度 `200`，装备移速比例继续作用于属性点。
 - 扩展包资源必须使用 `ContentPackData` 或提供兼容的 `pack_id`、`character_id` 与四类路径查询接口。所属角色必须已经由角色目录注册；空 ID、未知角色、重复扩展包 ID、同角色第二份清单和重复内容归属不会获得额外注册权重。
 - 未列入任何扩展包清单的合法资源属于基础内容并始终可用；列入清单的资源只有在所属角色已解锁时才会由武器、装备、道具和怪物复数查询接口返回。按稳定 ID 进行的单项路径查询仍可恢复玩家已经持有的旧物品。
 
@@ -82,6 +82,6 @@
 - 混合武器分别从远程槽和近战槽验证双攻击、共享强化、一次能耗/坐力与 2 点耐久；可蓄力武器验证按住、取消、最小/满蓄力、减速和减伤清理。
 - 新套装装备必须配置稳定 `EquipmentSetData.set_id` 与玩家可见 `display_name`；背包、仓库、商店和锻造的装备分类会自动发现这些字段并生成多选套装筛选，无需在各面板硬编码套装名称。
 - 限时消耗品验证首次使用、同 ID 刷新、不同 ID 叠加、配置持续时间到期、战斗结束清理和存档堆叠恢复；攻速类额外断言远程、近战与混合武器冷却统一缩短且面板不新增攻速字段。
-- 远程武器验证未持有弹射时维持原销毁逻辑、持有弹射时墙体命中后离墙飞行、无穿透命中敌人后销毁，以及有穿透时命中敌人后消耗一次弹射。
+- 远程武器验证默认 `has_piercing=true` 且 `piercing_count=0` 时命中首个敌人后销毁、正数穿透时可额外命中目标，以及持有弹射时墙体命中后离墙飞行并在穿透目标命中后消耗一次弹射。
 - 怪物验证每个场景根节点 `spawn_weight` 已配置，并以大量抽样确认类型比例随权重变化；四个现有怪物的权重总和为 3300。
 - 无效类型、空 ID 和错误目录资源不会进入对应业务池；重复 ID 必须修改后再验收。

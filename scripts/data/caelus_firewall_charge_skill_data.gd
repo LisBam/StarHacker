@@ -6,6 +6,7 @@ class_name CaelusFirewallChargeSkillData
 ## 冲锋基础持续时间；默认 1 秒，释放时再加本次实际蓄力秒数。
 @export_range(0.01, 30.0, 0.01, "or_greater") var base_charge_duration: float = 1.0
 ## 冲锋额外移速属性；默认 150 点，与角色当前移速属性相加后按 1 点等于 3 像素/秒换算。
+## 当前冲锋移速属性按 1 点等于 2 像素/秒换算；默认 150 点会与释放瞬间的有效角色移速直接相加。
 @export_range(0.0, 3000.0, 1.0, "or_greater") var bonus_move_speed_attribute: float = 150.0
 ## 冲锋期间减伤比例；默认 0.80 表示最终受到伤害降低 80%，与其他来源按剩余伤害连乘。
 @export_range(0.0, 1.0, 0.01) var charge_damage_reduction_ratio: float = 0.80

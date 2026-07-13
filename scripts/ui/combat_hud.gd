@@ -371,6 +371,8 @@ var _settlement_subcategory: String = InventoryQuery.SUBCATEGORY_ALL
 @onready var _infinite_energy_check_button: CheckButton = %InfiniteEnergyCheckButton
 ## 无限血量开关缓存；默认绑定 InfiniteHealthCheckButton，切换后修改玩家属性组件的无限血量状态。
 @onready var _infinite_health_check_button: CheckButton = %InfiniteHealthCheckButton
+## 主动技能无冷却开关缓存；默认绑定 ActiveSkillNoCooldownCheckButton，仅训练场或开发者训练工具中切换当前角色技能组件状态。
+@onready var _active_skill_no_cooldown_check_button: CheckButton = %ActiveSkillNoCooldownCheckButton
 ## 训练场设置返回按钮缓存；默认绑定 TestSettingsBackButton，点击后返回暂停主菜单。
 @onready var _test_settings_back_button: Button = %TestSettingsBackButton
 ## 训练场角色切换面板缓存；默认绑定 CharacterSwitchPanel，只在训练场设置中打开。
@@ -1734,6 +1736,7 @@ func _bind_pause_menu() -> void:
 	_character_switch_back_button.pressed.connect(_on_character_switch_back_button_pressed)
 	_infinite_energy_check_button.toggled.connect(_on_infinite_energy_toggled)
 	_infinite_health_check_button.toggled.connect(_on_infinite_health_toggled)
+	_active_skill_no_cooldown_check_button.toggled.connect(_on_active_skill_no_cooldown_toggled)
 	_test_settings_back_button.pressed.connect(_on_test_settings_back_button_pressed)
 	_pause_master_volume_slider.value_changed.connect(_on_pause_master_volume_slider_value_changed)
 	_build_pause_key_binding_navigation()
@@ -2316,6 +2319,7 @@ func _sync_test_settings_controls() -> void:
 	if _stats_component == null:
 		_infinite_energy_check_button.set_pressed_no_signal(false)
 		_infinite_health_check_button.set_pressed_no_signal(false)
+		_active_skill_no_cooldown_check_button.set_pressed_no_signal(false)
 		return
 
 	# 无限能量状态；取值来自属性组件，默认 false，修改会影响训练场设置开关显示。
@@ -2324,6 +2328,9 @@ func _sync_test_settings_controls() -> void:
 	var infinite_health_enabled: bool = bool(_stats_component.get("infinite_health"))
 	_infinite_energy_check_button.set_pressed_no_signal(infinite_energy_enabled)
 	_infinite_health_check_button.set_pressed_no_signal(infinite_health_enabled)
+	# 主动技能无冷却状态；由独立技能组件维护，角色切换后读取新组件默认状态而不写入永久存档。
+	var active_skill_no_cooldown_enabled: bool = bool(_active_skill_component.call("is_cooldown_disabled")) if _active_skill_component != null and _active_skill_component.has_method("is_cooldown_disabled") else false
+	_active_skill_no_cooldown_check_button.set_pressed_no_signal(active_skill_no_cooldown_enabled)
 
 
 func _sync_pause_master_volume_slider() -> void:
@@ -2580,6 +2587,13 @@ func _set_infinite_health_enabled(enabled: bool) -> void:
 
 	_stats_component.call("set_infinite_health", enabled)
 	_refresh_stats()
+
+
+func _set_active_skill_no_cooldown_enabled(enabled: bool) -> void:
+	## 将训练场主动技能无冷却开关写入当前技能组件；组件缺失时安全忽略，不影响其他训练设置。
+	if _active_skill_component == null or not _active_skill_component.has_method("set_cooldown_disabled"):
+		return
+	_active_skill_component.call("set_cooldown_disabled", enabled)
 
 
 func _switch_training_character(character_id: String) -> void:
@@ -3348,6 +3362,10 @@ func _on_infinite_energy_toggled(enabled: bool) -> void:
 
 func _on_infinite_health_toggled(enabled: bool) -> void:
 	_set_infinite_health_enabled(enabled)
+
+
+func _on_active_skill_no_cooldown_toggled(enabled: bool) -> void:
+	_set_active_skill_no_cooldown_enabled(enabled)
 
 
 func _on_test_settings_back_button_pressed() -> void:

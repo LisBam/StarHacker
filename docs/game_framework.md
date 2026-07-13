@@ -62,6 +62,7 @@
 | `InventoryComponent` | 代理随身背包操作；全局服务缺失时才使用本地回退 |
 | `DamageReceiverComponent` | 统一可受伤目标的伤害接收入口 |
 | `CombatDamageCalculator` | 统一伤害、攻防和暴击计算 |
+| `CombatHudSlotView` | 统一局内主动技能槽与常驻武器槽的纯展示接口，不拥有技能或装备数据，不承担物品卡牌交互 |
 
 `PlayerController` 是组合根，只协调组件、朝向和战斗反馈，不拥有库存、输入解析或攻击公式。新增角色优先替换数据和子组件，避免扩张聚合脚本。
 
@@ -79,6 +80,8 @@
 ### 3.4 UI 层
 
 - `CombatHud` 负责局内信息、暂停、地图、拾取提示、物资撤离和结算编排，不直接拥有库存数据。
+- 战斗常驻 HUD 将技能栏放在屏幕左下角、武器栏放在屏幕右下角，角色名字、生命与能量独立保留在底部中心；常驻 HUD 节点必须位于全部交互遮罩之前，菜单显示时不依赖逐项隐藏也不会覆盖菜单内容。
+- 右下常驻武器栏由 `CombatHud` 直接创建 `CombatHudSlotView` 并读取装备组件快照，顶部使用与技能按键相同的居中区域显示“远程 1 / 远程 2 / 近战”，下方显示武器名、能耗、耐久、当前手持高亮和攻击冷却；它不复用 `WeaponSlotControl` 或 `ItemCardView`，装备、卸下、修复、强化和拖拽操作只存在于背包等交互界面。
 - 主菜单与暂停设置复用 `SaveTransferControl` 提供存档导出、导入和文件选择；控件只调用 `SaveArchiveService`，不直接访问各业务存档。
 - `SharedBackpackPanel` 同时服务主菜单和战斗 HUD；上下文只决定丢弃等少量业务差异。
 - `InventoryQuery` 为仓库、背包、商店、锻造与结算提供无副作用的分类、强化词条筛选、套装筛选、搜索和排序结果；`EquipmentSetFilterControl` 统一维护套装多选 UI，不拥有库存数据。

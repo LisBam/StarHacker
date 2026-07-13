@@ -39,6 +39,8 @@ const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 const PROGRESS_SLIDER_VISUAL_SCRIPT: Script = preload("res://scripts/ui/progress_slider_visual.gd")
 ## 主动技能栏脚本；动态显示三个技能槽的实际按键、名称和冷却，不接管技能输入状态机。
 const ACTIVE_SKILL_BAR_SCRIPT: Script = preload("res://scripts/ui/active_skill_bar.gd")
+## 局内共享槽位视图；左侧技能栏和右侧纯展示武器栏直接复用同一视觉组件。
+const COMBAT_HUD_SLOT_VIEW_SCRIPT: Script = preload("res://scripts/ui/combat_hud_slot_view.gd")
 ## 战斗开发者模式解锁序列；默认六个英文字母，输入错误时按首字母重新开始匹配。
 const DEVELOPER_UNLOCK_SEQUENCE: String = "LISBAM"
 ## 背包全部分页标识；默认显示所有背包武器，修改会影响筛选按钮与背包网格过滤。
@@ -84,10 +86,16 @@ const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
 @export var active_skill_component_path: NodePath = ^"ActiveSkillComponent"
 ## 主动技能栏场景；默认使用独立 active_skill_bar.tscn，使槽位样式参数可在编辑器检查器中统一调整。
 @export var active_skill_bar_scene: PackedScene = preload("res://scenes/ui/active_skill_bar.tscn")
-## 主动技能栏相对底部中心的位置；默认 (-233, -204)，使 466 像素宽技能栏水平居中且位于武器栏上方。
-@export var active_skill_bar_position: Vector2 = Vector2(-233.0, -204.0)
-## 主动技能栏锚定尺寸；默认 466×58 像素，精确容纳三个 150 像素技能槽和两段 8 像素间距。
-@export var active_skill_bar_size: Vector2 = Vector2(466.0, 58.0)
+## 主动技能栏相对屏幕左下角的位置；默认 (18, -82)，保留 18 像素左边距并把紧凑面板放在底边上方。
+@export var active_skill_bar_position: Vector2 = Vector2(18.0, -82.0)
+## 主动技能栏外层面板尺寸；默认 362×64 像素，容纳三个紧凑技能槽、槽间距与统一面板内边距。
+@export var active_skill_bar_size: Vector2 = Vector2(362.0, 64.0)
+## 单个主动技能槽紧凑尺寸；默认 106×50 像素，与外层分区样式合成后保持 362×64 实际面板尺寸。
+@export var active_skill_slot_size: Vector2 = Vector2(106.0, 50.0)
+## 主动技能栏水平内边距；默认 8 像素，与战斗武器面板的紧凑内容留白保持一致。
+@export_range(0, 32, 1) var active_skill_bar_horizontal_margin: int = 8
+## 主动技能栏垂直内边距；默认 5 像素，与战斗武器面板上下留白保持一致。
+@export_range(0, 32, 1) var active_skill_bar_vertical_margin: int = 5
 ## 背包开关输入动作名；默认 toggle_inventory 对应 E 键，运行时通常不修改，改名会影响背包打开/关闭。
 @export var toggle_inventory_action: StringName = &"toggle_inventory"
 ## 暂停输入动作名；默认 pause_game 对应 ESC，运行时通常不修改，改名会影响暂停菜单打开方式。
@@ -102,12 +110,10 @@ const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
 @export var extraction_action: StringName = &"dodge"
 ## 主菜单场景路径；默认返回项目主菜单，必须填写 tscn 资源，运行时通常不修改，改错会导致暂停菜单返回失败。
 @export_file("*.tscn") var main_menu_scene_path: String = "res://scenes/ui/main_menu.tscn"
-## 远程装备槽最小尺寸；默认 80x54 适合底部低遮挡显示，运行时通常不修改，扩展槽数量时可调小。
-## 统一模板补充：当前默认值已固定为 160x72，运行时不应通过该兼容字段改变卡片尺寸。
-@export var ranged_slot_minimum_size: Vector2 = Vector2(160.0, 72.0)
-## 近战装备槽最小尺寸；默认 80x54 与远程槽一致，运行时通常不修改，修改会影响底部装备栏对齐。
-## 统一模板补充：当前默认值已固定为 160x72，运行时不应通过该兼容字段改变卡片尺寸。
-@export var melee_slot_minimum_size: Vector2 = Vector2(160.0, 72.0)
+## 远程装备槽紧凑尺寸；默认 112×54 像素，仅用于右下常驻武器栏，背包和仓库仍使用 160×72 标准卡片。
+@export var ranged_slot_minimum_size: Vector2 = Vector2(112.0, 54.0)
+## 近战装备槽紧凑尺寸；默认 112×54 像素，与右下远程槽保持一致，不影响其他物品界面。
+@export var melee_slot_minimum_size: Vector2 = Vector2(112.0, 54.0)
 ## 背包物品槽最小尺寸；默认 112x72 适合网格展示，运行时通常不修改，修改会影响背包容量视觉密度。
 ## 统一模板补充：当前默认值已固定为 160x72，运行时不应通过该兼容字段改变卡片尺寸。
 @export var inventory_slot_minimum_size: Vector2 = Vector2(160.0, 72.0)
@@ -148,8 +154,10 @@ var _ranged_attack_component: Node
 var _melee_attack_component: Node
 ## 主动技能组件缓存；默认从玩家子节点 ActiveSkillComponent 获取，允许为空但不会显示角色主动技能或冷却。
 var _active_skill_component: Node
-## 主动技能栏缓存；默认运行时创建在武器栏上方，三个技能槽按技能一、二、三顺序显示。
+## 主动技能栏缓存；默认运行时创建在屏幕左下角，三个技能槽按技能一、二、三顺序显示。
 var _active_skill_bar: Control
+## 主动技能栏标准分区面板；默认位于普通 HUD 层并排在所有菜单遮罩之前，避免覆盖背包、暂停或结算界面。
+var _active_skill_bar_panel: PanelContainer
 ## 远程槽控件缓存；元素为 WeaponSlotControl 实例，默认按装备槽数量动态创建，修改会影响 HUD 刷新目标。
 var _ranged_slot_controls: Array = []
 ## 近战槽控件缓存；取值为 WeaponSlotControl 或 null，默认动态创建，修改会影响近战装备显示目标。
@@ -561,16 +569,34 @@ func _bind_player_components() -> void:
 
 
 func _build_active_skill_bar() -> void:
-	## 在底部武器栏上方创建主动技能栏；场景无需复制三个固定槽节点，角色切换后直接刷新同一组件。
+	## 在屏幕左下角的标准 HUD 分区面板中创建主动技能栏；面板始终位于背包、暂停和结算遮罩下方。
 	# 主动技能栏实例；优先实例化检查器场景，缺失时使用脚本兜底以保持隔离场景兼容。
 	var skill_bar: Control = active_skill_bar_scene.instantiate() as Control if active_skill_bar_scene != null else ACTIVE_SKILL_BAR_SCRIPT.new() as Control
 	if skill_bar == null:
 		return
-	skill_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	skill_bar.position = active_skill_bar_position
-	skill_bar.size = active_skill_bar_size
+	skill_bar.set("slot_minimum_size", active_skill_slot_size)
+	# 技能栏外层面板；复用其他 HUD 分区的背景、弱描边和圆角，不再以独立顶置元素悬浮在菜单之上。
+	var skill_panel: PanelContainer = PanelContainer.new()
+	skill_panel.name = "ActiveSkillPanel"
+	skill_panel.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	skill_panel.position = active_skill_bar_position
+	skill_panel.size = active_skill_bar_size
+	skill_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UI_STYLE_GUIDE.apply_section_panel(skill_panel)
+	_root_control.add_child(skill_panel)
+	# 普通 HUD 绘制顺序；插入旧背包占位面板之前，使之后的背包、大地图、暂停和结算遮罩始终覆盖技能栏。
+	if _inventory_panel != null:
+		_root_control.move_child(skill_panel, _inventory_panel.get_index())
+	_active_skill_bar_panel = skill_panel
+	# 技能栏内边距；与武器面板使用相同的紧凑分区结构，内容组件只负责技能槽本身。
+	var skill_margin: MarginContainer = MarginContainer.new()
+	skill_margin.add_theme_constant_override("margin_left", maxi(active_skill_bar_horizontal_margin, 0))
+	skill_margin.add_theme_constant_override("margin_top", maxi(active_skill_bar_vertical_margin, 0))
+	skill_margin.add_theme_constant_override("margin_right", maxi(active_skill_bar_horizontal_margin, 0))
+	skill_margin.add_theme_constant_override("margin_bottom", maxi(active_skill_bar_vertical_margin, 0))
+	skill_panel.add_child(skill_margin)
 	skill_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_root_control.add_child(skill_bar)
+	skill_margin.add_child(skill_bar)
 	_active_skill_bar = skill_bar
 	if _active_skill_bar.has_method("configure"):
 		_active_skill_bar.call("configure", _active_skill_component)
@@ -667,13 +693,13 @@ func _rebuild_equipment_slots() -> void:
 
 	# 远程槽 UI 创建索引；取值为 0 到 slot_count - 1，默认逐槽生成，修改循环范围会影响装备栏显示数量。
 	for slot_index in range(slot_count):
-		# 远程槽控件；取值为 WeaponSlotControl 实例，默认动态创建，修改会影响远程槽显示与拖拽行为。
-		var slot_control: Control = _create_weapon_slot_control(ranged_slot_minimum_size)
+		# 远程槽视图；只显示当前装备快照、选中状态、耐久和冷却，不承载物品卡牌交互。
+		var slot_control: Control = _create_combat_weapon_slot_view(ranged_slot_minimum_size)
 		_ranged_slots_container.add_child(slot_control)
 		_ranged_slot_controls.append(slot_control)
 
-	# 近战槽控件；取值为 WeaponSlotControl 实例，默认单槽创建，修改会影响近战槽显示与拖拽行为。
-	var melee_slot_control: Control = _create_weapon_slot_control(melee_slot_minimum_size)
+	# 近战槽视图；与技能槽和远程槽复用同一纯展示组件，不接收拖拽或点击。
+	var melee_slot_control: Control = _create_combat_weapon_slot_view(melee_slot_minimum_size)
 	_melee_slot_host.add_child(melee_slot_control)
 	_melee_slot_control = melee_slot_control
 
@@ -685,20 +711,42 @@ func _refresh_equipment() -> void:
 	# 当前远程槽索引；取值来自装备组件，默认 0，修改会影响底部远程槽选中高亮。
 	var current_slot: int = int(_equipment_component.call("get_current_ranged_slot"))
 
-	# 远程槽刷新索引；取值为控件数组下标，默认逐个刷新，修改循环范围会影响装备栏文本和拖拽源。
+	# 远程槽刷新索引；取值为控件数组下标，默认逐个刷新纯展示内容与当前手持高亮。
 	for slot_index in range(_ranged_slot_controls.size()):
 		# 当前槽武器资源；取值为 Resource 或 null，默认来自装备组件，修改会影响当前槽显示内容。
 		var ranged_weapon: Resource = _equipment_component.call("get_ranged_weapon", slot_index) as Resource
-		_ranged_slot_controls[slot_index].call("set_slot_data", "equipment", "ranged", slot_index, ranged_weapon, slot_index == current_slot)
-		_ranged_slot_controls[slot_index].call("set_empty_text", "空远程")
-		_ranged_slot_controls[slot_index].call("set_weapon_target_selection_state", _inventory_panel.visible and _pending_combat_stone_resource != null, _can_pending_combat_repair_target(ranged_weapon))
+		_configure_combat_weapon_slot_view(_ranged_slot_controls[slot_index], ranged_slot_minimum_size, "远程 %d" % (slot_index + 1), ranged_weapon, "空武器", slot_index == current_slot)
 
 	if _melee_slot_control != null:
 		# 当前近战武器资源；取值为 Resource 或 null，默认来自装备组件，修改会影响近战槽显示内容。
 		var melee_weapon: Resource = _equipment_component.call("get_melee_weapon") as Resource
-		_melee_slot_control.call("set_slot_data", "equipment", "melee", -1, melee_weapon, true)
-		_melee_slot_control.call("set_empty_text", "空近战")
-		_melee_slot_control.call("set_weapon_target_selection_state", _inventory_panel.visible and _pending_combat_stone_resource != null, _can_pending_combat_repair_target(melee_weapon))
+		_configure_combat_weapon_slot_view(_melee_slot_control, melee_slot_minimum_size, "近战", melee_weapon, "空武器", true)
+
+
+func _create_combat_weapon_slot_view(display_size: Vector2) -> Control:
+	## 创建右下武器栏纯展示槽位；不连接任何拖拽、点击、修复或装备变更请求信号。
+	# 共享槽位视图；与主动技能槽使用相同脚本、背景、边框、圆角和文字结构。
+	var slot_view: Control = COMBAT_HUD_SLOT_VIEW_SCRIPT.new() as Control
+	if slot_view != null:
+		slot_view.custom_minimum_size = display_size
+		slot_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return slot_view
+
+
+func _configure_combat_weapon_slot_view(slot_view: Control, display_size: Vector2, header_text: String, weapon_data: Resource, empty_name: String, selected: bool) -> void:
+	## 把武器快照写入纯展示槽位；顶部标题与技能按键复用同一居中区域，资源为空时仍保留槽位职责。
+	if slot_view == null:
+		return
+	# 武器显示名称；损坏武器追加状态文本，空槽使用调用方占位名称。
+	var display_name: String = empty_name
+	if weapon_data != null:
+		display_name = str(weapon_data.get("display_name"))
+		if weapon_data.has_method("is_broken") and bool(weapon_data.call("is_broken")):
+			display_name += "（损坏）"
+	# 武器能耗；空槽不显示辅助信息，零能耗武器仍明确显示 0。
+	var detail_text: String = "能耗 %d" % roundi(maxf(float(weapon_data.get("energy_consumption")), 0.0)) if weapon_data != null else ""
+	slot_view.call("configure_hud_content", display_size, header_text, display_name, detail_text, weapon_data, 1.0)
+	slot_view.call("set_visual_state", selected and weapon_data != null, false)
 
 
 func _rebuild_inventory_slots() -> void:
@@ -897,7 +945,7 @@ func _refresh_cooldown_overlays() -> void:
 func _create_weapon_slot_control(minimum_size: Vector2) -> Control:
 	# 新建武器槽控件；取值为 WeaponSlotControl 实例，默认由预加载脚本创建，修改会影响所有槽位基础控件。
 	var slot_control: Control = WEAPON_SLOT_CONTROL_SCRIPT.new() as Control
-	# 固定卡片尺寸；保留参数仅兼容既有调用签名，实际尺寸统一由标准模板决定。
+	# 固定卡片尺寸；本接口只服务背包和装备交互区域，继续使用统一标准物品卡片模板。
 	slot_control.custom_minimum_size = ITEM_CARD_VIEW_SCRIPT.get_standard_size()
 	slot_control.connect("drop_received", Callable(self, "_on_weapon_slot_drop_received"))
 	slot_control.connect("drag_released_outside", Callable(self, "_on_weapon_slot_drag_released_outside"))

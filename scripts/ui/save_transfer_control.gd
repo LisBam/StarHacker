@@ -15,9 +15,9 @@ var _export_button: Button
 var _import_button: Button
 ## 操作状态标签；默认隐藏，显示成功、失败和战斗中导出边界提示。
 var _status_label: Label
-## 导出文件对话框；默认允许访问系统文件，保存扩展名为 hqisave 的归档。
+## 导出文件对话框；默认允许访问系统文件，保存扩展名为 lisbamsave 的归档。
 var _export_dialog: FileDialog
-## 导入文件对话框；默认允许访问系统文件，只选择单个 hqisave 归档。
+## 导入文件对话框；默认允许访问系统文件，只选择单个 lisbamsave 归档。
 var _import_dialog: FileDialog
 ## 状态提示剩余时间；取值大于等于 0，默认 0 表示不自动倒计时。
 var _status_time_remaining: float = 0.0
@@ -74,7 +74,7 @@ func _build_controls() -> void:
 	export_dialog.access = FileDialog.ACCESS_FILESYSTEM
 	export_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
 	export_dialog.use_native_dialog = true
-	export_dialog.add_filter("*.hqisave", "崩坏：量子骇袭存档")
+	export_dialog.add_filter("*.lisbamsave", "崩坏：量子骇袭存档")
 	export_dialog.file_selected.connect(_on_export_file_selected)
 	add_child(export_dialog)
 	_export_dialog = export_dialog
@@ -83,7 +83,7 @@ func _build_controls() -> void:
 	import_dialog.access = FileDialog.ACCESS_FILESYSTEM
 	import_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
 	import_dialog.use_native_dialog = true
-	import_dialog.add_filter("*.hqisave", "崩坏：量子骇袭存档")
+	import_dialog.add_filter("*.lisbamsave", "崩坏：量子骇袭存档")
 	import_dialog.file_selected.connect(_on_import_file_selected)
 	add_child(import_dialog)
 	_import_dialog = import_dialog
@@ -94,7 +94,7 @@ func _on_export_button_pressed() -> void:
 		return
 	# 默认文件名；使用本地时间避免连续备份互相覆盖，玩家仍可在系统对话框中修改。
 	var time_data: Dictionary = Time.get_datetime_dict_from_system()
-	_export_dialog.current_file = "HQI_save_%04d%02d%02d_%02d%02d%02d.hqisave" % [int(time_data.year), int(time_data.month), int(time_data.day), int(time_data.hour), int(time_data.minute), int(time_data.second)]
+	_export_dialog.current_file = "HQI_save_%04d%02d%02d_%02d%02d%02d.lisbamsave" % [int(time_data.year), int(time_data.month), int(time_data.day), int(time_data.hour), int(time_data.minute), int(time_data.second)]
 	_export_dialog.popup_centered_ratio(0.72)
 
 

@@ -5,6 +5,8 @@ class_name PlayerController
 ## 具体能力放在独立组件中实现，后续替换角色、武器或控制方式时可以局部替换节点。
 
 signal weapon_durability_changed(weapon_data: Resource)
+## 玩家成功完成一次武器攻击请求后派发实际来源槽；HUD 据此区分混合武器的执行通道冷却与玩家可见槽位冷却。
+signal weapon_attack_succeeded(source_kind: String, source_index: int, weapon_data: Resource)
 ## 玩家实际受到一次未闪避攻击后派发；技能可据此缩短持续时间，但不得从信号回调重复扣除生命或防具耐久。
 signal damage_received(final_damage: float, source: Node)
 ## 玩家固定移速技能来源变化后派发；角色面板据此即时刷新“技能”移速分项，不参与实际移动结算。
@@ -339,6 +341,9 @@ func _execute_weapon_attack(weapon_data: Resource, requested_mode: String, charg
 		melee_succeeded = bool(_melee_attack_component.call("try_attack", _last_aim_direction, weapon_data, attack_modifiers))
 	if not ranged_succeeded and not melee_succeeded:
 		return false
+	# 攻击来源槽索引；远程请求记录当前手持远程槽，近战请求固定为 -1，混合武器不会因同时执行两个通道改变来源归属。
+	var source_slot_index: int = int(_equipment_component.call("get_current_ranged_slot")) if requested_mode == "ranged" and _equipment_component != null and _equipment_component.has_method("get_current_ranged_slot") else -1
+	weapon_attack_succeeded.emit(requested_mode, source_slot_index, weapon_data)
 	if ranged_succeeded:
 		_record_stock_metric("shots", 1.0)
 	_apply_weapon_recoil(weapon_data, _last_aim_direction, recoil_multiplier)

@@ -16,7 +16,7 @@ func apply_successful_extraction_bonus(global_inventory: Node, game_world: Node)
 	## 发放一次成功撤离金币并返回实际增加量；服务或世界接口缺失时安全返回 0。
 	if _skill_data == null or global_inventory == null or game_world == null or not global_inventory.has_method("adjust_coins") or not game_world.has_method("get_world_drop_total_value"):
 		return 0
-	# 地图剩余掉落物总价值；只统计仍处于 item_drops 组的可拾取物，每个地面节点按一件计价。
+	# 地图剩余掉落物总价值；只统计仍处于 item_drops 组的可拾取物，堆叠节点按实际数量计价。
 	var world_drop_total_value: int = maxi(int(game_world.call("get_world_drop_total_value")), 0)
 	# 金币换算比例；最低为 0，扩展包默认 20%，结果按金币整数语义向下取整。
 	var gold_ratio: float = maxf(float(_skill_data.get("world_drop_value_gold_ratio")), 0.0)

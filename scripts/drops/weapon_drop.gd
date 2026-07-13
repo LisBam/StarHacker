@@ -1,13 +1,15 @@
 extends Area2D
 class_name WeaponDrop
 
-## 通用物品掉落物在地图上保存一件武器或资源。
+## 通用物品掉落物在地图上保存一件武器，或保存一组堆叠资源及其数量。
 ## HUD 会扫描 item_drops 组生成附近掉落物列表，玩家点击列表或按 F 后调用 pickup_to_inventory 拾取。
 
 ## 掉落武器资源；默认空表示无效掉落，运行时由 GameWorld 或背包丢弃逻辑写入。
 @export var weapon_data: Resource
 ## 通用掉落物资源；默认空并兼容旧 weapon_data 字段，强化石等非武器物品只写入该字段。
 @export var item_data: Resource
+## 地面掉落数量；武器固定为 1，可堆叠资源取值 1 到 99，运行时由整组丢弃流程写入且拾取后一次性合并回背包。
+@export_range(1, 99, 1) var quantity: int = 1
 ## 可拾取距离；取值建议大于玩家半径，默认 96 像素，HUD 使用该距离判断是否进入附近列表。
 @export_range(1.0, 400.0, 1.0, "or_greater") var pickup_radius: float = 96.0
 ## 掉落物悬浮幅度；取值建议 0 到 12，默认 0 表示地面武器保持静止，修改会影响地面武器轻微浮动表现。
@@ -55,12 +57,16 @@ func _process(delta: float) -> void:
 func configure_drop(new_weapon_data: Resource) -> void:
 	weapon_data = new_weapon_data
 	item_data = new_weapon_data
+	quantity = 1
 	_refresh_visual()
 
 
-func configure_item_drop(new_item_data: Resource) -> void:
+func configure_item_drop(new_item_data: Resource, new_quantity: int = 1) -> void:
 	item_data = new_item_data
 	weapon_data = new_item_data if new_item_data != null and str(new_item_data.get("item_kind")) != "enhancement_stone" else null
+	# 有效地面数量；武器和装备始终是一件，只有可堆叠资源保留传入数量。
+	var is_stackable_item: bool = new_item_data != null and str(new_item_data.get("item_kind")) in ["enhancement_stone", "repair_kit", "consumable"]
+	quantity = clampi(new_quantity, 1, 99) if is_stackable_item else 1
 	_refresh_visual()
 
 
@@ -75,6 +81,11 @@ func get_item_data() -> Resource:
 
 func get_pickup_radius() -> float:
 	return pickup_radius
+
+
+func get_quantity() -> int:
+	## 返回地面节点代表的实际物品数量；附近列表、拾取和结算计价均可通过该只读接口取得一致结果。
+	return clampi(quantity, 1, 99)
 
 
 func play_launch_animation(target_position: Vector2, duration: float, arc_height: float) -> void:
@@ -106,15 +117,16 @@ func get_pickup_display_name() -> String:
 	var current_item_data: Resource = _get_item_data()
 	if current_item_data == null:
 		return "未知物品"
+	# 物品显示名；强化石优先使用增强词条预览，其他类型读取通用 display_name。
+	var display_name: String = ""
 	if str(current_item_data.get("item_kind")) == "enhancement_stone" and current_item_data.has_method("get_pickup_preview_name"):
-		return str(current_item_data.call("get_pickup_preview_name"))
-
-	# 物品显示名；取值来自资源 display_name 字段，默认用于附近掉落物列表和按钮文本。
-	var display_name: String = str(current_item_data.get("display_name"))
+		display_name = str(current_item_data.call("get_pickup_preview_name"))
+	else:
+		display_name = str(current_item_data.get("display_name"))
 	if display_name.is_empty():
 		return "未知物品"
 
-	return display_name
+	return "%s x%d" % [display_name, get_quantity()] if get_quantity() > 1 else display_name
 
 
 func pickup_to_inventory(inventory_component: Node) -> bool:
@@ -123,13 +135,18 @@ func pickup_to_inventory(inventory_component: Node) -> bool:
 	if _launching or current_item_data == null or inventory_component == null or not inventory_component.has_method("add_item"):
 		return false
 
-	if not bool(inventory_component.call("add_item", current_item_data)):
+	# 实际拾取数量；新版组件可一次合并整组资源，旧组件只兼容单件掉落。
+	var pickup_quantity: int = get_quantity()
+	# 拾取是否成功；只有整个地面堆叠都被库存服务接收后才移除掉落节点，失败时数量和节点保持不变。
+	var pickup_succeeded: bool = bool(inventory_component.call("add_item_quantity", current_item_data, pickup_quantity)) if inventory_component.has_method("add_item_quantity") else pickup_quantity == 1 and bool(inventory_component.call("add_item", current_item_data))
+	if not pickup_succeeded:
 		return false
 
 	remove_from_group("item_drops")
 	remove_from_group("weapon_drops")
 	weapon_data = null
 	item_data = null
+	quantity = 1
 	visible = false
 	queue_free()
 	return true

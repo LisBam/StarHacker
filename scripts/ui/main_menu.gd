@@ -205,6 +205,8 @@ func _on_warehouse_button_pressed() -> void:
 		return
 	_settings_panel.visible = false
 	_warehouse_overlay.visible = true
+	if _warehouse_panel != null and _warehouse_panel.has_method("refresh"):
+		_warehouse_panel.call("refresh")
 
 
 func _on_backpack_button_pressed() -> void:
@@ -212,6 +214,8 @@ func _on_backpack_button_pressed() -> void:
 		return
 	_settings_panel.visible = false
 	_backpack_overlay.visible = true
+	if _backpack_panel != null and _backpack_panel.has_method("refresh"):
+		_backpack_panel.call("refresh")
 
 
 func _on_shop_button_pressed() -> void:
@@ -226,6 +230,8 @@ func _on_forge_button_pressed() -> void:
 		return
 	_settings_panel.visible = false
 	_forge_overlay.visible = true
+	if _forge_panel != null and _forge_panel.has_method("refresh"):
+		_forge_panel.call("refresh")
 
 
 func _on_stock_market_button_pressed() -> void:

@@ -124,6 +124,10 @@ var _primary_buttons: Dictionary = {}
 var _subcategory_buttons: Dictionary = {}
 ## 二级分类按钮栏；武器、装备和资源显示各自子分类。
 var _subcategory_bar: HBoxContainer
+## 库存刷新是否已排队；默认 false，同一帧连续收到库存与装备信号时只在帧末重建一次可见面板。
+var _refresh_queued: bool = false
+## 隐藏期间库存是否发生变化；默认 false，隐藏面板不创建物品卡片，下一次宿主打开面板时通过公开刷新入口同步最新状态。
+var _refresh_pending: bool = false
 
 
 func _ready() -> void:
@@ -152,6 +156,8 @@ func configure_runtime_character_components(stats_component: Node, equipment_com
 
 func refresh() -> void:
 	## 公开刷新入口；宿主在打开面板或上下文数据批量变化后调用，不需要了解组件内部控件结构。
+	_refresh_queued = false
+	_refresh_pending = false
 	_refresh_all()
 
 
@@ -351,10 +357,36 @@ func _connect_inventory_signals() -> void:
 		return
 	for signal_name in ["inventory_changed", "equipment_changed"]:
 		if _global_inventory.has_signal(signal_name):
-			_global_inventory.connect(signal_name, Callable(self, "_refresh_all"))
+			_global_inventory.connect(signal_name, Callable(self, "_on_inventory_state_changed"))
+
+
+func _on_inventory_state_changed() -> void:
+	## 合并库存变化刷新；隐藏面板只记录脏状态，避免拾取或其他界面操作时在后台销毁并重建完整背包。
+	if not is_visible_in_tree():
+		_refresh_pending = true
+		return
+	if _refresh_queued:
+		return
+	_refresh_queued = true
+	call_deferred("_flush_queued_refresh")
+
+
+func _flush_queued_refresh() -> void:
+	## 执行已经合并的可见刷新；公开 refresh() 若已同步过界面会清除排队标识，使本回调安全跳过重复重建。
+	if not _refresh_queued:
+		return
+	_refresh_queued = false
+	if not is_visible_in_tree():
+		_refresh_pending = true
+		return
+	_refresh_pending = false
+	_refresh_all()
 
 
 func _refresh_all() -> void:
+	# 任意即时刷新都会接管同帧已排队任务；延迟回调随后检测到标识已清除并跳过，避免一次操作重复重建。
+	_refresh_queued = false
+	_refresh_pending = false
 	_rebuild_equipment()
 	_rebuild_items()
 	if _character_stats_panel != null:

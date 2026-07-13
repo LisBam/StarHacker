@@ -112,6 +112,10 @@ var _forging_in_progress: bool = false
 var _animation_ghosts: Array[Control] = []
 ## 动画起始偏移；元素为牺牲品中心相对主物品中心的位置，用于旋转并收拢。
 var _animation_start_offsets: Array[Vector2] = []
+## 库存刷新是否已排队；默认 false，同一帧多个所有权信号只触发一次锻造候选列表重建。
+var _refresh_queued: bool = false
+## 隐藏期间锻造库存是否发生变化；默认 false，面板关闭时不维护不可见候选卡片，重新打开后统一校验。
+var _refresh_pending: bool = false
 
 
 func _ready() -> void:
@@ -130,6 +134,14 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if is_visible_in_tree() and event.is_action_pressed("ui_cancel") and not _forging_in_progress:
 		closed.emit()
 		get_viewport().set_input_as_handled()
+
+
+func refresh() -> void:
+	## 公开同步入口；主菜单打开锻造时调用，并在刷新前校验已放入槽位的资源所有权。
+	_refresh_queued = false
+	_refresh_pending = false
+	_validate_selected_entries()
+	_refresh_all()
 
 
 func _initialize_sacrifice_entries() -> void:
@@ -429,6 +441,9 @@ func _connect_inventory_signals() -> void:
 
 
 func _refresh_all() -> void:
+	# 任意即时刷新都会接管同帧已排队任务；延迟回调随后安全跳过，避免锻造操作与库存信号重复重建候选列表。
+	_refresh_queued = false
+	_refresh_pending = false
 	_refresh_slots()
 	_rebuild_inventory_items()
 	_refresh_preview()
@@ -950,6 +965,25 @@ func _refresh_stone_attribute_filter_display() -> void:
 func _on_inventory_state_changed() -> void:
 	if _forging_in_progress:
 		return
+	# 隐藏面板不维护候选卡片；只记录脏状态，避免背包或仓库操作触发完整锻造列表后台重建。
+	if not is_visible_in_tree():
+		_refresh_pending = true
+		return
+	if _refresh_queued:
+		return
+	_refresh_queued = true
+	call_deferred("_flush_queued_inventory_refresh")
+
+
+func _flush_queued_inventory_refresh() -> void:
+	## 执行合并后的锻造库存刷新；先移除失效槽位引用，再按当前来源和筛选重建一次列表。
+	if not _refresh_queued:
+		return
+	_refresh_queued = false
+	if not is_visible_in_tree():
+		_refresh_pending = true
+		return
+	_refresh_pending = false
 	# 失效槽位清理；库存外部变化后只移除已不在原来源的引用，不改变仍有效的玩家布局。
 	_validate_selected_entries()
 	_refresh_all()

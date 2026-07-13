@@ -172,6 +172,8 @@ var _inventory_equipment_melee_control: Control
 var _inventory_armor_slot_buttons: Dictionary = {}
 ## 最近触发冷却的远程槽索引；取值为 -1 或有效远程槽，默认 -1 表示无远程冷却显示目标，修改会影响远程 CD 遮罩位置。
 var _last_cooling_ranged_slot: int = -1
+## 当前玩家可见武器冷却来源；取值为空、ranged 或 melee，默认空字符串表示不显示任何槽位冷却。
+var _weapon_cooldown_display_source: String = ""
 ## 背包当前二级筛选页；取值为 all、武器类型、装备部位或资源类型，默认 all。
 var _inventory_filter: String = INVENTORY_FILTER_ALL
 ## 背包当前主分类；取值为 all、weapons、equipment 或 resources，默认全部并决定二级按钮内容。
@@ -539,6 +541,8 @@ func _bind_player_components() -> void:
 		return
 	if _player.has_signal("weapon_durability_changed"):
 		_player.connect("weapon_durability_changed", Callable(self, "_on_weapon_durability_changed"))
+	if _player.has_signal("weapon_attack_succeeded"):
+		_player.connect("weapon_attack_succeeded", Callable(self, "_on_weapon_attack_succeeded"))
 
 	_stats_component = _player.get_node_or_null("StatsComponent")
 	_equipment_component = _player.get_node_or_null("EquipmentComponent")
@@ -562,8 +566,6 @@ func _bind_player_components() -> void:
 	if _inventory_component != null:
 		_inventory_component.connect("inventory_changed", Callable(self, "_on_inventory_changed"))
 
-	if _ranged_attack_component != null:
-		_ranged_attack_component.connect("fired", Callable(self, "_on_ranged_weapon_fired"))
 	if _active_skill_component != null and _active_skill_component.has_signal("skill_loadout_changed"):
 		_active_skill_component.connect("skill_loadout_changed", Callable(self, "_on_active_skill_loadout_changed"))
 
@@ -927,19 +929,22 @@ func _refresh_cooldown_overlays() -> void:
 	var weapon_cooldown_duration: float = _get_component_cooldown_duration(_ranged_attack_component)
 	if weapon_cooldown_duration <= cooldown_overlay_minimum_duration:
 		weapon_cooldown_ratio = 0.0
-	if weapon_cooldown_ratio <= 0.0:
+	if weapon_cooldown_ratio <= 0.0 and _weapon_cooldown_display_source == "ranged":
 		_last_cooling_ranged_slot = -1
+		_weapon_cooldown_display_source = ""
 
 	# 远程槽冷却刷新索引；取值为控件数组下标，默认逐槽清理或设置遮罩，修改循环范围会影响 CD 显示目标。
 	for slot_index in range(_ranged_slot_controls.size()):
 		# 当前远程槽遮罩比例；取值为 0 到 1，默认只给最近开火槽显示，修改会影响远程 CD 归属。
-		var slot_cooldown_ratio: float = weapon_cooldown_ratio if slot_index == _last_cooling_ranged_slot else 0.0
+		var slot_cooldown_ratio: float = weapon_cooldown_ratio if _weapon_cooldown_display_source == "ranged" and slot_index == _last_cooling_ranged_slot else 0.0
 		_ranged_slot_controls[slot_index].call("set_cooldown_ratio", slot_cooldown_ratio)
 
 	if _melee_slot_control != null:
 		# 近战冷却比例；取值为 0 到 1，默认从近战攻击组件读取，修改会影响近战槽白色 CD 遮罩。
 		var melee_slot_cooldown_ratio: float = _get_component_cooldown_ratio(_melee_attack_component)
-		_melee_slot_control.call("set_cooldown_ratio", melee_slot_cooldown_ratio)
+		if melee_slot_cooldown_ratio <= 0.0 and _weapon_cooldown_display_source == "melee":
+			_weapon_cooldown_display_source = ""
+		_melee_slot_control.call("set_cooldown_ratio", melee_slot_cooldown_ratio if _weapon_cooldown_display_source == "melee" else 0.0)
 
 
 func _create_weapon_slot_control(minimum_size: Vector2) -> Control:
@@ -2717,6 +2722,16 @@ func _on_ranged_weapon_fired(_projectile: Node2D) -> void:
 		return
 
 	_last_cooling_ranged_slot = int(_equipment_component.call("get_current_ranged_slot"))
+
+
+func _on_weapon_attack_succeeded(source_kind: String, source_index: int, _weapon_data: Resource) -> void:
+	## 记录玩家实际发动攻击的装备槽；混合武器同时运行两个攻击组件时仍只把冷却显示在来源槽。
+	if source_kind == "ranged":
+		_weapon_cooldown_display_source = "ranged"
+		_last_cooling_ranged_slot = source_index
+	elif source_kind == "melee":
+		_weapon_cooldown_display_source = "melee"
+		_last_cooling_ranged_slot = -1
 
 
 func _on_player_died() -> void:

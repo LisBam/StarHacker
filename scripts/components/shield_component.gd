@@ -50,6 +50,19 @@ func add_shield(amount: float, expand_maximum: bool = false) -> float:
 	return maxf(current_shield - previous_shield, 0.0)
 
 
+func remove_shield(amount: float, reduce_maximum: bool = false) -> float:
+	## 移除护盾并返回实际移除量；限时护盾到期时可同时降低上限，已被伤害消耗的部分不会重复扣除。
+	if amount <= 0.0:
+		return 0.0
+	var previous_shield: float = current_shield
+	set_shield(current_shield - amount)
+	var removed_shield: float = maxf(previous_shield - current_shield, 0.0)
+	if reduce_maximum:
+		max_shield = maxf(max_shield - amount, current_shield)
+		shield_changed.emit(current_shield, max_shield)
+	return removed_shield
+
+
 func absorb_damage(amount: float) -> float:
 	## 使用当前护盾吸收伤害并返回仍需由生命值承担的剩余伤害；护盾不足时允许同一次伤害溢出。
 	if amount <= 0.0 or current_shield <= 0.0:

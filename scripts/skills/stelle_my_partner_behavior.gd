@@ -7,6 +7,8 @@ extends Node
 const ATTACK_SPEED_SOURCE_ID: String = "stelle_my_partner_boost"
 ## 银河全垒打标记元数据键；与银河全垒打行为共享，值为 true 表示目标已被标记。
 const GRAND_SLAM_MARK_META: StringName = &"stelle_grand_slam_marked"
+## 银河全垒打标记到期时间元数据键；超过该毫秒时间戳后旧标记不再触发冷却缩减。
+const GRAND_SLAM_MARK_EXPIRES_META: StringName = &"stelle_grand_slam_mark_expires_msec"
 
 ## 当前施法者；默认 null，由主动技能组件注入，作为迷迷的跟随主人和召唤坐标来源。
 var _caster: Node2D
@@ -81,7 +83,7 @@ func _restore_and_boost_existing_unit() -> void:
 
 func _on_summoned_unit_damage_dealt(target: Node, _damage: float) -> void:
 	## 只有命中仍带有银河全垒打标记的目标时，才减少“我的伙伴”当前剩余冷却。
-	if not is_instance_valid(target) or not bool(target.get_meta(GRAND_SLAM_MARK_META, false)):
+	if not is_instance_valid(target) or not bool(target.get_meta(GRAND_SLAM_MARK_META, false)) or Time.get_ticks_msec() >= int(target.get_meta(GRAND_SLAM_MARK_EXPIRES_META, 0)):
 		return
 	if _active_skill_component != null and _active_skill_component.has_method("reduce_cooldown_remaining") and _slot_index >= 0:
 		_active_skill_component.call("reduce_cooldown_remaining", _slot_index, maxf(float(_skill_data.get("marked_target_cooldown_reduction")), 0.0))

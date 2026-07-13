@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="SilverWolfWarmupCompleteSkillData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/silver_wolf_warmup_complete_skill_data.gd" id="1_data"]
+[ext_resource type="Script" path="res://scripts/skills/silver_wolf_warmup_complete_behavior.gd" id="2_behavior"]
+
+[resource]
+script = ExtResource("1_data")
+skill_id = "silver_wolf_warmup_complete"
+display_name = "热身结束"
+description = "当你一局内累计造成与受到999点伤害后，解锁此技能。暂停游戏并再次触发【我的主场！】，本次额外提供99点可分配属性。分配结束后继续游戏，立即刷新所有技能，且下次释放【幻影现实】与【二倍速】不会触发负面效果。"
+behavior_script = ExtResource("2_behavior")
+targeting_mode = 2
+cooldown_duration = 0.0
+energy_cost = 0.0
+cast_range = 1.0
+target_group = &"skill_targets"
+can_charge = false
+unlock_damage_total = 999.0
+additional_attribute_points = 99

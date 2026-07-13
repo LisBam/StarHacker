@@ -1,8 +1,11 @@
-[gd_resource type="Resource" script_class="CharacterData" load_steps=4 format=3]
+[gd_resource type="Resource" script_class="CharacterData" load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://scripts/data/character_data.gd" id="1_character"]
 [ext_resource type="Resource" path="res://data/skills/caelus/scavenging.tres" id="2_scavenging"]
 [ext_resource type="Resource" path="res://data/skills/caelus/firewall_charge.tres" id="3_firewall_charge"]
+[ext_resource type="Resource" path="res://data/skills/caelus/good_work_reward.tres" id="4_good_work_reward"]
+[ext_resource type="Resource" path="res://data/skills/caelus/immortal_amber.tres" id="5_immortal_amber"]
+[ext_resource type="Resource" path="res://data/skills/caelus/stardust_ace.tres" id="6_stardust_ace"]
 
 [resource]
 script = ExtResource("1_character")
@@ -17,7 +20,7 @@ move_speed = 90.0
 attack_power = 90.0
 defense_power = 120.0
 energy_regeneration = 15.0
-passive = "拾荒：成功撤离时，获得地图上掉落物总价值20%的金币。"
-active = "炎墙，冲锋！：长按进行蓄力，朝指定方向持续冲锋持续1s，冲锋期间不可操控角色，且受到的伤害降低80%，期间撞击敌人造成10（+20%防御力）点威力的伤害并朝两侧击退敌人。至多蓄力2秒并延长等量时间的冲锋时长。冲锋期间撞击墙体会提前结束冲锋。"
-passive_skills = Array[Resource]([ExtResource("2_scavenging")])
-active_skills = Array[Resource]([ExtResource("3_firewall_charge")])
+passive = "拾荒：成功撤离时，获得地图上掉落物总价值20%的金币。\n\n好活当赏：6秒内累计受到6次伤害且未使用武器时获得护盾。"
+active = "炎墙，冲锋！：冲锋撞击造成10（+5%防御力）点威力。\n\n不灭的琥珀：为自己和周围友方提供限时护盾。\n\n星尘王牌：护盾转化为防御力，并可在武器攻击时消耗为附加伤害。"
+passive_skills = Array[Resource]([ExtResource("2_scavenging"), ExtResource("4_good_work_reward")])
+active_skills = Array[Resource]([ExtResource("3_firewall_charge"), ExtResource("5_immortal_amber"), ExtResource("6_stardust_ace")])

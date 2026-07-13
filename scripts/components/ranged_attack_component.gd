@@ -183,6 +183,8 @@ func _fire_round(direction: Vector2, weapon_data: Resource) -> bool:
 			projectile.call("set_bounce_count", int(weapon_data.get_meta("active_bounce_count", 0)))
 		if projectile.has_method("configure_combat_attributes"):
 			projectile.call("configure_combat_attributes", _get_owner_attack_power(), clampf(_get_weapon_float(weapon_data, "critical_chance", 0.0) + _get_stats_float("get_equipment_critical_chance", 0.0), 0.0, EnhancementRules.CRITICAL_CHANCE_MAXIMUM), _get_weapon_float(weapon_data, "critical_damage", 1.5) + _get_stats_float("get_equipment_critical_damage", 0.0))
+		if projectile.has_method("set_damage_instigator"):
+			projectile.call("set_damage_instigator", owner)
 		projectile.global_position = spawn_position
 		projectile.global_rotation = resolved_direction.angle()
 		var projectile_parent: Node = _resolve_projectile_parent()

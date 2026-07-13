@@ -5,7 +5,7 @@
 [ext_resource type="Resource" path="res://data/skills/stelle/presence.tres" id="3_presence"]
 [ext_resource type="Resource" path="res://data/skills/stelle/galactic_grand_slam.tres" id="4_galactic_grand_slam"]
 [ext_resource type="Resource" path="res://data/skills/stelle/my_partner.tres" id="5_my_partner"]
-[ext_resource type="Resource" path="res://data/skills/stelle/stardust_ace.tres" id="6_stardust_ace"]
+[ext_resource type="Resource" path="res://data/skills/stelle/coordinated_dance_light.tres" id="6_coordinated_dance_light"]
 [ext_resource type="Resource" path="res://data/derived_units/stelle/mimi.tres" id="7_mimi"]
 
 [resource]
@@ -22,7 +22,7 @@ attack_power = 100.0
 defense_power = 100.0
 energy_regeneration = 15.0
 passive = "开拓！：游戏开始时，地图上标记一个距离你最远的宝箱。\n\n开拓！！：视野范围内每有一个其他单位或宝箱，你的攻击力与防御力便提高2%，至多以此法提高20%。"
-active = "银河全垒打：长按进行蓄力，朝指定方向挥出强力一击造成10（+10%攻击力）点威力的伤害，造成150冲击力的击退并标记所有击中的目标。至多蓄力3秒提升80%的伤害与击退效果。\n\n我的伙伴：召唤迷迷，重复释放会治疗并强化迷迷。\n\n星尘王牌：在限时状态内为武器和银河全垒打追加伤害。"
+active = "银河全垒打：长按进行蓄力，朝指定方向挥出强力一击造成10（+10%攻击力）点威力的伤害，造成150冲击力的击退并标记所有击中的目标持续10s。至多蓄力3秒提升80%的伤害与击退效果。\n\n我的伙伴：召唤迷迷，重复释放会治疗并强化迷迷。\n\n同协舞灯：使玩家与周围友方造成伤害时按各自生命上限治疗自身。"
 passive_skills = Array[Resource]([ExtResource("2_farthest_chest"), ExtResource("3_presence")])
-active_skills = Array[Resource]([ExtResource("4_galactic_grand_slam"), ExtResource("5_my_partner"), ExtResource("6_stardust_ace")])
+active_skills = Array[Resource]([ExtResource("4_galactic_grand_slam"), ExtResource("5_my_partner"), ExtResource("6_coordinated_dance_light")])
 derived_units = Array[Resource]([ExtResource("7_mimi")])

@@ -39,6 +39,8 @@ var _was_hit: bool = false
 var _energy_spent_during_effect: float = 0.0
 ## 二倍速头顶状态节点；默认 null，效果开始时创建并在任何结束路径回收，独立于短时飘字生命周期。
 var _overhead_status_text: Node2D
+## 本次释放是否免除全部受击负面效果；默认 false，热身结束只对下一次完整二倍速状态生效。
+var _ignore_hit_penalties_this_activation: bool = false
 
 
 func _ready() -> void:
@@ -66,6 +68,9 @@ func execute(context: Dictionary) -> bool:
 	_effect_strength = 1.0
 	_was_hit = false
 	_energy_spent_during_effect = 0.0
+	_ignore_hit_penalties_this_activation = bool(_caster.get_meta("silver_wolf_ignore_double_speed_penalty_once", false))
+	if _ignore_hit_penalties_this_activation:
+		_caster.set_meta("silver_wolf_ignore_double_speed_penalty_once", false)
 	if _active_skill_component != null and _active_skill_component.has_method("set_cooldown_paused_source") and _slot_index >= 0:
 		_active_skill_component.call("set_cooldown_paused_source", _slot_index, COOLDOWN_PAUSE_SOURCE_ID, true)
 	_apply_current_strength()
@@ -86,6 +91,8 @@ func _process(delta: float) -> void:
 func _on_damage_received(_final_damage: float, _source: Node) -> void:
 	## 实际受击缩短当前持续时间并线性降低两个增益；技能未激活时忽略信号。
 	if _remaining_duration <= 0.0 or _skill_data == null:
+		return
+	if _ignore_hit_penalties_this_activation:
 		return
 	_was_hit = true
 	_remaining_duration = maxf(_remaining_duration - maxf(float(_skill_data.get("duration_loss_per_hit")), 0.0), 0.0)
@@ -114,6 +121,7 @@ func _finish_effect(allow_no_hit_reward: bool) -> void:
 	if _remaining_duration <= 0.0 and not is_processing():
 		return
 	_remaining_duration = 0.0
+	_ignore_hit_penalties_this_activation = false
 	set_process(false)
 	_clear_overhead_status_text()
 	if _active_skill_component != null and _active_skill_component.has_method("set_cooldown_paused_source") and _slot_index >= 0:

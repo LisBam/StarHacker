@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="CaelusImmortalAmberSkillData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/caelus_immortal_amber_skill_data.gd" id="1_data"]
+[ext_resource type="Script" path="res://scripts/skills/caelus_immortal_amber_behavior.gd" id="2_behavior"]
+
+[resource]
+script = ExtResource("1_data")
+skill_id = "caelus_immortal_amber"
+display_name = "不灭的琥珀"
+description = "可在【炎枪，冲锋！】的冲锋期间使用。你获得10（+5%防御力）点护盾持续10s。若周围存在其他友方单位，则额外使周围的所有其他友方单位获得5（+2.5%防御力）的护盾。"
+behavior_script = ExtResource("2_behavior")
+targeting_mode = 2
+cooldown_duration = 20.0
+energy_cost = 20.0
+cast_range = 1.0
+target_group = &"skill_targets"
+can_charge = false
+self_base_shield = 10.0
+self_defense_ratio = 0.05
+ally_base_shield = 5.0
+ally_defense_ratio = 0.025
+shield_duration = 10.0
+ally_radius = 300.0

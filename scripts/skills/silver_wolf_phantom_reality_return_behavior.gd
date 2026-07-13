@@ -42,5 +42,8 @@ func execute(context: Dictionary) -> bool:
 		_stats_component.call("set_health", float(chain_state.get("recorded_health", 0.0)))
 	# 致命自动触发；本次整套技能最终冷却按 1+99% 结算，普通手动二段保持 1 倍。
 	if bool(context.get("triggered_by_lethal_damage", false)) and _active_skill_component != null and _active_skill_component.has_method("set_completion_cooldown_multiplier"):
-		_active_skill_component.call("set_completion_cooldown_multiplier", int(context.get("slot_index", -1)), 1.0 + maxf(float(_skill_data.get("lethal_cooldown_extension_ratio")), 0.0))
+		if is_instance_valid(_caster) and bool(_caster.get_meta("silver_wolf_ignore_phantom_penalty_once", false)):
+			_caster.set_meta("silver_wolf_ignore_phantom_penalty_once", false)
+		else:
+			_active_skill_component.call("set_completion_cooldown_multiplier", int(context.get("slot_index", -1)), 1.0 + maxf(float(_skill_data.get("lethal_cooldown_extension_ratio")), 0.0))
 	return true

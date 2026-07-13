@@ -220,6 +220,11 @@ func get_knockback_direction() -> Vector2:
 	return _current_attack_direction
 
 
+func get_damage_instigator() -> Node:
+	## 返回本次伤害的实际发起单位；敌人受伤改索敌时锁定玩家而不是近战命中框组件。
+	return owner
+
+
 func get_attack_power() -> float:
 	return _current_attack_power
 

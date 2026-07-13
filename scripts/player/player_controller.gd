@@ -7,6 +7,8 @@ class_name PlayerController
 signal weapon_durability_changed(weapon_data: Resource)
 ## 玩家成功完成一次武器攻击请求后派发输入对应的装备来源槽；混合副通道不会作为独立 HUD 冷却来源重复派发。
 signal weapon_attack_succeeded(source_kind: String, source_index: int, weapon_data: Resource)
+## 玩家完成全部资格检查、即将创建本次武器攻击时派发；状态技能可在命中窗口生成前消费护盾并准备附加效果。
+signal weapon_attack_committing(source_kind: String, source_index: int, weapon_data: Resource)
 ## 玩家实际受到一次未闪避攻击后派发；技能可据此缩短持续时间，但不得从信号回调重复扣除生命或防具耐久。
 signal damage_received(final_damage: float, source: Node)
 ## 玩家固定移速技能来源变化后派发；角色面板据此即时刷新“技能”移速分项，不参与实际移动结算。
@@ -151,6 +153,11 @@ var _is_sprinting: bool = false
 @onready var _aim_pivot: Node2D = get_node(aim_pivot_path) as Node2D
 ## 战斗相机节点缓存；默认按 camera_path 获取，允许为空，缺失时只跳过屏幕震动不影响移动和攻击。
 @onready var _camera: Node = get_node_or_null(camera_path)
+
+
+func _enter_tree() -> void:
+	## 注册玩家为敌人最高优先级战斗目标；稳定节点组避免敌人按场景节点名硬编码查找玩家。
+	add_to_group(&"player_combat_target")
 
 
 func _physics_process(delta: float) -> void:
@@ -401,6 +408,8 @@ func _execute_weapon_attack(weapon_data: Resource, requested_mode: String, charg
 		return false
 	if requested_mode not in [ATTACK_MODE_RANGED, ATTACK_MODE_MELEE]:
 		return false
+	var committing_source_slot_index: int = int(_equipment_component.call("get_current_ranged_slot")) if requested_mode == ATTACK_MODE_RANGED and _equipment_component != null and _equipment_component.has_method("get_current_ranged_slot") else -1
+	weapon_attack_committing.emit(requested_mode, committing_source_slot_index, weapon_data)
 	if is_hybrid_weapon:
 		# 混合攻击主组件；使用输入所属装备槽的主组件，使该武器后续使用仍由来源槽冷却限制。
 		var primary_attack_component: Node = _ranged_attack_component if requested_mode == ATTACK_MODE_RANGED else _melee_attack_component
@@ -1084,3 +1093,14 @@ func apply_character_base_attribute_allocation(attributes: Dictionary) -> bool:
 	if _equipment_component != null and _equipment_component.has_method("configure_base_move_speed"):
 		_equipment_component.call("configure_base_move_speed", float(attributes.get("move_speed")))
 	return true
+
+
+func get_current_attribute_allocation_snapshot() -> Dictionary:
+	## 返回五维分配弹窗使用的当前属性快照；热身结束以这些值为下限并额外提供 99 点。
+	return {
+		"max_health": float(_stats_component.get("max_health")) if _stats_component != null else 0.0,
+		"max_energy": float(_stats_component.get("max_energy")) if _stats_component != null else 0.0,
+		"attack_power": float(_stats_component.get("attack_power")) if _stats_component != null else 0.0,
+		"defense_power": float(_stats_component.get("defense_power")) if _stats_component != null else 0.0,
+		"move_speed": float(_movement_component.call("get_max_speed")) if _movement_component != null and _movement_component.has_method("get_max_speed") else 0.0,
+	}

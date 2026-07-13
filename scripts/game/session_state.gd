@@ -18,8 +18,8 @@ const CHARACTER_CAEULUS: String = "caelus"
 const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 ## 角色解锁存档路径；保存全部已解锁角色，默认角色也会写入以兼容未来默认解锁配置调整。
 const CHARACTER_UNLOCK_SAVE_PATH: String = "user://character_unlocks.json"
-## 角色解锁存档版本；版本 1 保存稳定角色 ID 数组，未来迁移必须保留已解锁状态。
-const CHARACTER_UNLOCK_SAVE_VERSION: int = 1
+## 角色解锁存档版本；版本 2 额外保存上次确认的角色 ID，未来迁移必须保留已解锁状态与有效角色选择。
+const CHARACTER_UNLOCK_SAVE_VERSION: int = 2
 
 ## 当前游戏模式；取值为 hack 或 training，默认 hack 保证直接进游戏时不会打开训练场设置。
 var game_mode: String = MODE_HACK
@@ -31,12 +31,13 @@ var _unlocked_character_ids: Array[String] = []
 
 func _ready() -> void:
 	_initialize_character_unlocks()
-	selected_character_id = normalize_character_id(selected_character_id)
+	_load_selected_character()
 
 
 func configure(next_game_mode: String, next_character_id: String) -> void:
 	game_mode = normalize_game_mode(next_game_mode)
 	selected_character_id = normalize_character_id(next_character_id)
+	_save_character_unlocks()
 
 
 func set_game_mode(next_game_mode: String) -> void:
@@ -45,6 +46,7 @@ func set_game_mode(next_game_mode: String) -> void:
 
 func set_selected_character(next_character_id: String) -> void:
 	selected_character_id = normalize_character_id(next_character_id)
+	_save_character_unlocks()
 
 
 func unlock_character(character_id: String) -> bool:
@@ -284,6 +286,26 @@ func _load_character_unlocks() -> void:
 			_unlocked_character_ids.append(character_id)
 
 
+func _load_selected_character() -> void:
+	## 从角色存档恢复上次确认的角色；旧版本或无效、已锁定角色会安全回退到当前默认角色。
+	# 角色存档文件；缺失或打开失败时保留变量定义的星角色默认值。
+	if not FileAccess.file_exists(CHARACTER_UNLOCK_SAVE_PATH):
+		selected_character_id = normalize_character_id(selected_character_id)
+		return
+	var save_file: FileAccess = FileAccess.open(CHARACTER_UNLOCK_SAVE_PATH, FileAccess.READ)
+	if save_file == null:
+		selected_character_id = normalize_character_id(selected_character_id)
+		return
+	# 存档结构；只有字典才可能包含新增的 selected_character_id 字段。
+	var parsed_data: Variant = JSON.parse_string(save_file.get_as_text())
+	if not parsed_data is Dictionary:
+		selected_character_id = normalize_character_id(selected_character_id)
+		return
+	# 已保存角色标识；统一走现有规范化入口，确保角色在后续内容调整后不会变成无效选择。
+	var saved_character_id: String = str((parsed_data as Dictionary).get("selected_character_id", selected_character_id))
+	selected_character_id = normalize_character_id(saved_character_id)
+
+
 func _save_character_unlocks() -> void:
 	## 保存全部已解锁角色稳定 ID；默认角色一并写入可简化未来默认值调整后的向后兼容。
 	# 解锁存档文件；打开失败时保留内存状态，不中断本次角色解锁流程。
@@ -294,6 +316,7 @@ func _save_character_unlocks() -> void:
 	var save_data: Dictionary = {
 		"version": CHARACTER_UNLOCK_SAVE_VERSION,
 		"unlocked_character_ids": _unlocked_character_ids.duplicate(),
+		"selected_character_id": selected_character_id,
 	}
 	save_file.store_string(JSON.stringify(save_data))
 

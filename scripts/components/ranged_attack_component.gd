@@ -95,6 +95,8 @@ func try_attack(direction: Vector2, weapon_data: Resource = null, attack_modifie
 	var selected_combo_count: int = maxi(roundi(_get_weapon_float(weapon_data, "combo_count", 1.0)), 1) if _weapon_has_attribute(weapon_data, "has_combo") else 1
 	# 本次穿透次数；表示每颗弹体在首个目标之后还能额外穿过的目标数量。
 	var selected_piercing_count: int = maxi(roundi(_get_weapon_float(weapon_data, "piercing_count", 0.0)), 0) if _weapon_has_attribute(weapon_data, "has_piercing") else 0
+	# 本次弹射次数；表示每颗弹体在墙体或可穿透目标命中后最多还能改变方向的次数。
+	var selected_bounce_count: int = maxi(roundi(_get_weapon_float(weapon_data, "bounce_count", 0.0)), 0) if _weapon_has_attribute(weapon_data, "has_bounce") else 0
 
 	if selected_projectile_scene == null or _cooldown_remaining > 0.0 or _combo_rounds_remaining > 0 or direction.is_zero_approx():
 		return false
@@ -102,6 +104,7 @@ func try_attack(direction: Vector2, weapon_data: Resource = null, attack_modifie
 	weapon_data.set_meta("active_scatter_count", selected_scatter_count)
 	weapon_data.set_meta("active_has_scatter", _weapon_has_attribute(weapon_data, "has_scatter"))
 	weapon_data.set_meta("active_piercing_count", selected_piercing_count)
+	weapon_data.set_meta("active_bounce_count", selected_bounce_count)
 	weapon_data.set_meta("active_projectile_scene", selected_projectile_scene)
 	weapon_data.set_meta("active_projectile_speed", selected_projectile_speed)
 	weapon_data.set_meta("active_attack_distance", selected_attack_distance)
@@ -158,6 +161,8 @@ func _fire_round(direction: Vector2, weapon_data: Resource) -> bool:
 			projectile.call("set_impact_force", float(weapon_data.get_meta("active_impact_force", 0.0)))
 		if projectile.has_method("set_piercing_count"):
 			projectile.call("set_piercing_count", int(weapon_data.get_meta("active_piercing_count", 0)))
+		if projectile.has_method("set_bounce_count"):
+			projectile.call("set_bounce_count", int(weapon_data.get_meta("active_bounce_count", 0)))
 		if projectile.has_method("configure_combat_attributes"):
 			projectile.call("configure_combat_attributes", _get_owner_attack_power(), clampf(_get_weapon_float(weapon_data, "critical_chance", 0.0) + _get_stats_float("get_equipment_critical_chance", 0.0), 0.0, EnhancementRules.CRITICAL_CHANCE_MAXIMUM), _get_weapon_float(weapon_data, "critical_damage", 1.5) + _get_stats_float("get_equipment_critical_damage", 0.0))
 		projectile.global_position = spawn_position

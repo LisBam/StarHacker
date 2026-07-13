@@ -592,7 +592,9 @@ func _build_shared_backpack_panel() -> void:
 	if shared_panel == null:
 		return
 	shared_panel.configure_context(SharedBackpackPanel.CONTEXT_COMBAT)
-	shared_panel.configure_runtime_character_components(_stats_component, _equipment_component)
+	# 临时增益组件；交给共享背包处理消耗品使用，避免 HUD 与共享面板各自维护一套扣除规则。
+	var temporary_buff_component: Node = _player.get_node_or_null("TemporaryBuffComponent") if _player != null else null
+	shared_panel.configure_runtime_character_components(_stats_component, _equipment_component, temporary_buff_component)
 	shared_panel.anchor_left = 0.5
 	shared_panel.anchor_top = 0.5
 	shared_panel.anchor_right = 0.5

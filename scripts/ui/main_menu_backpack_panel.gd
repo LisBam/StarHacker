@@ -46,6 +46,8 @@ const ACTION_DISCARD_PARTIAL: int = 5
 const ACTION_UNEQUIP: int = 6
 ## 使用修复包操作编号；点击后进入背包与装备栏耐久目标选择状态。
 const ACTION_USE_REPAIR_KIT: int = 7
+## 使用消耗品操作编号；仅战斗背包显示，成功施加临时效果后扣除一个对应道具。
+const ACTION_USE_CONSUMABLE: int = 8
 
 ## 面板最小尺寸；与战斗背包接近，确保左侧七个装备槽和右侧物品网格可读。
 @export var panel_minimum_size: Vector2 = Vector2(960.0, 620.0)
@@ -68,6 +70,8 @@ var _equipment_tab_button: Button
 var _runtime_stats_component: Node
 ## 战斗装备组件；默认空表示主菜单上下文，由 CombatHud 在加入场景树前注入。
 var _runtime_equipment_component: Node
+## 战斗临时增益组件；默认空表示主菜单没有玩家实体，战斗背包用它安全应用能量饮料与可乐效果。
+var _runtime_temporary_buff_component: Node
 ## 右侧背包物品网格；按真实背包顺序显示全部物品。
 var _item_grid: HFlowContainer
 ## 背包拖放区域；接收装备拖到右侧空白处的卸下操作和背包内部排序。
@@ -137,10 +141,11 @@ func configure_context(context_mode: String) -> void:
 	_context_mode = context_mode if context_mode in [CONTEXT_MAIN_MENU, CONTEXT_COMBAT] else CONTEXT_MAIN_MENU
 
 
-func configure_runtime_character_components(stats_component: Node, equipment_component: Node) -> void:
-	## 注入战斗中的实时角色组件；主菜单不调用并自动读取角色档案与全局装备。
+func configure_runtime_character_components(stats_component: Node, equipment_component: Node, temporary_buff_component: Node = null) -> void:
+	## 注入战斗中的实时角色组件；主菜单不调用并自动读取角色档案与全局装备，临时增益组件只在战斗背包使用消耗品时读取。
 	_runtime_stats_component = stats_component
 	_runtime_equipment_component = equipment_component
+	_runtime_temporary_buff_component = temporary_buff_component
 	if _character_stats_panel != null:
 		_character_stats_panel.configure_runtime_components(_runtime_stats_component, _runtime_equipment_component)
 
@@ -533,6 +538,8 @@ func _on_item_pressed(item_resource: Resource) -> void:
 		_action_popup.add_action("装备2", ACTION_EQUIP_RANGED_TWO)
 	elif str(item_resource.get("item_kind")) == "repair_kit":
 		_action_popup.add_action("使用", ACTION_USE_REPAIR_KIT)
+	elif _context_mode == CONTEXT_COMBAT and str(item_resource.get("item_kind")) == "consumable":
+		_action_popup.add_action("使用", ACTION_USE_CONSUMABLE)
 	if _action_quantity > 1:
 		_action_popup.add_action("全部丢弃", ACTION_DISCARD_ALL, false, true)
 		_action_popup.add_action("部分丢弃", ACTION_DISCARD_PARTIAL, false, true)
@@ -565,6 +572,11 @@ func _on_action_pressed(action_id: int) -> void:
 		_pending_repair_kit_location = "backpack"
 		_cancel_use_button.visible = true
 		_status_label.text = "正在使用 %s：请选择或拖到未满耐久的武器/装备" % str(_action_resource.get("display_name"))
+		_refresh_all()
+	elif action_id == ACTION_USE_CONSUMABLE and _context_mode == CONTEXT_COMBAT and str(_action_resource.get("item_kind")) == "consumable":
+		# 临时增益组件；先成功写入或刷新效果，再从真实背包扣除一个，避免配置无效导致道具丢失。
+		if _runtime_temporary_buff_component != null and _runtime_temporary_buff_component.has_method("apply_consumable") and bool(_runtime_temporary_buff_component.call("apply_consumable", _action_resource)) and bool(_global_inventory.call("consume_storage_resource_quantity", _action_resource, "backpack", 1)):
+			_status_label.text = "已使用 %s" % str(_action_resource.get("display_name"))
 		_refresh_all()
 
 

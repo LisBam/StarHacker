@@ -342,6 +342,8 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 			_append_weapon_stat_line(detail_lines, item_resource, "scatter_count", 0)
 		if bool(item_resource.get("has_piercing")):
 			_append_weapon_stat_line(detail_lines, item_resource, "piercing_count", 0)
+		if bool(item_resource.get("has_bounce")):
+			_append_weapon_stat_line(detail_lines, item_resource, "bounce_count", 0)
 		if bool(item_resource.get("has_combo")):
 			_append_weapon_stat_line(detail_lines, item_resource, "combo_count", 0)
 	if weapon_type in ["melee", "hybrid"]:

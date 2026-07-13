@@ -52,6 +52,10 @@ const FIXED_DURABILITY_COST_PER_USE: float = 1.0
 @export var has_piercing: bool = false
 ## 每颗弹体可额外穿过的目标数量；默认 0 表示命中首个目标后销毁，只有 has_piercing 为 true 时参与战斗与强化结算。
 @export_range(0, 100, 1, "or_greater") var piercing_count: int = 0
+## 是否具有弹射属性；默认 false，只有显式启用的远程武器才能在碰撞后改变弹道并接受弹射强化。
+@export var has_bounce: bool = false
+## 每颗弹体最多可执行的弹射次数；默认 0 表示不弹射，只有 has_bounce 为 true 时参与战斗、展示与强化结算。
+@export_range(0, 100, 1, "or_greater") var bounce_count: int = 0
 ## 是否具有连击属性；默认 false，只有显式启用的远程武器才能连续发射多轮并接受连击强化。
 @export var has_combo: bool = false
 ## 一次攻击连续执行的射击轮数；默认 1 表示只发射一轮，完整连击结束后才进入武器冷却。
@@ -119,7 +123,7 @@ const MINIMUM_DURATION_VALUE: float = 0.01
 ## 可应用于所有武器的统一强化属性；新增通用战斗字段时应同步详情格式化器。
 const COMMON_ENHANCEMENT_STATS: Array[String] = ["damage", "cooldown", "energy_consumption", "attack_distance", "recoil_force", "front_recoil_force", "impact_force", "critical_chance", "critical_damage", "max_durability"]
 ## 远程武器专属强化属性；只允许远程武器消费包含这些字段的强化石效果。
-const RANGED_ENHANCEMENT_STATS: Array[String] = ["projectile_speed", "deviation_degrees", "scatter_count", "piercing_count", "combo_count"]
+const RANGED_ENHANCEMENT_STATS: Array[String] = ["projectile_speed", "deviation_degrees", "scatter_count", "piercing_count", "bounce_count", "combo_count"]
 ## 近战武器专属强化属性；只允许近战武器消费包含这些字段的强化石效果。
 const MELEE_ENHANCEMENT_STATS: Array[String] = ["melee_active_duration"]
 
@@ -349,6 +353,8 @@ func _is_stat_supported(stat_name: String) -> bool:
 			return has_scatter
 		if canonical_stat_name == "piercing_count":
 			return has_piercing
+		if canonical_stat_name == "bounce_count":
+			return has_bounce
 		if canonical_stat_name == "combo_count":
 			return has_combo
 		if canonical_stat_name in RANGED_ENHANCEMENT_STATS:

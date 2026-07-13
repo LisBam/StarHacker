@@ -90,13 +90,14 @@ const ADDITIVE_POINT_STATS: Dictionary = {
 const ADDITIVE_VALUE_STATS: Dictionary = {
 	"scatter_count": CALCULATION_ADDITIVE_VALUE,
 	"piercing_count": CALCULATION_ADDITIVE_VALUE,
+	"bounce_count": CALCULATION_ADDITIVE_VALUE,
 	"combo_count": CALCULATION_ADDITIVE_VALUE,
 	"energy_regeneration": CALCULATION_ADDITIVE_VALUE,
 }
 ## 稀有属性相对常规属性的刷新权重；0.2 表示单项权重为常规属性的五分之一。
 const RARE_STAT_RELATIVE_WEIGHT: float = 0.20
 ## 稀有属性目录；强化石、商店历史强化和其他复用随机生成器的系统统一读取该集合。
-const RARE_STAT_KEYS: Array[String] = ["scatter_count", "piercing_count", "combo_count", "move_speed", "vision_range", "energy_regeneration"]
+const RARE_STAT_KEYS: Array[String] = ["scatter_count", "piercing_count", "bounce_count", "combo_count", "move_speed", "vision_range", "energy_regeneration"]
 ## 加算数值属性独立幅度；能量恢复严格使用品质区间，武器离散计数每次固定改变 1。
 const ADDITIVE_VALUE_MAGNITUDE_RANGES: Dictionary = {
 	"scatter_count": {
@@ -111,6 +112,12 @@ const ADDITIVE_VALUE_MAGNITUDE_RANGES: Dictionary = {
 		QUALITY_HIGH: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 1.0, "detrimental_max": 1.0},
 		QUALITY_SUPREME: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
+	"bounce_count": {
+		QUALITY_LOW: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 1.0, "detrimental_max": 1.0},
+		QUALITY_MEDIUM: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 1.0, "detrimental_max": 1.0},
+		QUALITY_HIGH: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 1.0, "detrimental_max": 1.0},
+		QUALITY_SUPREME: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 0.0, "detrimental_max": 0.0},
+	},
 	"combo_count": {
 		QUALITY_LOW: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 1.0, "detrimental_max": 1.0},
 		QUALITY_MEDIUM: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 1.0, "detrimental_max": 1.0},
@@ -118,9 +125,9 @@ const ADDITIVE_VALUE_MAGNITUDE_RANGES: Dictionary = {
 		QUALITY_SUPREME: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
 	"energy_regeneration": {
-		QUALITY_LOW: {"beneficial_min": 1.0, "beneficial_max": 2.0, "detrimental_min": 1.0, "detrimental_max": 2.0},
-		QUALITY_MEDIUM: {"beneficial_min": 2.0, "beneficial_max": 4.0, "detrimental_min": 2.0, "detrimental_max": 4.0},
-		QUALITY_HIGH: {"beneficial_min": 3.0, "beneficial_max": 5.0, "detrimental_min": 3.0, "detrimental_max": 5.0},
+		QUALITY_LOW: {"beneficial_min": 1.0, "beneficial_max": 2.0, "detrimental_min": 2.0, "detrimental_max": 4.0},
+		QUALITY_MEDIUM: {"beneficial_min": 2.0, "beneficial_max": 4.0, "detrimental_min": 1.0, "detrimental_max": 4.0},
+		QUALITY_HIGH: {"beneficial_min": 3.0, "beneficial_max": 5.0, "detrimental_min": 1.0, "detrimental_max": 3.0},
 		QUALITY_SUPREME: {"beneficial_min": 4.0, "beneficial_max": 6.0, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
 }
@@ -148,21 +155,21 @@ const MULTIPLICATIVE_MAGNITUDE_RANGES: Dictionary = {
 ## 加算属性独立幅度；数值仍以 0 到 1 小数保存，0.005 表示直接增加 0.5 个百分点。
 const ADDITIVE_POINT_MAGNITUDE_RANGES: Dictionary = {
 	"critical_chance": {
-		QUALITY_LOW: {"beneficial_min": 0.005, "beneficial_max": 0.020, "detrimental_min": 0.005, "detrimental_max": 0.020},
-		QUALITY_MEDIUM: {"beneficial_min": 0.015, "beneficial_max": 0.035, "detrimental_min": 0.015, "detrimental_max": 0.035},
-		QUALITY_HIGH: {"beneficial_min": 0.025, "beneficial_max": 0.050, "detrimental_min": 0.025, "detrimental_max": 0.050},
+		QUALITY_LOW: {"beneficial_min": 0.005, "beneficial_max": 0.020, "detrimental_min": 0.010, "detrimental_max": 0.030},
+		QUALITY_MEDIUM: {"beneficial_min": 0.015, "beneficial_max": 0.035, "detrimental_min": 0.010, "detrimental_max": 0.020},
+		QUALITY_HIGH: {"beneficial_min": 0.025, "beneficial_max": 0.050, "detrimental_min": 0.005, "detrimental_max": 0.015},
 		QUALITY_SUPREME: {"beneficial_min": 0.040, "beneficial_max": 0.070, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
 	"critical_damage": {
-		QUALITY_LOW: {"beneficial_min": 0.010, "beneficial_max": 0.030, "detrimental_min": 0.010, "detrimental_max": 0.030},
-		QUALITY_MEDIUM: {"beneficial_min": 0.025, "beneficial_max": 0.050, "detrimental_min": 0.025, "detrimental_max": 0.050},
-		QUALITY_HIGH: {"beneficial_min": 0.040, "beneficial_max": 0.070, "detrimental_min": 0.040, "detrimental_max": 0.070},
+		QUALITY_LOW: {"beneficial_min": 0.010, "beneficial_max": 0.030, "detrimental_min": 0.015, "detrimental_max": 0.040},
+		QUALITY_MEDIUM: {"beneficial_min": 0.025, "beneficial_max": 0.050, "detrimental_min": 0.010, "detrimental_max": 0.030},
+		QUALITY_HIGH: {"beneficial_min": 0.040, "beneficial_max": 0.070, "detrimental_min": 0.005, "detrimental_max": 0.020},
 		QUALITY_SUPREME: {"beneficial_min": 0.055, "beneficial_max": 0.090, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
 	"dodge_chance": {
-		QUALITY_LOW: {"beneficial_min": 0.003, "beneficial_max": 0.015, "detrimental_min": 0.003, "detrimental_max": 0.015},
-		QUALITY_MEDIUM: {"beneficial_min": 0.010, "beneficial_max": 0.025, "detrimental_min": 0.010, "detrimental_max": 0.025},
-		QUALITY_HIGH: {"beneficial_min": 0.018, "beneficial_max": 0.035, "detrimental_min": 0.018, "detrimental_max": 0.035},
+		QUALITY_LOW: {"beneficial_min": 0.003, "beneficial_max": 0.015, "detrimental_min": 0.015, "detrimental_max": 0.035},
+		QUALITY_MEDIUM: {"beneficial_min": 0.010, "beneficial_max": 0.025, "detrimental_min": 0.010, "detrimental_max": 0.030},
+		QUALITY_HIGH: {"beneficial_min": 0.018, "beneficial_max": 0.035, "detrimental_min": 0.005, "detrimental_max": 0.020},
 		QUALITY_SUPREME: {"beneficial_min": 0.025, "beneficial_max": 0.050, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
 }
@@ -202,11 +209,12 @@ const STAT_KEYS: Array[String] = [
 	"vision_range",
 	"scatter_count",
 	"piercing_count",
+	"bounce_count",
 	"combo_count",
 	"energy_regeneration",
 ]
 ## 武器强化石属性池；只包含武器能够应用的属性。
-const WEAPON_STAT_KEYS: Array[String] = ["damage", "cooldown", "energy_consumption", "attack_distance", "projectile_speed", "deviation_degrees", "recoil_force", "front_recoil_force", "impact_force", "melee_active_duration", "critical_chance", "critical_damage", "max_durability", "scatter_count", "piercing_count", "combo_count"]
+const WEAPON_STAT_KEYS: Array[String] = ["damage", "cooldown", "energy_consumption", "attack_distance", "projectile_speed", "deviation_degrees", "recoil_force", "front_recoil_force", "impact_force", "melee_active_duration", "critical_chance", "critical_damage", "max_durability", "scatter_count", "piercing_count", "bounce_count", "combo_count"]
 ## 装备强化石属性池；移速仅脚部可应用，视野仅头部可应用。
 const EQUIPMENT_STAT_KEYS: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance", "move_speed", "vision_range", "energy_regeneration"]
 ## 属性中文名称；键为统一属性名，值用于强化石、搜索、筛选和武器详情。
@@ -233,6 +241,7 @@ const STAT_LABELS: Dictionary = {
 	"vision_range": "视野",
 	"scatter_count": "散射",
 	"piercing_count": "穿透",
+	"bounce_count": "弹射",
 	"combo_count": "连击",
 	"energy_regeneration": "能量恢复",
 }
@@ -260,6 +269,7 @@ const BENEFICIAL_DIRECTIONS: Dictionary = {
 	"vision_range": 1,
 	"scatter_count": 1,
 	"piercing_count": 1,
+	"bounce_count": 1,
 	"combo_count": 1,
 	"energy_regeneration": 1,
 }
@@ -355,7 +365,7 @@ static func calculate_effective_stat(base_value: float, stat_name: String, accum
 		return calculated_value
 	if stat_name in ["cooldown", "melee_active_duration"]:
 		return maxf(calculated_value, MINIMUM_DURATION_VALUE)
-	if stat_name in ["scatter_count", "combo_count"]:
+	if stat_name in ["scatter_count", "bounce_count", "combo_count"]:
 		return maxf(roundf(calculated_value), 1.0)
 	if stat_name == "piercing_count":
 		return maxf(roundf(calculated_value), 0.0)

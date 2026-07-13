@@ -7,7 +7,7 @@
 | 入口 | 实现 | 职责 |
 | --- | --- | --- |
 | 主菜单 | `res://scenes/ui/main_menu.tscn`、`res://scripts/ui/main_menu.gd` | 项目主场景；打开角色、背包、仓库、商店、锻造、股市、矿场及模式入口 |
-| 角色选择 | `res://scenes/ui/character_select.tscn`、`res://scripts/ui/character_select.gd` | 展示自动发现的角色档案；确认后只更新当前角色并返回主菜单 |
+| 角色选择 | `res://scenes/ui/character_select.tscn`、`res://scripts/ui/character_select.gd` | 展示自动发现的角色档案；确认后持久化当前角色并返回主菜单，下次启动默认选中该角色 |
 | 战斗世界 | `res://scenes/game/game_world.tscn`、`res://scripts/game/game_world.gd` | 承载玩家、地图、环境、敌人人口、宝箱、掉落与撤离流程 |
 | 玩家预制体 | `res://scenes/characters/player.tscn`、`res://scripts/player/player_controller.gd` | 组合输入、移动、战斗属性、装备和攻击组件 |
 
@@ -20,7 +20,7 @@
 | 服务 | 核心职责 | 持久化 |
 | --- | --- | --- |
 | `ContentCatalog` | 启动时扫描角色、武器、装备、道具、怪物和扩展包清单，按角色解锁状态过滤内容池 | 无 |
-| `SessionState` | 保存当前游戏模式、已确认角色与永久角色/扩展包解锁状态 | `user://character_unlocks.json`；模式和当前选择仅运行期 |
+| `SessionState` | 保存当前游戏模式、已确认角色与永久角色/扩展包解锁状态 | `user://character_unlocks.json`；角色选择和解锁永久保存，模式仅运行期 |
 | `InputBindings` | 管理默认与自定义输入映射 | `user://input_bindings.cfg` |
 | `DebugSettings` | 管理开发者调试选项 | `user://debug_settings.cfg` |
 | `GlobalInventory` | 拥有金币、仓库、随身背包、装备槽、持仓和战斗结算数据 | `user://global_inventory.json` |
@@ -54,7 +54,7 @@
 | `TemporaryBuffComponent` | 管理消耗品限时效果、同 ID 刷新和到期属性清理 |
 | `TopDownMovementComponent` | 合成输入速度与外部击退并执行角色物理移动 |
 | `CombatStatsComponent` | 维护生命、能量、攻防、恢复和死亡状态 |
-| `RangedAttackComponent` | 校验攻击条件、为普通或散射攻击构造弹体偏移并处理连击与弹体生成 |
+| `RangedAttackComponent` | 校验攻击条件、为普通或散射攻击构造弹体偏移，并把穿透、弹射、连击参数传入弹体 |
 | `MeleeAttackComponent` | 管理近战命中框、命中去重、冲击和敌方弹体清除 |
 | `EquipmentComponent` | 代理装备槽并聚合有效战斗属性 |
 | `EquipmentSetComponent` | 按套装稳定 ID 统计未损坏穿戴件、汇总档位属性并结算世界特殊效果 |
@@ -68,7 +68,7 @@
 
 ### 3.3 世界与敌人层
 
-- `GameWorld` 负责地图边界、独立背景网格绘制、环境生成、探索记录、撤离点、宝箱、掉落池、虚拟人口目标和共享导航缓存；背景网格间距不参与玩法边界或导航计算。
+- `GameWorld` 负责地图边界、独立背景网格绘制、环境生成、探索记录、撤离点、宝箱、掉落池、虚拟人口目标和共享导航缓存；怪物类型按各场景根节点的 `spawn_weight` 占比抽取，背景网格间距不参与玩法边界或导航计算。
 - `MonsterSimulationManager` 只负责虚拟敌人记录与真实节点之间的分批物化和休眠。
 - `BasicMonster` 组合感知、战术和移动组件；`RangedMonster` 只增加安全距离与射击行为。
 - `WeaponDrop` 是统一地面物品载体，可承载武器、装备、强化石和道具的独立资源副本。
@@ -151,7 +151,7 @@ ContentCatalog 模板
 ## 5. 存档边界
 
 - 每个服务只写入自己拥有的文件；跨服务交易先完成业务校验，再分别持久化相关资产。
-- `SessionState` 只把已解锁角色稳定 ID 写入 `user://character_unlocks.json`；角色档案中的 `unlocked_by_default` 每次启动都会补入，旧存档不能回锁默认角色。
+- `SessionState` 把已解锁角色稳定 ID 与最后确认的 `selected_character_id` 写入 `user://character_unlocks.json`；角色档案中的 `unlocked_by_default` 每次启动都会补入，旧存档不能回锁默认角色，无效或已锁定的旧角色选择会回退为星。
 - 资源实例同时保存稳定 ID、资源路径和运行时字段，以支持内容重命名与旧记录恢复。
 - 存档版本常量与迁移代码位于对应服务脚本。文档只保留仍会被读取的迁移规则，不维护已经失效的历史流水账。
 - 普通高频变化可合并写入；货币兑换、股票成交等跨资产操作应立即保存，缩短文件间状态不一致窗口。

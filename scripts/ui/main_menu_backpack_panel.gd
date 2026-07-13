@@ -419,28 +419,54 @@ func _add_equipment_slot(slot_label: String, location: String, accepted_type: St
 
 
 func _rebuild_items() -> void:
-	_clear_container(_item_grid)
 	if _global_inventory == null:
 		return
 	var entries: Array = _global_inventory.call("get_backpack_entries")
 	_equipment_set_filter_control.configure_entries(entries)
 	# 可见条目；统一查询器保留每项原始 source_index，排序和筛选后拖拽仍操作正确背包记录。
 	var visible_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(entries, _primary_category, _subcategory, _search_edit.text, _stone_attribute_filter, _sort_mode, _equipment_set_filter_control.get_selected_set_ids())
-	for entry in visible_entries:
+	# 现有卡片表；键为资源实例编号，值为可复用背包卡片，空状态文本和异常节点不参与复用。
+	var existing_controls: Dictionary = {}
+	for child in _item_grid.get_children():
+		if child == null or child.is_queued_for_deletion() or not child.has_method("get_item_resource"):
+			continue
+		# 现有卡片资源；实例身份用于区分同名武器和相同模板的独立物品。
+		var existing_resource: Resource = child.call("get_item_resource") as Resource
+		if existing_resource != null:
+			existing_controls[existing_resource.get_instance_id()] = child
+	# 本轮保留控件集合；用于移除筛选后不可见、已装备或已丢弃物品对应的旧卡片。
+	var retained_control_ids: Dictionary = {}
+	for visible_index in range(visible_entries.size()):
+		# 当前可见条目；包含真实来源下标、资源、数量和排序元数据。
+		var entry: Dictionary = visible_entries[visible_index]
+		# 真实来源下标；筛选和排序只改变显示顺序，拖拽仍必须写回全局背包中的原记录位置。
 		var entry_index: int = int(entry.get("source_index", -1))
+		# 条目资源；实例身份用于复用卡片并区分同名或同模板的独立物品。
 		var item_resource: Resource = entry.get("resource") as Resource
 		if item_resource == null:
 			continue
-		var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
-		item_control.call("configure", item_resource, "backpack", entry_index, false, "", int(entry.get("quantity", 1)))
-		item_control.call("set_weapon_slot_visual_style", true)
-		item_control.connect("item_action_requested", Callable(self, "_on_item_pressed"))
-		item_control.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
-		item_control.connect("repair_kit_drop_requested", Callable(self, "_on_repair_kit_drop_requested"))
+		# 复用背包卡片；普通移动只更新真实下标，新物品或重新进入筛选结果时才创建节点并连接信号。
+		var item_control: Button = existing_controls.get(item_resource.get_instance_id()) as Button
+		if item_control == null:
+			item_control = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
+			item_control.call("configure", item_resource, "backpack", entry_index, false, "", int(entry.get("quantity", 1)))
+			item_control.call("set_weapon_slot_visual_style", true)
+			item_control.connect("item_action_requested", Callable(self, "_on_item_pressed"))
+			item_control.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
+			item_control.connect("repair_kit_drop_requested", Callable(self, "_on_repair_kit_drop_requested"))
+			_item_grid.add_child(item_control)
+		else:
+			item_control.call("update_storage_context", item_resource, "backpack", entry_index, false, "", int(entry.get("quantity", 1)))
 		# 修复目标选择；背包武器与装备使用和左侧装备栏相同的可选与灰显规则。
 		var is_durable_item: bool = str(item_resource.get("weapon_type")) in ["ranged", "melee", "hybrid"] or str(item_resource.get("item_kind")) == "equipment"
 		item_control.call("set_weapon_target_selection_state", _pending_repair_kit_resource != null and is_durable_item, _can_repair_target(item_resource))
-		_item_grid.add_child(item_control)
+		retained_control_ids[item_control.get_instance_id()] = true
+		_item_grid.move_child(item_control, mini(visible_index, _item_grid.get_child_count() - 1))
+	# 过期卡片与旧空状态；从布局中立即移除，释放动作延后到安全时机执行。
+	for child in _item_grid.get_children():
+		if child != null and not retained_control_ids.has(child.get_instance_id()):
+			_item_grid.remove_child(child)
+			child.queue_free()
 	if visible_entries.is_empty():
 		var empty_label: Label = Label.new()
 		empty_label.text = "当前分类与筛选没有物品"

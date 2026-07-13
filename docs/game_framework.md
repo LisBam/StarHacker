@@ -79,7 +79,7 @@
 
 - `CombatHud` 负责局内信息、暂停、地图、拾取提示、物资撤离和结算编排，不直接拥有库存数据。
 - `SharedBackpackPanel` 同时服务主菜单和战斗 HUD；上下文只决定丢弃等少量业务差异。
-- `InventoryQuery` 为仓库、背包、商店、锻造与结算提供无副作用的分类、筛选、搜索和排序结果。
+- `InventoryQuery` 为仓库、背包、商店、锻造与结算提供无副作用的分类、强化词条筛选、套装筛选、搜索和排序结果；`EquipmentSetFilterControl` 统一维护套装多选 UI，不拥有库存数据。
 - `ItemCardView`、`WeaponDurabilityBar` 和 `ItemDetailFormatter` 统一物品展示，宿主只提供操作协议。
 - `CommonConfirmationDialog`、`SellQuantityDialog`、`SecuritiesTransferDialog`、`EnhancementResultDialog` 和 `ItemActionPopup` 分别承载明确的弹窗交互。
 - `UiStyleGuide`、`DialogOuterFrame` 和 `ProgressSliderVisual` 统一窗口、弹窗和滑条视觉，规则见 `docs/ui_style.md`。

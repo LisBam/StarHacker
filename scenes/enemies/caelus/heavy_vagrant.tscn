@@ -1,0 +1,50 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/enemies/basic_monster.gd" id="1_monster"]
+[ext_resource type="Script" path="res://scripts/components/enemy_perception_component.gd" id="2_perception"]
+[ext_resource type="Script" path="res://scripts/components/enemy_movement_component.gd" id="3_movement"]
+[ext_resource type="Script" path="res://scripts/components/enemy_tactical_component.gd" id="4_tactical"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_body"]
+radius = 24.0
+
+[node name="HeavyVagrant" type="CharacterBody2D"]
+collision_layer = 2
+collision_mask = 16
+script = ExtResource("1_monster")
+display_name = "重甲流浪者"
+max_health = 60.0
+current_health = 60.0
+drop_multiplier = 1.0
+attack_damage = 15.0
+attack_power = 80.0
+defense_power = 300.0
+move_speed = 80.0
+toughness = 0.0
+vision_range = 500.0
+attack_range = 45.0
+attack_cooldown = 0.8
+
+[node name="Body" type="Polygon2D" parent="."]
+color = Color(0.25, 0.42, 0.3, 1)
+polygon = PackedVector2Array(0, -31, 24, -12, 22, 20, 0, 31, -22, 20, -24, -12)
+
+[node name="Armor" type="Polygon2D" parent="."]
+color = Color(0.48, 0.56, 0.5, 1)
+polygon = PackedVector2Array(0, -20, 17, -7, 14, 15, 0, 22, -14, 15, -17, -7)
+
+[node name="Core" type="Polygon2D" parent="."]
+color = Color(0.96, 0.78, 0.36, 1)
+polygon = PackedVector2Array(0, -9, 8, 0, 0, 9, -8, 0)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_body")
+
+[node name="EnemyPerceptionComponent" type="Node" parent="."]
+script = ExtResource("2_perception")
+
+[node name="EnemyMovementComponent" type="Node" parent="."]
+script = ExtResource("3_movement")
+
+[node name="EnemyTacticalComponent" type="Node" parent="."]
+script = ExtResource("4_tactical")

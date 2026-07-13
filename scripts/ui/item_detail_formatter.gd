@@ -347,14 +347,14 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 	if weapon_type in ["melee", "hybrid"]:
 		_append_weapon_stat_line(detail_lines, item_resource, "melee_active_duration", 2, " 秒")
 	if bool(item_resource.get("has_recoil")):
-		_append_weapon_stat_line(detail_lines, item_resource, "recoil_force", 1, " 像素")
+		_append_weapon_stat_line(detail_lines, item_resource, "recoil_force", 1)
 	if bool(item_resource.get("has_front_recoil")):
-		_append_weapon_stat_line(detail_lines, item_resource, "front_recoil_force", 1, " 像素")
+		_append_weapon_stat_line(detail_lines, item_resource, "front_recoil_force", 1)
 	if weapon_type == "hybrid":
-		_append_weapon_attack_channel_stat_line(detail_lines, item_resource, "远程冲击", "impact_force", "ranged", 1, " 像素")
-		_append_weapon_attack_channel_stat_line(detail_lines, item_resource, "近战冲击", "impact_force", "melee", 1, " 像素")
+		_append_weapon_attack_channel_stat_line(detail_lines, item_resource, "远程冲击", "impact_force", "ranged", 1)
+		_append_weapon_attack_channel_stat_line(detail_lines, item_resource, "近战冲击", "impact_force", "melee", 1)
 	else:
-		_append_weapon_stat_line(detail_lines, item_resource, "impact_force", 1, " 像素")
+		_append_weapon_stat_line(detail_lines, item_resource, "impact_force", 1)
 
 
 static func _append_weapon_attack_channel_stat_line(detail_lines: Array[String], item_resource: Resource, label: String, stat_name: String, attack_mode: String, decimals: int, suffix: String = "") -> void:

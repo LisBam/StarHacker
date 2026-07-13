@@ -23,6 +23,8 @@ const ATTRIBUTE_ROWS: Array[Dictionary] = [
 var _stats_component: Node
 ## 装备组件；默认空表示主菜单上下文，存在时提供实际移速与视野快照。
 var _equipment_component: Node
+## 玩家控制器；默认空表示主菜单上下文，用于读取并监听技能固定移速属性来源。
+var _player_controller: Node
 ## 全局库存服务；主菜单属性页通过它读取当前四部位装备，战斗中仍保留作为安全兜底。
 var _global_inventory: Node
 ## 会话状态服务；用于读取当前选中角色及其基础属性档案。
@@ -46,10 +48,15 @@ func configure_runtime_components(stats_component: Node, equipment_component: No
 	## 注入战斗中的角色组件；主菜单不调用此方法并自动使用角色档案与全局装备计算。
 	if _stats_component != null and _stats_component.has_signal("stats_changed") and _stats_component.is_connected("stats_changed", Callable(self, "refresh")):
 		_stats_component.disconnect("stats_changed", Callable(self, "refresh"))
+	if _player_controller != null and _player_controller.has_signal("movement_speed_attribute_bonus_changed") and _player_controller.is_connected("movement_speed_attribute_bonus_changed", Callable(self, "refresh")):
+		_player_controller.disconnect("movement_speed_attribute_bonus_changed", Callable(self, "refresh"))
 	_stats_component = stats_component
 	_equipment_component = equipment_component
+	_player_controller = _stats_component.get_parent() if _stats_component != null else null
 	if _stats_component != null and _stats_component.has_signal("stats_changed") and not _stats_component.is_connected("stats_changed", Callable(self, "refresh")):
 		_stats_component.connect("stats_changed", Callable(self, "refresh"))
+	if _player_controller != null and _player_controller.has_signal("movement_speed_attribute_bonus_changed") and not _player_controller.is_connected("movement_speed_attribute_bonus_changed", Callable(self, "refresh")):
+		_player_controller.connect("movement_speed_attribute_bonus_changed", Callable(self, "refresh"))
 	if is_node_ready():
 		refresh()
 
@@ -135,6 +142,14 @@ func _get_runtime_snapshot() -> Dictionary:
 		# 装备运行快照；移速已换算为实际点数，视野保留比例供百分比格式化。
 		var equipment_snapshot: Dictionary = _equipment_component.call("get_character_attribute_snapshot") as Dictionary
 		snapshot.merge(equipment_snapshot, true)
+	if _player_controller != null and _player_controller.has_method("get_movement_speed_attribute_bonus") and snapshot.get("move_speed") is Dictionary:
+		# 移速技能快照；二倍速等固定点数来源独立标记为“技能”，并加入消耗品倍率计算前的当前移速。
+		var move_speed_values: Dictionary = (snapshot.get("move_speed") as Dictionary).duplicate()
+		# 技能移速点数；满强度二倍速为 99，受击衰减时随来源信号即时刷新。
+		var skill_move_speed: float = maxf(float(_player_controller.call("get_movement_speed_attribute_bonus")), 0.0)
+		move_speed_values["skill"] = skill_move_speed
+		move_speed_values["total"] = maxf(float(move_speed_values.get("total", 0.0)) + skill_move_speed, 0.0)
+		snapshot["move_speed"] = move_speed_values
 	# 临时增益组件；移速饮料作用于装备结算后的有效移速，单独写入 temporary 供界面标注。
 	var temporary_buff_component: Node = _stats_component.get_parent().get_node_or_null("TemporaryBuffComponent") if _stats_component.get_parent() != null else null
 	if temporary_buff_component != null and temporary_buff_component.has_method("get_move_speed_multiplier") and snapshot.get("move_speed") is Dictionary:

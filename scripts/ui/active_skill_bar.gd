@@ -171,12 +171,12 @@ func _refresh_cooldowns() -> void:
 	for slot_index in range(_cooldown_overlays.size()):
 		# 当前剩余冷却；组件缺失或无效槽按 0 处理。
 		var cooldown_remaining: float = float(_active_skill_component.call("get_cooldown_remaining", slot_index)) if _active_skill_component != null and _active_skill_component.has_method("get_cooldown_remaining") else 0.0
-		# 后续段剩余窗口；大于零时优先显示连段提示，提醒玩家技能槽当前仍可再次触发。
+		# 后续段剩余窗口；大于零时优先显示剩余秒数，提醒玩家技能槽当前仍可再次触发。
 		var follow_up_remaining: float = float(_active_skill_component.call("get_follow_up_remaining", slot_index)) if _active_skill_component != null and _active_skill_component.has_method("get_follow_up_remaining") else 0.0
 		_cooldown_overlays[slot_index].visible = cooldown_remaining > 0.0 or follow_up_remaining > 0.0
 		_cooldown_overlays[slot_index].color = follow_up_overlay_color if follow_up_remaining > 0.0 else cooldown_overlay_color
 		if follow_up_remaining > 0.0:
-			_cooldown_labels[slot_index].text = "连段 %ss" % String.num(follow_up_remaining, cooldown_decimal_places)
+			_cooldown_labels[slot_index].text = "%ss" % String.num(follow_up_remaining, cooldown_decimal_places)
 		else:
 			_cooldown_labels[slot_index].text = "%ss" % String.num(cooldown_remaining, cooldown_decimal_places) if cooldown_remaining > 0.0 else ""
 

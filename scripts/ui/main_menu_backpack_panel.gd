@@ -30,6 +30,8 @@ const ITEM_ACTION_POPUP_SCRIPT: Script = preload("res://scripts/ui/item_action_p
 const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
 ## 角色属性面板脚本；共享背包在主菜单和战斗中复用同一三值属性展示组件。
 const CHARACTER_STATS_PANEL_SCRIPT: Script = preload("res://scripts/ui/character_stats_panel.gd")
+## 套装筛选控件脚本；装备分类使用与强化石筛选一致的多选与清空交互。
+const EQUIPMENT_SET_FILTER_CONTROL_SCRIPT: Script = preload("res://scripts/ui/equipment_set_filter_control.gd")
 ## 装备操作编号；背包武器或装备点击后按类型进入对应装备槽。
 const ACTION_EQUIP: int = 1
 ## 远程装备槽一操作编号；远程武器可明确选择第一个远程槽。
@@ -110,6 +112,8 @@ var _sort_option: OptionButton
 var _stone_attribute_option: OptionButton
 ## 清空强化筛选按钮；当前没有筛选条件时禁用。
 var _stone_attribute_clear_button: Button
+## 套装多选筛选控件；只在装备分类显示，并根据当前背包条目动态列出可用套装。
+var _equipment_set_filter_control: EquipmentSetFilterControl
 ## 一级分类按钮表；用于同步全部、武器、装备和资源的选中状态。
 var _primary_buttons: Dictionary = {}
 ## 二级分类按钮表；根据当前一级分类动态重建。
@@ -222,6 +226,9 @@ func _build_interface() -> void:
 	_stone_attribute_clear_button.text = "清空筛选"
 	_stone_attribute_clear_button.pressed.connect(_clear_stone_attribute_filter)
 	query_bar.add_child(_stone_attribute_clear_button)
+	_equipment_set_filter_control = EQUIPMENT_SET_FILTER_CONTROL_SCRIPT.new() as EquipmentSetFilterControl
+	_equipment_set_filter_control.filters_changed.connect(_on_equipment_set_filters_changed)
+	query_bar.add_child(_equipment_set_filter_control)
 	# 分类栏；一级分类固定一行，二级分类根据当前类型动态变化。
 	var category_columns: VBoxContainer = VBoxContainer.new()
 	category_columns.add_theme_constant_override("separation", 3)
@@ -366,6 +373,7 @@ func _add_equipment_slot(slot_label: String, location: String, accepted_type: St
 	var slot_control: Button = EQUIPMENT_STORAGE_SLOT_SCRIPT.new() as Button
 	slot_control.call("configure", slot_label, location, accepted_type, item_resource)
 	slot_control.connect("item_selected", Callable(self, "_on_equipment_selected").bind(location))
+	slot_control.connect("quick_unequip_requested", Callable(self, "_on_quick_unequip_requested").bind(location))
 	slot_control.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
 	slot_control.connect("repair_kit_drop_requested", Callable(self, "_on_repair_kit_drop_requested"))
 	# 修复选择状态；可修复目标保持绿色，满耐久目标灰显并阻止无效使用。
@@ -378,8 +386,9 @@ func _rebuild_items() -> void:
 	if _global_inventory == null:
 		return
 	var entries: Array = _global_inventory.call("get_backpack_entries")
+	_equipment_set_filter_control.configure_entries(entries)
 	# 可见条目；统一查询器保留每项原始 source_index，排序和筛选后拖拽仍操作正确背包记录。
-	var visible_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(entries, _primary_category, _subcategory, _search_edit.text, _stone_attribute_filter, _sort_mode)
+	var visible_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(entries, _primary_category, _subcategory, _search_edit.text, _stone_attribute_filter, _sort_mode, _equipment_set_filter_control.get_selected_set_ids())
 	for entry in visible_entries:
 		var entry_index: int = int(entry.get("source_index", -1))
 		var item_resource: Resource = entry.get("resource") as Resource
@@ -437,6 +446,7 @@ func _on_primary_category_pressed(category_name: String) -> void:
 	_primary_category = category_name
 	_subcategory = InventoryQuery.SUBCATEGORY_ALL
 	_clear_stone_attribute_filter(false)
+	_equipment_set_filter_control.clear_filters(false)
 	_rebuild_subcategory_buttons()
 	_rebuild_items()
 
@@ -480,6 +490,11 @@ func _clear_stone_attribute_filter(rebuild_items: bool = true) -> void:
 		_rebuild_items()
 
 
+func _on_equipment_set_filters_changed(_selected_set_ids: Array[String]) -> void:
+	## 套装多选变化后重建背包展示；真实库存顺序和所有权保持不变。
+	_rebuild_items()
+
+
 func _refresh_stone_attribute_filter_display() -> void:
 	_stone_attribute_option.set_item_text(0, "强化筛选（%d）" % _stone_attribute_filter.size())
 	_stone_attribute_option.select(0)
@@ -498,6 +513,7 @@ func _refresh_query_controls() -> void:
 	var resource_category_active: bool = _primary_category == InventoryQuery.PRIMARY_RESOURCES
 	_stone_attribute_option.visible = resource_category_active
 	_stone_attribute_clear_button.visible = resource_category_active
+	_equipment_set_filter_control.visible = _primary_category == InventoryQuery.PRIMARY_EQUIPMENT
 	_refresh_stone_attribute_filter_display()
 
 
@@ -565,6 +581,12 @@ func _on_equipment_selected(item_resource: Resource, equipment_location: String)
 	_action_popup.clear_actions()
 	_action_popup.add_action("卸下", ACTION_UNEQUIP)
 	_action_popup.present_at(get_viewport().get_mouse_position())
+
+
+func _on_quick_unequip_requested(equipment_location: String) -> void:
+	## Shift+点击装备槽时直接卸到随身背包；目标选择期间由槽控件保留普通点击语义，不会误卸下。
+	if _global_inventory != null and not equipment_location.is_empty():
+		_global_inventory.call("transfer_equipment_to_storage", equipment_location, "backpack")
 
 
 func _on_item_drop_requested(drag_data: Dictionary, target_location: String, target_index: int) -> void:

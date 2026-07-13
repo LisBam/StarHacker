@@ -564,11 +564,11 @@ func _get_weapon_tooltip_text() -> String:
 	var critical_damage: float = float(weapon_data.call("get_effective_stat", "critical_damage")) if weapon_data.has_method("get_effective_stat") else maxf(float(weapon_data.get("critical_damage")), 1.0)
 	tooltip_lines.append("能耗：%d" % roundi(energy_consumption))
 	if bool(weapon_data.get("has_recoil")) and recoil_force > 0.0:
-		tooltip_lines.append("后坐力：%d 像素" % roundi(recoil_force))
+		tooltip_lines.append("后坐力：%d" % roundi(recoil_force))
 	if bool(weapon_data.get("has_front_recoil")) and front_recoil_force > 0.0:
-		tooltip_lines.append("前坐力：%d 像素" % roundi(front_recoil_force))
+		tooltip_lines.append("前坐力：%d" % roundi(front_recoil_force))
 	if weapon_type != "hybrid":
-		tooltip_lines.append("冲击力：%d 像素" % roundi(impact_force))
+		tooltip_lines.append("冲击力：%d" % roundi(impact_force))
 	tooltip_lines.append("暴击率：%.0f%%" % (critical_chance * 100.0))
 	tooltip_lines.append("暴击伤害：%.0f%%" % (critical_damage * 100.0))
 
@@ -603,7 +603,7 @@ func _append_ranged_tooltip_lines(tooltip_lines: PackedStringArray) -> void:
 	if str(weapon_data.get("weapon_type")) != "hybrid":
 		tooltip_lines.append("冷却：%.2f 秒" % cooldown)
 	if str(weapon_data.get("weapon_type")) == "hybrid":
-		tooltip_lines.append("远程冲击：%d 像素" % roundi(_get_attack_channel_stat("impact_force", "ranged", "ranged_impact_force")))
+		tooltip_lines.append("远程冲击：%d" % roundi(_get_attack_channel_stat("impact_force", "ranged", "ranged_impact_force")))
 
 
 func _append_melee_tooltip_lines(tooltip_lines: PackedStringArray) -> void:
@@ -620,7 +620,7 @@ func _append_melee_tooltip_lines(tooltip_lines: PackedStringArray) -> void:
 	tooltip_lines.append("冷却：%.2f 秒" % cooldown)
 	tooltip_lines.append("判定时长：%.2f 秒" % melee_active_duration)
 	if str(weapon_data.get("weapon_type")) == "hybrid":
-		tooltip_lines.append("近战冲击：%d 像素" % roundi(_get_attack_channel_stat("impact_force", "melee", "melee_impact_force")))
+		tooltip_lines.append("近战冲击：%d" % roundi(_get_attack_channel_stat("impact_force", "melee", "melee_impact_force")))
 
 
 func _get_attack_channel_stat(stat_name: String, attack_mode: String, fallback_property_name: String) -> float:

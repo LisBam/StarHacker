@@ -146,8 +146,8 @@ func _refresh_shared_slot_content() -> void:
 		# 技能名称；空资源明确显示空技能槽，避免误认为 HUD 加载失败。
 		var skill_name: String = str(skill_data.get("display_name")) if skill_data != null else "空技能槽"
 		# 技能能耗；有资源时始终显示整数能耗，空槽不显示辅助信息。
-		var energy_cost: float = maxf(float(skill_data.get("energy_cost")), 0.0) if skill_data != null else 0.0
-		var detail_text: String = "能耗 %d" % roundi(energy_cost) if skill_data != null else ""
+		var energy_cost: int = maxi(int(skill_data.get("energy_cost")), 0) if skill_data != null else 0
+		var detail_text: String = "能耗 %d" % energy_cost if skill_data != null else ""
 		# 内容透明度；空槽使用原有 0.42 默认值，已配置技能保持完全可读。
 		var content_opacity: float = 1.0 if skill_data != null else empty_slot_opacity
 		_slot_views[slot_index].call("configure_hud_content", slot_minimum_size, _get_action_display_text(action_name), skill_name, detail_text, null, content_opacity)

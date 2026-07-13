@@ -42,8 +42,8 @@ class_name EquipmentData
 @export_range(0.0, 10.0, 0.01, "or_greater") var move_speed: float = 0.0
 ## 视野加成比例；使用 0 到 1 小数，默认 0，仅头部装备支持，数值越高相机视野越广。
 @export_range(0.0, 10.0, 0.01, "or_greater") var vision_range: float = 0.0
-## 每秒能量恢复加成；默认 0，仅躯干装备支持，每 1 点会让玩家每秒额外恢复 1 点能量。
-@export_range(0.0, 99999.0, 1.0, "or_greater") var energy_regeneration: float = 0.0
+## 每秒能量恢复加成；默认 0，仅躯干装备支持，支持 0.1 精度并直接加算到玩家每秒能量恢复。
+@export_range(0.0, 99999.0, 0.1, "or_greater") var energy_regeneration: float = 0.0
 ## 暴击率加成；使用 0 到 1 小数，默认 0，装备有效时与武器暴击率相加。
 @export_range(0.0, 1.0, 0.01) var critical_chance: float = 0.0
 ## 暴击伤害倍率增量；默认 0，0.1 表示在基础 150% 上增加 10 个百分点。

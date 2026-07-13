@@ -677,8 +677,13 @@ func _refresh_stats() -> void:
 
 	_health_label.text = "生命 %d / %d" % [roundi(current_health), roundi(max_health)]
 	_health_bar.value = current_health / max_health * 100.0
-	_energy_label.text = "能量 %d / %d" % [roundi(current_energy), roundi(max_energy)]
+	_energy_label.text = "能量 %s / %s" % [_format_energy_display_value(current_energy), _format_energy_display_value(max_energy)]
 	_energy_bar.value = current_energy / max_energy * 100.0
+
+
+func _format_energy_display_value(value: float) -> String:
+	## 格式化战斗 HUD 能量数值；整数不显示无意义的小数，0.1 精度的非整数值保留一位小数。
+	return str(roundi(value)) if is_equal_approx(value, roundf(value)) else "%.1f" % value
 
 
 func _rebuild_equipment_slots() -> void:
@@ -745,8 +750,9 @@ func _configure_combat_weapon_slot_view(slot_view: Control, display_size: Vector
 		display_name = str(weapon_data.get("display_name"))
 		if weapon_data.has_method("is_broken") and bool(weapon_data.call("is_broken")):
 			display_name += "（损坏）"
-	# 武器能耗；空槽不显示辅助信息，零能耗武器仍明确显示 0。
-	var detail_text: String = "能耗 %d" % roundi(maxf(float(weapon_data.get("energy_consumption")), 0.0)) if weapon_data != null else ""
+	# 武器能耗；读取强化后的最终整数值，空槽不显示辅助信息，零能耗武器仍明确显示 0。
+	var energy_consumption: int = maxi(roundi(float(weapon_data.call("get_effective_stat", "energy_consumption"))), 0) if weapon_data != null and weapon_data.has_method("get_effective_stat") else (maxi(roundi(float(weapon_data.get("energy_consumption"))), 0) if weapon_data != null else 0)
+	var detail_text: String = "能耗 %d" % energy_consumption if weapon_data != null else ""
 	slot_view.call("configure_hud_content", display_size, header_text, display_name, detail_text, weapon_data, 1.0)
 	slot_view.call("set_visual_state", selected and weapon_data != null, false)
 

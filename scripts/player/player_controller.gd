@@ -52,10 +52,8 @@ const SPRINT_ENERGY_REGENERATION_BLOCK_SOURCE_ID: String = "player_sprint"
 ## 当前疾跑每秒能耗；默认 20 表示每个实际疾跑秒稳定消费 20 点能量，能量不足当前帧不会获得疾跑倍率。
 ## 当前项目配置补充：默认值为每秒 5 点，检查器可按角色或测试场景覆盖；运行时通常不动态修改，数值越低可持续疾跑时间越长。
 @export_range(0.0, 9999.0, 0.1, "or_greater") var sprint_energy_consumption_per_second: float = 5.0
-## 冲刺单次能耗；取值建议大于等于 0，默认 18 表示每次 Space 突进需要付出固定能量，运行时修改会影响冲刺频率。
-## 当前冲刺单次能耗；默认 20 表示每次成功 Space 突进固定消费 20 点能量，支付失败不会打断已有蓄力。
-## 当前项目配置补充：默认值为每次 10 点，检查器可按角色或测试场景覆盖；运行时通常不动态修改，数值越低连续冲刺次数越多。
-@export_range(0.0, 9999.0, 0.1, "or_greater") var dodge_energy_consumption: float = 10.0
+## 冲刺单次能耗；取值建议大于等于 0，默认 40 表示每次成功 Space 突进固定消费 40 点能量，支付失败不会打断已有蓄力。
+@export_range(0.0, 9999.0, 0.1, "or_greater") var dodge_energy_consumption: float = 40.0
 ## 冲刺距离；取值建议大于 0，默认 140 像素适合当前角色尺寸，运行时修改会影响 Space 突进位移。
 @export_range(1.0, 1200.0, 1.0, "or_greater") var dodge_distance: float = 140.0
 ## 冲刺持续时间；取值建议 0.05 到 0.5 秒，默认 0.16 秒；该时间只控制突进位移，不提供无敌效果。
@@ -719,12 +717,13 @@ func _set_sprinting_state(enabled: bool) -> void:
 
 
 func _get_weapon_energy_consumption(weapon_data: Resource) -> float:
+	## 返回本次武器整数能耗；基础配置和强化后的最终值均按最近整数结算，避免能量池小数精度泄漏到武器成本。
 	if weapon_data == null:
 		return 0.0
 	if weapon_data.has_method("get_effective_stat"):
-		return maxf(float(weapon_data.call("get_effective_stat", "energy_consumption")), 0.0)
+		return float(maxi(roundi(float(weapon_data.call("get_effective_stat", "energy_consumption"))), 0))
 
-	return maxf(float(weapon_data.get("energy_consumption")), 0.0)
+	return float(maxi(roundi(float(weapon_data.get("energy_consumption"))), 0))
 
 
 func apply_knockback(direction: Vector2, force: float) -> void:

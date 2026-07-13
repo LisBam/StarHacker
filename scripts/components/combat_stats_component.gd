@@ -13,16 +13,19 @@ signal energy_spent(amount: float)
 ## 死亡信号；生命首次降到 0 时派发一次，HUD 用它进入死亡暂停界面。
 signal died
 
+## 能量数值量化精度；固定为 0.1 点，所有运行时能量写入均按此精度对齐，避免逐帧恢复累积浮点残差。
+const ENERGY_VALUE_PRECISION: float = 0.1
+
 ## 最大生命值；取值应大于 0，默认 100 作为基础玩家血量，运行时修改会影响生命条上限。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var max_health: float = 100.0
 ## 当前生命值；取值会被限制在 0 到 max_health，默认 100 表示满血开局，运行时修改会影响玩家当前生存状态。
 @export_range(0.0, 9999.0, 1.0, "or_greater") var current_health: float = 100.0
-## 最大能量值；取值应大于 0，默认 100 作为基础技能资源上限，运行时修改会影响能量条上限。
-@export_range(1.0, 9999.0, 1.0, "or_greater") var max_energy: float = 100.0
-## 当前能量值；取值会被限制在 0 到 max_energy，默认 100 表示满能量开局，运行时修改会影响武器可用性。
-@export_range(0.0, 9999.0, 1.0, "or_greater") var current_energy: float = 100.0
-## 每秒能量恢复量；取值建议大于等于 0，默认 18 让原型战斗保持节奏，运行时修改会影响持续作战能力。
-@export_range(0.0, 9999.0, 0.1, "or_greater") var energy_regeneration_per_second: float = 18.0
+## 最大能量值；取值应大于 0，默认 100，支持 0.1 精度以配合精细资源配置，运行时修改会影响能量条上限。
+@export_range(0.1, 9999.0, 0.1, "or_greater") var max_energy: float = 100.0
+## 当前能量值；取值会被限制并量化到 0 至 max_energy 的 0.1 精度，默认 100 表示满能量开局，运行时修改会影响武器可用性。
+@export_range(0.0, 9999.0, 0.1, "or_greater") var current_energy: float = 100.0
+## 每秒能量恢复量；取值建议大于等于 0，默认 15，支持 0.1 精度并与装备、消耗品恢复直接相加。
+@export_range(0.0, 9999.0, 0.1, "or_greater") var energy_regeneration_per_second: float = 15.0
 ## 玩家攻击力；默认 100，与 C=100、目标防御 0 组合时保持武器原始伤害不变，装备可在运行时叠加。
 @export_range(0.0, 99999.0, 1.0, "or_greater") var attack_power: float = 100.0
 ## 玩家防御力；默认 0，不改变当前敌人伤害，装备可在运行时叠加并降低受到的最终伤害。
@@ -50,6 +53,8 @@ var _equipment_health_regeneration_per_five_seconds: float = 0.0
 var _equipment_energy_regeneration: float = 0.0
 ## 能量自然恢复阻止来源表；键为稳定来源 ID、值为 true，任一来源存在时暂停自然回能但不影响主动耗能与无限能量。
 var _energy_regeneration_blocked_sources: Dictionary = {}
+## 能量自然恢复未结算余数；默认 0，累计不足 0.1 点的逐帧恢复，保证状态量化后长期恢复速率仍精确等于配置值。
+var _energy_regeneration_remainder: float = 0.0
 ## 装备闪避率；默认 0，受到攻击时由玩家控制器独立判定。
 var _equipment_dodge_chance: float = 0.0
 ## 装备暴击率加成；默认 0，与当前武器暴击率相加。
@@ -70,7 +75,7 @@ var _equipment_set_stat_multipliers: Dictionary = {}
 
 func _ready() -> void:
 	current_health = clampf(current_health, 0.0, max_health)
-	current_energy = clampf(current_energy, 0.0, max_energy)
+	current_energy = snappedf(clampf(current_energy, 0.0, max_energy), ENERGY_VALUE_PRECISION)
 	if infinite_health:
 		current_health = max_health
 	if infinite_energy:
@@ -86,10 +91,12 @@ func _process(delta: float) -> void:
 		if _equipment_health_regeneration_per_five_seconds > 0.0 and current_health > 0.0:
 			heal(_equipment_health_regeneration_per_five_seconds)
 	if infinite_energy:
+		_energy_regeneration_remainder = 0.0
 		set_energy(max_energy)
 		return
 	if not _energy_regeneration_blocked_sources.is_empty():
 		# 自然回能阻止；疾跑等持续主动耗能期间不与回能相抵，解除全部来源后下一帧恢复原有结算。
+		_energy_regeneration_remainder = 0.0
 		return
 
 	# 当前每秒能量恢复；基础值与装备加成直接相加，每 1 点装备属性对应每秒额外恢复 1 点能量。
@@ -97,16 +104,24 @@ func _process(delta: float) -> void:
 	if effective_energy_regeneration <= 0.0 or current_energy >= max_energy:
 		return
 
-	# 本帧恢复后的能量值；取值限制在 0 到 max_energy，默认由恢复速度和 delta 计算，修改会影响能量自然回复结果。
-	var regenerated_energy: float = minf(current_energy + effective_energy_regeneration * delta, max_energy)
-	set_energy(regenerated_energy)
+	# 本帧累计恢复量；先累积不可见余数，再只结算完整 0.1 点，避免逐帧量化改变长期每秒恢复速度。
+	var accumulated_regeneration: float = _energy_regeneration_remainder + effective_energy_regeneration * maxf(delta, 0.0)
+	# 本帧可结算恢复量；向下对齐到 0.1 点，确保写入状态始终符合能量精度协议。
+	var settled_regeneration: float = floorf(accumulated_regeneration / ENERGY_VALUE_PRECISION) * ENERGY_VALUE_PRECISION
+	_energy_regeneration_remainder = accumulated_regeneration - settled_regeneration
+	if settled_regeneration <= 0.0:
+		return
+	# 本帧恢复后的能量值；接近上限时 set_energy 会夹取，剩余未结算量不跨满能状态保留。
+	set_energy(current_energy + settled_regeneration)
+	if current_energy >= max_energy:
+		_energy_regeneration_remainder = 0.0
 
 
 func can_spend_energy(amount: float) -> bool:
 	if infinite_energy:
 		return true
 
-	return amount <= 0.0 or current_energy >= amount
+	return amount <= 0.0 or current_energy + ENERGY_VALUE_PRECISION * 0.001 >= amount
 
 
 func spend_energy(amount: float) -> bool:
@@ -127,7 +142,7 @@ func spend_energy(amount: float) -> bool:
 
 func set_energy(value: float) -> void:
 	# 标准化后的能量值；取值限制在 0 到 max_energy，默认由传入值夹取，修改会影响信号派发前的最终能量。
-	var clamped_energy: float = clampf(value, 0.0, max_energy)
+	var clamped_energy: float = snappedf(clampf(value, 0.0, max_energy), ENERGY_VALUE_PRECISION)
 	if is_equal_approx(clamped_energy, current_energy):
 		return
 

@@ -143,7 +143,7 @@ func get_character_profile(character_id: String) -> Dictionary:
 			"health_regeneration_per_five_seconds": 0.0,
 			"vision_range": 1.0,
 			"dodge_chance": 0.0,
-			"energy_regeneration": 18.0,
+			"energy_regeneration": 15.0,
 			"passive": "被动技能：待配置",
 			"active": "主动技能：待配置"
 		}
@@ -161,7 +161,7 @@ func get_character_profile(character_id: String) -> Dictionary:
 			"health_regeneration_per_five_seconds": 0.0,
 			"vision_range": 1.0,
 			"dodge_chance": 0.0,
-			"energy_regeneration": 18.0,
+			"energy_regeneration": 15.0,
 			"passive": "被动技能：待配置",
 			"active": "主动技能：待配置"
 		}
@@ -179,7 +179,7 @@ func get_character_profile(character_id: String) -> Dictionary:
 		"health_regeneration_per_five_seconds": 0.0,
 		"vision_range": 1.0,
 		"dodge_chance": 0.0,
-		"energy_regeneration": 18.0,
+		"energy_regeneration": 15.0,
 		"passive": "被动技能：待配置",
 		"active": "主动技能：待配置"
 	}

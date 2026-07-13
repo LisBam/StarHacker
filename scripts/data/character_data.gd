@@ -16,8 +16,8 @@ class_name CharacterData
 @export var unlocked_by_default: bool = false
 ## 基础生命上限；默认 100，进入战斗或切换角色时应用，运行时不应动态修改模板。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var max_health: float = 100.0
-## 基础能量上限；默认 100，进入战斗或切换角色时应用，运行时不应动态修改模板。
-@export_range(1.0, 9999.0, 1.0, "or_greater") var max_energy: float = 100.0
+## 基础能量上限；默认 100，支持 0.1 精度，进入战斗或切换角色时应用，运行时不应动态修改模板。
+@export_range(0.1, 9999.0, 0.1, "or_greater") var max_energy: float = 100.0
 ## 基础移动速度属性；默认 106.6667，按 1 点等于 3 像素/秒换算，装备移速比例会在该值上继续结算。
 ## 当前移动速度属性换算按 1 点等于 2 像素/秒执行；默认值仅作为未填写角色资源的隔离场景回退。
 @export_range(1.0, 2000.0, 0.0001, "or_greater") var move_speed: float = 106.6667
@@ -31,8 +31,8 @@ class_name CharacterData
 @export_range(0.01, 10.0, 0.01, "or_greater") var vision_range: float = 1.0
 ## 基础闪避率；默认 0，使用 0 到 1 小数表示 0% 到 100%。
 @export_range(0.0, 1.0, 0.01) var dodge_chance: float = 0.0
-## 基础每秒能量恢复；默认 18，装备能量恢复会在该值上继续结算。
-@export_range(0.0, 99999.0, 0.1, "or_greater") var energy_regeneration: float = 18.0
+## 基础每秒能量恢复；默认 15，支持 0.1 精度，装备与消耗品能量恢复会在该值上继续结算。
+@export_range(0.0, 99999.0, 0.1, "or_greater") var energy_regeneration: float = 15.0
 ## 被动技能说明；默认待配置，当前用于角色选择详情占位，未来可扩展为技能资源引用。
 ## 兼容说明：该文本保留给旧角色和隔离场景，实际多被动行为优先读取 passive_skills 资源数组。
 @export var passive: String = "被动技能：待配置"

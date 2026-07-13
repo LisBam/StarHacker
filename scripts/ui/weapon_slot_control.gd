@@ -508,12 +508,12 @@ func _get_weapon_detail_text() -> String:
 	if weapon_data == null:
 		return ""
 
-	# 武器能耗；取值来自资源 energy_consumption 字段，默认 0，修改会影响槽位能耗提示。
-	var energy_consumption: float = maxf(float(weapon_data.get("energy_consumption")), 0.0)
+	# 武器能耗；读取强化后的最终整数值，与战斗结算和常驻 HUD 保持一致。
+	var energy_consumption: int = maxi(roundi(float(weapon_data.call("get_effective_stat", "energy_consumption"))), 0) if weapon_data.has_method("get_effective_stat") else maxi(int(weapon_data.get("energy_consumption")), 0)
 	if energy_consumption <= 0.0:
 		return "能耗 0"
 
-	return "能耗 %d" % roundi(energy_consumption)
+	return "能耗 %d" % energy_consumption
 
 
 func _get_weapon_type_label(target_weapon_data: Resource) -> String:
@@ -550,8 +550,8 @@ func _get_weapon_tooltip_text() -> String:
 	if not description.is_empty():
 		tooltip_lines.append(description)
 
-	# 武器能耗；取值来自资源 energy_consumption 字段，默认 0 表示不消耗能量。
-	var energy_consumption: float = maxf(float(weapon_data.get("energy_consumption")), 0.0)
+	# 武器能耗；读取强化后的最终整数值，与实际攻击成本保持一致。
+	var energy_consumption: int = maxi(roundi(float(weapon_data.call("get_effective_stat", "energy_consumption"))), 0) if weapon_data.has_method("get_effective_stat") else maxi(int(weapon_data.get("energy_consumption")), 0)
 	# 武器后坐力；取值来自资源 recoil_force 字段，默认 0 表示不开火后推。
 	var recoil_force: float = maxf(float(weapon_data.get("recoil_force")), 0.0)
 	# 武器前坐力；取值来自资源 front_recoil_force 字段，默认 0 表示不向攻击方向推动使用者。
@@ -562,7 +562,7 @@ func _get_weapon_tooltip_text() -> String:
 	var critical_chance: float = float(weapon_data.call("get_effective_stat", "critical_chance")) if weapon_data.has_method("get_effective_stat") else maxf(float(weapon_data.get("critical_chance")), 0.0)
 	# 武器暴击伤害；使用倍率保存，详情转换为百分比展示。
 	var critical_damage: float = float(weapon_data.call("get_effective_stat", "critical_damage")) if weapon_data.has_method("get_effective_stat") else maxf(float(weapon_data.get("critical_damage")), 1.0)
-	tooltip_lines.append("能耗：%d" % roundi(energy_consumption))
+	tooltip_lines.append("能耗：%d" % energy_consumption)
 	if bool(weapon_data.get("has_recoil")) and recoil_force > 0.0:
 		tooltip_lines.append("后坐力：%d" % roundi(recoil_force))
 	if bool(weapon_data.get("has_front_recoil")) and front_recoil_force > 0.0:

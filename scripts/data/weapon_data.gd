@@ -30,8 +30,8 @@ class_name WeaponData
 ## 独立消耗配置补充：默认参考值为 1.0，每把武器资源可覆盖为不同浮点消耗。
 ## 固定消耗规则补充：武器不再暴露独立耐久消耗属性，所有成功使用统一扣除 1 点且运行时不可按武器修改。
 const FIXED_DURABILITY_COST_PER_USE: float = 1.0
-## 每次成功使用武器的能耗；取值建议大于等于 0，默认 0 表示免费攻击，修改会影响玩家能量消耗节奏。
-@export_range(0.0, 9999.0, 0.1, "or_greater") var energy_consumption: float = 0.0
+## 每次成功使用武器的基础能耗；取值为非负整数，默认 0 表示免费攻击，强化后的最终值也会统一取整。
+@export_range(0, 9999, 1, "or_greater") var energy_consumption: int = 0
 ## 远程武器使用的弹体场景；默认空表示不能发射，必须实例化为 Node2D，修改会影响远程攻击生成对象。
 @export var projectile_scene: PackedScene
 ## 远程弹体速度；取值建议大于 0，默认 900，修改会影响远程弹道速度。

@@ -29,8 +29,8 @@ const DIRECTIONAL_INPUT_POSITION: int = 1
 @export_enum("方向", "位置") var directional_input_mode: int = DIRECTIONAL_INPUT_DIRECTION
 ## 基础冷却时间；取值大于等于 0 秒，默认 0 表示可以连续释放，运行时由组件按成功释放次数独立计时。
 @export_range(0.0, 3600.0, 0.05, "or_greater") var cooldown_duration: float = 0.0
-## 单次能量消耗；取值大于等于 0，默认 0 表示无需能量，成功释放后才由属性组件扣除。
-@export_range(0.0, 9999.0, 0.1, "or_greater") var energy_cost: float = 0.0
+## 单次能量消耗；取值为非负整数，默认 0 表示无需能量，成功释放后才由属性组件扣除。
+@export_range(0, 9999, 1, "or_greater") var energy_cost: int = 0
 ## 释放或索敌最大距离；取值大于 0 像素，默认 240，用于范围显示、鼠标位置夹取与目标合法性过滤。
 @export_range(1.0, 6000.0, 1.0, "or_greater") var cast_range: float = 240.0
 ## 指向技能扇形半角；取值 0 至 180 度，默认 45 度，用于方向范围预览，具体行为可复用该角度进行命中过滤。

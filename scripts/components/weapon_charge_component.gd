@@ -13,7 +13,12 @@ const CHARGE_BAR_OWNER_ID: StringName = &"weapon"
 ## 当前蓄力武器；默认 null 表示没有活动蓄力，武器切换、输入关闭或释放后会立即清空。
 var _charging_weapon: Resource
 ## 当前蓄力对应的攻击通道；取值为 ranged 或 melee，默认空字符串，混合武器释放时仍由控制器同时执行两个通道。
+## 当前规则补充：混合武器释放时只执行本字段记录的单一通道，另一通道拥有独立输入与冷却。
 var _attack_mode: String = ""
+## 当前蓄力武器的实际装备来源；取值为 ranged 或 melee，默认空字符串，用于释放时恢复真实槽位反馈。
+var _source_kind: String = ""
+## 当前蓄力武器的远程槽索引；取值为 -1 或有效远程槽，默认 -1 表示来源不是远程槽。
+var _source_index: int = -1
 ## 当前累计蓄力时间；取值 0 至武器最大蓄力时间，默认 0，达到上限后保持不再增长。
 var _charge_elapsed: float = 0.0
 
@@ -21,12 +26,14 @@ var _charge_elapsed: float = 0.0
 @onready var _charge_bar: Node = get_node_or_null(charge_bar_path)
 
 
-func begin_charge(weapon_data: Resource, attack_mode: String) -> bool:
+func begin_charge(weapon_data: Resource, attack_mode: String, source_kind: String = "", source_index: int = -1) -> bool:
 	## 开始一次可配置武器蓄力；已有蓄力或资源未声明效果时返回 false，不覆盖当前输入状态。
 	if _charging_weapon != null or weapon_data == null or not bool(weapon_data.get("has_charge_effect")):
 		return false
 	_charging_weapon = weapon_data
 	_attack_mode = attack_mode
+	_source_kind = source_kind
+	_source_index = source_index
 	_charge_elapsed = 0.0
 	if _charge_bar != null and _charge_bar.has_method("show_charge"):
 		_charge_bar.call("show_charge", CHARGE_BAR_OWNER_ID)
@@ -55,6 +62,8 @@ func release_charge() -> Dictionary:
 	var release_context: Dictionary = {
 		"weapon": _charging_weapon,
 		"attack_mode": _attack_mode,
+		"source_kind": _source_kind,
+		"source_index": _source_index,
 		"charge_seconds": _charge_elapsed,
 		"charge_ratio": clampf(_charge_elapsed / maximum_duration, 0.0, 1.0),
 	}
@@ -99,6 +108,8 @@ func _clear_state() -> void:
 	## 清空全部运行时状态并隐藏进度条；多次调用保持幂等。
 	_charging_weapon = null
 	_attack_mode = ""
+	_source_kind = ""
+	_source_index = -1
 	_charge_elapsed = 0.0
 	if _charge_bar != null and _charge_bar.has_method("hide_charge"):
 		_charge_bar.call("hide_charge", CHARGE_BAR_OWNER_ID)

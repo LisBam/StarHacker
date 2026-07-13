@@ -41,6 +41,8 @@ const PROGRESS_SLIDER_VISUAL_SCRIPT: Script = preload("res://scripts/ui/progress
 const ACTIVE_SKILL_BAR_SCRIPT: Script = preload("res://scripts/ui/active_skill_bar.gd")
 ## 局内共享槽位视图；左侧技能栏和右侧纯展示武器栏直接复用同一视觉组件。
 const COMBAT_HUD_SLOT_VIEW_SCRIPT: Script = preload("res://scripts/ui/combat_hud_slot_view.gd")
+## 角色系统当前角色展示模式编号；与 CharacterSelect 的公开展示模式保持一致，只隐藏角色选择栏并复用完整详情。
+const CHARACTER_SHOWCASE_DISPLAY_MODE: int = 1
 ## 战斗开发者模式解锁序列；默认六个英文字母，输入错误时按首字母重新开始匹配。
 const DEVELOPER_UNLOCK_SEQUENCE: String = "LISBAM"
 ## 背包全部分页标识；默认显示所有背包武器，修改会影响筛选按钮与背包网格过滤。
@@ -86,6 +88,8 @@ const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
 @export var active_skill_component_path: NodePath = ^"ActiveSkillComponent"
 ## 主动技能栏场景；默认使用独立 active_skill_bar.tscn，使槽位样式参数可在编辑器检查器中统一调整。
 @export var active_skill_bar_scene: PackedScene = preload("res://scenes/ui/active_skill_bar.tscn")
+## 战斗内角色展示场景；默认复用角色系统场景并切换为仅当前角色模式，替换场景时必须提供 display_mode、refresh_current_character 和 close_requested 接口。
+@export var character_showcase_scene: PackedScene = preload("res://scenes/ui/character_select.tscn")
 ## 主动技能栏相对屏幕左下角的位置；默认 (18, -82)，保留 18 像素左边距并把紧凑面板放在底边上方。
 @export var active_skill_bar_position: Vector2 = Vector2(18.0, -82.0)
 ## 主动技能栏外层面板尺寸；默认 362×64 像素，容纳三个紧凑技能槽、槽间距与统一面板内边距。
@@ -102,6 +106,8 @@ const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
 @export var pause_action: StringName = &"pause_game"
 ## 大地图开关输入动作名；默认 toggle_large_map 对应 Q 键，运行时通常不修改，改名会影响大地图打开方式。
 @export var toggle_large_map_action: StringName = &"toggle_large_map"
+## 角色展示开关输入动作名；默认 toggle_character_showcase 对应 O 键，运行时通常不修改，改名会影响战斗内角色技能查看入口。
+@export var toggle_character_showcase_action: StringName = &"toggle_character_showcase"
 ## 快速拾取输入动作名；默认 pickup_nearby 对应 F 键，运行时通常不修改，改名会影响附近掉落物快速拾取。
 @export var pickup_action: StringName = &"pickup_nearby"
 ## 掉落物列表开关输入动作名；默认 toggle_drop_list 对应 G 键，运行时通常不修改，改名会影响自动展开开关。
@@ -173,7 +179,12 @@ var _inventory_armor_slot_buttons: Dictionary = {}
 ## 最近触发冷却的远程槽索引；取值为 -1 或有效远程槽，默认 -1 表示无远程冷却显示目标，修改会影响远程 CD 遮罩位置。
 var _last_cooling_ranged_slot: int = -1
 ## 当前玩家可见武器冷却来源；取值为空、ranged 或 melee，默认空字符串表示不显示任何槽位冷却。
+## 当前规则补充：该字段专门记录远程攻击组件冷却对应的真实装备来源，允许来源为近战槽混合武器。
 var _weapon_cooldown_display_source: String = ""
+## 近战攻击组件冷却对应的真实装备来源；取值为空、ranged 或 melee，默认空字符串表示没有近战通道冷却。
+var _melee_cooldown_display_source: String = ""
+## 近战通道来源为远程槽时的槽索引；取值为 -1 或有效远程槽，默认 -1 表示来源为近战槽或无冷却。
+var _last_cooling_melee_ranged_slot: int = -1
 ## 背包当前二级筛选页；取值为 all、武器类型、装备部位或资源类型，默认 all。
 var _inventory_filter: String = INVENTORY_FILTER_ALL
 ## 背包当前主分类；取值为 all、weapons、equipment 或 resources，默认全部并决定二级按钮内容。
@@ -272,6 +283,8 @@ var _active_loot_chest: Node2D
 var _supply_extraction_overlay: Control
 ## 物资撤离面板实例；默认运行时创建一次并复用，显示背包、装备、金币和剩余送回价值。
 var _supply_extraction_panel: Control
+## 战斗内角色展示界面；默认运行时从角色系统场景创建并隐藏，打开时只显示当前已选角色并暂停游戏。
+var _character_showcase_view: Control
 ## 最近一次显示的存活时间整秒数；默认 -1 表示尚未刷新，用于避免每帧重复写入相同计时文本。
 var _last_survival_time_whole_seconds: int = -1
 ## 最近一次显示的存活怪物数量；默认 -1 表示尚未刷新，虚拟人口变化时才更新左上角文本。
@@ -452,6 +465,7 @@ func _ready() -> void:
 	_build_combat_status_panel()
 	_build_nearby_drop_panel()
 	_build_supply_extraction_overlay()
+	_build_character_showcase_view()
 	_build_combat_developer_overlay()
 	_refresh_all()
 	_refresh_combat_status()
@@ -493,10 +507,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if event is InputEventKey:
-		# 当前键盘事件；取值来自输入系统，默认用于识别 E 键和背包动作，修改会影响背包开关响应。
+		# 当前键盘事件；取值来自输入系统，默认用于识别界面开关动作，修改会影响背包、地图、暂停和角色展示响应。
 		var key_event: InputEventKey = event as InputEventKey
 		if _pause_overlay.visible and not _is_combat_developer_menu_visible() and key_event.pressed and not key_event.echo and _try_unlock_combat_developer_menu(key_event):
 			_mark_input_as_handled()
+			return
+		if key_event.pressed and not key_event.echo and _is_toggle_character_showcase_event(key_event):
+			if not _pause_overlay.visible and not _is_combat_developer_menu_visible() and (_supply_extraction_overlay == null or not _supply_extraction_overlay.visible):
+				_toggle_character_showcase()
+				_mark_input_as_handled()
 			return
 		if key_event.pressed and not key_event.echo and _is_pause_event(key_event):
 			if _close_top_interactive_panel():
@@ -507,7 +526,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_mark_input_as_handled()
 			return
 
-		if _pause_overlay.visible:
+		if _pause_overlay.visible or _is_character_showcase_visible():
 			return
 
 		if key_event.pressed and not key_event.echo and _is_toggle_inventory_event(key_event):
@@ -930,27 +949,38 @@ func _on_inventory_armor_item_selected(_item_resource: Resource, armor_slot: Str
 
 func _refresh_cooldown_overlays() -> void:
 	# 远程冷却比例；取值为 0 到 1，默认从远程攻击组件读取，修改会影响远程槽白色 CD 遮罩。
-	var weapon_cooldown_ratio: float = _get_component_cooldown_ratio(_ranged_attack_component)
+	var ranged_cooldown_ratio: float = _get_component_cooldown_ratio(_ranged_attack_component)
 	# 本次远程冷却总时长；高射速武器不显示快速闪烁的遮罩，但实际攻击冷却保持不变。
-	var weapon_cooldown_duration: float = _get_component_cooldown_duration(_ranged_attack_component)
-	if weapon_cooldown_duration <= cooldown_overlay_minimum_duration:
-		weapon_cooldown_ratio = 0.0
-	if weapon_cooldown_ratio <= 0.0 and _weapon_cooldown_display_source == "ranged":
+	var ranged_cooldown_duration: float = _get_component_cooldown_duration(_ranged_attack_component)
+	if ranged_cooldown_duration <= cooldown_overlay_minimum_duration:
+		ranged_cooldown_ratio = 0.0
+	if ranged_cooldown_ratio <= 0.0:
 		_last_cooling_ranged_slot = -1
 		_weapon_cooldown_display_source = ""
+	# 近战冷却比例；与远程组件独立读取，混合武器连续使用左右键时两套状态不会互相清空。
+	var melee_cooldown_ratio: float = _get_component_cooldown_ratio(_melee_attack_component)
+	# 本次近战冷却总时长；与远程使用同一最短遮罩阈值，只影响显示而不改变攻击资格。
+	var melee_cooldown_duration: float = _get_component_cooldown_duration(_melee_attack_component)
+	if melee_cooldown_duration <= cooldown_overlay_minimum_duration:
+		melee_cooldown_ratio = 0.0
+	if melee_cooldown_ratio <= 0.0:
+		_melee_cooldown_display_source = ""
+		_last_cooling_melee_ranged_slot = -1
 
 	# 远程槽冷却刷新索引；取值为控件数组下标，默认逐槽清理或设置遮罩，修改循环范围会影响 CD 显示目标。
 	for slot_index in range(_ranged_slot_controls.size()):
 		# 当前远程槽遮罩比例；取值为 0 到 1，默认只给最近开火槽显示，修改会影响远程 CD 归属。
-		var slot_cooldown_ratio: float = weapon_cooldown_ratio if _weapon_cooldown_display_source == "ranged" and slot_index == _last_cooling_ranged_slot else 0.0
+		var slot_cooldown_ratio: float = ranged_cooldown_ratio if _weapon_cooldown_display_source == "ranged" and slot_index == _last_cooling_ranged_slot else 0.0
+		if _melee_cooldown_display_source == "ranged" and slot_index == _last_cooling_melee_ranged_slot:
+			slot_cooldown_ratio = maxf(slot_cooldown_ratio, melee_cooldown_ratio)
 		_ranged_slot_controls[slot_index].call("set_cooldown_ratio", slot_cooldown_ratio)
 
 	if _melee_slot_control != null:
 		# 近战冷却比例；取值为 0 到 1，默认从近战攻击组件读取，修改会影响近战槽白色 CD 遮罩。
-		var melee_slot_cooldown_ratio: float = _get_component_cooldown_ratio(_melee_attack_component)
-		if melee_slot_cooldown_ratio <= 0.0 and _weapon_cooldown_display_source == "melee":
-			_weapon_cooldown_display_source = ""
-		_melee_slot_control.call("set_cooldown_ratio", melee_slot_cooldown_ratio if _weapon_cooldown_display_source == "melee" else 0.0)
+		var melee_slot_cooldown_ratio: float = ranged_cooldown_ratio if _weapon_cooldown_display_source == "melee" else 0.0
+		if _melee_cooldown_display_source == "melee":
+			melee_slot_cooldown_ratio = maxf(melee_slot_cooldown_ratio, melee_cooldown_ratio)
+		_melee_slot_control.call("set_cooldown_ratio", melee_slot_cooldown_ratio)
 
 
 func _create_weapon_slot_control(minimum_size: Vector2) -> Control:
@@ -1116,6 +1146,25 @@ func _build_supply_extraction_overlay() -> void:
 	# 全局库存服务；送回报价、金币与所有权转移均由该单例处理。
 	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
 	panel.call("configure", global_inventory)
+
+
+func _build_character_showcase_view() -> void:
+	## 创建战斗内当前角色展示界面；视图复用角色系统场景，HUD 只负责显示、关闭与暂停编排。
+	if _root_control == null or _character_showcase_view != null or character_showcase_scene == null:
+		return
+	# 角色展示实例；进入场景树前切换为仅当前角色模式，避免 ready 阶段创建可见的左侧角色选择栏。
+	var showcase_view: Control = character_showcase_scene.instantiate() as Control
+	if showcase_view == null:
+		return
+	showcase_view.name = "CharacterShowcaseView"
+	showcase_view.set("display_mode", CHARACTER_SHOWCASE_DISPLAY_MODE)
+	showcase_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	showcase_view.process_mode = Node.PROCESS_MODE_ALWAYS
+	showcase_view.visible = false
+	if showcase_view.has_signal("close_requested"):
+		showcase_view.connect("close_requested", Callable(self, "_on_character_showcase_close_requested"))
+	_root_control.add_child(showcase_view)
+	_character_showcase_view = showcase_view
 
 
 func _build_combat_developer_overlay() -> void:
@@ -1437,9 +1486,36 @@ func _set_large_map_visible(visible: bool) -> void:
 	_refresh_combat_input_state()
 
 
+func _toggle_character_showcase() -> void:
+	_set_character_showcase_visible(not _is_character_showcase_visible())
+
+
+func _is_character_showcase_visible() -> bool:
+	## 返回战斗内角色展示状态；界面未创建时安全返回 false。
+	return _character_showcase_view != null and _character_showcase_view.visible
+
+
+func _set_character_showcase_visible(visible: bool) -> void:
+	## 切换当前角色展示并同步暂停状态；打开前关闭背包和大地图，关闭后恢复战斗运行。
+	if _character_showcase_view == null or _is_player_dead:
+		return
+	if visible:
+		_set_inventory_visible(false)
+		_set_large_map_visible(false)
+		_character_showcase_view.visible = true
+		if _character_showcase_view.has_method("refresh_current_character"):
+			_character_showcase_view.call("refresh_current_character")
+		if _character_showcase_view.has_method("focus_default_control"):
+			_character_showcase_view.call("focus_default_control")
+	else:
+		_character_showcase_view.visible = false
+	get_tree().paused = visible
+	_refresh_combat_input_state()
+
+
 func _refresh_combat_input_state() -> void:
-	# 战斗输入启用状态；取值由背包、大地图、暂停菜单和掉落物 UI 共同决定，默认任意交互界面打开都会禁用战斗输入。
-	var combat_input_enabled: bool = not _is_shared_inventory_visible() and not _large_map_overlay.visible and not _pause_overlay.visible and not _death_overlay.visible and (_supply_extraction_overlay == null or not _supply_extraction_overlay.visible) and not _is_player_dead and not _should_drop_ui_block_combat_input()
+	# 战斗输入启用状态；取值由背包、大地图、角色展示、暂停菜单和掉落物 UI 共同决定，默认任意交互界面打开都会禁用战斗输入。
+	var combat_input_enabled: bool = not _is_shared_inventory_visible() and not _large_map_overlay.visible and not _is_character_showcase_visible() and not _pause_overlay.visible and not _death_overlay.visible and (_supply_extraction_overlay == null or not _supply_extraction_overlay.visible) and not _is_player_dead and not _should_drop_ui_block_combat_input()
 	if _has_combat_input_enabled_state and _last_combat_input_enabled == combat_input_enabled:
 		return
 
@@ -1602,7 +1678,7 @@ func _is_supply_extraction_open_event(event: InputEvent) -> bool:
 
 
 func _can_process_extraction_input() -> bool:
-	return not _is_player_dead and not _inventory_panel.visible and not _large_map_overlay.visible and not _pause_overlay.visible and not _death_overlay.visible and (_supply_extraction_overlay == null or not _supply_extraction_overlay.visible)
+	return not _is_player_dead and not _inventory_panel.visible and not _large_map_overlay.visible and not _is_character_showcase_visible() and not _pause_overlay.visible and not _death_overlay.visible and (_supply_extraction_overlay == null or not _supply_extraction_overlay.visible)
 
 
 func _is_extraction_ready_to_leave() -> bool:
@@ -2028,6 +2104,13 @@ func _is_toggle_large_map_event(key_event: InputEventKey) -> bool:
 	return InputMap.has_action(toggle_large_map_action) and Input.is_action_just_pressed(toggle_large_map_action)
 
 
+func _is_toggle_character_showcase_event(key_event: InputEventKey) -> bool:
+	if _should_use_physical_fallback(toggle_character_showcase_action) and key_event.physical_keycode == KEY_O:
+		return true
+
+	return InputMap.has_action(toggle_character_showcase_action) and Input.is_action_just_pressed(toggle_character_showcase_action)
+
+
 func _is_toggle_drop_list_event(key_event: InputEventKey) -> bool:
 	if _should_use_physical_fallback(toggle_drop_list_action) and key_event.physical_keycode == KEY_G:
 		return true
@@ -2115,6 +2198,9 @@ func _close_top_interactive_panel() -> bool:
 	if _is_combat_developer_menu_visible():
 		_on_combat_developer_menu_closed()
 		return true
+	if _is_character_showcase_visible():
+		_set_character_showcase_visible(false)
+		return true
 
 	if _inventory_panel.visible:
 		_set_inventory_visible(false)
@@ -2130,6 +2216,8 @@ func _close_top_interactive_panel() -> bool:
 func _open_supply_extraction_panel() -> void:
 	if _supply_extraction_overlay == null or _supply_extraction_panel == null:
 		return
+	if _is_character_showcase_visible():
+		_set_character_showcase_visible(false)
 	_set_inventory_visible(false)
 	_set_large_map_visible(false)
 	_supply_extraction_overlay.visible = true
@@ -2299,6 +2387,8 @@ func _toggle_pause_menu() -> void:
 func _set_pause_menu_visible(visible: bool) -> void:
 	if _is_player_dead:
 		return
+	if visible and _is_character_showcase_visible():
+		_set_character_showcase_visible(false)
 
 	_pause_overlay.visible = visible
 	if _combat_developer_overlay != null:
@@ -2730,14 +2820,15 @@ func _on_ranged_weapon_fired(_projectile: Node2D) -> void:
 	_last_cooling_ranged_slot = int(_equipment_component.call("get_current_ranged_slot"))
 
 
-func _on_weapon_attack_succeeded(source_kind: String, source_index: int, _weapon_data: Resource) -> void:
+func _on_weapon_attack_succeeded(attack_mode: String, source_kind: String, source_index: int, _weapon_data: Resource) -> void:
 	## 记录玩家实际发动攻击的装备槽；混合武器同时运行两个攻击组件时仍只把冷却显示在来源槽。
-	if source_kind == "ranged":
-		_weapon_cooldown_display_source = "ranged"
-		_last_cooling_ranged_slot = source_index
-	elif source_kind == "melee":
-		_weapon_cooldown_display_source = "melee"
-		_last_cooling_ranged_slot = -1
+	## 当前规则补充：远程与近战通道分别保存来源；后一次攻击不会清空另一通道仍在进行的冷却反馈。
+	if attack_mode == "ranged":
+		_weapon_cooldown_display_source = source_kind
+		_last_cooling_ranged_slot = source_index if source_kind == "ranged" else -1
+	elif attack_mode == "melee":
+		_melee_cooldown_display_source = source_kind
+		_last_cooling_melee_ranged_slot = source_index if source_kind == "ranged" else -1
 
 
 func _on_player_died() -> void:
@@ -3246,6 +3337,10 @@ func _on_resume_button_pressed() -> void:
 	_set_pause_menu_visible(false)
 
 
+func _on_character_showcase_close_requested() -> void:
+	_set_character_showcase_visible(false)
+
+
 func _on_combat_developer_menu_closed() -> void:
 	if _combat_developer_overlay != null:
 		_combat_developer_overlay.visible = false
@@ -3457,6 +3552,8 @@ func _set_death_overlay_visible(visible: bool) -> void:
 	if visible:
 		_inventory_panel.visible = false
 		_large_map_overlay.visible = false
+		if _character_showcase_view != null:
+			_character_showcase_view.visible = false
 		if _supply_extraction_overlay != null:
 			_supply_extraction_overlay.visible = false
 		_pause_overlay.visible = false

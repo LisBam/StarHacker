@@ -3,6 +3,9 @@ extends Control
 ## 独立角色系统负责查看和确认当前角色，不再作为进入骇入或训练场的前置步骤。
 ## 左侧按钮只切换当前查看目标，右侧详情面板展示角色定位、基础数值和后续技能入口。
 
+## 当前角色展示模式关闭请求；宿主收到后负责隐藏界面并恢复游戏，完整选择模式不会发出。
+signal close_requested
+
 ## 星角色标识；默认与 SessionState 保持一致，修改会影响星按钮的选择目标。
 const CHARACTER_STELLE: String = "stelle"
 ## 穹角色标识；默认与 SessionState 保持一致，修改会影响穹按钮的选择目标。
@@ -11,6 +14,14 @@ const CHARACTER_CAEULUS: String = "caelus"
 const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 ## 全局窗口样式指南；统一角色列表、详情分区、属性条和底部操作按钮的视觉。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+## 可展开角色技能卡片脚本；只接收展示数据并负责单个技能的圆角边框、徽章和说明展开交互。
+const CHARACTER_SKILL_CARD_SCRIPT: Script = preload("res://scripts/ui/character_skill_card.gd")
+## 完整角色选择模式；显示左侧角色列表、确认按钮和返回主菜单入口。
+const DISPLAY_MODE_SELECTION: int = 0
+## 当前角色展示模式；隐藏左侧角色列表，只显示会话中已选角色并由宿主处理关闭请求。
+const DISPLAY_MODE_CURRENT_CHARACTER: int = 1
+## 当前角色详情面板安全最小宽度；固定 480 像素，避免检查器异常值让技能徽章和说明无法阅读。
+const CURRENT_CHARACTER_PANEL_MINIMUM_WIDTH: float = 480.0
 
 ## 主菜单场景路径；默认返回项目主菜单，只允许填写 tscn 资源，运行时通常不动态修改。
 @export_file("*.tscn") var main_menu_scene_path: String = "res://scenes/ui/main_menu.tscn"
@@ -18,6 +29,14 @@ const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 @export_range(1.0, 9999.0, 1.0, "or_greater") var stat_bar_maximum: float = 200.0
 ## 速度条显示上限；取值应大于 0，默认 140 对应旧规则 420 速度，修改会影响速度条形比例。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var speed_bar_maximum: float = 140.0
+## 攻击力条显示上限；取值应大于 0，默认 200 覆盖当前角色基础攻击力，修改会影响攻击力条形比例。
+@export_range(1.0, 99999.0, 1.0, "or_greater") var attack_bar_maximum: float = 200.0
+## 防御力条显示上限；取值应大于 0，默认 200 覆盖当前角色基础防御力，修改会影响防御力条形比例。
+@export_range(1.0, 99999.0, 1.0, "or_greater") var defense_bar_maximum: float = 200.0
+## 界面展示模式；0 为完整角色选择，1 为战斗内当前角色展示，通常由宿主在实例进入场景树前配置。
+@export_enum("角色选择", "当前角色展示") var display_mode: int = DISPLAY_MODE_SELECTION
+## 当前角色展示模式的详情面板宽度；默认 860 像素，保持与完整角色系统右侧信息区接近，通常不需要运行时动态修改。
+@export_range(480.0, 1600.0, 1.0) var current_character_panel_width: float = 860.0
 
 ## 当前选中的角色标识；取值为 stelle、caelus 或 silver_wolf，默认 stelle，修改会影响确认进入的角色。
 var _selected_character_id: String = CHARACTER_STELLE
@@ -25,7 +44,21 @@ var _selected_character_id: String = CHARACTER_STELLE
 var _character_buttons: Dictionary = {}
 ## 角色按钮滚动内容；默认在 ready 中创建，承载全部内置与自动发现按钮，角色数量增加时可纵向滚动访问。
 var _character_button_container: VBoxContainer
+## 被动技能卡片缓存；元素为 CharacterSkillCard，切换角色时释放旧卡片并按资源数组重建。
+var _passive_skill_cards: Array[Control] = []
+## 主动技能卡片缓存；元素为 CharacterSkillCard，切换角色时释放旧卡片并按资源数组重建。
+var _active_skill_cards: Array[Control] = []
 
+## 页面背景缓存；完整选择模式显示不透明页面背景，战斗内展示模式显示统一半透明遮罩。
+@onready var _background: ColorRect = get_node("Background") as ColorRect
+## 主列容器缓存；完整模式左右分栏，当前角色展示模式改为居中单栏。
+@onready var _main_columns: HBoxContainer = get_node("RootMargin/RootContent/MainColumns") as HBoxContainer
+## 左侧角色列表面板缓存；当前角色展示模式隐藏该面板，避免战斗内切换角色。
+@onready var _character_list_panel: PanelContainer = get_node("RootMargin/RootContent/MainColumns/CharacterListPanel") as PanelContainer
+## 右侧角色详情面板缓存；两种模式共享同一属性、技能和滚动内容。
+@onready var _detail_panel: PanelContainer = get_node("RootMargin/RootContent/MainColumns/DetailPanel") as PanelContainer
+## 底部操作容器缓存；完整模式显示返回与确认，当前角色展示模式只保留关闭按钮。
+@onready var _bottom_actions: HBoxContainer = get_node("RootMargin/RootContent/BottomActions") as HBoxContainer
 ## 页面标题缓存；默认绑定 TitleLabel，显示当前模式下的角色选择标题。
 @onready var _title_label: Label = %TitleLabel
 ## 星角色按钮缓存；默认绑定 StelleButton，点击后查看星的详情。
@@ -58,12 +91,20 @@ var _character_button_container: VBoxContainer
 @onready var _speed_preview_bar: ProgressBar = %SpeedPreviewBar
 ## 攻击力文本缓存；默认绑定 AttackValueLabel，显示当前查看角色的基础攻击力。
 @onready var _attack_value_label: Label = %AttackValueLabel
+## 攻击力数值条缓存；默认绑定 AttackPreviewBar，用于表现当前查看角色的基础攻击力。
+@onready var _attack_preview_bar: ProgressBar = %AttackPreviewBar
 ## 防御力文本缓存；默认绑定 DefenseValueLabel，显示当前查看角色的基础防御力。
 @onready var _defense_value_label: Label = %DefenseValueLabel
-## 被动技能文本缓存；默认绑定 PassiveLabel，显示后续被动技能占位信息。
+## 防御力数值条缓存；默认绑定 DefensePreviewBar，用于表现当前查看角色的基础防御力。
+@onready var _defense_preview_bar: ProgressBar = %DefensePreviewBar
+## 被动技能文本缓存；默认绑定 PassiveLabel，作为被动技能卡片分区标题。
 @onready var _passive_label: Label = %PassiveLabel
-## 主动技能文本缓存；默认绑定 ActiveLabel，显示后续主动技能占位信息。
+## 被动技能卡片容器；默认绑定 PassiveSkillCards，按角色资源数组顺序承载全部被动技能。
+@onready var _passive_skill_cards_container: VBoxContainer = %PassiveSkillCards
+## 主动技能文本缓存；默认绑定 ActiveLabel，作为主动技能卡片分区标题。
 @onready var _active_label: Label = %ActiveLabel
+## 主动技能卡片容器；默认绑定 ActiveSkillCards，按角色资源数组顺序承载全部主动技能。
+@onready var _active_skill_cards_container: VBoxContainer = %ActiveSkillCards
 ## 确认进入按钮缓存；默认绑定 ConfirmButton，点击后写入角色并进入游戏世界。
 @onready var _confirm_button: Button = %ConfirmButton
 ## 返回按钮缓存；默认绑定 BackButton，点击后回到主菜单。
@@ -75,10 +116,14 @@ func _ready() -> void:
 	UI_STYLE_GUIDE.apply_primary_button(_confirm_button)
 	UI_STYLE_GUIDE.apply_title_label(_title_label)
 	UI_STYLE_GUIDE.apply_title_label(_character_name_label)
-	(get_node("Background") as ColorRect).color = UI_STYLE_GUIDE.SCREEN_BACKGROUND_COLOR
+	UI_STYLE_GUIDE.apply_section_panel(_character_list_panel)
+	UI_STYLE_GUIDE.apply_window_panel(_detail_panel)
 	_stelle_button.toggle_mode = true
 	_caelus_button.toggle_mode = true
 	_silver_wolf_button.toggle_mode = true
+	UI_STYLE_GUIDE.apply_character_selector_button(_stelle_button)
+	UI_STYLE_GUIDE.apply_character_selector_button(_caelus_button)
+	UI_STYLE_GUIDE.apply_character_selector_button(_silver_wolf_button)
 	_setup_character_button_scroll()
 	_stelle_button.pressed.connect(_on_stelle_button_pressed)
 	_caelus_button.pressed.connect(_on_caelus_button_pressed)
@@ -87,13 +132,33 @@ func _ready() -> void:
 	_confirm_button.pressed.connect(_on_confirm_button_pressed)
 	_back_button.pressed.connect(_on_back_button_pressed)
 	_selected_character_id = _get_session_selected_character_id()
+	_apply_display_mode()
 	_refresh_title()
 	_select_character(_selected_character_id)
 
 
 func _refresh_title() -> void:
+	if display_mode == DISPLAY_MODE_CURRENT_CHARACTER:
+		_title_label.text = "角色展示"
+		_back_button.text = "关闭"
+		return
 	_title_label.text = "角色系统"
 	_confirm_button.text = "确认选择"
+	_back_button.text = "返回"
+
+
+func refresh_current_character() -> void:
+	## 从 SessionState 重新读取当前已选角色并刷新详情；战斗内每次打开展示界面前调用可同步训练场角色切换结果。
+	_selected_character_id = _get_session_selected_character_id()
+	_select_character(_selected_character_id)
+
+
+func focus_default_control() -> void:
+	## 把键盘焦点交给当前模式的默认操作；战斗内展示使用关闭按钮，完整模式使用确认按钮。
+	if display_mode == DISPLAY_MODE_CURRENT_CHARACTER:
+		_back_button.grab_focus()
+	else:
+		_confirm_button.grab_focus()
 
 
 func _select_character(character_id: String) -> void:
@@ -134,11 +199,17 @@ func _refresh_character_detail() -> void:
 	_health_preview_bar.max_value = stat_bar_maximum
 	_energy_preview_bar.max_value = stat_bar_maximum
 	_speed_preview_bar.max_value = speed_bar_maximum
+	_attack_preview_bar.max_value = attack_bar_maximum
+	_defense_preview_bar.max_value = defense_bar_maximum
 	_health_preview_bar.value = clampf(max_health, 0.0, stat_bar_maximum)
 	_energy_preview_bar.value = clampf(max_energy, 0.0, stat_bar_maximum)
 	_speed_preview_bar.value = clampf(move_speed, 0.0, speed_bar_maximum)
-	_passive_label.text = _build_skill_detail_text("被动技能", profile.get("passive_skills", []) as Array, str(profile.get("passive", "被动技能：待配置")))
-	_active_label.text = _build_skill_detail_text("主动技能", profile.get("active_skills", []) as Array, str(profile.get("active", "主动技能：待配置")))
+	_attack_preview_bar.value = clampf(attack_power, 0.0, attack_bar_maximum)
+	_defense_preview_bar.value = clampf(defense_power, 0.0, defense_bar_maximum)
+	_passive_label.text = "被动技能"
+	_active_label.text = "主动技能"
+	_refresh_skill_cards(_passive_skill_cards_container, _passive_skill_cards, profile.get("passive_skills", []) as Array, str(profile.get("passive", "被动技能：待配置")), "被动")
+	_refresh_skill_cards(_active_skill_cards_container, _active_skill_cards, profile.get("active_skills", []) as Array, str(profile.get("active", "主动技能：待配置")), "主动")
 
 
 func _build_skill_detail_text(section_name: String, skill_resources: Array, fallback_text: String) -> String:
@@ -155,6 +226,67 @@ func _build_skill_detail_text(section_name: String, skill_resources: Array, fall
 		var skill_description: String = str(skill_resource.get("description")).strip_edges()
 		skill_lines.append("%s：%s" % [skill_name if not skill_name.is_empty() else "未命名技能", skill_description] if not skill_description.is_empty() else (skill_name if not skill_name.is_empty() else "未命名技能"))
 	return "%s\n%s" % [section_name, "\n\n".join(skill_lines)] if not skill_lines.is_empty() else fallback_text
+
+
+func _refresh_skill_cards(container: VBoxContainer, card_cache: Array[Control], skill_resources: Array, fallback_text: String, skill_type: String) -> void:
+	## 按角色技能资源重建指定分区；切换角色属于低频操作，卡片内部展开时不会重建其他技能。
+	for skill_card in card_cache:
+		if skill_card != null and is_instance_valid(skill_card):
+			skill_card.queue_free()
+	card_cache.clear()
+	for raw_skill_resource in skill_resources:
+		# 技能资源；空资源不会生成技能卡片，避免无效数组项占用界面空间。
+		var skill_resource: Resource = raw_skill_resource as Resource
+		if skill_resource == null:
+			continue
+		# 技能名称；缺失时使用稳定兜底文本，避免卡片第一行为空。
+		var skill_name: String = str(skill_resource.get("display_name")).strip_edges()
+		# 技能说明；允许为空，卡片会统一显示“暂无技能描述”。
+		var skill_description: String = str(skill_resource.get("description")).strip_edges()
+		# 基础冷却；被动资源没有该字段时按 0 秒展示，主动资源读取 cooldown_duration。
+		var cooldown_seconds: float = float(skill_resource.get("cooldown_duration")) if skill_type == "主动" else 0.0
+		# 基础能耗；被动资源没有该字段时按 0 展示，主动资源读取整数 energy_cost。
+		var energy_cost: int = int(skill_resource.get("energy_cost")) if skill_type == "主动" else 0
+		_add_skill_card(container, card_cache, skill_name, skill_description, skill_type, cooldown_seconds, energy_cost)
+	if not card_cache.is_empty():
+		return
+	# 兼容技能名称；旧角色只有文本字段时从第一个中文冒号前提取名称。
+	var fallback_skill_name: String = skill_type + "技能"
+	# 兼容技能说明；默认保留完整旧文本，解析成功时移除开头名称和冒号。
+	var fallback_description: String = fallback_text.strip_edges()
+	# 中文冒号位置；取值大于 0 时把冒号前文本作为兼容技能名。
+	var separator_index: int = fallback_description.find("：")
+	if separator_index > 0:
+		fallback_skill_name = fallback_description.left(separator_index).strip_edges()
+		fallback_description = fallback_description.substr(separator_index + 1).strip_edges()
+	_add_skill_card(container, card_cache, fallback_skill_name, fallback_description, skill_type, 0.0, 0)
+
+
+func _add_skill_card(container: VBoxContainer, card_cache: Array[Control], skill_name: String, skill_description: String, skill_type: String, cooldown_seconds: float, energy_cost: int) -> void:
+	## 创建并配置单个纯展示技能卡片；资源解析留在角色系统，卡片不依赖具体技能数据类型。
+	# 技能卡片；使用共享组件确保局外角色系统与战斗内角色展示拥有完全一致的布局和交互。
+	var skill_card: CharacterSkillCard = CHARACTER_SKILL_CARD_SCRIPT.new() as CharacterSkillCard
+	skill_card.configure(skill_name, skill_description, skill_type, cooldown_seconds, energy_cost)
+	container.add_child(skill_card)
+	card_cache.append(skill_card)
+
+
+func _apply_display_mode() -> void:
+	## 根据宿主用途切换完整选择或当前角色展示；详情内容始终复用同一滚动面板。
+	# 是否仅展示当前角色；true 时禁止通过本界面切换或确认其他角色。
+	var current_character_only: bool = display_mode == DISPLAY_MODE_CURRENT_CHARACTER
+	_background.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR if current_character_only else UI_STYLE_GUIDE.SCREEN_BACKGROUND_COLOR
+	_character_list_panel.visible = not current_character_only
+	_confirm_button.visible = not current_character_only
+	_bottom_actions.alignment = BoxContainer.ALIGNMENT_CENTER if current_character_only else BoxContainer.ALIGNMENT_END
+	if current_character_only:
+		_main_columns.alignment = BoxContainer.ALIGNMENT_CENTER
+		_detail_panel.custom_minimum_size = Vector2(maxf(current_character_panel_width, CURRENT_CHARACTER_PANEL_MINIMUM_WIDTH), 0.0)
+		_detail_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	else:
+		_main_columns.alignment = BoxContainer.ALIGNMENT_BEGIN
+		_detail_panel.custom_minimum_size = Vector2.ZERO
+		_detail_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 
 func _get_session_state() -> Node:
@@ -241,6 +373,7 @@ func _build_character_buttons() -> void:
 			character_button = Button.new()
 			character_button.custom_minimum_size = Vector2(0.0, 58.0)
 			character_button.toggle_mode = true
+			UI_STYLE_GUIDE.apply_character_selector_button(character_button)
 			character_button.pressed.connect(_on_dynamic_character_pressed.bind(character_id))
 			_character_button_container.add_child(character_button)
 			_character_buttons[character_id] = character_button
@@ -292,6 +425,9 @@ func _on_confirm_button_pressed() -> void:
 
 
 func _on_back_button_pressed() -> void:
+	if display_mode == DISPLAY_MODE_CURRENT_CHARACTER:
+		close_requested.emit()
+		return
 	_change_scene_with_transition(main_menu_scene_path)
 
 

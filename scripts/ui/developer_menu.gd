@@ -17,6 +17,8 @@ const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
 ## 通用信息确认弹窗脚本；清空仓库等不可逆调试操作统一使用白边信息确认样式。
 const COMMON_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/common_confirmation_dialog.gd")
+## 强化规则脚本；读取正式属性池、品质标识与中文名称，避免开发者菜单重复维护强化数据。
+const ENHANCEMENT_RULES_SCRIPT: Script = preload("res://scripts/data/enhancement_rules.gd")
 
 ## 菜单最小尺寸；默认 520x580，适合在主菜单中央显示资源操作和调试信息开关。
 @export var panel_minimum_size: Vector2 = Vector2(520.0, 640.0)
@@ -47,6 +49,20 @@ var _grant_weapons_button: Button
 var _grant_equipment_button: Button
 ## 随机强化石按钮；默认运行时创建，点击后向永久仓库发放 10 颗随机强化石。
 var _grant_stones_button: Button
+## 自定义强化石配置容器；默认运行时创建，包含品质、适用对象和三条可选词条，战斗开发者上下文会统一隐藏。
+var _custom_stone_controls_container: VBoxContainer
+## 自定义强化石品质选项；默认初级，玩家可从初级、中级、高级、极品中选择实际品质。
+var _custom_stone_quality_option: OptionButton
+## 自定义强化石适用对象选项；默认武器，决定后三个词条只显示武器或装备可用属性。
+var _custom_stone_target_option: OptionButton
+## 自定义强化石第一条加强词条选项；默认未选择且为必填，缺失时不会生成无效强化石。
+var _custom_stone_beneficial_one_option: OptionButton
+## 自定义强化石第二条加强词条选项；默认无，可选填且与第一条重复时会在生成阶段安全忽略。
+var _custom_stone_beneficial_two_option: OptionButton
+## 自定义强化石削弱词条选项；默认无，可选填且会按属性的反向收益方向写入强化石。
+var _custom_stone_detrimental_option: OptionButton
+## 创建自定义强化石按钮；点击后把当前配置生成一颗并存入永久仓库。
+var _grant_custom_stone_button: Button
 ## 获取全部道具按钮；默认运行时创建，点击后向永久仓库各发放一件内容目录当前注册道具。
 var _grant_all_items_button: Button
 ## 修改金币按钮；点击后通过滑条或数字输入直接设置目标金币余额。
@@ -189,6 +205,7 @@ func _build_interface() -> void:
 	_grant_stones_button.pressed.connect(_on_grant_stones_pressed)
 	content.add_child(_grant_stones_button)
 	_economy_controls.append(_grant_stones_button)
+	_build_custom_stone_controls(content)
 	_grant_all_items_button = Button.new()
 	_grant_all_items_button.custom_minimum_size = Vector2(0.0, 46.0)
 	_grant_all_items_button.text = "一键获取所有道具"
@@ -305,12 +322,111 @@ func _build_interface() -> void:
 	content.add_child(close_button)
 
 
+func _build_custom_stone_controls(content: VBoxContainer) -> void:
+	# 自定义强化石容器；独立归入局外经济区，战斗开发者菜单会通过统一控件列表隐藏。
+	_custom_stone_controls_container = VBoxContainer.new()
+	_custom_stone_controls_container.add_theme_constant_override("separation", 8)
+	content.add_child(_custom_stone_controls_container)
+	_economy_controls.append(_custom_stone_controls_container)
+	# 分区标题；明确这些选项只影响即将发放的一颗开发者强化石，不会改写随机掉落规则。
+	var custom_stone_title: Label = Label.new()
+	custom_stone_title.text = "自定义强化石效果"
+	custom_stone_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	custom_stone_title.add_theme_font_size_override("font_size", 18)
+	_custom_stone_controls_container.add_child(custom_stone_title)
+	_custom_stone_quality_option = _create_custom_stone_selector("强化石品质")
+	_custom_stone_target_option = _create_custom_stone_selector("适用对象")
+	_custom_stone_beneficial_one_option = _create_custom_stone_selector("加强词条1")
+	_custom_stone_beneficial_two_option = _create_custom_stone_selector("加强词条2")
+	_custom_stone_detrimental_option = _create_custom_stone_selector("削弱词条1")
+	# 品质选项；显示文本遵循扩展包和背包的中文命名，元数据使用强化规则的稳定 ID。
+	_custom_stone_quality_option.add_item("初级")
+	_custom_stone_quality_option.set_item_metadata(0, ENHANCEMENT_RULES_SCRIPT.QUALITY_LOW)
+	_custom_stone_quality_option.add_item("中级")
+	_custom_stone_quality_option.set_item_metadata(1, ENHANCEMENT_RULES_SCRIPT.QUALITY_MEDIUM)
+	_custom_stone_quality_option.add_item("高级")
+	_custom_stone_quality_option.set_item_metadata(2, ENHANCEMENT_RULES_SCRIPT.QUALITY_HIGH)
+	_custom_stone_quality_option.add_item("极品")
+	_custom_stone_quality_option.set_item_metadata(3, ENHANCEMENT_RULES_SCRIPT.QUALITY_SUPREME)
+	# 适用对象选项；强化石现行协议区分武器与装备，选择后实时缩小可选词条池以避免无效物品。
+	_custom_stone_target_option.add_item("武器")
+	_custom_stone_target_option.set_item_metadata(0, "weapon")
+	_custom_stone_target_option.add_item("装备")
+	_custom_stone_target_option.set_item_metadata(1, "equipment")
+	_custom_stone_target_option.item_selected.connect(_on_custom_stone_target_selected)
+	_refresh_custom_stone_stat_options()
+	_grant_custom_stone_button = Button.new()
+	_grant_custom_stone_button.text = "生成自定义强化石"
+	_grant_custom_stone_button.custom_minimum_size = Vector2(0.0, 42.0)
+	_grant_custom_stone_button.pressed.connect(_on_grant_custom_stone_pressed)
+	_custom_stone_controls_container.add_child(_grant_custom_stone_button)
+
+
+func _create_custom_stone_selector(label_text: String) -> OptionButton:
+	## 创建一行开发者强化石选项；所有行使用相同布局，避免品质与三条词条各自维护重复 UI 逻辑。
+	# 选项行；横向摆放固定宽度说明标签与可扩展的下拉选择器。
+	var selector_row: HBoxContainer = HBoxContainer.new()
+	selector_row.add_theme_constant_override("separation", 12)
+	_custom_stone_controls_container.add_child(selector_row)
+	# 选项标签；取值为调用方传入的永久功能名称，直接对应开发者设置中的可配置项。
+	var selector_label: Label = Label.new()
+	selector_label.text = label_text
+	selector_label.custom_minimum_size = Vector2(112.0, 32.0)
+	selector_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	selector_row.add_child(selector_label)
+	# 下拉选择器；默认按调用方随后填入的选项显示，横向占满可用区域。
+	var selector_option: OptionButton = OptionButton.new()
+	selector_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	selector_option.custom_minimum_size = Vector2(0.0, 32.0)
+	selector_row.add_child(selector_option)
+	return selector_option
+
+
+func _on_custom_stone_target_selected(_selected_index: int) -> void:
+	## 在武器与装备之间切换时刷新三条词条的候选池；旧选项不跨目标保留，避免生成无法应用的词条。
+	_refresh_custom_stone_stat_options()
+
+
+func _refresh_custom_stone_stat_options() -> void:
+	## 根据当前适用对象填充词条选项；第一条加强必须选择有效属性，其他两条保留“无”作为可选空值。
+	if _custom_stone_target_option == null or _custom_stone_beneficial_one_option == null or _custom_stone_beneficial_two_option == null or _custom_stone_detrimental_option == null:
+		return
+	# 当前适用对象；默认武器，元数据异常时同样安全回退武器属性池。
+	var target_kind: String = str(_custom_stone_target_option.get_item_metadata(_custom_stone_target_option.selected))
+	# 当前属性池；由正式规则目录提供，新增可强化属性后会自动进入开发者下拉菜单。
+	var supported_stat_names: Array[String] = ENHANCEMENT_RULES_SCRIPT.WEAPON_STAT_KEYS if target_kind == "weapon" else ENHANCEMENT_RULES_SCRIPT.EQUIPMENT_STAT_KEYS
+	_populate_custom_stone_stat_option(_custom_stone_beneficial_one_option, supported_stat_names, "请选择加强词条")
+	_populate_custom_stone_stat_option(_custom_stone_beneficial_two_option, supported_stat_names, "无")
+	_populate_custom_stone_stat_option(_custom_stone_detrimental_option, supported_stat_names, "无")
+
+
+func _populate_custom_stone_stat_option(option_button: OptionButton, supported_stat_names: Array[String], empty_label: String) -> void:
+	## 把正式属性池写入单个下拉框；首项的空元数据使生成器可区分“未选择”与一个真实词条。
+	if option_button == null:
+		return
+	option_button.clear()
+	option_button.add_item(empty_label)
+	option_button.set_item_metadata(0, "")
+	for stat_name in supported_stat_names:
+		option_button.add_item(str(ENHANCEMENT_RULES_SCRIPT.get_stat_label(stat_name)))
+		option_button.set_item_metadata(option_button.item_count - 1, stat_name)
+
+
+func _get_custom_stone_option_value(option_button: OptionButton) -> String:
+	## 返回下拉框当前的稳定属性或品质标识；控件尚未创建、未选中或元数据异常时返回空字符串。
+	if option_button == null or option_button.selected < 0:
+		return ""
+	return str(option_button.get_item_metadata(option_button.selected))
+
+
 func _refresh_availability() -> void:
 	# 服务是否可用；取值决定所有会修改局外存档的开发者按钮是否可点击。
 	var service_available: bool = _global_inventory != null
 	_grant_weapons_button.disabled = not service_available
 	_grant_equipment_button.disabled = not service_available
 	_grant_stones_button.disabled = not service_available
+	if _grant_custom_stone_button != null:
+		_grant_custom_stone_button.disabled = not service_available
 	_grant_all_items_button.disabled = not service_available
 	_modify_coins_button.disabled = not service_available
 	_clear_warehouse_button.disabled = not service_available
@@ -388,6 +504,20 @@ func _on_grant_stones_pressed() -> void:
 		return
 	_pending_developer_value_action = "stones"
 	_developer_value_dialog.present_developer_value("获取强化石", "选择要生成并存入永久仓库的随机强化石数量", 1, maxi(enhancement_stone_grant_maximum, 1), clampi(enhancement_stone_grant_count, 1, maxi(enhancement_stone_grant_maximum, 1)), "获取")
+
+
+func _on_grant_custom_stone_pressed() -> void:
+	## 读取当前开发者配置并生成一颗自定义强化石；只允许第一条加强词条为空时阻止生成，其余重复或空词条由数据层安全归一化。
+	if _global_inventory == null or not _global_inventory.has_method("grant_custom_enhancement_stone_to_warehouse"):
+		return
+	# 第一条加强词条；取值为空代表玩家尚未完成必填配置，不调用库存服务以避免产生无效资源。
+	var beneficial_stat_name_one: String = _get_custom_stone_option_value(_custom_stone_beneficial_one_option)
+	if beneficial_stat_name_one.is_empty():
+		_status_label.text = "请先选择加强词条1"
+		return
+	# 创建结果；库存服务复用正式强化石数据生成与保存流程，false 表示配置与目标类型不兼容。
+	var granted: bool = bool(_global_inventory.call("grant_custom_enhancement_stone_to_warehouse", _get_custom_stone_option_value(_custom_stone_quality_option), _get_custom_stone_option_value(_custom_stone_target_option), beneficial_stat_name_one, _get_custom_stone_option_value(_custom_stone_beneficial_two_option), _get_custom_stone_option_value(_custom_stone_detrimental_option)))
+	_status_label.text = "已向永久仓库发放自定义强化石" if granted else "自定义强化石配置无效，请重新选择词条"
 
 
 func _on_grant_all_items_pressed() -> void:

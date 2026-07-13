@@ -13,8 +13,8 @@ class_name SilverWolfDoubleSpeedSkillData
 @export_range(0.0, 120.0, 0.01, "or_greater") var duration_loss_per_hit: float = 2.0
 ## 每次实际受击降低的技能效果比例；默认 0.20 表示从初始强度扣除 20%，五次受击后效果降为零。
 @export_range(0.0, 1.0, 0.01) var effect_loss_ratio_per_hit: float = 0.20
-## 全程无伤时剩余技能冷却缩减比例；默认 0.10 表示效果结束时把当前剩余冷却乘以 0.90。
-@export_range(0.0, 1.0, 0.01) var no_hit_cooldown_reduction_ratio: float = 0.10
+## 全程无伤时剩余技能冷却缩减比例；默认 0.20 表示效果结束时把当前剩余冷却乘以 0.80。
+@export_range(0.0, 1.0, 0.01) var no_hit_cooldown_reduction_ratio: float = 0.20
 ## 全程无伤完成时显示的头顶文本；默认 COMBO!，只作为即时反馈且不进入角色属性面板。
 @export var no_hit_feedback_text: String = "COMBO!"
 ## 全程无伤完成时文本颜色；默认亮绿色，修改只影响头顶反馈视觉。

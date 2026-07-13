@@ -1,18 +1,15 @@
-[gd_resource type="Resource" script_class="WeaponData" load_steps=3 format=3]
+[gd_resource type="Resource" script_class="WeaponData" format=3 uid="uid://cvmi45lujbw47"]
 
-[ext_resource type="Script" path="res://scripts/data/weapon_data.gd" id="1_weapon"]
+[ext_resource type="Script" uid="uid://bnwiep4d7h6jo" path="res://scripts/data/weapon_data.gd" id="1_weapon"]
 [ext_resource type="PackedScene" path="res://scenes/projectiles/player_projectile.tscn" id="2_projectile"]
 
 [resource]
 script = ExtResource("1_weapon")
 weapon_id = "hacker_silence"
 display_name = "骇客·静默"
-weapon_type = "ranged"
 description = "高冲击的精准远程武器，弹体可额外穿过一名目标。"
 icon_text = "S"
 value = 50
-max_durability = 500.0
-current_durability = 500.0
 energy_consumption = 20.0
 projectile_scene = ExtResource("2_projectile")
 projectile_speed = 1200.0

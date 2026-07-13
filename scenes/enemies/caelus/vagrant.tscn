@@ -25,6 +25,7 @@ toughness = 0.0
 vision_range = 600.0
 attack_range = 45.0
 attack_cooldown = 0.8
+attack_front_recoil_force = 40.0
 
 [node name="Body" type="Polygon2D" parent="."]
 color = Color(0.38, 0.62, 0.42, 1)

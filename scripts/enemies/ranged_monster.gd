@@ -106,7 +106,7 @@ func _update_target_behavior(_delta: float, target_distance: float) -> void:
 
 
 func _try_fire_projectile(direction: Vector2) -> void:
-	if projectile_scene == null or _cooldown_remaining > 0.0 or direction.is_zero_approx():
+	if _is_dying or projectile_scene == null or _cooldown_remaining > 0.0 or direction.is_zero_approx():
 		return
 	if not is_instance_valid(_target) or not _target_is_visible:
 		return
@@ -142,6 +142,9 @@ func _try_fire_projectile(direction: Vector2) -> void:
 	if projectile.has_method("launch"):
 		projectile.call("launch", resolved_direction, ranged_projectile_speed)
 
+	# 远程攻击自反馈；后坐力沿弹体反方向推动怪物，坐力为 0 时仍播放开火冲击特效但不改变移动。
+	_apply_attack_motion(resolved_direction)
+	_spawn_attack_effect()
 	_cooldown_remaining = _get_resolved_cooldown()
 
 

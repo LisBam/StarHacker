@@ -117,6 +117,8 @@ var _last_run_outcome: Dictionary = {}
 var _combat_shipped_value: int = 0
 ## 存档是否已排队；默认 false，同一帧多次拖拽操作只在帧末写盘一次。
 var _save_queued: bool = false
+## 正式战斗库存是否存在尚未落盘的变化；默认 false，拾取、丢弃和耐久变化只更新内存，撤离或失败结算后统一保存，避免仓库较大时每次交互都序列化完整库存。
+var _combat_inventory_save_pending: bool = false
 ## 耐久变化合并存档间隔；默认 0.5 秒，高射速连续射击期间最多每半秒触发一次实际存档写入。
 @export_range(0.05, 10.0, 0.05) var durability_save_delay_seconds: float = 0.5
 ## 是否已有耐久存档等待执行；默认 false，用于把短时间内多次射击合并为一次磁盘写入。
@@ -156,6 +158,7 @@ func _notification(what: int) -> void:
 
 func begin_combat_run() -> void:
 	_run_active = true
+	_combat_inventory_save_pending = false
 	_combat_shipped_value = 0
 	_run_seen_resource_instance_ids.clear()
 	_run_gained_resources.clear()
@@ -568,7 +571,8 @@ func ship_combat_resource_to_warehouse(item_resource: Resource, source_location:
 		if str(item_resource.get("item_kind")) == "enhancement_stone":
 			stock_market_service.call("record_run_metric", "shipped_enhancement_stones", shipping_quantity)
 	_refresh_current_ranged_slot_after_equipment_change()
-	_queue_save_inventory()
+	# 物资撤离已经把所有权转入永久仓库；即使正式战斗仍在进行也立即落盘，保证安全送回结果不会等待最终结算。
+	_queue_save_inventory(true)
 	inventory_changed.emit()
 	equipment_changed.emit()
 	warehouse_changed.emit()
@@ -1274,11 +1278,13 @@ func has_backpack_resource(item_resource: Resource) -> bool:
 	return _find_backpack_record_index(item_resource) >= 0
 
 
-func add_backpack_resource(item_resource: Resource, target_index: int = -1) -> bool:
+func add_backpack_resource(item_resource: Resource, target_index: int = -1, quantity: int = 1) -> bool:
 	if item_resource == null or _is_resource_equipped(item_resource):
 		return false
 	if has_backpack_resource(item_resource):
 		return false
+	# 实际加入数量；武器与装备固定为一件，可堆叠资源允许地面掉落按单组上限一次加入。
+	var resolved_quantity: int = clampi(quantity, 1, MAX_STACK_QUANTITY) if _is_stackable_resource(item_resource) else 1
 
 	# 待加入记录；优先复用 HUD 分步操作留下的临时记录，新拾取物品才创建新的获得时间。
 	var record: Dictionary = _take_detached_record(item_resource)
@@ -1286,10 +1292,11 @@ func add_backpack_resource(item_resource: Resource, target_index: int = -1) -> b
 	var is_new_acquisition: bool = record.is_empty()
 	if is_new_acquisition:
 		record = _create_record(item_resource)
+		record["quantity"] = resolved_quantity
 		# 是否为本局首次获得；自己丢弃后重新捡回会返回 false，避免堆叠来源数量被重复累计。
-		var is_run_acquisition: bool = _track_combat_acquisition(item_resource)
-		# 本局来源数量；首次战场拾取资源代表一个独立单位，堆叠合并时由库存记录继续累计与转移。
-		record["run_gained_quantity"] = 1 if is_run_acquisition else 0
+		var is_run_acquisition: bool = _track_combat_acquisition(item_resource, resolved_quantity)
+		# 本局来源数量；首次拾取的地面堆叠全部属于同一次战场获得，自己丢弃后重新捡回时保持为零。
+		record["run_gained_quantity"] = resolved_quantity if is_run_acquisition else 0
 
 	if _is_stackable_resource(item_resource):
 		_insert_record_with_stack_merge(_backpack_records, record, target_index)
@@ -1982,7 +1989,7 @@ func _get_record_display_name(record: Dictionary) -> String:
 	return str(item_resource.get("weapon_id")) if display_name.is_empty() else display_name
 
 
-func _track_combat_acquisition(item_resource: Resource) -> bool:
+func _track_combat_acquisition(item_resource: Resource, quantity: int = 1) -> bool:
 	if not _run_active or item_resource == null:
 		return false
 	# 资源实例编号；当前战斗内保持稳定，用于区分首次战场拾取与自己丢弃后的重新捡回。
@@ -1994,7 +2001,7 @@ func _track_combat_acquisition(item_resource: Resource) -> bool:
 	# 股市统计服务；只在首次战场获得时上报，自己丢弃后重新拾取不会重复影响行情。
 	var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")
 	if stock_market_service != null and stock_market_service.has_method("record_resource_obtained"):
-		stock_market_service.call("record_resource_obtained", item_resource, 1)
+		stock_market_service.call("record_resource_obtained", item_resource, clampi(quantity, 1, MAX_STACK_QUANTITY))
 	return true
 
 
@@ -2060,7 +2067,11 @@ func _shuffle_integer_array(values: Array[int]) -> void:
 		values[swap_index] = temporary_value
 
 
-func _queue_save_inventory() -> void:
+func _queue_save_inventory(force_during_combat: bool = false) -> void:
+	# 正式战斗中的普通背包变化属于本局临时状态；结算前不反复序列化永久仓库，物资撤离等明确要求即时持久化的流程可通过参数强制保存。
+	if _run_active and not force_during_combat:
+		_combat_inventory_save_pending = true
+		return
 	if _save_queued:
 		return
 	_save_queued = true
@@ -2069,6 +2080,7 @@ func _queue_save_inventory() -> void:
 
 func _save_inventory() -> void:
 	_save_queued = false
+	_combat_inventory_save_pending = false
 	# 存档永久仓库记录；只序列化局外安全物品，读取后不会加入战斗背包或死亡结算范围。
 	var serialized_warehouse: Array[Dictionary] = []
 	# 永久仓库记录；取值为全部安全存储记录，逐项转换为可恢复的 JSON 字典。

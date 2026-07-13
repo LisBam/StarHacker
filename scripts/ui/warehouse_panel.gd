@@ -155,6 +155,10 @@ var _stone_return_view_pending: bool = false
 var _pending_repair_kit_resource: Resource
 ## 待使用修复包来源；取值 warehouse 或 backpack，修复成功后从对应堆叠扣除一件。
 var _pending_repair_kit_location: String = ""
+## 仓库刷新是否已排队；默认 false，同一项跨容器操作触发多个库存信号时只重建一次可见列表。
+var _refresh_queued: bool = false
+## 隐藏期间仓库数据是否发生变化；默认 false，后台不创建仓库卡片，下一次打开时由公开刷新入口读取最新库存。
+var _refresh_pending: bool = false
 
 
 func _ready() -> void:
@@ -166,13 +170,43 @@ func _ready() -> void:
 	_build_storage_interface()
 	if _global_inventory != null:
 		if _global_inventory.has_signal("inventory_changed"):
-			_global_inventory.connect("inventory_changed", Callable(self, "_rebuild_storage_content"))
+			_global_inventory.connect("inventory_changed", Callable(self, "_on_inventory_state_changed"))
 		if _global_inventory.has_signal("equipment_changed"):
-			_global_inventory.connect("equipment_changed", Callable(self, "_rebuild_storage_content"))
+			_global_inventory.connect("equipment_changed", Callable(self, "_on_inventory_state_changed"))
 		if _global_inventory.has_signal("warehouse_changed"):
-			_global_inventory.connect("warehouse_changed", Callable(self, "_rebuild_storage_content"))
+			_global_inventory.connect("warehouse_changed", Callable(self, "_on_inventory_state_changed"))
 		if _global_inventory.has_signal("coins_changed"):
-			_global_inventory.connect("coins_changed", Callable(self, "_rebuild_storage_content"))
+			_global_inventory.connect("coins_changed", Callable(self, "_on_inventory_state_changed"))
+	_rebuild_storage_content()
+
+
+func refresh() -> void:
+	## 公开同步入口；主菜单打开仓库时调用，确保隐藏期间积累的库存变化一次性反映到当前列表。
+	_refresh_queued = false
+	_refresh_pending = false
+	_rebuild_storage_content()
+
+
+func _on_inventory_state_changed() -> void:
+	## 合并全局库存信号；隐藏仓库只标记待刷新，避免背包丢弃时按永久仓库总量重建不可见卡片。
+	if not is_visible_in_tree():
+		_refresh_pending = true
+		return
+	if _refresh_queued:
+		return
+	_refresh_queued = true
+	call_deferred("_flush_queued_refresh")
+
+
+func _flush_queued_refresh() -> void:
+	## 执行单次仓库重建；同帧 inventory、equipment、warehouse 与 coins 信号会共享这一次刷新。
+	if not _refresh_queued:
+		return
+	_refresh_queued = false
+	if not is_visible_in_tree():
+		_refresh_pending = true
+		return
+	_refresh_pending = false
 	_rebuild_storage_content()
 
 
@@ -397,6 +431,9 @@ func _build_storage_interface() -> void:
 
 
 func _rebuild_storage_content() -> void:
+	# 任意即时重建都会接管同帧已排队任务；延迟回调随后安全跳过，避免业务显式刷新与库存信号各重建一次。
+	_refresh_queued = false
+	_refresh_pending = false
 	_clear_container(_warehouse_item_list)
 	_clear_container(_carried_item_list)
 	_clear_container(_loadout_list)

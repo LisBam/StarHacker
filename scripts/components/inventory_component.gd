@@ -40,6 +40,15 @@ func add_item(item_data: Resource) -> bool:
 	return true
 
 
+func add_item_quantity(item_data: Resource, quantity: int) -> bool:
+	## 一次加入指定数量的可堆叠资源；正式项目由 GlobalInventory 原子合并堆叠，本地回退只支持单件以避免同一资源实例被重复登记。
+	if item_data == null or quantity <= 0:
+		return false
+	if _global_inventory != null and _global_inventory.has_method("add_backpack_resource"):
+		return bool(_global_inventory.call("add_backpack_resource", item_data, -1, quantity))
+	return add_item(item_data) if quantity == 1 else false
+
+
 func add_item_at(item_data: Resource, target_index: int) -> bool:
 	if _global_inventory != null and _global_inventory.has_method("add_backpack_resource"):
 		return bool(_global_inventory.call("add_backpack_resource", item_data, target_index))

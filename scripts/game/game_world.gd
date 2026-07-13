@@ -803,12 +803,12 @@ func spawn_weapon_drop_near_player(weapon_data: Resource) -> bool:
 	return spawn_weapon_drop(weapon_data, drop_position)
 
 
-func spawn_item_drop_near_player(item_data: Resource) -> bool:
+func spawn_item_drop_near_player(item_data: Resource, quantity: int = 1) -> bool:
 	if item_data == null:
 		return false
 	# 通用丢弃中心；强化石和修复包与武器共用玩家附近散落及墙体避让规则。
 	var drop_center: Vector2 = _player.global_position if _player != null else Vector2.ZERO
-	return spawn_item_drop(item_data, _get_scattered_drop_position(drop_center))
+	return spawn_item_drop(item_data, _get_scattered_drop_position(drop_center), Vector2.INF, 0.0, 0.0, quantity)
 
 
 func switch_character(character_id: String) -> void:
@@ -2365,7 +2365,7 @@ func _create_random_enhancement_stone() -> EnhancementStoneData:
 	)
 
 
-func spawn_item_drop(item_data: Resource, drop_position: Vector2, launch_origin: Vector2 = Vector2.INF, launch_duration: float = 0.0, launch_arc_height: float = 0.0) -> bool:
+func spawn_item_drop(item_data: Resource, drop_position: Vector2, launch_origin: Vector2 = Vector2.INF, launch_duration: float = 0.0, launch_arc_height: float = 0.0, quantity: int = 1) -> bool:
 	if item_data == null or weapon_drop_scene == null:
 		return false
 
@@ -2383,7 +2383,7 @@ func spawn_item_drop(item_data: Resource, drop_position: Vector2, launch_origin:
 	var should_launch: bool = launch_origin != Vector2.INF and launch_duration > 0.0
 	drop_instance.global_position = _clamp_position_to_map(launch_origin) if should_launch else resolved_drop_position
 	if drop_instance.has_method("configure_item_drop"):
-		drop_instance.call("configure_item_drop", item_data)
+		drop_instance.call("configure_item_drop", item_data, quantity)
 	else:
 		drop_instance.set("weapon_data", item_data)
 	if should_launch and drop_instance.has_method("play_launch_animation"):
@@ -2422,7 +2422,7 @@ func _is_position_near_existing_drop(candidate_position: Vector2) -> bool:
 
 
 func get_world_drop_total_value() -> int:
-	## 返回地图上当前仍可拾取掉落物的总价值；每个 item_drops 节点按一件计价，飞出动画期间暂不在组内。
+	## 返回地图上当前仍可拾取掉落物的总价值；普通节点按一件计价，堆叠丢弃节点按其数量计价，飞出动画期间暂不在组内。
 	var total_value: int = 0
 	for raw_drop in get_tree().get_nodes_in_group("item_drops"):
 		# 掉落节点；必须提供只读资源接口，异常或正在删除的节点不计入成功撤离被动。
@@ -2433,7 +2433,11 @@ func get_world_drop_total_value() -> int:
 		var item_resource: Resource = drop_node.call("get_item_data") as Resource
 		if item_resource == null:
 			continue
-		total_value += maxi(int(item_resource.call("get_effective_value")) if item_resource.has_method("get_effective_value") else int(item_resource.get("value")), 0)
+		# 地面物品数量；旧掉落节点没有数量接口时按一件兼容，整组丢弃节点按实际数量保持总价值不变。
+		var drop_quantity: int = maxi(int(drop_node.call("get_quantity")), 1) if drop_node.has_method("get_quantity") else 1
+		# 单件有效价值；强化与耐久物品读取动态价值，普通材料读取固定基础价值。
+		var unit_value: int = maxi(int(item_resource.call("get_effective_value")) if item_resource.has_method("get_effective_value") else int(item_resource.get("value")), 0)
+		total_value += unit_value * drop_quantity
 	return total_value
 
 

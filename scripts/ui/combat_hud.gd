@@ -2924,19 +2924,14 @@ func _discard_combat_inventory_item(item_resource: Resource, requested_quantity:
 			return
 		# 实际丢弃数量；限制到当前真实堆叠，防止旧弹窗数量过期。
 		var discard_quantity: int = clampi(requested_quantity, 1, stored_quantity)
-		# 地面资源实例；每个单位使用独立副本，重新拾取时仍可按签名合并且不会共享同一实例身份。
-		var dropped_resources: Array[Resource] = []
-		for _discard_index in range(discard_quantity):
-			# 单个地面资源副本；每件拥有独立实例身份，拾取后仍按签名自动堆叠。
-			var dropped_resource: Resource = item_resource.duplicate(true) as Resource
-			if dropped_resource == null or not bool(_game_world.call("spawn_item_drop_near_player", dropped_resource)):
-				return
-			dropped_resources.append(dropped_resource)
+		# 地面堆叠资源；整组只创建一个节点并携带数量，避免最多 99 件资源在同一帧深拷贝和实例化造成卡顿。
+		var dropped_resource: Resource = item_resource.duplicate(true) as Resource
+		if dropped_resource == null or not bool(_game_world.call("spawn_item_drop_near_player", dropped_resource, discard_quantity)):
+			return
 		if not bool(global_inventory.call("consume_storage_resource_quantity", item_resource, "backpack", discard_quantity)):
 			return
-		for dropped_resource in dropped_resources:
-			if global_inventory.has_method("register_combat_dropped_resource"):
-				global_inventory.call("register_combat_dropped_resource", dropped_resource)
+		if global_inventory.has_method("register_combat_dropped_resource"):
+			global_inventory.call("register_combat_dropped_resource", dropped_resource)
 	_combat_action_stone_resource = null
 	_combat_action_weapon_resource = null
 	_combat_action_weapon_source_index = -1

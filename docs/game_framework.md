@@ -71,7 +71,7 @@
 - `GameWorld` 负责地图边界、独立背景网格绘制、环境生成、探索记录、撤离点、宝箱、掉落池、虚拟人口目标和共享导航缓存；怪物类型按各场景根节点的 `spawn_weight` 占比抽取，背景网格间距不参与玩法边界或导航计算。
 - `MonsterSimulationManager` 只负责虚拟敌人记录与真实节点之间的分批物化和休眠。
 - `BasicMonster` 组合感知、战术和移动组件；`RangedMonster` 只增加安全距离与射击行为。
-- `WeaponDrop` 是统一地面物品载体，可承载武器、装备、强化石和道具的独立资源副本。
+- `WeaponDrop` 是统一地面物品载体，可承载武器、装备、强化石和道具的独立资源副本；武器与自然掉落默认数量为 1，玩家整组丢弃的可堆叠资源由单个节点保存 1 至 99 的数量并在拾取时原子合并。
 
 敌人状态机与加载协议见 `docs/enemy_ai.md`，掉落概率、人口曲线和撤离数值见机制总表。
 
@@ -83,6 +83,7 @@
 - `ItemCardView`、`WeaponDurabilityBar` 和 `ItemDetailFormatter` 统一物品展示，宿主只提供操作协议。
 - `CommonConfirmationDialog`、`SellQuantityDialog`、`SecuritiesTransferDialog`、`EnhancementResultDialog` 和 `ItemActionPopup` 分别承载明确的弹窗交互。
 - `UiStyleGuide`、`DialogOuterFrame` 和 `ProgressSliderVisual` 统一窗口、弹窗和滑条视觉，规则见 `docs/ui_style.md`。
+- 背包、仓库和锻造等库存长列表只在自身可见时消费库存变化信号；隐藏期间仅记录待刷新状态，重新打开后从 `GlobalInventory` 读取一次最新快照。同一帧连续出现库存、装备、仓库或金币信号时，每个可见面板最多重建 1 次列表。
 
 UI 不得通过字符串 `call()` 猜测已知组件接口，也不得复制服务公式来预判最终结果。操作提交前后的合法性都由数据所有者复核。
 
@@ -178,6 +179,7 @@ ContentCatalog 模板
 - 新筛选、排序或关键词规则进入 `InventoryQuery`，不得由每个面板单独实现。
 - 新物品展示字段进入 `ItemDetailFormatter`；标准卡片结构进入 `ItemCardView`。
 - 主菜单与战斗背包的共同交互进入 `SharedBackpackPanel`。仅场景特有的所有权结果由宿主通过信号处理。
+- 正式战斗中的普通拾取、丢弃、装备与耐久变化先写入 `GlobalInventory` 内存状态，不为每次操作重复序列化包含永久仓库的完整存档；成功撤离、失败或正常退出结算后统一落盘。物资撤离点已经送回永久仓库的资产使用强制保存路径，不等待本局最终结算。
 
 ### 7.3 敌人与环境
 

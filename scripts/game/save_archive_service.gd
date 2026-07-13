@@ -5,8 +5,8 @@ extends Node
 
 ## 归档格式版本；默认 1，用于拒绝未来不兼容的结构，修改时必须同步迁移规则与框架文档。
 const ARCHIVE_VERSION: int = 1
-## 归档文件扩展名；默认 hqisave，供设置界面的文件选择器限制可见文件类型。
-const ARCHIVE_EXTENSION: String = "hqisave"
+## 归档文件扩展名；默认 lisbamsave，供设置界面的文件选择器限制可见文件类型。
+const ARCHIVE_EXTENSION: String = "lisbamsave"
 ## 导入备份目录前缀；默认位于 user://，每次成功导入前按时间戳保存被覆盖的旧文件。
 const BACKUP_DIRECTORY_PREFIX: String = "save_import_backup_"
 ## 临时导入文件后缀；默认 temp_import，所有文件验证并写入成功后才替换正式存档。

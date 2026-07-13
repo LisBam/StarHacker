@@ -237,9 +237,8 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 ## 星的固定生命上限；取值应大于 0，默认 130，切换角色时直接应用，不再随机。
 ## 星扩展包数值补充：当前权威基础生命上限为 100，资源档案可继续覆盖该隔离场景兜底值。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var stelle_max_health: float = 100.0
-## 星的固定能量上限；取值应大于 0，默认 110，切换角色时直接应用，不再随机。
-## 星扩展包数值补充：当前权威基础能量上限为 100，资源档案可继续覆盖该隔离场景兜底值。
-@export_range(1.0, 9999.0, 1.0, "or_greater") var stelle_max_energy: float = 100.0
+## 星的固定能量上限；取值应大于 0，默认 100，支持 0.1 精度，资源档案可继续覆盖该隔离场景兜底值。
+@export_range(0.1, 9999.0, 0.1, "or_greater") var stelle_max_energy: float = 100.0
 ## 星的固定移动速度属性；默认 106.6667，按 1 点等于 3 像素/秒换算，切换角色时写入玩家移动组件。
 ## 当前星移速按 1 点等于 2 像素/秒换算；100 点基础移速在战斗中对应 200 像素/秒。
 ## 星扩展包数值补充：当前权威基础移速为 100 点，等效实际速度 300 像素/秒。
@@ -253,8 +252,8 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 @export_range(0.0, 99999.0, 1.0, "or_greater") var stelle_defense_power: float = 100.0
 ## 穹的固定生命上限；取值应大于 0，默认 150，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var caelus_max_health: float = 120.0
-## 穹的固定能量上限；取值应大于 0，默认 95，切换角色时直接应用，不再随机。
-@export_range(1.0, 9999.0, 1.0, "or_greater") var caelus_max_energy: float = 80.0
+## 穹的固定能量上限；取值应大于 0，默认 80，支持 0.1 精度，切换角色时直接应用，不再随机。
+@export_range(0.1, 9999.0, 0.1, "or_greater") var caelus_max_energy: float = 80.0
 ## 穹的固定移动速度属性；默认 100，按 1 点等于 3 像素/秒换算，切换角色时写入玩家移动组件。
 ## 当前穹移速按 1 点等于 2 像素/秒换算；90 点基础移速在战斗中对应 180 像素/秒。
 @export_range(1.0, 2000.0, 0.0001, "or_greater") var caelus_move_speed: float = 90.0
@@ -264,8 +263,8 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 @export_range(0.0, 99999.0, 1.0, "or_greater") var caelus_defense_power: float = 120.0
 ## 银狼的固定生命上限；取值应大于 0，默认 105，切换角色时直接应用，不再随机。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var silver_wolf_max_health: float = 99.0
-## 银狼的固定能量上限；取值应大于 0，默认 155，切换角色时直接应用，不再随机。
-@export_range(1.0, 9999.0, 1.0, "or_greater") var silver_wolf_max_energy: float = 99.0
+## 银狼的固定能量上限；取值应大于 0，默认 99，支持 0.1 精度，切换角色时直接应用，不再随机。
+@export_range(0.1, 9999.0, 0.1, "or_greater") var silver_wolf_max_energy: float = 99.0
 ## 银狼的固定移动速度属性；默认 118.3333，按 1 点等于 3 像素/秒换算，切换角色时写入玩家移动组件。
 ## 当前银狼移速按 1 点等于 2 像素/秒换算；99 点基础移速在战斗中对应 198 像素/秒。
 @export_range(1.0, 2000.0, 0.0001, "or_greater") var silver_wolf_move_speed: float = 99.0

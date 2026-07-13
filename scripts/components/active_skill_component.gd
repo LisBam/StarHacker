@@ -280,7 +280,7 @@ func _try_begin_skill(slot_index: int) -> void:
 	if slot_index >= _behavior_instances.size() or _behavior_instances[slot_index] == null:
 		return
 	# 技能能量消耗；按下阶段只预检，实际扣除必须等行为成功执行后发生。
-	var energy_cost: float = maxf(float(skill_data.get("energy_cost")), 0.0)
+	var energy_cost: int = maxi(int(skill_data.get("energy_cost")), 0)
 	if _stats_component != null and _stats_component.has_method("can_spend_energy") and not bool(_stats_component.call("can_spend_energy", energy_cost)):
 		return
 	_active_slot_index = slot_index
@@ -316,7 +316,7 @@ func _release_active_skill() -> void:
 		_cancel_active_skill(false)
 		return
 	# 技能能量消耗；按下后的蓄力与瞄准期间其他动作可能消耗能量，松手时必须再次复核才能执行行为。
-	var energy_cost: float = maxf(float(skill_data.get("energy_cost")), 0.0)
+	var energy_cost: int = maxi(int(skill_data.get("energy_cost")), 0)
 	if _stats_component != null and _stats_component.has_method("can_spend_energy") and not bool(_stats_component.call("can_spend_energy", energy_cost)):
 		_cancel_active_skill(false)
 		return
@@ -587,7 +587,7 @@ func execute_pending_stage_immediately(slot_index: int, context_overrides: Dicti
 	if skill_data == null or not is_instance_valid(behavior_instance) or not behavior_instance.has_method("execute"):
 		return false
 	# 后续段能耗；自动触发与手动释放遵守相同资源成本，能量不足时不能绕过技能配置。
-	var energy_cost: float = maxf(float(skill_data.get("energy_cost")), 0.0)
+	var energy_cost: int = maxi(int(skill_data.get("energy_cost")), 0)
 	if _stats_component != null and _stats_component.has_method("can_spend_energy") and not bool(_stats_component.call("can_spend_energy", energy_cost)):
 		return false
 	# 自动释放上下文；默认使用施法者当前位置与最后有效方向，调用方只覆盖死亡来源等必要字段。

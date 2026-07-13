@@ -329,7 +329,7 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 	else:
 		_append_weapon_stat_line(detail_lines, item_resource, "damage", 1)
 	_append_weapon_stat_line(detail_lines, item_resource, "cooldown", 2, " 秒")
-	_append_weapon_stat_line(detail_lines, item_resource, "energy_consumption", 1)
+	_append_weapon_stat_line(detail_lines, item_resource, "energy_consumption", 0)
 	if weapon_type == "hybrid":
 		_append_weapon_attack_channel_stat_line(detail_lines, item_resource, "远程距离", "attack_distance", "ranged", 1)
 		_append_weapon_attack_channel_stat_line(detail_lines, item_resource, "近战距离", "attack_distance", "melee", 1)

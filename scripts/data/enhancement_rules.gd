@@ -126,10 +126,10 @@ const ADDITIVE_VALUE_MAGNITUDE_RANGES: Dictionary = {
 		QUALITY_SUPREME: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
 	"energy_regeneration": {
-		QUALITY_LOW: {"beneficial_min": 1.0, "beneficial_max": 2.0, "detrimental_min": 2.0, "detrimental_max": 4.0},
-		QUALITY_MEDIUM: {"beneficial_min": 2.0, "beneficial_max": 4.0, "detrimental_min": 1.0, "detrimental_max": 4.0},
-		QUALITY_HIGH: {"beneficial_min": 3.0, "beneficial_max": 5.0, "detrimental_min": 1.0, "detrimental_max": 3.0},
-		QUALITY_SUPREME: {"beneficial_min": 4.0, "beneficial_max": 6.0, "detrimental_min": 0.0, "detrimental_max": 0.0},
+		QUALITY_LOW: {"beneficial_min": 0.5, "beneficial_max": 1.0, "detrimental_min": 1.0, "detrimental_max": 2.0},
+		QUALITY_MEDIUM: {"beneficial_min": 0.8, "beneficial_max": 1.5, "detrimental_min": 0.8, "detrimental_max": 1.5},
+		QUALITY_HIGH: {"beneficial_min": 1.0, "beneficial_max": 2.0, "detrimental_min": 0.5, "detrimental_max": 1.0},
+		QUALITY_SUPREME: {"beneficial_min": 1.5, "beneficial_max": 3.0, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
 }
 ## 乘算属性分组幅度；所有数值使用小数比例，增强与削弱按品质分别维护闭区间。
@@ -186,6 +186,8 @@ const MODIFIER_VALUE_PRECISION: float = 0.001
 const MULTIPLICATIVE_ROLL_STEP: float = 0.001
 ## 加算幅度随机步长；0.001 对应 0.1 个百分点，覆盖 0.3%、0.5% 等区间端点。
 const ADDITIVE_POINT_ROLL_STEP: float = 0.001
+## 能量恢复强化随机步长；固定为 0.1 点，离散武器计数属性仍沿用整数步长。
+const ENERGY_REGENERATION_ROLL_STEP: float = 0.1
 ## 暴击率最终上限；1.0 表示 100%，武器与装备的有效属性统一应用该限制。
 const CRITICAL_CHANCE_MAXIMUM: float = 1.0
 ## 闪避率最终上限；0.60 表示 60%，单件装备和装备聚合结果均不得超过该值。
@@ -375,6 +377,8 @@ static func calculate_effective_stat(base_value: float, stat_name: String, accum
 		return calculated_value
 	if stat_name in ["cooldown", "melee_active_duration"]:
 		return maxf(calculated_value, MINIMUM_DURATION_VALUE)
+	if stat_name == "energy_consumption":
+		return maxf(roundf(calculated_value), 0.0)
 	if stat_name in ["scatter_count", "bounce_count", "combo_count"]:
 		return maxf(roundf(calculated_value), 1.0)
 	if stat_name == "piercing_count":
@@ -435,7 +439,8 @@ static func build_modifier_token(stat_name: String, direction: Variant, include_
 		return direction_text
 	# 可见幅度；加算属性与乘算属性都保留 0.1 精度，避免一级属性的小数百分比被显示为 0%。
 	if is_additive_value_stat(stat_name):
-		return "%s%d" % [direction_text, roundi(absf(float(direction)))]
+		var additive_value_format: String = "%.1f" if stat_name == "energy_regeneration" else "%d"
+		return "%s%s" % [direction_text, additive_value_format % (absf(float(direction)) if stat_name == "energy_regeneration" else roundi(absf(float(direction))))]
 	return "%s%.1f 个百分点" % [direction_text, absf(modifier_ratio) * 100.0] if is_additive_point_stat(stat_name) else "%s%.1f%%" % [direction_text, absf(modifier_ratio) * 100.0]
 
 
@@ -455,8 +460,8 @@ static func roll_quality_modifier_ratio(random_source: RandomNumberGenerator, qu
 	var maximum_ratio: float = float(quality_config.get("beneficial_max" if beneficial else "detrimental_max", 0.0))
 	if maximum_ratio <= 0.0:
 		return 0.0
-	# 随机步长；乘算属性和加算属性都使用 0.1% 精度，分别按比例与百分点语义结算。
-	var roll_step: float = 1.0 if is_additive_value_stat(stat_name) else (ADDITIVE_POINT_ROLL_STEP if is_additive_point_stat(stat_name) else MULTIPLICATIVE_ROLL_STEP)
+	# 随机步长；能量恢复使用 0.1 点，其他离散加算属性保持整数，比例与百分点沿用各自的 0.1% 精度。
+	var roll_step: float = ENERGY_REGENERATION_ROLL_STEP if stat_name == "energy_regeneration" else (1.0 if is_additive_value_stat(stat_name) else (ADDITIVE_POINT_ROLL_STEP if is_additive_point_stat(stat_name) else MULTIPLICATIVE_ROLL_STEP))
 	# 最小随机单位；将浮点区间换算为整数单位，避免 randf 产生不可追踪精度。
 	var minimum_step: int = roundi(minf(minimum_ratio, maximum_ratio) / roll_step)
 	# 最大随机单位；与最小单位组成包含端点的闭区间。

@@ -178,7 +178,7 @@ func _get_menu_snapshot() -> Dictionary:
 	# 属性快照；局外没有受伤状态，当前生命等于含装备加成的总生命上限。
 	var snapshot: Dictionary = {}
 	for attribute_key in ["max_health", "attack_power", "defense_power", "health_regeneration_per_five_seconds", "dodge_chance", "cooldown_reduction", "energy_regeneration"]:
-		# 基础属性；每 5 秒回血、闪避默认为 0，能量恢复由角色档案提供 18。
+		# 基础属性；每 5 秒回血、闪避默认为 0，能量恢复由角色档案提供每秒 15 点并支持 0.1 精度。
 		var base_value: float = float(profile.get(attribute_key, 0.0))
 		# 装备属性；由有效四部位装备直接加算。
 		var equipment_value: float = float(equipment_attributes.get(attribute_key, 0.0))
@@ -235,7 +235,7 @@ func _get_character_profile() -> Dictionary:
 		# 当前角色标识；优先使用公开入口，避免直接依赖自动加载字段。
 		var character_id: String = str(_session_state.call("get_selected_character_id")) if _session_state.has_method("get_selected_character_id") else "stelle"
 		return _session_state.call("get_character_profile", character_id) as Dictionary
-	return {"display_name": "星", "max_health": 100.0, "max_energy": 100.0, "move_speed": 100.0, "attack_power": 100.0, "defense_power": 100.0, "health_regeneration_per_five_seconds": 0.0, "vision_range": 1.0, "dodge_chance": 0.0, "energy_regeneration": 18.0}
+	return {"display_name": "星", "max_health": 100.0, "max_energy": 100.0, "move_speed": 100.0, "attack_power": 100.0, "defense_power": 100.0, "health_regeneration_per_five_seconds": 0.0, "vision_range": 1.0, "dodge_chance": 0.0, "energy_regeneration": 15.0}
 
 
 func _build_value_snapshot(base_value: float, equipment_value: float) -> Dictionary:

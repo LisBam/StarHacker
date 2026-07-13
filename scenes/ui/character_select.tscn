@@ -106,49 +106,56 @@ theme_override_constants/margin_top = 18
 theme_override_constants/margin_right = 22
 theme_override_constants/margin_bottom = 18
 
-[node name="DetailContent" type="VBoxContainer" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin"]
+[node name="DetailScroll" type="ScrollContainer" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin"]
 layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+vertical_scroll_mode = 2
+
+[node name="DetailContent" type="VBoxContainer" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_constants/separation = 14
 
-[node name="CharacterNameLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent"]
+[node name="CharacterNameLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 28
 text = "星"
 
-[node name="CharacterRoleLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent"]
+[node name="CharacterRoleLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.721569, 0.894118, 1, 1)
 theme_override_font_sizes/font_size = 16
 text = "标准型开拓者"
 
-[node name="CharacterDescriptionLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent"]
+[node name="CharacterDescriptionLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "生命和能量上限都较平衡，适合验证默认战斗、背包和武器流程。"
 autowrap_mode = 2
 
-[node name="StatsPanel" type="PanelContainer" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent"]
+[node name="StatsPanel" type="PanelContainer" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent"]
 layout_mode = 2
 
-[node name="StatsMargin" type="MarginContainer" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent/StatsPanel"]
+[node name="StatsMargin" type="MarginContainer" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent/StatsPanel"]
 layout_mode = 2
 theme_override_constants/margin_left = 14
 theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 12
 
-[node name="StatsContent" type="VBoxContainer" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent/StatsPanel/StatsMargin"]
+[node name="StatsContent" type="VBoxContainer" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent/StatsPanel/StatsMargin"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="HealthValueLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent/StatsPanel/StatsMargin/StatsContent"]
+[node name="HealthValueLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent/StatsPanel/StatsMargin/StatsContent"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "生命上限  100"
 
-[node name="HealthPreviewBar" type="ProgressBar" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent/StatsPanel/StatsMargin/StatsContent"]
+[node name="HealthPreviewBar" type="ProgressBar" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent/StatsPanel/StatsMargin/StatsContent"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 14)
 layout_mode = 2
@@ -156,12 +163,12 @@ max_value = 200.0
 value = 100.0
 show_percentage = false
 
-[node name="EnergyValueLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent/StatsPanel/StatsMargin/StatsContent"]
+[node name="EnergyValueLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent/StatsPanel/StatsMargin/StatsContent"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "能量上限  100"
 
-[node name="EnergyPreviewBar" type="ProgressBar" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent/StatsPanel/StatsMargin/StatsContent"]
+[node name="EnergyPreviewBar" type="ProgressBar" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent/StatsPanel/StatsMargin/StatsContent"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 14)
 layout_mode = 2
@@ -169,12 +176,12 @@ max_value = 200.0
 value = 100.0
 show_percentage = false
 
-[node name="SpeedValueLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent/StatsPanel/StatsMargin/StatsContent"]
+[node name="SpeedValueLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent/StatsPanel/StatsMargin/StatsContent"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "速度  300"
 
-[node name="SpeedPreviewBar" type="ProgressBar" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent/StatsPanel/StatsMargin/StatsContent"]
+[node name="SpeedPreviewBar" type="ProgressBar" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent/StatsPanel/StatsMargin/StatsContent"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 14)
 layout_mode = 2
@@ -182,29 +189,57 @@ max_value = 140.0
 value = 100.0
 show_percentage = false
 
-[node name="AttackValueLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent/StatsPanel/StatsMargin/StatsContent"]
+[node name="AttackValueLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent/StatsPanel/StatsMargin/StatsContent"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "攻击力  100"
 
-[node name="DefenseValueLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent/StatsPanel/StatsMargin/StatsContent"]
+[node name="AttackPreviewBar" type="ProgressBar" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent/StatsPanel/StatsMargin/StatsContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 14)
+layout_mode = 2
+max_value = 200.0
+value = 100.0
+show_percentage = false
+
+[node name="DefenseValueLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent/StatsPanel/StatsMargin/StatsContent"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "防御力  100"
 
-[node name="PassiveLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent"]
+[node name="DefensePreviewBar" type="ProgressBar" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent/StatsPanel/StatsMargin/StatsContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 14)
+layout_mode = 2
+max_value = 200.0
+value = 100.0
+show_percentage = false
+
+[node name="PassiveLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent"]
 unique_name_in_owner = true
 layout_mode = 2
-text = "被动技能：待配置"
-autowrap_mode = 2
+theme_override_colors/font_color = Color(0.55, 0.92, 1, 1)
+theme_override_font_sizes/font_size = 18
+text = "被动技能"
 
-[node name="ActiveLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent"]
+[node name="PassiveSkillCards" type="VBoxContainer" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent"]
 unique_name_in_owner = true
 layout_mode = 2
-text = "主动技能：待配置"
-autowrap_mode = 2
+theme_override_constants/separation = 10
 
-[node name="DetailSpacer" type="Control" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailContent"]
+[node name="ActiveLabel" type="Label" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.55, 0.92, 1, 1)
+theme_override_font_sizes/font_size = 18
+text = "主动技能"
+
+[node name="ActiveSkillCards" type="VBoxContainer" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="DetailSpacer" type="Control" parent="RootMargin/RootContent/MainColumns/DetailPanel/DetailMargin/DetailScroll/DetailContent"]
 layout_mode = 2
 size_flags_vertical = 3
 

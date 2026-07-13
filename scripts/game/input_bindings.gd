@@ -34,6 +34,7 @@ var _action_entries: Array[Dictionary] = [
 	{"action": "switch_ranged_next", "label": "下一把远程"},
 	{"action": "toggle_inventory", "label": "背包"},
 	{"action": "toggle_large_map", "label": "大地图"},
+	{"action": "toggle_character_showcase", "label": "角色展示"},
 	{"action": "pause_game", "label": "暂停菜单"},
 	{"action": "pickup_nearby", "label": "快速拾取"},
 	{"action": "toggle_drop_list", "label": "掉落列表"},

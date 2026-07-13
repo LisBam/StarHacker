@@ -24,6 +24,10 @@ const BUTTON_BACKGROUND_COLOR: Color = Color(0.065, 0.125, 0.165, 0.98)
 const BUTTON_HOVER_COLOR: Color = Color(0.085, 0.235, 0.305, 1.0)
 ## 普通按钮按下色；比正常状态更深，提供清晰点击反馈。
 const BUTTON_PRESSED_COLOR: Color = Color(0.035, 0.090, 0.125, 1.0)
+## 角色选择按钮选中色；默认使用稳定青蓝底区分当前角色，修改会影响角色列表的常驻选中状态。
+const CHARACTER_SELECTED_COLOR: Color = Color(0.045, 0.285, 0.365, 1.0)
+## 角色选择按钮选中悬停色；默认比选中色更亮，确保当前角色在鼠标悬停时仍有明确反馈。
+const CHARACTER_SELECTED_HOVER_COLOR: Color = Color(0.075, 0.43, 0.54, 1.0)
 ## 主操作按钮背景色；用于进入、确认、购买和锻造等页面主要动作。
 const PRIMARY_BUTTON_COLOR: Color = Color(0.055, 0.30, 0.39, 1.0)
 ## 主操作按钮悬停色；默认提高青蓝亮度但保持白色文字可读性。
@@ -48,6 +52,20 @@ const DISABLED_TEXT_COLOR: Color = Color(0.42, 0.48, 0.52, 0.92)
 const ACCENT_COLOR: Color = Color(0.55, 0.92, 1.0, 1.0)
 ## 青蓝弱强调色；用于非主要标题和细分区描边。
 const ACCENT_MUTED_COLOR: Color = Color(0.30, 0.60, 0.72, 0.92)
+## 角色技能卡片高亮背景色；悬停或展开时使用，修改会影响全部角色详情技能卡片。
+const CHARACTER_SKILL_CARD_HIGHLIGHT_COLOR: Color = Color(0.055, 0.085, 0.108, 0.98)
+## 角色技能标题悬停背景色；只覆盖卡片第一行，修改会影响技能展开入口的鼠标反馈。
+const CHARACTER_SKILL_HEADER_HOVER_COLOR: Color = Color(0.08, 0.22, 0.28, 0.72)
+## 主动技能类型徽章背景色；默认青蓝色，用于角色详情中的“主动”分类。
+const CHARACTER_SKILL_ACTIVE_BADGE_COLOR: Color = Color(0.08, 0.34, 0.42, 0.98)
+## 被动技能类型徽章背景色；默认紫蓝色，用于角色详情中的“被动”分类。
+const CHARACTER_SKILL_PASSIVE_BADGE_COLOR: Color = Color(0.25, 0.16, 0.40, 0.98)
+## 技能冷却徽章背景色；默认弱青蓝色，用于角色详情中的基础 CD。
+const CHARACTER_SKILL_COOLDOWN_BADGE_COLOR: Color = Color(0.16, 0.34, 0.42, 0.98)
+## 技能能耗徽章背景色；默认暖黄色，用于角色详情中的整数能量消耗。
+const CHARACTER_SKILL_ENERGY_BADGE_COLOR: Color = Color(0.34, 0.27, 0.08, 0.98)
+## 技能徽章边框色；默认使用 72% 不透明度青蓝色，保持三个徽章边界一致。
+const CHARACTER_SKILL_BADGE_BORDER_COLOR: Color = Color(0.55, 0.92, 1.0, 0.72)
 ## 成功语义色；用于收益、上涨、完成和正向状态。
 const SUCCESS_COLOR: Color = Color(0.34, 1.0, 0.62, 1.0)
 ## 警告语义色；用于费用、限制、提示和需要注意的信息。
@@ -113,6 +131,13 @@ static func apply_danger_button(target: Button) -> void:
 	target.theme_type_variation = &"DangerButton"
 
 
+## 为角色列表按钮启用独立选中与选中悬停状态；按钮必须保持 toggle_mode 才能显示当前角色。
+static func apply_character_selector_button(target: Button) -> void:
+	if target == null:
+		return
+	target.theme_type_variation = &"CharacterSelectorButton"
+
+
 ## 为标题标签应用统一青蓝文字；字号小于等于 0 时保留调用方原有字号。
 static func apply_title_label(target: Label, font_size: int = 0) -> void:
 	if target == null:
@@ -139,6 +164,9 @@ static func create_theme() -> Theme:
 	# 主操作按钮类型变体；只由进入、确认、购买和锻造等核心按钮显式启用。
 	interface_theme.set_type_variation("PrimaryButton", "Button")
 	_set_button_styles(interface_theme, "PrimaryButton", PRIMARY_BUTTON_COLOR, PRIMARY_BUTTON_HOVER_COLOR, PRIMARY_BUTTON_PRESSED_COLOR, ACCENT_COLOR)
+	# 角色选择按钮类型变体；普通悬停与常驻选中使用不同色阶，选中后再次悬停仍会继续提亮。
+	interface_theme.set_type_variation("CharacterSelectorButton", "Button")
+	_set_character_selector_button_styles(interface_theme)
 	# 危险按钮类型变体；只由退出、清空和高风险操作显式启用。
 	interface_theme.set_type_variation("DangerButton", "Button")
 	_set_button_styles(interface_theme, "DangerButton", DANGER_BUTTON_COLOR, DANGER_BUTTON_HOVER_COLOR, DANGER_BUTTON_PRESSED_COLOR, DANGER_COLOR)
@@ -304,6 +332,34 @@ static func _set_button_styles(target_theme: Theme, theme_type: StringName, norm
 	target_theme.set_color("font_focus_color", theme_type, Color.WHITE)
 	target_theme.set_color("font_hover_pressed_color", theme_type, Color.WHITE)
 	target_theme.set_color("font_disabled_color", theme_type, DISABLED_TEXT_COLOR)
+
+
+## 写入角色选择按钮的普通、悬停、选中与选中悬停状态，避免 toggle 按钮在当前角色上失去鼠标反馈。
+static func _set_character_selector_button_styles(target_theme: Theme) -> void:
+	# 角色按钮正常样式；未选中时沿用普通冷色按钮，保持列表层级稳定。
+	var normal_style: StyleBoxFlat = _create_flat_style(BUTTON_BACKGROUND_COLOR, ACCENT_MUTED_COLOR, 1, 5, 11.0, 6.0)
+	# 角色按钮悬停样式；未选中角色经过鼠标时使用普通悬停青蓝色。
+	var hover_style: StyleBoxFlat = _create_flat_style(BUTTON_HOVER_COLOR, ACCENT_COLOR, 1, 5, 11.0, 6.0)
+	# 角色按钮选中样式；常驻显示当前角色并使用更亮描边。
+	var selected_style: StyleBoxFlat = _create_flat_style(CHARACTER_SELECTED_COLOR, ACCENT_COLOR, 2, 5, 11.0, 6.0)
+	# 角色按钮选中悬停样式；在常驻选中底色上继续提亮，明确当前按钮仍可交互。
+	var selected_hover_style: StyleBoxFlat = _create_flat_style(CHARACTER_SELECTED_HOVER_COLOR, Color.WHITE, 2, 5, 11.0, 6.0)
+	# 角色按钮禁用样式；保留边界但降低饱和度，供未来锁定角色列表复用。
+	var disabled_style: StyleBoxFlat = _create_flat_style(DISABLED_BACKGROUND_COLOR, Color(0.20, 0.24, 0.27, 0.82), 1, 5, 11.0, 6.0)
+	# 角色按钮焦点样式；只绘制外层强调边框，避免覆盖鼠标与选中状态底色。
+	var focus_style: StyleBoxFlat = _create_flat_style(Color.TRANSPARENT, ACCENT_COLOR, 2, 5)
+	target_theme.set_stylebox("normal", "CharacterSelectorButton", normal_style)
+	target_theme.set_stylebox("hover", "CharacterSelectorButton", hover_style)
+	target_theme.set_stylebox("pressed", "CharacterSelectorButton", selected_style)
+	target_theme.set_stylebox("hover_pressed", "CharacterSelectorButton", selected_hover_style)
+	target_theme.set_stylebox("disabled", "CharacterSelectorButton", disabled_style)
+	target_theme.set_stylebox("focus", "CharacterSelectorButton", focus_style)
+	target_theme.set_color("font_color", "CharacterSelectorButton", PRIMARY_TEXT_COLOR)
+	target_theme.set_color("font_hover_color", "CharacterSelectorButton", Color.WHITE)
+	target_theme.set_color("font_pressed_color", "CharacterSelectorButton", Color.WHITE)
+	target_theme.set_color("font_hover_pressed_color", "CharacterSelectorButton", Color.WHITE)
+	target_theme.set_color("font_focus_color", "CharacterSelectorButton", Color.WHITE)
+	target_theme.set_color("font_disabled_color", "CharacterSelectorButton", DISABLED_TEXT_COLOR)
 
 
 ## 写入复选框和开关文字颜色；图标继续沿用 Godot 内置资源，保证不同输入设备兼容。

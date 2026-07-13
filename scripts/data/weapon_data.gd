@@ -13,6 +13,7 @@ class_name WeaponData
 ## 武器显示名称；默认“未命名武器”用于兜底显示，运行时通常不修改，改名会影响 HUD 和背包文本。
 @export var display_name: String = "未命名武器"
 ## 武器类型；取值为 ranged、melee 或 hybrid，默认 ranged，hybrid 可放入任一武器槽且每次使用同时执行远程与近战攻击。
+## 当前混合武器规则补充：hybrid 仍可放入任一武器槽，但左键只执行远程通道、右键只执行近战通道，两套冷却互不写入。
 @export_enum("ranged", "melee", "hybrid") var weapon_type: String = "ranged"
 ## 武器说明文本；默认空字符串，主要用于背包详情和调试展示，运行时通常不动态修改。
 @export_multiline var description: String = ""
@@ -140,6 +141,7 @@ func is_melee() -> bool:
 
 func is_hybrid() -> bool:
 	## 返回武器是否会在一次使用中同时触发远程和近战攻击；调用方不得用该结果重复结算能量、冷却或坐力。
+	## 当前规则补充：返回 true 只表示资源同时支持两个独立通道，不再表示一次输入同时执行两种攻击。
 	return weapon_type == "hybrid"
 
 
@@ -169,6 +171,7 @@ func consume_durability(requested_amount: float = FIXED_DURABILITY_COST_PER_USE)
 	if is_broken():
 		return false
 	# 实际消耗量；普通武器固定传入 1，混合武器传入 2；当前耐久不足时只消耗剩余值，因此 1 点耐久仍可完成最后一次攻击。
+	# 当前规则补充：远程与近战通道均按一次独立使用传入 1，混合武器不再因类型额外消耗耐久。
 	var resolved_amount: float = minf(maxf(requested_amount, 0.0), current_durability)
 	if resolved_amount <= 0.0:
 		return false

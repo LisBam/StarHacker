@@ -49,6 +49,8 @@ var _current_critical_damage: float = 1.5
 var _hitbox_near_distance: float = 0.0
 ## 命中框垂直高度；默认 1，ready 时从矩形碰撞形状读取，攻击距离变化时保持不变。
 var _hitbox_height: float = 1.0
+## 是否正在显示蓄力攻击范围预览；默认 false，只控制视觉显隐，不启用碰撞或命中监听。
+var _range_preview_visible: bool = false
 
 ## 命中框碰撞形状缓存；默认按 collision_shape_path 获取，允许为空但无法碰撞，修改会影响近战判定开关。
 @onready var _collision_shape: CollisionShape2D = get_node_or_null(collision_shape_path) as CollisionShape2D
@@ -116,6 +118,29 @@ func can_attack(direction: Vector2, _weapon_data: Resource = null) -> bool:
 	return _cooldown_remaining <= 0.0 and _active_remaining <= 0.0 and not direction.is_zero_approx()
 
 
+func show_attack_range_preview(direction: Vector2, weapon_data: Resource = null) -> void:
+	## 使用当前武器真实近战距离显示蓄力范围；预览不打开 monitoring，也不会注册任何命中。
+	# 预览攻击距离；与正式攻击读取同一强化后属性，确保显示范围和松手后的实际判定一致。
+	var preview_attack_distance: float = _get_weapon_attack_float(weapon_data, "attack_distance", "melee", attack_distance)
+	_apply_attack_distance(preview_attack_distance)
+	_range_preview_visible = true
+	update_attack_range_preview_direction(direction)
+	_refresh_visual_visibility()
+
+
+func update_attack_range_preview_direction(direction: Vector2) -> void:
+	## 让蓄力范围持续跟随当前瞄准方向；零向量保持上一有效朝向，避免视觉闪跳。
+	if not _range_preview_visible or direction.is_zero_approx():
+		return
+	rotation = direction.angle() + rotation_offset
+
+
+func hide_attack_range_preview() -> void:
+	## 结束蓄力范围预览；正式攻击若已经开始，命中窗口视觉继续保持到攻击结束。
+	_range_preview_visible = false
+	_refresh_visual_visibility()
+
+
 func _finish_attack() -> void:
 	_set_hitbox_enabled(false)
 	attack_finished.emit()
@@ -125,8 +150,13 @@ func _set_hitbox_enabled(enabled: bool) -> void:
 	monitoring = enabled
 	if _collision_shape != null:
 		_collision_shape.disabled = not enabled
+	_refresh_visual_visibility()
+
+
+func _refresh_visual_visibility() -> void:
+	## 统一近战判定与蓄力预览的视觉显隐；任一状态存在时显示形状，但只有攻击状态启用碰撞。
 	if _visual != null:
-		_visual.visible = enabled
+		_visual.visible = monitoring or _range_preview_visible
 
 
 func _cache_hitbox_geometry() -> void:

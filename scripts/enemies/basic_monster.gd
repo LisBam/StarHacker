@@ -213,6 +213,12 @@ const DAMAGE_INSTIGATOR_PARENT_SEARCH_LIMIT: int = 8
 @export_range(1.0, 256.0, 1.0) var path_waypoint_arrive_distance: float = 28.0
 ## 路径目标随机半径；取值建议 0 到 64，默认 18，只在目标可见时轻微分散怪物终点。
 @export_range(0.0, 512.0, 1.0) var path_random_goal_radius: float = 18.0
+## 同阵营分散半径；默认 64 像素，范围内敌人会产生互相远离的移动修正，0 表示关闭站位分散。
+@export_range(0.0, 512.0, 1.0) var separation_radius: float = 64.0
+## 同阵营分散速度；默认 90 像素/秒，决定敌人重叠或扎堆时主动拉开站位的强度。
+@export_range(0.0, 1000.0, 1.0) var separation_speed: float = 90.0
+## 单次分散计算最大邻居数；默认 8，限制高密度战斗中的遍历开销，优先使用节点组中先遇到的近邻。
+@export_range(1, 64, 1) var separation_max_neighbors: int = 8
 ## 单次路径最大路点数；取值建议 8 到 160，默认 96，修改会影响远距离寻路缓存长度。
 @export_range(1, 256, 1) var path_max_point_count: int = 96
 ## 卡住判定时间；取值建议 0.3 到 1.2 秒，默认 0.75，避免正常转角减速被误判为卡住。
@@ -500,7 +506,8 @@ func _add_target_collision_exception(target_node: Node) -> void:
 	(target_node as PhysicsBody2D).add_collision_exception_with(self)
 
 
-func _remove_target_collision_exception(target_node: Node) -> void:
+func _remove_target_collision_exception(target_node: Variant) -> void:
+	## 旧目标可能已经在其他节点的回调中释放；使用 Variant 接收可避免进入函数前发生失效 Object 的强类型转换错误。
 	if not is_instance_valid(target_node) or not (target_node is PhysicsBody2D):
 		return
 	remove_collision_exception_with(target_node)
@@ -597,6 +604,10 @@ func _build_movement_configuration() -> Dictionary:
 		"path_destination_refresh_distance": path_destination_refresh_distance,
 		"path_waypoint_arrive_distance": path_waypoint_arrive_distance,
 		"path_random_goal_radius": path_random_goal_radius,
+		"separation_group": active_skill_target_group,
+		"separation_radius": separation_radius,
+		"separation_speed": separation_speed,
+		"separation_max_neighbors": separation_max_neighbors,
 		"path_max_point_count": path_max_point_count,
 		"stuck_detection_time": stuck_detection_time,
 		"stuck_minimum_movement": stuck_minimum_movement,
@@ -805,6 +816,10 @@ func _get_source_combat_value(source: Node, method_name: String, fallback_value:
 func _try_attack_target() -> void:
 	if _is_dying or _attack_cooldown_remaining > 0.0 or not is_instance_valid(_target):
 		return
+	# 发动瞬间目标距离；AI 决策为低频更新，攻击入口必须用实时位置复核目标仍在攻击范围内。
+	var current_target_distance: float = global_position.distance_to(_target.global_position)
+	if current_target_distance > maxf(attack_range, 0.0):
+		return
 
 	if _target.has_method("apply_damage"):
 		_target.call("apply_damage", attack_damage, self)
@@ -858,6 +873,8 @@ func _begin_death_sequence() -> void:
 	_is_dying = true
 	velocity = Vector2.ZERO
 	_remove_target_collision_exception(_target)
+	if not active_skill_target_group.is_empty():
+		remove_from_group(active_skill_target_group)
 	# 尸体战斗层；设为 0 后不会再被玩家弹体、攻击或目标查询当作敌人，但保留环境碰撞掩码以使冲击位移能够被墙体阻挡。
 	collision_layer = 0
 	_spawn_death_effect()

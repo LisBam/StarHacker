@@ -156,7 +156,7 @@ func _try_attack_target() -> void:
 	# 攻击前目标；同步缓存避免基础攻击后目标状态变化导致事件对象不一致。
 	var attacked_target: Node = _target
 	# 攻击前是否可释放；基础方法仍负责最终合法性检查和冷却写入。
-	var was_ready: bool = _attack_cooldown_remaining <= 0.0 and is_instance_valid(attacked_target) and attacked_target.has_method("apply_damage")
+	var was_ready: bool = _attack_cooldown_remaining <= 0.0 and is_instance_valid(attacked_target) and attacked_target.has_method("apply_damage") and global_position.distance_to((attacked_target as Node2D).global_position) <= maxf(attack_range, 0.0)
 	super._try_attack_target()
 	if was_ready:
 		damage_dealt.emit(attacked_target, attack_damage)

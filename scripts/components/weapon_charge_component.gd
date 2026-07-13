@@ -9,6 +9,8 @@ const CHARGE_BAR_OWNER_ID: StringName = &"weapon"
 
 ## 蓄力条路径；默认复用角色头顶进度条，缺失时蓄力机制仍正常运行，运行时通常不动态修改。
 @export var charge_bar_path: NodePath = ^"../SkillChargeBar"
+## 近战攻击组件路径；默认指向玩家主近战组件，近战武器蓄力期间复用其真实判定形状显示攻击范围。
+@export var melee_attack_component_path: NodePath = ^"../MeleeAttackComponent"
 
 ## 当前蓄力武器；默认 null 表示没有活动蓄力，武器切换、输入关闭或释放后会立即清空。
 var _charging_weapon: Resource
@@ -19,9 +21,11 @@ var _charge_elapsed: float = 0.0
 
 ## 角色头顶蓄力条缓存；默认按 charge_bar_path 解析，允许为空以支持无界面验证场景。
 @onready var _charge_bar: Node = get_node_or_null(charge_bar_path)
+## 玩家主近战攻击组件缓存；默认按 melee_attack_component_path 解析，缺失时仅跳过蓄力范围预览。
+@onready var _melee_attack_component: Node = get_node_or_null(melee_attack_component_path)
 
 
-func begin_charge(weapon_data: Resource, attack_mode: String) -> bool:
+func begin_charge(weapon_data: Resource, attack_mode: String, attack_direction: Vector2 = Vector2.RIGHT) -> bool:
 	## 开始一次可配置武器蓄力；已有蓄力或资源未声明效果时返回 false，不覆盖当前输入状态。
 	if _charging_weapon != null or weapon_data == null or not bool(weapon_data.get("has_charge_effect")):
 		return false
@@ -30,10 +34,12 @@ func begin_charge(weapon_data: Resource, attack_mode: String) -> bool:
 	_charge_elapsed = 0.0
 	if _charge_bar != null and _charge_bar.has_method("show_charge"):
 		_charge_bar.call("show_charge", CHARGE_BAR_OWNER_ID)
+	if _attack_mode == "melee" and _melee_attack_component != null and _melee_attack_component.has_method("show_attack_range_preview"):
+		_melee_attack_component.call("show_attack_range_preview", attack_direction, _charging_weapon)
 	return true
 
 
-func update_charge(delta: float) -> void:
+func update_charge(delta: float, attack_direction: Vector2 = Vector2.RIGHT) -> void:
 	## 按武器上限累计本次蓄力；上限至少 0.01 秒，异常资源不会产生除零或负进度。
 	if _charging_weapon == null:
 		return
@@ -42,6 +48,8 @@ func update_charge(delta: float) -> void:
 	_charge_elapsed = minf(_charge_elapsed + maxf(delta, 0.0), maximum_duration)
 	if _charge_bar != null and _charge_bar.has_method("set_charge_ratio"):
 		_charge_bar.call("set_charge_ratio", _charge_elapsed / maximum_duration, CHARGE_BAR_OWNER_ID)
+	if _attack_mode == "melee" and _melee_attack_component != null and _melee_attack_component.has_method("update_attack_range_preview_direction"):
+		_melee_attack_component.call("update_attack_range_preview_direction", attack_direction)
 
 
 func release_charge() -> Dictionary:
@@ -97,6 +105,8 @@ func get_damage_reduction_ratio() -> float:
 
 func _clear_state() -> void:
 	## 清空全部运行时状态并隐藏进度条；多次调用保持幂等。
+	if _attack_mode == "melee" and _melee_attack_component != null and _melee_attack_component.has_method("hide_attack_range_preview"):
+		_melee_attack_component.call("hide_attack_range_preview")
 	_charging_weapon = null
 	_attack_mode = ""
 	_charge_elapsed = 0.0

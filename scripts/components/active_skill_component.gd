@@ -16,6 +16,8 @@ const MINIMUM_CAST_RANGE: float = 1.0
 const MINIMUM_CHARGE_DURATION: float = 0.01
 ## 共用蓄力条所有者 ID；固定 active_skill，保证武器延迟取消不会隐藏当前技能蓄力显示。
 const CHARGE_BAR_OWNER_ID: StringName = &"active_skill"
+## 技能链临时节点键；行为把跨阶段世界表现写入该数组，组件在技能链结束或重配时统一释放。
+const CHAIN_TRANSIENT_NODES_KEY: String = "transient_nodes"
 
 signal skill_loadout_changed
 signal skill_aiming_started(slot_index: int, skill_data: Resource)
@@ -90,6 +92,11 @@ func _ready() -> void:
 		_input_component.connect("combat_input_enabled_changed", Callable(self, "_on_combat_input_enabled_changed"))
 
 
+func _exit_tree() -> void:
+	## 组件离树前释放挂在战斗场景中的技能链临时表现，避免玩家卸载后留下返回点或持续特效。
+	_clear_all_chain_transient_nodes()
+
+
 func _process(delta: float) -> void:
 	_update_cooldowns(delta)
 	_update_follow_up_windows(delta)
@@ -136,6 +143,7 @@ func configure_skills(skill_resources: Array) -> void:
 	## 注入当前角色主动技能；保留资源数组顺序，最多使用可配置输入动作数量，其余技能可在未来装备界面选择后再进入槽位。
 	_cancel_active_skill(false)
 	_clear_behavior_instances()
+	_clear_all_chain_transient_nodes()
 	_skill_resources.clear()
 	_root_skill_resources.clear()
 	_behavior_instances.clear()
@@ -218,6 +226,11 @@ func get_cooldown_remaining(slot_index: int) -> float:
 	if slot_index < 0 or slot_index >= _cooldown_remaining.size():
 		return 0.0
 	return maxf(_cooldown_remaining[slot_index], 0.0)
+
+
+func is_cooldown_paused(slot_index: int) -> bool:
+	## 返回指定槽是否处于“技能结束后暂不倒计时”状态；无效下标按未暂停处理，供 HUD 隐藏尚未开始的冷却数字。
+	return slot_index >= 0 and slot_index < _cooldown_pause_sources.size() and not _cooldown_pause_sources[slot_index].is_empty()
 
 
 func get_follow_up_remaining(slot_index: int) -> float:
@@ -505,6 +518,7 @@ func _complete_skill_chain(slot_index: int) -> void:
 	if get_skill_resource(slot_index) != root_skill_data:
 		_replace_slot_skill(slot_index, root_skill_data)
 	_follow_up_remaining[slot_index] = 0.0
+	_clear_chain_transient_nodes(slot_index)
 	_chain_states[slot_index] = {}
 	# 本次完成冷却倍率；最低为 0，允许专属技能免除冷却或延长冷却，不会影响后续释放。
 	var completion_multiplier: float = maxf(_completion_cooldown_multipliers[slot_index], 0.0)
@@ -566,7 +580,7 @@ func refresh_all_cooldowns() -> void:
 
 
 func set_cooldown_paused_source(slot_index: int, source_id: String, paused: bool) -> void:
-	## 设置指定槽的独立冷却暂停来源；所有来源清空后下一帧恢复递减，暂停不改变 HUD 的剩余秒数。
+	## 设置指定槽的独立冷却暂停来源；所有来源清空后下一帧恢复递减，HUD 在暂停期间保留遮罩但隐藏冷却数字。
 	if slot_index < 0 or slot_index >= _cooldown_pause_sources.size():
 		return
 	# 标准来源 ID；空字符串无法稳定解除，因此直接忽略。
@@ -709,6 +723,28 @@ func _clear_behavior_instances() -> void:
 		if behavior_instance.has_method("shutdown"):
 			behavior_instance.call("shutdown")
 		behavior_instance.queue_free()
+
+
+func _clear_all_chain_transient_nodes() -> void:
+	## 清理全部技能槽登记的跨阶段世界节点；数组尚未初始化或重复调用时保持幂等。
+	for slot_index in range(_chain_states.size()):
+		_clear_chain_transient_nodes(slot_index)
+
+
+func _clear_chain_transient_nodes(slot_index: int) -> void:
+	## 释放指定技能链登记的临时节点；无效节点和已经排队释放的节点会安全跳过。
+	if slot_index < 0 or slot_index >= _chain_states.size():
+		return
+	# 当前技能链状态；只读取通用临时节点数组，不识别具体技能字段。
+	var chain_state: Dictionary = _chain_states[slot_index]
+	# 临时节点列表；行为可登记任意 Node，组件仅负责生命周期回收。
+	var transient_nodes: Array = chain_state.get(CHAIN_TRANSIENT_NODES_KEY, []) as Array
+	for raw_transient_node in transient_nodes:
+		# 当前临时节点；非 Node 值按 null 跳过，合法节点统一进入安全释放队列。
+		var transient_node: Node = raw_transient_node as Node
+		if is_instance_valid(transient_node) and not transient_node.is_queued_for_deletion():
+			transient_node.queue_free()
+	chain_state.erase(CHAIN_TRANSIENT_NODES_KEY)
 
 
 func _is_valid_skill_resource(skill_data: Resource) -> bool:

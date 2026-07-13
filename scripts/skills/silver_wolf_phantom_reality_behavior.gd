@@ -4,6 +4,8 @@ extends Node
 
 ## 基础暴击伤害倍率；固定 1.5，与其他无武器主动技能的统一暴击协议一致。
 const BASE_CRITICAL_DAMAGE_MULTIPLIER: float = 1.5
+## 角色虚影复制节点名；固定复制玩家主体与核心图形，避免把碰撞、相机、输入或技能组件复制到世界中。
+const PHANTOM_VISUAL_NODE_NAMES: Array[StringName] = [&"Body", &"Core"]
 
 ## 当前施法者；默认 null，由主动技能组件注入并提供安全落点与清理外部移动接口。
 var _caster: Node2D
@@ -46,11 +48,52 @@ func execute(context: Dictionary) -> bool:
 	var chain_state: Dictionary = context.get("chain_state") as Dictionary
 	chain_state["recorded_position"] = _caster.global_position
 	chain_state["recorded_health"] = float(_stats_component.get("current_health")) if _stats_component != null else 0.0
+	_create_return_position_phantom(chain_state, _caster.global_position)
+	# 传送前位置；镜头组件使用该坐标抵消宿主节点的瞬时位移。
+	var previous_position: Vector2 = _caster.global_position
 	_caster.global_position = safe_position
 	if _caster.has_method("clear_external_motion"):
 		_caster.call("clear_external_motion")
+	if _caster.has_method("smooth_camera_after_teleport"):
+		_caster.call("smooth_camera_after_teleport", previous_position)
 	_resolve_landing_damage(safe_position)
 	return true
+
+
+func _create_return_position_phantom(chain_state: Dictionary, marker_position: Vector2) -> void:
+	## 在技能链共享状态中登记无碰撞虚影；主动技能组件会在二段完成、超时或角色切换时统一释放。
+	# 虚影根节点；挂到当前战斗场景以保持在传送前世界位置，不跟随玩家继续移动。
+	var phantom_root: Node2D = Node2D.new()
+	phantom_root.name = "SilverWolfPhantomRealityReturnMarker"
+	phantom_root.z_index = _caster.z_index - 1
+	# 虚影颜色；资源可调整透明度和色调，所有复制图形共享同一标记语义。
+	var phantom_modulate: Color = _skill_data.get("phantom_marker_modulate") as Color
+	for visual_name in PHANTOM_VISUAL_NODE_NAMES:
+		# 原角色图形；当前玩家使用 Polygon2D，类型不匹配时安全跳过以兼容未来角色视觉结构。
+		var source_visual: Polygon2D = _caster.get_node_or_null(NodePath(str(visual_name))) as Polygon2D
+		if source_visual == null:
+			continue
+		# 虚影图形副本；只复制渲染属性，不包含任何碰撞、脚本或输入能力。
+		var phantom_visual: Polygon2D = source_visual.duplicate() as Polygon2D
+		if phantom_visual != null:
+			phantom_visual.modulate = phantom_modulate
+			phantom_root.add_child(phantom_visual)
+	# 虚影父节点；优先当前场景，隔离测试缺少场景时回退根节点。
+	var effect_parent: Node = get_tree().current_scene if get_tree().current_scene != null else get_tree().root
+	effect_parent.add_child(phantom_root)
+	phantom_root.global_position = marker_position
+	# 呼吸单程时长；最低 0.1 秒，避免异常资源产生零时长无限补间。
+	var pulse_duration: float = maxf(float(_skill_data.get("phantom_marker_pulse_duration")), 0.1)
+	# 呼吸最小缩放；限制在 0.5 至 1.0，确保虚影不会翻转、放大或缩小到难以识别。
+	var minimum_scale: float = clampf(float(_skill_data.get("phantom_marker_minimum_scale")), 0.5, 1.0)
+	# 呼吸动画；循环缩放增强远处辨识度，节点释放时补间会随绑定节点自动结束。
+	var pulse_tween: Tween = phantom_root.create_tween().set_loops()
+	pulse_tween.tween_property(phantom_root, "scale", Vector2.ONE * minimum_scale, pulse_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	pulse_tween.tween_property(phantom_root, "scale", Vector2.ONE, pulse_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	# 技能链临时节点表；组件只识别通用键，不依赖幻影现实的具体节点名或行为脚本。
+	var transient_nodes: Array = chain_state.get("transient_nodes", []) as Array
+	transient_nodes.append(phantom_root)
+	chain_state["transient_nodes"] = transient_nodes
 
 
 func _resolve_landing_damage(landing_position: Vector2) -> void:

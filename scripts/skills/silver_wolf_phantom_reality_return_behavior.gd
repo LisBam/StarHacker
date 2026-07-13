@@ -35,9 +35,13 @@ func execute(context: Dictionary) -> bool:
 		return false
 	# 记录位置；来自一段传送前的合法玩家位置，可直接恢复且不需要再次寻找目标附近空地。
 	var recorded_position: Vector2 = chain_state.get("recorded_position") as Vector2
+	# 回溯前位置；镜头以此为新一轮平滑追赶的画面起点。
+	var previous_position: Vector2 = _caster.global_position
 	_caster.global_position = recorded_position
 	if _caster.has_method("clear_external_motion"):
 		_caster.call("clear_external_motion")
+	if _caster.has_method("smooth_camera_after_teleport"):
+		_caster.call("smooth_camera_after_teleport", previous_position)
 	if _stats_component.has_method("set_health"):
 		_stats_component.call("set_health", float(chain_state.get("recorded_health", 0.0)))
 	# 致命自动触发；本次整套技能最终冷却按 1+99% 结算，普通手动二段保持 1 倍。

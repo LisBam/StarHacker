@@ -42,7 +42,7 @@ theme_override_font_sizes/font_size = 38
 text = "星穹骇客"
 horizontal_alignment = 1
 
-[node name="EnglishTitle" type="Label" parent="Center"]
+[node name="EnglishTitle" type="Label" parent="Center" unique_id=1250518934]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.48, 0.74, 0.9, 1)
 theme_override_font_sizes/font_size = 18

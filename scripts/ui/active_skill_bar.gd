@@ -216,12 +216,14 @@ func _refresh_cooldowns() -> void:
 			var shared_cooldown_remaining: float = float(_active_skill_component.call("get_cooldown_remaining", slot_index)) if _active_skill_component != null and _active_skill_component.has_method("get_cooldown_remaining") else 0.0
 			# 后续段剩余窗口；大于零时使用青蓝遮罩，表示当前槽仍可继续释放。
 			var shared_follow_up_remaining: float = float(_active_skill_component.call("get_follow_up_remaining", slot_index)) if _active_skill_component != null and _active_skill_component.has_method("get_follow_up_remaining") else 0.0
+			# 冷却是否仍处于延迟开始阶段；暂停只隐藏普通冷却数字，后续段窗口仍正常显示自己的可释放倒计时。
+			var shared_cooldown_paused: bool = bool(_active_skill_component.call("is_cooldown_paused", slot_index)) if _active_skill_component != null and _active_skill_component.has_method("is_cooldown_paused") else false
 			# 遮罩剩余时间；后续段优先于普通冷却显示。
 			var display_remaining: float = shared_follow_up_remaining if shared_follow_up_remaining > 0.0 else shared_cooldown_remaining
 			# 遮罩颜色；后续段使用原青蓝色，普通冷却使用原黑色。
 			var display_color: Color = follow_up_overlay_color if shared_follow_up_remaining > 0.0 else cooldown_overlay_color
 			# 遮罩文字；只在剩余时间大于零时显示一位小数秒数。
-			var display_text: String = "%ss" % String.num(display_remaining, cooldown_decimal_places) if display_remaining > 0.0 else ""
+			var display_text: String = "%ss" % String.num(display_remaining, cooldown_decimal_places) if display_remaining > 0.0 and (shared_follow_up_remaining > 0.0 or not shared_cooldown_paused) else ""
 			_slot_views[slot_index].call("set_state_overlay", display_remaining > 0.0, display_color, display_text)
 			# 发动条件状态；逐帧读取使伤害累计达到阈值时无需重建技能栏即可移除禁用滤镜。
 			var skill_data: Resource = _active_skill_component.call("get_skill_resource", slot_index) as Resource if _active_skill_component != null and _active_skill_component.has_method("get_skill_resource") else null
@@ -233,12 +235,14 @@ func _refresh_cooldowns() -> void:
 		var cooldown_remaining: float = float(_active_skill_component.call("get_cooldown_remaining", slot_index)) if _active_skill_component != null and _active_skill_component.has_method("get_cooldown_remaining") else 0.0
 		# 后续段剩余窗口；大于零时优先显示剩余秒数，提醒玩家技能槽当前仍可再次触发。
 		var follow_up_remaining: float = float(_active_skill_component.call("get_follow_up_remaining", slot_index)) if _active_skill_component != null and _active_skill_component.has_method("get_follow_up_remaining") else 0.0
+		# 冷却暂停状态；延迟进入冷却时继续表明技能不可用，但不提前展示尚未开始递减的秒数。
+		var cooldown_paused: bool = bool(_active_skill_component.call("is_cooldown_paused", slot_index)) if _active_skill_component != null and _active_skill_component.has_method("is_cooldown_paused") else false
 		_cooldown_overlays[slot_index].visible = cooldown_remaining > 0.0 or follow_up_remaining > 0.0
 		_cooldown_overlays[slot_index].color = follow_up_overlay_color if follow_up_remaining > 0.0 else cooldown_overlay_color
 		if follow_up_remaining > 0.0:
 			_cooldown_labels[slot_index].text = "%ss" % String.num(follow_up_remaining, cooldown_decimal_places)
 		else:
-			_cooldown_labels[slot_index].text = "%ss" % String.num(cooldown_remaining, cooldown_decimal_places) if cooldown_remaining > 0.0 else ""
+			_cooldown_labels[slot_index].text = "%ss" % String.num(cooldown_remaining, cooldown_decimal_places) if cooldown_remaining > 0.0 and not cooldown_paused else ""
 
 
 func _get_action_display_text(action_name: StringName) -> String:

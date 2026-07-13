@@ -2080,6 +2080,9 @@ func _queue_save_inventory(force_during_combat: bool = false) -> void:
 
 func _save_inventory() -> void:
 	_save_queued = false
+	# 持久化所有者校验；只有项目 AutoLoad 中的唯一 GlobalInventory 服务可以写入 user://，独立测试实例与临时工具实例一律保持纯内存状态。
+	if not _is_canonical_persistence_owner():
+		return
 	_combat_inventory_save_pending = false
 	# 存档永久仓库记录；只序列化局外安全物品，读取后不会加入战斗背包或死亡结算范围。
 	var serialized_warehouse: Array[Dictionary] = []
@@ -2125,6 +2128,17 @@ func _save_inventory() -> void:
 	var save_file: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if save_file != null:
 		save_file.store_string(JSON.stringify(save_data))
+
+
+func _is_canonical_persistence_owner() -> bool:
+	## 判断当前实例是否为场景树根节点注册的唯一库存 AutoLoad；返回 false 时不得读取测试对象状态覆盖真实用户存档。
+	# 当前场景树；独立脚本测试、尚未入树节点或已经退出树的实例没有有效持久化权限。
+	var scene_tree: SceneTree = get_tree()
+	if scene_tree == null:
+		return false
+	# 已注册库存服务；只接受与当前实例完全相同的 /root/GlobalInventory 节点，名称相同的普通子节点也没有写入权限。
+	var registered_inventory: Node = scene_tree.root.get_node_or_null("GlobalInventory")
+	return registered_inventory == self
 
 
 func _load_inventory() -> bool:

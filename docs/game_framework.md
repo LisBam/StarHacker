@@ -180,6 +180,7 @@ ContentCatalog 模板
 - 新物品展示字段进入 `ItemDetailFormatter`；标准卡片结构进入 `ItemCardView`。
 - 主菜单与战斗背包的共同交互进入 `SharedBackpackPanel`。仅场景特有的所有权结果由宿主通过信号处理。
 - 正式战斗中的普通拾取、丢弃、装备与耐久变化先写入 `GlobalInventory` 内存状态，不为每次操作重复序列化包含永久仓库的完整存档；成功撤离、失败或正常退出结算后统一落盘。物资撤离点已经送回永久仓库的资产使用强制保存路径，不等待本局最终结算。
+- `user://global_inventory.json` 只能由 `/root/GlobalInventory` AutoLoad 写入；独立测试实例、临时验证脚本和普通场景节点没有持久化权限。库存服务只维护这一份主存档，不自动生成额外恢复或备份文件。
 
 ### 7.3 敌人与环境
 

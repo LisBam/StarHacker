@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="ContentPackData" load_steps=9 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/content_pack_data.gd" id="1_pack"]
+[ext_resource type="Resource" path="res://data/weapons/silver_wolf/prometheus.tres" id="2_prometheus"]
+[ext_resource type="Resource" path="res://data/weapons/silver_wolf/hacker_silence.tres" id="3_silence"]
+[ext_resource type="Resource" path="res://data/equipment/silver_wolf/hacker_glasses.tres" id="4_head"]
+[ext_resource type="Resource" path="res://data/equipment/silver_wolf/carrier_suit.tres" id="5_body"]
+[ext_resource type="Resource" path="res://data/equipment/silver_wolf/port_trousers.tres" id="6_legs"]
+[ext_resource type="Resource" path="res://data/equipment/silver_wolf/node_stealth_boots.tres" id="7_feet"]
+[ext_resource type="Resource" path="res://data/items/cola.tres" id="8_cola"]
+
+[resource]
+script = ExtResource("1_pack")
+pack_id = "silver_wolf"
+display_name = "银狼"
+character_id = "silver_wolf"
+weapon_resources = Array[Resource]([ExtResource("2_prometheus"), ExtResource("3_silence")])
+equipment_resources = Array[Resource]([ExtResource("4_head"), ExtResource("5_body"), ExtResource("6_legs"), ExtResource("7_feet")])
+item_resources = Array[Resource]([ExtResource("8_cola")])
+enemy_scenes = Array[PackedScene]([])

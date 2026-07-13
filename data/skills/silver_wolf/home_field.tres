@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="SilverWolfHomeFieldSkillData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/silver_wolf_home_field_skill_data.gd" id="1_data"]
+[ext_resource type="Script" path="res://scripts/skills/silver_wolf_home_field_behavior.gd" id="2_behavior"]
+
+[resource]
+script = ExtResource("1_data")
+skill_id = "silver_wolf_home_field"
+display_name = "我的主场！"
+description = "进入游戏时，你可分配你面板上的基础属性，每项属性的变动不高于20%。"
+behavior_script = ExtResource("2_behavior")
+base_attribute_value = 99.0
+maximum_adjustment_ratio = 0.2
+allocation_step = 0.1

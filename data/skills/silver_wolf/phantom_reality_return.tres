@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="SilverWolfPhantomRealitySkillData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/silver_wolf_phantom_reality_skill_data.gd" id="1_data"]
+[ext_resource type="Script" path="res://scripts/skills/silver_wolf_phantom_reality_return_behavior.gd" id="2_behavior"]
+
+[resource]
+script = ExtResource("1_data")
+skill_id = "silver_wolf_phantom_reality_return"
+display_name = "幻影现实·回溯"
+description = "传送回记录的位置并将血量调整为记录的血量。"
+behavior_script = ExtResource("2_behavior")
+targeting_mode = 2
+cooldown_duration = 0.0
+energy_cost = 0.0
+cast_range = 1.0
+target_group = &"skill_targets"
+can_charge = false
+lethal_cooldown_extension_ratio = 0.99

@@ -45,7 +45,7 @@
 
 | 来源 | 上报事实 |
 | --- | --- |
-| `PlayerController` | 成功射击、武器实际耐久消耗、实际受伤和成功闪避 |
+| `PlayerController` | 成功射击、武器实际耐久消耗、实际受伤和成功冲刺 |
 | `EquipmentComponent` | 防具实际耐久消耗与首次损坏 |
 | `LootChest` | 宝箱实际开启或击毁 |
 | `GlobalInventory` | 首次战场获得、物资送回、修复包使用和失败损失 |

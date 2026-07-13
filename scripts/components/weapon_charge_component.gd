@@ -4,6 +4,9 @@ class_name WeaponChargeComponent
 ## 武器蓄力组件只维护一次武器蓄力的时间、来源和临时防御/移动效果。
 ## 玩家控制器负责读取输入与执行攻击，本组件不生成命中、不扣能量和耐久，避免特殊效果重复结算攻击成本。
 
+## 共用蓄力条所有者 ID；固定 weapon，保证武器结束只能隐藏自己取得的显示，不覆盖主动技能蓄力。
+const CHARGE_BAR_OWNER_ID: StringName = &"weapon"
+
 ## 蓄力条路径；默认复用角色头顶进度条，缺失时蓄力机制仍正常运行，运行时通常不动态修改。
 @export var charge_bar_path: NodePath = ^"../SkillChargeBar"
 
@@ -26,7 +29,7 @@ func begin_charge(weapon_data: Resource, attack_mode: String) -> bool:
 	_attack_mode = attack_mode
 	_charge_elapsed = 0.0
 	if _charge_bar != null and _charge_bar.has_method("show_charge"):
-		_charge_bar.call("show_charge")
+		_charge_bar.call("show_charge", CHARGE_BAR_OWNER_ID)
 	return true
 
 
@@ -38,7 +41,7 @@ func update_charge(delta: float) -> void:
 	var maximum_duration: float = maxf(float(_charging_weapon.get("maximum_charge_duration")), 0.01)
 	_charge_elapsed = minf(_charge_elapsed + maxf(delta, 0.0), maximum_duration)
 	if _charge_bar != null and _charge_bar.has_method("set_charge_ratio"):
-		_charge_bar.call("set_charge_ratio", _charge_elapsed / maximum_duration)
+		_charge_bar.call("set_charge_ratio", _charge_elapsed / maximum_duration, CHARGE_BAR_OWNER_ID)
 
 
 func release_charge() -> Dictionary:
@@ -60,6 +63,9 @@ func release_charge() -> Dictionary:
 
 func cancel_charge() -> void:
 	## 取消蓄力且不生成攻击；战斗输入关闭、武器失效或角色死亡时使用。
+	# 共用蓄力条所有权；武器没有活动蓄力时不得隐藏可能正由主动技能显示的同一节点。
+	if _charging_weapon == null:
+		return
 	_clear_state()
 
 
@@ -94,4 +100,4 @@ func _clear_state() -> void:
 	_attack_mode = ""
 	_charge_elapsed = 0.0
 	if _charge_bar != null and _charge_bar.has_method("hide_charge"):
-		_charge_bar.call("hide_charge")
+		_charge_bar.call("hide_charge", CHARGE_BAR_OWNER_ID)

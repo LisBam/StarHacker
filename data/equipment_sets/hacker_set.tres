@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="EquipmentSetData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/equipment_set_data.gd" id="1_set"]
+
+[resource]
+script = ExtResource("1_set")
+set_id = "hacker_set"
+display_name = "骇客套装"
+two_piece_required_count = 2
+two_piece_description = "闪避率提高10%。击杀敌人后的3s内额外提高5%。"
+two_piece_attribute_bonuses = {
+"dodge_chance": 0.1
+}
+four_piece_required_count = 4
+four_piece_description = "你每拥有10点移速，你造成的伤害便提高1%，受到的伤害便减少1%，至多计入210点移速。"
+recent_kill_dodge_chance_bonus = 0.05
+recent_kill_dodge_duration = 3.0
+move_speed_effect_points_per_stack = 10.0
+move_speed_effect_maximum_points = 210.0
+move_speed_damage_bonus_per_stack = 0.01
+move_speed_damage_reduction_per_stack = 0.01

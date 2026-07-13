@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="ConsumableData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/consumable_data.gd" id="1_consumable"]
+
+[resource]
+script = ExtResource("1_consumable")
+item_kind = "consumable"
+item_id = "cola"
+display_name = "可乐"
+description = "使用后提高9%的攻速持续45s。"
+icon_text = "C"
+value = 25
+effect_stat = "attack_speed_ratio"
+effect_amount = 0.09
+duration_seconds = 45.0

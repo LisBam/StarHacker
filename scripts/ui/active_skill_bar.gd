@@ -15,6 +15,8 @@ const MINIMUM_LABEL_AXIS_SIZE: float = 1.0
 @export var slot_border_color: Color = Color(0.26, 0.72, 0.92, 0.86)
 ## 冷却遮罩颜色；默认黑色半透明，冷却中覆盖技能槽并显示精确剩余秒数。
 @export var cooldown_overlay_color: Color = Color(0.01, 0.015, 0.025, 0.72)
+## 后续段等待遮罩颜色；默认青蓝半透明，用于明确表示技能仍可释放而不是已经进入冷却。
+@export var follow_up_overlay_color: Color = Color(0.02, 0.24, 0.34, 0.66)
 ## 技能名称颜色；默认浅蓝白色，冷却和空槽状态由独立文本说明。
 @export var skill_name_color: Color = Color(0.78, 0.94, 1.0, 1.0)
 ## 空技能槽透明度；默认 0.42，使占位文本可见但弱于已装载技能。
@@ -169,8 +171,14 @@ func _refresh_cooldowns() -> void:
 	for slot_index in range(_cooldown_overlays.size()):
 		# 当前剩余冷却；组件缺失或无效槽按 0 处理。
 		var cooldown_remaining: float = float(_active_skill_component.call("get_cooldown_remaining", slot_index)) if _active_skill_component != null and _active_skill_component.has_method("get_cooldown_remaining") else 0.0
-		_cooldown_overlays[slot_index].visible = cooldown_remaining > 0.0
-		_cooldown_labels[slot_index].text = "%ss" % String.num(cooldown_remaining, cooldown_decimal_places) if cooldown_remaining > 0.0 else ""
+		# 后续段剩余窗口；大于零时优先显示连段提示，提醒玩家技能槽当前仍可再次触发。
+		var follow_up_remaining: float = float(_active_skill_component.call("get_follow_up_remaining", slot_index)) if _active_skill_component != null and _active_skill_component.has_method("get_follow_up_remaining") else 0.0
+		_cooldown_overlays[slot_index].visible = cooldown_remaining > 0.0 or follow_up_remaining > 0.0
+		_cooldown_overlays[slot_index].color = follow_up_overlay_color if follow_up_remaining > 0.0 else cooldown_overlay_color
+		if follow_up_remaining > 0.0:
+			_cooldown_labels[slot_index].text = "连段 %ss" % String.num(follow_up_remaining, cooldown_decimal_places)
+		else:
+			_cooldown_labels[slot_index].text = "%ss" % String.num(cooldown_remaining, cooldown_decimal_places) if cooldown_remaining > 0.0 else ""
 
 
 func _get_action_display_text(action_name: StringName) -> String:

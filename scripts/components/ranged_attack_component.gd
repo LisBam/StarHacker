@@ -84,7 +84,7 @@ func try_attack(direction: Vector2, weapon_data: Resource = null, attack_modifie
 	# 本次使用的弹体伤害；取值来自武器数据或组件默认值，默认 projectile_damage，修改会影响本次弹体命中伤害。
 	var selected_projectile_damage: float = _get_weapon_attack_float(weapon_data, "damage", "ranged", projectile_damage) * maxf(float(attack_modifiers.get("damage_multiplier", 1.0)), 0.0)
 	# 本次使用的冷却；取值来自武器数据或组件默认值，默认 cooldown，修改会影响下一次可攻击时间。
-	var selected_cooldown: float = _get_weapon_float(weapon_data, "cooldown", cooldown)
+	var selected_cooldown: float = _get_weapon_float(weapon_data, "cooldown", cooldown) * maxf(float(attack_modifiers.get("cooldown_multiplier", 1.0)), 0.0)
 	# 本次使用的弹体冲击力；取值来自武器数据，单位为目标单次无碰撞理论位移像素，默认 0 表示只造成伤害不击退。
 	var selected_impact_force: float = _get_weapon_attack_float(weapon_data, "impact_force", "ranged", 0.0) * maxf(float(attack_modifiers.get("impact_multiplier", 1.0)), 0.0)
 	# 本次使用的偏移角度；取值来自武器数据，默认 0 度表示弹体严格沿瞄准方向发射。

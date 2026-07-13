@@ -60,7 +60,9 @@ func execute(context: Dictionary) -> bool:
 		return false
 	# 释放瞬间最终防御力；包含角色、装备、套装和被动倍率，本次冲锋期间固定不再变化。
 	var defense_power: float = float(_stats_component.call("get_defense_power")) if _stats_component != null and _stats_component.has_method("get_defense_power") else 0.0
-	_current_damage = maxf(float(_skill_data.get("base_damage")), 0.0) + defense_power * maxf(float(_skill_data.get("defense_power_ratio")), 0.0)
+	# 玩家综合增伤倍率；装备套装等来源由玩家公开接口统一聚合，不让穹技能依赖任何具体套装。
+	var outgoing_damage_multiplier: float = float(_caster.call("get_outgoing_damage_multiplier")) if _caster.has_method("get_outgoing_damage_multiplier") else 1.0
+	_current_damage = (maxf(float(_skill_data.get("base_damage")), 0.0) + defense_power * maxf(float(_skill_data.get("defense_power_ratio")), 0.0)) * maxf(outgoing_damage_multiplier, 0.0)
 	_current_attack_power = maxf(float(_skill_data.get("damage_formula_attack_power")), 0.0)
 	_current_critical_chance = float(_stats_component.call("get_equipment_critical_chance")) if _stats_component != null and _stats_component.has_method("get_equipment_critical_chance") else 0.0
 	_current_critical_damage_multiplier = maxf(BASE_CRITICAL_DAMAGE_MULTIPLIER + (float(_stats_component.call("get_equipment_critical_damage")) if _stats_component != null and _stats_component.has_method("get_equipment_critical_damage") else 0.0), 1.0)
@@ -74,6 +76,9 @@ func execute(context: Dictionary) -> bool:
 func _physics_process(delta: float) -> void:
 	if _charge_remaining <= 0.0 or not is_instance_valid(_caster):
 		_finish_charge()
+		return
+	if _caster.has_method("was_forced_movement_blocked_this_frame") and bool(_caster.call("was_forced_movement_blocked_this_frame")):
+		_finish_charge(true)
 		return
 	_resolve_collisions()
 	_charge_remaining = maxf(_charge_remaining - maxf(delta, 0.0), 0.0)
@@ -103,10 +108,12 @@ func _resolve_collisions() -> void:
 		target.call("apply_damage", _current_damage, self)
 
 
-func _finish_charge() -> void:
+func _finish_charge(cancel_forced_movement: bool = false) -> void:
 	## 结束冲锋行为并移除独立减伤来源；玩家强制移动使用相同时长，会在自身物理帧同步归零。
 	_charge_remaining = 0.0
 	set_physics_process(false)
+	if cancel_forced_movement and is_instance_valid(_caster) and _caster.has_method("cancel_forced_movement"):
+		_caster.call("cancel_forced_movement")
 	if is_instance_valid(_caster) and _caster.has_method("remove_damage_reduction_source"):
 		_caster.call("remove_damage_reduction_source", DAMAGE_REDUCTION_SOURCE_ID)
 

@@ -8,6 +8,8 @@ class_name CombatStatsComponent
 signal health_changed(current_health: float, max_health: float)
 signal energy_changed(current_energy: float, max_energy: float)
 signal stats_changed
+## 能量实际消费信号；每次成功扣除正数能量时派发，限时技能可精确统计期间总消耗而不受自然恢复影响。
+signal energy_spent(amount: float)
 ## 死亡信号；生命首次降到 0 时派发一次，HUD 用它进入死亡暂停界面。
 signal died
 
@@ -114,6 +116,7 @@ func spend_energy(amount: float) -> bool:
 		return false
 
 	set_energy(current_energy - amount)
+	energy_spent.emit(amount)
 	return true
 
 

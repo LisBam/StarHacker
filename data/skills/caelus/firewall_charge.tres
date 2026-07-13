@@ -7,7 +7,7 @@
 script = ExtResource("1_data")
 skill_id = "caelus_firewall_charge"
 display_name = "炎墙，冲锋！"
-description = "长按进行蓄力，朝指定方向持续冲锋持续1s，冲锋期间不可操控角色，且受到的伤害降低80%，期间撞击敌人造成10（+20%防御力）点威力的伤害并朝两侧击退敌人。至多蓄力2秒并延长等量时间的冲锋时长。"
+description = "长按进行蓄力，朝指定方向持续冲锋持续1s，冲锋期间不可操控角色，且受到的伤害降低80%，期间撞击敌人造成10（+20%防御力）点威力的伤害并朝两侧击退敌人。至多蓄力2秒并延长等量时间的冲锋时长。冲锋期间撞击墙体会提前结束冲锋。"
 behavior_script = ExtResource("2_behavior")
 targeting_mode = 0
 directional_input_mode = 0

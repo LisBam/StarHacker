@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="EquipmentData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/equipment_data.gd" id="1_equipment"]
+[ext_resource type="Resource" path="res://data/equipment_sets/hacker_set.tres" id="2_set"]
+
+[resource]
+script = ExtResource("1_equipment")
+equipment_id = "port_trousers"
+display_name = "端口网裤"
+equipment_slot = "legs"
+equipment_set = ExtResource("2_set")
+icon_text = "裤"
+value = 99
+max_durability = 300.0
+current_durability = 300.0
+attack_power = 20.0
+defense_power = 20.0
+max_health = 25.0
+health_regeneration_per_five_seconds = 20.0
+dodge_chance = 0.05

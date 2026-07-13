@@ -79,7 +79,7 @@ func try_attack(direction: Vector2, weapon_data: Resource = null, attack_modifie
 	# 本次近战伤害；取值来自武器数据或组件默认值，默认 damage，修改会影响当前挥击命中伤害。
 	var selected_damage: float = _get_weapon_attack_float(weapon_data, "damage", "melee", damage) * maxf(float(attack_modifiers.get("damage_multiplier", 1.0)), 0.0)
 	# 本次近战冷却；取值来自武器数据或组件默认值，默认 cooldown_duration，修改会影响下一次可近战时间。
-	var selected_cooldown: float = _get_weapon_float(weapon_data, "cooldown", cooldown_duration)
+	var selected_cooldown: float = _get_weapon_float(weapon_data, "cooldown", cooldown_duration) * maxf(float(attack_modifiers.get("cooldown_multiplier", 1.0)), 0.0)
 	# 本次近战激活时长；取值来自武器数据或组件默认值，默认 active_duration，修改会影响命中框持续时间。
 	var selected_active_duration: float = _get_weapon_float(weapon_data, "melee_active_duration", active_duration)
 	# 本次近战攻击距离；表示判定区域沿攻击方向的最远端与玩家本体的距离，强化后会动态改变碰撞范围。

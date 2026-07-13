@@ -5,6 +5,8 @@ class_name PlayerController
 ## 具体能力放在独立组件中实现，后续替换角色、武器或控制方式时可以局部替换节点。
 
 signal weapon_durability_changed(weapon_data: Resource)
+## 玩家实际受到一次未闪避攻击后派发；技能可据此缩短持续时间，但不得从信号回调重复扣除生命或防具耐久。
+signal damage_received(final_damage: float, source: Node)
 
 ## 战斗爆发特效脚本；默认通过路径预加载，避免依赖 Godot 全局类名缓存解析顺序。
 const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat_burst_effect.gd")
@@ -39,11 +41,11 @@ const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat
 @export_range(1.0, 4.0, 0.05, "or_greater") var sprint_speed_multiplier: float = 1.55
 ## 疾跑每秒能耗；取值建议大于等于 0，默认 24 表示持续疾跑会稳定消耗能量，运行时修改会影响疾跑续航。
 @export_range(0.0, 9999.0, 0.1, "or_greater") var sprint_energy_consumption_per_second: float = 24.0
-## 闪避单次能耗；取值建议大于等于 0，默认 18 表示每次 Space 突进需要付出固定能量，运行时修改会影响闪避频率。
+## 冲刺单次能耗；取值建议大于等于 0，默认 18 表示每次 Space 突进需要付出固定能量，运行时修改会影响冲刺频率。
 @export_range(0.0, 9999.0, 0.1, "or_greater") var dodge_energy_consumption: float = 18.0
-## 闪避突进距离；取值建议大于 0，默认 140 像素适合当前角色尺寸，运行时修改会影响 Space 突进位移。
+## 冲刺距离；取值建议大于 0，默认 140 像素适合当前角色尺寸，运行时修改会影响 Space 突进位移。
 @export_range(1.0, 1200.0, 1.0, "or_greater") var dodge_distance: float = 140.0
-## 闪避持续时间；取值建议 0.05 到 0.5 秒，默认 0.16 秒，运行时修改会影响突进速度和无敌等后续扩展窗口。
+## 冲刺持续时间；取值建议 0.05 到 0.5 秒，默认 0.16 秒；该时间只控制突进位移，不提供无敌效果。
 @export_range(0.01, 2.0, 0.01) var dodge_duration: float = 0.16
 ## 击退速度衰减；取值建议大于 0，默认 1800 像素每秒平方，修改会影响武器坐力的初速度换算以及所有外部速度的持续时间。
 @export_range(1.0, 12000.0, 1.0, "or_greater") var knockback_decay: float = 1800.0
@@ -64,9 +66,9 @@ const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat
 
 ## 最近一次有效瞄准方向；取值为单位向量，默认向右保证鼠标贴近角色时仍有攻击方向，修改会影响无有效鼠标方向时的攻击朝向。
 var _last_aim_direction: Vector2 = Vector2.RIGHT
-## 当前闪避方向；取值为单位向量或 Vector2.ZERO，默认空向量表示未闪避，修改会影响突进移动方向。
+## 当前冲刺方向；取值为单位向量或 Vector2.ZERO，默认空向量表示未冲刺，修改会影响突进移动方向。
 var _dodge_direction: Vector2 = Vector2.ZERO
-## 当前闪避剩余时间；取值大于等于 0，默认 0 表示未闪避，修改会影响突进持续帧数。
+## 当前冲刺剩余时间；取值大于等于 0，默认 0 表示未冲刺，修改会影响突进持续帧数。
 var _dodge_time_remaining: float = 0.0
 ## 当前外部击退速度；取值为 Vector2，默认零向量，修改会影响后坐力和受击击退叠加到移动上的强度。
 var _knockback_velocity: Vector2 = Vector2.ZERO
@@ -76,14 +78,22 @@ var _damage_interval_remaining: float = 0.0
 var _durability_consumption_disabled_by_debug: bool = false
 ## 外部移动倍率来源；键为稳定效果 ID、值为非负倍率，默认空字典，主动技能蓄力等临时效果分别写入并连乘。
 var _movement_speed_multiplier_sources: Dictionary = {}
-## 外部减伤来源；键为稳定效果 ID、值为 0 至 1 的减伤比例，默认空字典，不同来源按剩余伤害倍率连乘。
+## 临时移动速度属性点来源；键为稳定来源 ID、值为可正向叠加的属性点，银狼技能等效果结束时按来源精确移除。
+var _movement_speed_attribute_bonus_sources: Dictionary = {}
+## 临时武器攻速提升来源；键为稳定来源 ID、值为 0 到更高的提升比例，只影响手持武器有效冷却。
+var _attack_speed_bonus_sources: Dictionary = {}
+## 外部减伤来源；键为稳定效果 ID、值为 0 至 1 的减伤比例，默认空字典，所有来源在同一免伤乘区内加算。
 var _damage_reduction_sources: Dictionary = {}
+## 外部增伤来源；键为稳定效果 ID、值为大于等于 0 的增伤比例，默认空字典，所有来源与蓄力增伤在同一乘区内加算。
+var _outgoing_damage_bonus_sources: Dictionary = {}
 ## 强制移动方向；默认向右，主动冲锋开始时覆盖为单位向量，持续期间玩家输入不改变该方向。
 var _forced_movement_direction: Vector2 = Vector2.RIGHT
 ## 强制移动剩余时间；取值大于等于 0 秒，默认 0 表示玩家可正常操控，归零后立即恢复输入移动。
 var _forced_movement_remaining: float = 0.0
 ## 强制移动速度；单位为像素/秒，默认 0，主动冲锋按角色移速属性与技能额外移速换算后写入。
 var _forced_movement_speed: float = 0.0
+## 本物理帧强制移动是否被环境墙体阻挡；默认 false，仅在强制移动 move_and_slide 后按碰撞法线更新。
+var _forced_movement_blocked_this_frame: bool = false
 
 ## 输入组件实例缓存；默认在 ready 阶段按路径获取，保持动态类型以降低脚本类名缓存依赖，修改会影响移动与攻击输入读取。
 @onready var _input_component = get_node(input_component_path)
@@ -113,6 +123,7 @@ var _forced_movement_speed: float = 0.0
 
 func _physics_process(delta: float) -> void:
 	_damage_interval_remaining = maxf(_damage_interval_remaining - delta, 0.0)
+	_forced_movement_blocked_this_frame = false
 	_handle_weapon_switch_input()
 
 	# 当前帧移动方向；取值为归一化 Vector2 或 Vector2.ZERO，无持久默认值，修改会直接影响本帧移动速度方向。
@@ -123,9 +134,8 @@ func _physics_process(delta: float) -> void:
 	if not aim_direction.is_zero_approx():
 		_last_aim_direction = aim_direction
 		_aim_pivot.rotation = _last_aim_direction.angle()
-	_update_weapon_attack_input(delta)
-
 	_handle_dodge_request(movement_direction)
+	_update_weapon_attack_input(delta)
 	if _forced_movement_remaining > 0.0:
 		_move_forced_movement(delta)
 	elif _dodge_time_remaining > 0.0:
@@ -142,7 +152,9 @@ func apply_damage(damage: float, source: Node) -> void:
 		return
 	# 装备闪避；每次有效受击请求独立判定，成功时不扣血、不触发受击间隔和击退。
 	var dodge_chance: float = float(_stats_component.call("get_dodge_chance")) if _stats_component != null and _stats_component.has_method("get_dodge_chance") else 0.0
-	if dodge_chance > 0.0 and randf() < clampf(dodge_chance, 0.0, 1.0):
+	if _equipment_set_component != null and _equipment_set_component.has_method("get_recent_kill_dodge_chance_bonus"):
+		dodge_chance += maxf(float(_equipment_set_component.call("get_recent_kill_dodge_chance_bonus")), 0.0)
+	if dodge_chance > 0.0 and randf() < clampf(dodge_chance, 0.0, EnhancementRules.DODGE_CHANCE_MAXIMUM):
 		return
 
 	# 统一伤害计算器；敌方攻击力与玩家防御力在此完成结算。
@@ -156,16 +168,21 @@ func apply_damage(damage: float, source: Node) -> void:
 	# 最终伤害；生命扣除、镜头震动和受击反馈使用同一整数结果。
 	# 减伤前最终伤害；已经完成攻防与暴击结算，所有临时减伤只对该结果应用一次。
 	var damage_before_reduction: float = float(damage_result.get("damage", 0))
-	# 最终伤害；武器蓄力、套装与技能来源按剩余伤害倍率连乘，四舍五入到项目统一整数伤害。
+		# 最终伤害；武器蓄力、套装与技能来源先在免伤乘区加算，四舍五入到项目统一整数伤害。
 	var final_damage: float = float(maxi(roundi(damage_before_reduction * _get_received_damage_multiplier()), 1)) if damage_before_reduction > 0.0 else 0.0
 	_record_stock_metric("damage_taken", final_damage)
 	_damage_interval_remaining = maxf(damage_interval, 0.0)
 	# 受伤前死亡状态；取值来自属性组件，默认用于避免死亡特效重复生成。
 	var was_dead: bool = _is_stats_dead()
-	if _stats_component.has_method("take_damage"):
+	# 致命伤害拦截；只有正在等待的技能后续段可以同步处理，成功后本次扣血由回溯效果替代且不会发出死亡信号。
+	var current_health_before_damage: float = float(_stats_component.get("current_health")) if _stats_component != null else 0.0
+	# 是否完成致命伤害回溯；只有伤害达到当前生命且技能组件明确成功执行后续段时为 true。
+	var lethal_damage_intercepted: bool = final_damage >= current_health_before_damage and _active_skill_component != null and _active_skill_component.has_method("try_intercept_lethal_damage") and bool(_active_skill_component.call("try_intercept_lethal_damage", final_damage, source))
+	if not lethal_damage_intercepted and _stats_component.has_method("take_damage"):
 		_stats_component.call("take_damage", final_damage)
 	if _equipment_component != null and _equipment_component.has_method("consume_armor_durability_on_hit"):
 		_equipment_component.call("consume_armor_durability_on_hit")
+	damage_received.emit(final_damage, source)
 
 	# 受伤后死亡状态；取值来自属性组件，默认用于决定播放受击或死亡特效。
 	var is_dead_after_damage: bool = _is_stats_dead()
@@ -224,6 +241,10 @@ func _update_weapon_attack_input(delta: float) -> void:
 		if _weapon_charge_component != null:
 			_weapon_charge_component.call("cancel_charge")
 		return
+	if _dodge_time_remaining > 0.0:
+		if _weapon_charge_component != null:
+			_weapon_charge_component.call("cancel_charge")
+		return
 	if _weapon_charge_component == null:
 		if _input_component.is_fire_requested():
 			_try_fire_ranged_weapon()
@@ -275,14 +296,19 @@ func _execute_weapon_attack(weapon_data: Resource, requested_mode: String, charg
 		return false
 	# 安全蓄力比例；普通武器固定传入 0，可蓄力武器取 0 至 1 线性插值三个效果倍率。
 	var resolved_charge_ratio: float = clampf(charge_ratio, 0.0, 1.0)
-	# 伤害倍率；满蓄提升来自武器数据，混合武器两个攻击通道使用同一倍率。
-	var damage_multiplier: float = 1.0 + maxf(float(weapon_data.get("maximum_charge_damage_bonus_ratio")), 0.0) * resolved_charge_ratio
+	# 蓄力增伤比例；满蓄提升来自武器数据，与玩家其他“造成的伤害提高”来源进入同一增伤乘区。
+	var charge_damage_bonus_ratio: float = maxf(float(weapon_data.get("maximum_charge_damage_bonus_ratio")), 0.0) * resolved_charge_ratio
+	# 伤害倍率；同乘区比例直接加算，两个 10% 增伤得到 1.20 而不是 1.21。
+	var damage_multiplier: float = 1.0 + charge_damage_bonus_ratio + get_outgoing_damage_bonus_ratio()
 	# 冲击倍率；只影响目标位移语义，不改变攻击距离或攻击成本。
 	var impact_multiplier: float = 1.0 + maxf(float(weapon_data.get("maximum_charge_impact_bonus_ratio")), 0.0) * resolved_charge_ratio
 	# 坐力倍率；用于攻击成功后的单次前坐力或后坐力反馈，混合武器不会按通道重复施加。
 	var recoil_multiplier: float = 1.0 + maxf(float(weapon_data.get("maximum_charge_recoil_bonus_ratio")), 0.0) * resolved_charge_ratio
 	# 攻击参数；两个攻击组件只读取自身相关倍率，冷却仍从同一武器数据读取。
-	var attack_modifiers: Dictionary = {"damage_multiplier": damage_multiplier, "impact_multiplier": impact_multiplier}
+	# 玩家攻速倍率；提高 99% 时为 1.99，武器有效冷却除以该倍率，技能专属效果可在强化 0.01 秒下限之后继续突破该值。
+	var attack_speed_multiplier: float = get_attack_speed_multiplier()
+	# 攻击参数；攻速只转换为冷却倍率，不改变弹体速度、近战判定时长或武器资源基础数值。
+	var attack_modifiers: Dictionary = {"damage_multiplier": damage_multiplier, "impact_multiplier": impact_multiplier, "cooldown_multiplier": 1.0 / maxf(attack_speed_multiplier, 0.01)}
 	# 是否为混合武器；兼容资源缺少方法时按 weapon_type 字段判断。
 	var is_hybrid_weapon: bool = bool(weapon_data.call("is_hybrid")) if weapon_data.has_method("is_hybrid") else str(weapon_data.get("weapon_type")) == "hybrid"
 	# 远程通道是否成功；混合武器始终尝试，普通武器只按请求通道执行。
@@ -352,7 +378,7 @@ func _handle_dodge_request(movement_direction: Vector2) -> void:
 	if not _input_component.has_method("consume_dodge_request"):
 		return
 
-	# 本帧是否请求闪避；取值为 true/false，默认由输入组件消费 Space 得出，修改会影响是否尝试突进。
+	# 本帧是否请求冲刺；取值为 true/false，默认由输入组件消费 Space 得出，修改会影响是否尝试突进。
 	var dodge_requested: bool = bool(_input_component.call("consume_dodge_request"))
 	if not dodge_requested or _dodge_time_remaining > 0.0 or _forced_movement_remaining > 0.0:
 		return
@@ -363,6 +389,11 @@ func _handle_dodge_request(movement_direction: Vector2) -> void:
 	if not _spend_energy(dodge_energy_consumption):
 		return
 
+	# 蓄力打断只发生在冲刺能量已成功支付后；方向无效、能量不足或状态冲突不会改变当前蓄力。
+	if _weapon_charge_component != null and _weapon_charge_component.has_method("cancel_charge"):
+		_weapon_charge_component.call("cancel_charge")
+	if _active_skill_component != null and _active_skill_component.has_method("cancel_aiming"):
+		_active_skill_component.call("cancel_aiming")
 	_dodge_direction = movement_direction.normalized()
 	_dodge_time_remaining = maxf(dodge_duration, 0.01)
 	_record_stock_metric("dodges", 1.0)
@@ -376,9 +407,9 @@ func _record_stock_metric(metric_name: String, amount: float) -> void:
 
 
 func _move_dodge(delta: float) -> void:
-	# 有效闪避时长；取值至少 0.01 秒，默认由 dodge_duration 夹取，修改会影响突进速度计算。
+	# 有效冲刺时长；取值至少 0.01 秒，默认由 dodge_duration 夹取，修改会影响突进速度计算。
 	var effective_dodge_duration: float = maxf(dodge_duration, 0.01)
-	# 闪避速度；取值为距离除以时长，默认确保总位移接近 dodge_distance，修改会影响突进帧速度。
+	# 冲刺速度；取值为距离除以时长，默认确保总位移接近 dodge_distance，修改会影响突进帧速度。
 	var dodge_speed: float = maxf(dodge_distance, 0.0) / effective_dodge_duration
 	velocity = _dodge_direction * dodge_speed + _knockback_velocity
 	move_and_slide()
@@ -402,6 +433,9 @@ func _get_movement_speed_multiplier(movement_direction: Vector2, delta: float) -
 		resolved_multiplier *= maxf(float(_weapon_charge_component.call("get_movement_speed_multiplier")), 0.0)
 	if _temporary_buff_component != null and _temporary_buff_component.has_method("get_move_speed_multiplier"):
 		resolved_multiplier *= maxf(float(_temporary_buff_component.call("get_move_speed_multiplier")), 0.0)
+	# 临时属性点倍率；以装备结算后的当前基础移速为分母，把技能提供的固定点数转换为移动组件可消费的倍率。
+	var base_move_speed_attribute: float = float(_movement_component.call("get_max_speed")) if _movement_component != null and _movement_component.has_method("get_max_speed") else 1.0
+	resolved_multiplier *= maxf((base_move_speed_attribute + _get_movement_speed_attribute_bonus()) / maxf(base_move_speed_attribute, 1.0), 0.0)
 	for raw_multiplier in _movement_speed_multiplier_sources.values():
 		resolved_multiplier *= maxf(float(raw_multiplier), 0.0)
 	if _equipment_set_component != null and _equipment_set_component.has_method("get_contextual_movement_speed_multiplier"):
@@ -422,8 +456,92 @@ func remove_movement_speed_multiplier_source(source_id: String) -> void:
 	_movement_speed_multiplier_sources.erase(source_id.strip_edges())
 
 
+func set_movement_speed_attribute_bonus_source(source_id: String, bonus_attribute: float) -> void:
+	## 设置一个独立固定移速属性来源；相同来源覆盖旧值，负值按 0 处理，适用于“移速增加 99 点”而不是比例加速。
+	var normalized_source_id: String = source_id.strip_edges()
+	if normalized_source_id.is_empty():
+		return
+	_movement_speed_attribute_bonus_sources[normalized_source_id] = maxf(bonus_attribute, 0.0)
+
+
+func remove_movement_speed_attribute_bonus_source(source_id: String) -> void:
+	## 移除指定固定移速属性来源；不存在时保持幂等，不影响装备比例、疾跑或其他移动倍率。
+	_movement_speed_attribute_bonus_sources.erase(source_id.strip_edges())
+
+
+func _get_movement_speed_attribute_bonus() -> float:
+	## 汇总全部固定移速属性来源；每个来源直接加算点数，结果最低为 0。
+	var total_bonus: float = 0.0
+	for raw_bonus in _movement_speed_attribute_bonus_sources.values():
+		total_bonus += maxf(float(raw_bonus), 0.0)
+	return maxf(total_bonus, 0.0)
+
+
+func get_current_move_speed_attribute() -> float:
+	## 返回用于套装与技能判定的当前移速属性；包含装备、固定点数技能和消耗品比例，不包含疾跑与蓄力控制倍率。
+	# 装备结算后的基础移速；移动组件缺失时按 0 处理。
+	var base_attribute: float = float(_movement_component.call("get_max_speed")) if _movement_component != null and _movement_component.has_method("get_max_speed") else 0.0
+	# 消耗品移速倍率；默认 1，不包含疾跑和其他操作状态倍率。
+	var temporary_multiplier: float = float(_temporary_buff_component.call("get_move_speed_multiplier")) if _temporary_buff_component != null and _temporary_buff_component.has_method("get_move_speed_multiplier") else 1.0
+	return maxf((base_attribute + _get_movement_speed_attribute_bonus()) * maxf(temporary_multiplier, 0.0), 0.0)
+
+
+func set_attack_speed_bonus_source(source_id: String, bonus_ratio: float) -> void:
+	## 设置一个独立玩家攻速提升比例；0.99 表示手持武器攻速提高 99%，相同来源只覆盖自身且不进入角色面板。
+	var normalized_source_id: String = source_id.strip_edges()
+	if normalized_source_id.is_empty():
+		return
+	_attack_speed_bonus_sources[normalized_source_id] = maxf(bonus_ratio, 0.0)
+
+
+func remove_attack_speed_bonus_source(source_id: String) -> void:
+	## 移除指定攻速来源；不存在时保持幂等，不修改武器强化冷却或其他技能效果。
+	_attack_speed_bonus_sources.erase(source_id.strip_edges())
+
+
+func get_attack_speed_multiplier() -> float:
+	## 返回玩家手持武器综合攻速倍率；技能与不同消耗品比例加算，同一来源由各自组件保证不重复叠加。
+	# 综合攻速提升比例；技能来源与临时道具来源直接加算，最终再加基础 1 倍。
+	var bonus_ratio: float = 0.0
+	for raw_bonus in _attack_speed_bonus_sources.values():
+		bonus_ratio += maxf(float(raw_bonus), 0.0)
+	if _temporary_buff_component != null and _temporary_buff_component.has_method("get_attack_speed_multiplier"):
+		bonus_ratio += maxf(float(_temporary_buff_component.call("get_attack_speed_multiplier")) - 1.0, 0.0)
+	return maxf(1.0 + bonus_ratio, 0.01)
+
+
+func get_outgoing_damage_multiplier() -> float:
+	## 返回玩家当前全部“增伤/造成的伤害提高”来源形成的唯一倍率；武器和主动技能均通过该入口读取。
+	return maxf(1.0 + get_outgoing_damage_bonus_ratio(), 0.0)
+
+
+func get_outgoing_damage_bonus_ratio() -> float:
+	## 返回同一增伤乘区内的累计比例；不同来源直接加算，供自带蓄力增伤的攻击合并后只应用一次。
+	# 综合增伤比例；稳定来源与当前套装效果均累计为比例，不在这里提前转换成多个独立倍率。
+	var combined_bonus_ratio: float = 0.0
+	for raw_bonus_ratio in _outgoing_damage_bonus_sources.values():
+		combined_bonus_ratio += maxf(float(raw_bonus_ratio), 0.0)
+	if _equipment_set_component != null and _equipment_set_component.has_method("get_move_speed_damage_bonus_ratio"):
+		combined_bonus_ratio += maxf(float(_equipment_set_component.call("get_move_speed_damage_bonus_ratio", get_current_move_speed_attribute())), 0.0)
+	return maxf(combined_bonus_ratio, 0.0)
+
+
+func set_outgoing_damage_bonus_source(source_id: String, bonus_ratio: float) -> void:
+	## 设置一个独立“增伤/造成的伤害提高”来源；相同 ID 覆盖旧值，负值按 0 处理，运行时效果结束时应配对移除。
+	# 标准来源 ID；空字符串不写入，避免多个匿名效果互相覆盖且无法精确清理。
+	var normalized_source_id: String = source_id.strip_edges()
+	if normalized_source_id.is_empty():
+		return
+	_outgoing_damage_bonus_sources[normalized_source_id] = maxf(bonus_ratio, 0.0)
+
+
+func remove_outgoing_damage_bonus_source(source_id: String) -> void:
+	## 移除指定增伤来源；不存在时保持幂等，不影响套装、蓄力增伤或其他独立来源。
+	_outgoing_damage_bonus_sources.erase(source_id.strip_edges())
+
+
 func set_damage_reduction_source(source_id: String, reduction_ratio: float) -> void:
-	## 设置一个独立减伤来源；相同来源覆盖旧值，比例限制到 0 至 100%，多个来源按剩余伤害连乘。
+	## 设置一个独立“免伤/受到的伤害降低”来源；相同来源覆盖旧值，所有来源在同一乘区加算并统一限制到 100%。
 	var normalized_source_id: String = source_id.strip_edges()
 	if normalized_source_id.is_empty():
 		return
@@ -444,6 +562,7 @@ func start_forced_movement(direction: Vector2, duration_seconds: float, bonus_mo
 	# 当前移动速度属性；由移动组件保存角色基础值及装备倍率结算后的基础属性，技能额外值直接相加。
 	var current_move_speed_attribute: float = float(_movement_component.call("get_max_speed")) if _movement_component.has_method("get_max_speed") else 100.0
 	_forced_movement_speed = maxf(current_move_speed_attribute + bonus_move_speed_attribute, 0.0) * 3.0
+	_forced_movement_blocked_this_frame = false
 	_dodge_time_remaining = 0.0
 	_dodge_direction = Vector2.ZERO
 	return true
@@ -460,12 +579,24 @@ func _move_forced_movement(delta: float) -> void:
 	## 推进当前强制移动并保留墙体碰撞；持续时间归零后清空速度，下一物理帧恢复正常控制。
 	velocity = _forced_movement_direction * _forced_movement_speed + _knockback_velocity
 	move_and_slide()
+	# 强制移动墙体碰撞；只有法线确实阻挡冲锋方向时标记，沿墙滑动或其他切向碰撞不会提前结束技能。
+	for collision_index in range(get_slide_collision_count()):
+		# 本次滑动碰撞；空结果跳过，法线用于判断是否阻挡强制移动主方向。
+		var slide_collision: KinematicCollision2D = get_slide_collision(collision_index)
+		if slide_collision != null and _forced_movement_direction.dot(slide_collision.get_normal()) < 0.0:
+			_forced_movement_blocked_this_frame = true
+			break
 	_cancel_blocked_knockback_components()
 	_decay_knockback(delta)
 	_forced_movement_remaining = maxf(_forced_movement_remaining - maxf(delta, 0.0), 0.0)
 	if _forced_movement_remaining <= 0.0:
 		_forced_movement_speed = 0.0
 		velocity = Vector2.ZERO
+
+
+func was_forced_movement_blocked_this_frame() -> bool:
+	## 返回最近一次强制移动是否正面撞上环境；具体技能决定是否据此提前结束，不把技能规则写入移动聚合脚本。
+	return _forced_movement_blocked_this_frame
 
 
 func apply_front_recoil_distance(direction: Vector2, recoil_distance: float) -> void:
@@ -476,15 +607,18 @@ func apply_front_recoil_distance(direction: Vector2, recoil_distance: float) -> 
 
 
 func _get_received_damage_multiplier() -> float:
-	## 汇总全部减伤来源并返回剩余伤害倍率；每项独立连乘可避免多个高减伤来源简单相加超过 100%。
-	var received_multiplier: float = 1.0
+	## 汇总全部“免伤/受到的伤害降低”来源并返回唯一剩余伤害倍率；比例先加算，再统一限制到 100%。
+	# 综合免伤比例；所有来源处于同一乘区，两个 10% 免伤得到 20% 而不是按剩余伤害得到 19%。
+	var combined_reduction_ratio: float = 0.0
 	if _weapon_charge_component != null and _weapon_charge_component.has_method("get_damage_reduction_ratio"):
-		received_multiplier *= 1.0 - clampf(float(_weapon_charge_component.call("get_damage_reduction_ratio")), 0.0, 1.0)
+		combined_reduction_ratio += clampf(float(_weapon_charge_component.call("get_damage_reduction_ratio")), 0.0, 1.0)
 	for raw_reduction_ratio in _damage_reduction_sources.values():
-		received_multiplier *= 1.0 - clampf(float(raw_reduction_ratio), 0.0, 1.0)
+		combined_reduction_ratio += clampf(float(raw_reduction_ratio), 0.0, 1.0)
 	if _equipment_set_component != null and _equipment_set_component.has_method("get_contextual_damage_reduction_ratio"):
-		received_multiplier *= 1.0 - clampf(float(_equipment_set_component.call("get_contextual_damage_reduction_ratio", global_position, _input_component.call("get_movement_vector"))), 0.0, 1.0)
-	return clampf(received_multiplier, 0.0, 1.0)
+		combined_reduction_ratio += clampf(float(_equipment_set_component.call("get_contextual_damage_reduction_ratio", global_position, _input_component.call("get_movement_vector"))), 0.0, 1.0)
+	if _equipment_set_component != null and _equipment_set_component.has_method("get_move_speed_damage_reduction_ratio"):
+		combined_reduction_ratio += clampf(float(_equipment_set_component.call("get_move_speed_damage_reduction_ratio", get_current_move_speed_attribute())), 0.0, 1.0)
+	return 1.0 - clampf(combined_reduction_ratio, 0.0, 1.0)
 
 
 func _spend_energy(amount: float) -> bool:
@@ -729,3 +863,57 @@ func clear_external_motion() -> void:
 	velocity = Vector2.ZERO
 	if _movement_component != null and _movement_component.has_method("reset_motion"):
 		_movement_component.call("reset_motion")
+
+
+func find_nearest_clear_position(target_position: Vector2, clearance_radius: float, search_step: float, maximum_search_radius: float) -> Vector2:
+	## 返回目标点或其周围最近的环境空地；只检测玩家环境碰撞掩码，完全找不到时返回 Vector2.INF 供技能取消释放。
+	# 安全检测半径；最低 1 像素，避免退化形状查询。
+	var resolved_clearance_radius: float = maxf(clearance_radius, 1.0)
+	# 同心圆搜索步长；最低 1 像素，决定相邻搜索圈距离。
+	var resolved_search_step: float = maxf(search_step, 1.0)
+	# 最大搜索半径；至少覆盖一圈，异常小值不会直接跳过搜索。
+	var resolved_maximum_radius: float = maxf(maximum_search_radius, resolved_search_step)
+	if _is_teleport_position_clear(target_position, resolved_clearance_radius):
+		return target_position
+	# 搜索圈数；从最近一圈逐步向外扩展，保证首次找到的候选属于最小半径层。
+	var ring_count: int = maxi(ceili(resolved_maximum_radius / resolved_search_step), 1)
+	for ring_index in range(1, ring_count + 1):
+		# 当前搜索半径；最后一圈不超过配置最大值，防止步长无法整除时越界搜索。
+		var ring_radius: float = minf(float(ring_index) * resolved_search_step, resolved_maximum_radius)
+		# 当前角度采样数；随周长增加并限制在 8 至 64，兼顾最近空地精度与单次物理查询成本。
+		var sample_count: int = clampi(ceili(TAU * ring_radius / resolved_search_step), 8, 64)
+		for sample_index in range(sample_count):
+			# 候选位置；同圈均匀采样，起始角固定向右使结果在相同地图条件下可复现。
+			var candidate_position: Vector2 = target_position + Vector2.RIGHT.rotated(TAU * float(sample_index) / float(sample_count)) * ring_radius
+			if _is_teleport_position_clear(candidate_position, resolved_clearance_radius):
+				return candidate_position
+	return Vector2.INF
+
+
+func _is_teleport_position_clear(candidate_position: Vector2, clearance_radius: float) -> bool:
+	## 使用玩家环境碰撞掩码检查一个圆形占位；排除玩家自身 RID，避免当前位置或邻近候选被自身误判阻挡。
+	# 安全占位圆；半径与技能资源一致，用于近似玩家本体空间。
+	var clearance_shape: CircleShape2D = CircleShape2D.new()
+	clearance_shape.radius = maxf(clearance_radius, 1.0)
+	# 物理形状查询；只检测玩家 collision_mask 中的实体环境并排除自身。
+	var query: PhysicsShapeQueryParameters2D = PhysicsShapeQueryParameters2D.new()
+	query.shape = clearance_shape
+	query.transform = Transform2D(0.0, candidate_position)
+	query.collision_mask = collision_mask
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+	query.exclude = [get_rid()]
+	return get_world_2d().direct_space_state.intersect_shape(query, 1).is_empty()
+
+
+func apply_character_base_attribute_allocation(attributes: Dictionary) -> bool:
+	## 应用银狼五维基础属性分配；只通过现有属性与装备组件入口更新，不把临时分配写入角色模板或永久存档。
+	for required_key in ["max_health", "max_energy", "attack_power", "defense_power", "move_speed"]:
+		if not attributes.has(required_key):
+			return false
+	if _stats_component == null or not _stats_component.has_method("configure_character_base_stats"):
+		return false
+	_stats_component.call("configure_character_base_stats", float(attributes.get("max_health")), float(attributes.get("max_energy")), float(attributes.get("attack_power")), float(attributes.get("defense_power")))
+	if _equipment_component != null and _equipment_component.has_method("configure_base_move_speed"):
+		_equipment_component.call("configure_base_move_speed", float(attributes.get("move_speed")))
+	return true

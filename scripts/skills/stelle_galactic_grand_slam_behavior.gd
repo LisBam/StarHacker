@@ -65,10 +65,17 @@ func execute(context: Dictionary) -> bool:
 	var attack_power: float = float(_stats_component.call("get_attack_power")) if _stats_component != null and _stats_component.has_method("get_attack_power") else FALLBACK_ATTACK_POWER
 	# 未蓄力技能威力；固定伤害与当前攻击力比例直接相加，再交给项目统一攻防与暴击公式。
 	var uncharged_damage: float = maxf(float(_skill_data.get("base_damage")), 0.0) + attack_power * maxf(float(_skill_data.get("attack_power_ratio")), 0.0)
-	# 满蓄伤害插值倍率；0 蓄力为 1，满蓄力按资源 maximum_charge_damage_bonus_ratio 提高。
-	var damage_multiplier: float = 1.0 + maxf(float(_skill_data.get("maximum_charge_damage_bonus_ratio")), 0.0) * charge_ratio
+	# 蓄力增伤比例；0 蓄力为 0，满蓄力按资源 maximum_charge_damage_bonus_ratio 提高，并与其他增伤进入同一乘区。
+	var charge_damage_bonus_ratio: float = maxf(float(_skill_data.get("maximum_charge_damage_bonus_ratio")), 0.0) * charge_ratio
 	# 本次传给目标的原始技能伤害；所有目标共享同一释放数值，防止命中顺序改变结果。
-	var cast_damage: float = uncharged_damage * damage_multiplier
+	# 玩家综合增伤比例；装备套装等来源由玩家公开接口统一聚合，技能行为不识别具体套装 ID。
+	var outgoing_damage_bonus_ratio: float = 0.0
+	if _caster.has_method("get_outgoing_damage_bonus_ratio"):
+		outgoing_damage_bonus_ratio = maxf(float(_caster.call("get_outgoing_damage_bonus_ratio")), 0.0)
+	elif _caster.has_method("get_outgoing_damage_multiplier"):
+		outgoing_damage_bonus_ratio = maxf(float(_caster.call("get_outgoing_damage_multiplier")) - 1.0, 0.0)
+	# 本次技能伤害；蓄力增伤与“造成的伤害提高”比例加算后只形成一个最终倍率。
+	var cast_damage: float = uncharged_damage * maxf(1.0 + charge_damage_bonus_ratio + outgoing_damage_bonus_ratio, 0.0)
 	# 基础击退距离；取值来自资源，满蓄力再按独立比例提高。
 	var base_knockback_distance: float = maxf(float(_skill_data.get("knockback_distance")), 0.0)
 	# 本次期望击退距离；0 蓄力为 100，满蓄力默认为 180 像素。

@@ -1,0 +1,34 @@
+[gd_resource type="Resource" script_class="SilverWolfPhantomRealitySkillData" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/silver_wolf_phantom_reality_skill_data.gd" id="1_data"]
+[ext_resource type="Script" path="res://scripts/skills/silver_wolf_phantom_reality_behavior.gd" id="2_behavior"]
+[ext_resource type="Resource" path="res://data/skills/silver_wolf/phantom_reality_return.tres" id="3_return"]
+
+[resource]
+script = ExtResource("1_data")
+skill_id = "silver_wolf_phantom_reality"
+display_name = "幻影现实"
+description = "记录发动技能时的位置和血量，然后传送至指定位置。传送落地时对周围一圈的敌人造成9（+9%攻击力）点伤害并击退敌人。在3s内再次发动技能会传送回记录的位置并将血量调整为记录的血量。若在3s内血量降为0，则立即触发二段技能，并使本技能下次CD延长99%。"
+behavior_script = ExtResource("2_behavior")
+targeting_mode = 0
+directional_input_mode = 1
+cooldown_duration = 9.0
+energy_cost = 0.0
+cast_range = 250.0
+directional_half_angle_degrees = 180.0
+target_group = &"skill_targets"
+target_requires_damage_method = true
+target_requires_line_of_sight = false
+can_charge = false
+target_marker_radius = 18.0
+next_stage = ExtResource("3_return")
+next_stage_window_duration = 3.0
+landing_base_damage = 9.0
+attack_power_ratio = 0.09
+landing_effect_radius = 90.0
+landing_impact_force = 75.0
+damage_formula_attack_power = 100.0
+teleport_clearance_radius = 18.0
+teleport_search_step = 18.0
+teleport_max_search_radius = 600.0
+lethal_cooldown_extension_ratio = 0.99

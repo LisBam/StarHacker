@@ -36,6 +36,18 @@ class_name EquipmentSetData
 @export_range(0.0, 10.0, 0.01, "or_greater") var nearby_drop_move_speed_bonus_ratio: float = 0.0
 ## 朝附近掉落物移动时的减伤比例；默认 0 表示不减伤，0.15 表示受到伤害降低 15%，与其他来源按剩余伤害连乘。
 @export_range(0.0, 1.0, 0.01) var nearby_drop_damage_reduction_ratio: float = 0.0
+## 两件套击杀后的额外闪避率；默认 0 表示没有击杀触发，0.05 表示触发期间额外增加 5 个百分点。
+@export_range(0.0, 1.0, 0.01) var recent_kill_dodge_chance_bonus: float = 0.0
+## 两件套击杀闪避效果持续时间；单位为秒，默认 0 表示关闭，重复击杀只刷新持续时间而不重复叠加自身。
+@export_range(0.0, 60.0, 0.01, "or_greater") var recent_kill_dodge_duration: float = 0.0
+## 四件套移速换算的单档属性点；默认 0 表示没有该效果，10 表示每拥有 10 点当前移速获得一档增伤与减伤。
+@export_range(0.0, 1000.0, 0.1, "or_greater") var move_speed_effect_points_per_stack: float = 0.0
+## 四件套移速换算计入上限；默认 0 表示没有该效果，210 表示超过 210 点的移速不再增加档数。
+@export_range(0.0, 10000.0, 1.0, "or_greater") var move_speed_effect_maximum_points: float = 0.0
+## 四件套每档造成伤害提升比例；默认 0，0.01 表示每档提高 1%，与武器和技能自身倍率乘算。
+@export_range(0.0, 1.0, 0.001) var move_speed_damage_bonus_per_stack: float = 0.0
+## 四件套每档受到伤害降低比例；默认 0，0.01 表示每档降低 1%，最终结果限制在 0% 至 100%。
+@export_range(0.0, 1.0, 0.001) var move_speed_damage_reduction_per_stack: float = 0.0
 
 
 func get_tier_definitions() -> Array[Dictionary]:
@@ -94,6 +106,31 @@ func get_nearby_drop_effect(active_piece_count: int) -> Dictionary:
 		"detection_radius": maxf(nearby_drop_detection_radius, 0.0),
 		"move_speed_bonus_ratio": maxf(nearby_drop_move_speed_bonus_ratio, 0.0),
 		"damage_reduction_ratio": clampf(nearby_drop_damage_reduction_ratio, 0.0, 1.0),
+	}
+
+
+func get_recent_kill_dodge_effect(active_piece_count: int) -> Dictionary:
+	## 返回达到两件门槛后的击杀闪避参数；未配置数值或未触发套装时返回空词典。
+	if active_piece_count < maxi(two_piece_required_count, 1) or recent_kill_dodge_chance_bonus <= 0.0 or recent_kill_dodge_duration <= 0.0:
+		return {}
+	return {
+		"dodge_chance_bonus": clampf(recent_kill_dodge_chance_bonus, 0.0, 1.0),
+		"duration": maxf(recent_kill_dodge_duration, 0.0),
+	}
+
+
+func get_move_speed_combat_effect(active_piece_count: int, move_speed_attribute: float) -> Dictionary:
+	## 按当前移速计算四件套完整档数；不足一档的余数不生效，超过配置上限的部分不再计入。
+	if active_piece_count < maxi(four_piece_required_count, 1) or move_speed_effect_points_per_stack <= 0.0 or move_speed_effect_maximum_points <= 0.0:
+		return {}
+	# 计入移速；最低为 0，最高限制到套装配置上限，避免临时高速无限放大攻防效果。
+	var counted_move_speed: float = clampf(move_speed_attribute, 0.0, move_speed_effect_maximum_points)
+	# 完整档数；使用向下取整对应“每拥有若干点”语义，余数不会提前提供下一档收益。
+	var stack_count: int = maxi(floori(counted_move_speed / move_speed_effect_points_per_stack), 0)
+	return {
+		"stack_count": stack_count,
+		"damage_bonus_ratio": float(stack_count) * maxf(move_speed_damage_bonus_per_stack, 0.0),
+		"damage_reduction_ratio": clampf(float(stack_count) * maxf(move_speed_damage_reduction_per_stack, 0.0), 0.0, 1.0),
 	}
 
 

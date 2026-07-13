@@ -6,6 +6,8 @@ class_name SkillChargeBar
 
 ## 蓄力条单轴尺寸安全下限；固定 1 像素，防止检查器异常值生成负矩形或不可见绘制。
 const MINIMUM_BAR_AXIS_SIZE: float = 1.0
+## 兼容调用的默认所有者 ID；固定 default，旧调用方不传来源时仍能独占一次显示生命周期。
+const DEFAULT_OWNER_ID: StringName = &"default"
 
 ## 蓄力条相对角色的局部偏移；默认位于角色头顶 42 像素，运行时通常不动态修改。
 @export var bar_offset: Vector2 = Vector2(0.0, -42.0)
@@ -22,23 +24,35 @@ const MINIMUM_BAR_AXIS_SIZE: float = 1.0
 
 ## 当前蓄力比例；取值 0 至 1，默认 0，显示期间由主动技能组件逐帧更新。
 var _charge_ratio: float = 0.0
+## 当前显示所有者；默认空 ID 表示无人持有，武器与主动技能只能更新或隐藏自己取得的显示。
+var _owner_id: StringName = &""
 
 
-func show_charge() -> void:
+func show_charge(owner_id: StringName = DEFAULT_OWNER_ID) -> void:
 	## 显示并从 0 开始新的蓄力条，避免连续技能沿用上次残留进度。
+	_owner_id = owner_id if not owner_id.is_empty() else DEFAULT_OWNER_ID
 	_charge_ratio = 0.0
 	visible = true
 	queue_redraw()
 
 
-func set_charge_ratio(charge_ratio: float) -> void:
+func set_charge_ratio(charge_ratio: float, owner_id: StringName = DEFAULT_OWNER_ID) -> void:
 	## 更新蓄力比例并限制在合法范围；达到最大时间后保持满条直到玩家松开按键。
+	# 标准更新所有者；非当前持有者的延迟更新不得覆盖另一类蓄力的显示。
+	var resolved_owner_id: StringName = owner_id if not owner_id.is_empty() else DEFAULT_OWNER_ID
+	if _owner_id != resolved_owner_id:
+		return
 	_charge_ratio = clampf(charge_ratio, 0.0, 1.0)
 	queue_redraw()
 
 
-func hide_charge() -> void:
+func hide_charge(owner_id: StringName = DEFAULT_OWNER_ID) -> void:
 	## 隐藏并清空蓄力条；技能释放、取消或角色切换后不会保留旧进度。
+	# 标准隐藏所有者；旧蓄力结束时不得隐藏已经由另一组件重新取得的共用进度条。
+	var resolved_owner_id: StringName = owner_id if not owner_id.is_empty() else DEFAULT_OWNER_ID
+	if _owner_id != resolved_owner_id:
+		return
+	_owner_id = &""
 	_charge_ratio = 0.0
 	visible = false
 	queue_redraw()

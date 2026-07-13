@@ -16,8 +16,8 @@ class_name ConsumableData
 @export var icon_text: String = "+"
 ## 单个道具价值；取值大于等于 0，默认 0 表示不可出售，堆叠总价按数量相乘。
 @export_range(0, 999999, 1) var value: int = 0
-## 临时效果属性；move_speed_ratio 为移速比例、dodge_chance 为闪避率百分点、energy_regeneration 为每秒能量恢复点数。
-@export_enum("move_speed_ratio", "dodge_chance", "energy_regeneration") var effect_stat: String = "move_speed_ratio"
+## 临时效果属性；move_speed_ratio 为移速比例、attack_speed_ratio 为手持武器攻速比例、dodge_chance 为闪避率百分点、energy_regeneration 为每秒能量恢复点数。
+@export_enum("move_speed_ratio", "attack_speed_ratio", "dodge_chance", "energy_regeneration") var effect_stat: String = "move_speed_ratio"
 ## 临时效果数值；默认 0，比例字段使用 0.1 表示 10%，点数字段直接使用每秒增加量。
 @export_range(0.0, 9999.0, 0.01, "or_greater") var effect_amount: float = 0.0
 ## 临时效果持续时间；单位为秒，默认 60 秒，同一 item_id 再次使用会刷新持续时间而不重复叠加数值。
@@ -35,4 +35,6 @@ func get_effect_description() -> String:
 		return "移速+%.0f%%，持续%.0f秒" % [effect_amount * 100.0, duration_seconds]
 	if effect_stat == "dodge_chance":
 		return "闪避率+%.0f%%，持续%.0f秒" % [effect_amount * 100.0, duration_seconds]
+	if effect_stat == "attack_speed_ratio":
+		return "攻速+%.0f%%，持续%.0f秒" % [effect_amount * 100.0, duration_seconds]
 	return "每秒能量恢复+%.1f，持续%.0f秒" % [effect_amount, duration_seconds]

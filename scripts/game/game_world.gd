@@ -204,7 +204,7 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 @export_range(1.0, 7200.0, 1.0, "or_greater") var extraction_map_marker_time_seconds: float = 300.0
 ## 训练工具单次增加的游戏时长；默认 60 秒即 1 分钟，运行时修改会影响调试按钮加速撤离点生成与地图标记的幅度。
 @export_range(1.0, 3600.0, 1.0, "or_greater") var training_time_addition_seconds: float = 60.0
-## 撤离驻留时长；取值应大于 0，默认 5 秒，玩家在撤离范围内连续停留满该时间后可按闪避撤离。
+## 撤离驻留时长；取值应大于 0，默认 5 秒，玩家在撤离范围内连续停留满该时间后可按冲刺键撤离。
 @export_range(0.1, 120.0, 0.1, "or_greater") var extraction_hold_duration_seconds: float = 5.0
 ## 撤离点半径；取值建议大于玩家碰撞半径，默认 96 像素，修改会影响可驻留撤离范围。
 @export_range(16.0, 512.0, 1.0, "or_greater") var extraction_radius: float = 96.0
@@ -220,7 +220,7 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 @export var extraction_ring_color: Color = Color(0.35, 1.0, 0.76, 0.88)
 ## 物资撤离点数量权重；默认 2、3、4、5 个的概率依次为 45%、30%、17%、8%，数量越多概率越低。
 @export var supply_extraction_count_weights: Array[float] = [0.45, 0.30, 0.17, 0.08]
-## 物资撤离点驻留时长；默认 3 秒，玩家连续停留后按闪避打开暂停式送回面板。
+## 物资撤离点驻留时长；默认 3 秒，玩家连续停留后按冲刺键打开暂停式送回面板。
 @export_range(0.1, 30.0, 0.1) var supply_extraction_hold_duration_seconds: float = 3.0
 ## 物资撤离点半径；默认 96 像素，与正式撤离点保持相同站位宽容度。
 @export_range(16.0, 512.0, 1.0) var supply_extraction_radius: float = 96.0
@@ -250,25 +250,25 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 ## 星扩展包数值补充：当前权威基础防御力为 100，资源档案可继续覆盖该隔离场景兜底值。
 @export_range(0.0, 99999.0, 1.0, "or_greater") var stelle_defense_power: float = 100.0
 ## 穹的固定生命上限；取值应大于 0，默认 150，切换角色时直接应用，不再随机。
-@export_range(1.0, 9999.0, 1.0, "or_greater") var caelus_max_health: float = 150.0
+@export_range(1.0, 9999.0, 1.0, "or_greater") var caelus_max_health: float = 120.0
 ## 穹的固定能量上限；取值应大于 0，默认 95，切换角色时直接应用，不再随机。
-@export_range(1.0, 9999.0, 1.0, "or_greater") var caelus_max_energy: float = 95.0
+@export_range(1.0, 9999.0, 1.0, "or_greater") var caelus_max_energy: float = 80.0
 ## 穹的固定移动速度属性；默认 100，按 1 点等于 3 像素/秒换算，切换角色时写入玩家移动组件。
-@export_range(1.0, 2000.0, 0.0001, "or_greater") var caelus_move_speed: float = 100.0
+@export_range(1.0, 2000.0, 0.0001, "or_greater") var caelus_move_speed: float = 90.0
 ## 穹的固定攻击力；默认 9，较低输出与较高生存能力形成角色差异。
-@export_range(0.0, 99999.0, 1.0, "or_greater") var caelus_attack_power: float = 9.0
+@export_range(0.0, 99999.0, 1.0, "or_greater") var caelus_attack_power: float = 90.0
 ## 穹的固定防御力；默认 10，为三名角色中最高基础防御。
-@export_range(0.0, 99999.0, 1.0, "or_greater") var caelus_defense_power: float = 10.0
+@export_range(0.0, 99999.0, 1.0, "or_greater") var caelus_defense_power: float = 120.0
 ## 银狼的固定生命上限；取值应大于 0，默认 105，切换角色时直接应用，不再随机。
-@export_range(1.0, 9999.0, 1.0, "or_greater") var silver_wolf_max_health: float = 105.0
+@export_range(1.0, 9999.0, 1.0, "or_greater") var silver_wolf_max_health: float = 99.0
 ## 银狼的固定能量上限；取值应大于 0，默认 155，切换角色时直接应用，不再随机。
-@export_range(1.0, 9999.0, 1.0, "or_greater") var silver_wolf_max_energy: float = 155.0
+@export_range(1.0, 9999.0, 1.0, "or_greater") var silver_wolf_max_energy: float = 99.0
 ## 银狼的固定移动速度属性；默认 118.3333，按 1 点等于 3 像素/秒换算，切换角色时写入玩家移动组件。
-@export_range(1.0, 2000.0, 0.0001, "or_greater") var silver_wolf_move_speed: float = 118.3333
+@export_range(1.0, 2000.0, 0.0001, "or_greater") var silver_wolf_move_speed: float = 99.0
 ## 银狼的固定攻击力；默认 11，为三名角色中最高基础攻击。
-@export_range(0.0, 99999.0, 1.0, "or_greater") var silver_wolf_attack_power: float = 11.0
+@export_range(0.0, 99999.0, 1.0, "or_greater") var silver_wolf_attack_power: float = 99.0
 ## 银狼的固定防御力；默认 2，以较低防御平衡高攻击、能量和移速。
-@export_range(0.0, 99999.0, 1.0, "or_greater") var silver_wolf_defense_power: float = 2.0
+@export_range(0.0, 99999.0, 1.0, "or_greater") var silver_wolf_defense_power: float = 99.0
 
 ## 随机数生成器；默认新建并在 ready 随机化，修改会影响地图和怪物生成结果。
 var _random: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -2192,6 +2192,10 @@ func _get_target_monster_population() -> int:
 func _on_monster_died(monster_node: Node) -> void:
 	if monster_node == null or not (monster_node is Node2D):
 		return
+	# 玩家套装击杀通知；只传递事件不传递怪物实现，使装备组件独立维护持续时间和当前穿戴门槛。
+	var equipment_set_component: Node = _player.get_node_or_null("EquipmentSetComponent") if _player != null else null
+	if equipment_set_component != null and equipment_set_component.has_method("notify_enemy_killed"):
+		equipment_set_component.call("notify_enemy_killed")
 
 	# 训练场只用于测试战斗，不生成任何怪物掉落，避免调试资源进入正式库存。
 	if not _is_training_mode:

@@ -46,7 +46,7 @@ func apply_consumable(consumable_data: Resource) -> bool:
 	var effect_amount: float = maxf(float(consumable_data.get("effect_amount")), 0.0)
 	# 持续时间；必须大于 0 秒，防止使用后同帧消失仍消费库存。
 	var duration_seconds: float = maxf(float(consumable_data.get("duration_seconds")), 0.0)
-	if effect_id.is_empty() or effect_stat not in ["move_speed_ratio", "dodge_chance", "energy_regeneration"] or effect_amount <= 0.0 or duration_seconds <= 0.0:
+	if effect_id.is_empty() or effect_stat not in ["move_speed_ratio", "attack_speed_ratio", "dodge_chance", "energy_regeneration"] or effect_amount <= 0.0 or duration_seconds <= 0.0:
 		return false
 	_active_effects[effect_id] = {"stat": effect_stat, "amount": effect_amount, "remaining_seconds": duration_seconds}
 	_refresh_stats_component()
@@ -62,6 +62,18 @@ func get_move_speed_multiplier() -> float:
 		if str(effect.get("stat", "")) == "move_speed_ratio":
 			bonus_ratio += maxf(float(effect.get("amount", 0.0)), 0.0)
 	return maxf(1.0 + bonus_ratio, 0.0)
+
+
+func get_attack_speed_multiplier() -> float:
+	## 返回全部活动攻速比例的加算结果；效果只用于玩家当前手持武器冷却，不写入角色属性面板或武器资源。
+	# 综合攻速提升比例；不同 item_id 加算，同一 ID 在活动表中始终只有一项。
+	var bonus_ratio: float = 0.0
+	for raw_effect in _active_effects.values():
+		# 当前活动效果；只有 attack_speed_ratio 参与攻速汇总，移速与战斗属性继续走各自独立入口。
+		var effect: Dictionary = raw_effect as Dictionary
+		if str(effect.get("stat", "")) == "attack_speed_ratio":
+			bonus_ratio += maxf(float(effect.get("amount", 0.0)), 0.0)
+	return maxf(1.0 + bonus_ratio, 0.01)
 
 
 func _refresh_stats_component() -> void:

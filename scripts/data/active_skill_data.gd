@@ -51,6 +51,10 @@ const DIRECTIONAL_INPUT_POSITION: int = 1
 @export_range(0.0, 1.0, 0.01) var charge_movement_speed_multiplier: float = 1.0
 ## 瞄准目标标记半径；取值大于 0 像素，默认 18，用于位置指向与锁定目标的世界预览圆环。
 @export_range(1.0, 256.0, 1.0, "or_greater") var target_marker_radius: float = 18.0
+## 下一段技能资源；默认 null 表示当前段释放成功后结束整套技能并让原技能进入冷却，配置后技能槽会临时切换到该资源。
+@export var next_stage: Resource
+## 下一段技能可释放窗口；单位为秒，默认 0 表示没有等待窗口，只有 next_stage 配置有效时用于超时恢复原技能并开始冷却。
+@export_range(0.0, 60.0, 0.01, "or_greater") var next_stage_window_duration: float = 0.0
 
 
 func is_valid_configuration() -> bool:

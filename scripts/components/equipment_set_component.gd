@@ -12,10 +12,17 @@ const ARMOR_SLOT_IDS: Array[String] = ["head", "body", "legs", "feet"]
 
 ## 装备组件缓存；用于世界特殊效果结算时读取当前四部位资源，不持有或复制装备所有权。
 var _equipment_component: Node
+## 最近一次满足套装条件的击杀增益剩余时间；取值大于等于 0，重复击杀刷新为当前有效套装的最长持续时间。
+var _recent_kill_dodge_remaining: float = 0.0
 
 
 func _ready() -> void:
 	_equipment_component = get_node_or_null(equipment_component_path)
+
+
+func _process(delta: float) -> void:
+	## 只维护击杀增益计时；套装在持续期间失效时查询接口会立即返回 0，无需等待计时归零。
+	_recent_kill_dodge_remaining = maxf(_recent_kill_dodge_remaining - maxf(delta, 0.0), 0.0)
 
 
 static func collect_active_set_states(armor_equipment: Dictionary) -> Dictionary:
@@ -134,14 +141,86 @@ func get_contextual_movement_speed_multiplier(player_position: Vector2, movement
 
 
 func get_contextual_damage_reduction_ratio(player_position: Vector2, movement_direction: Vector2) -> float:
-	## 返回当前朝附近掉落物移动时的综合减伤比例；不同套装按剩余伤害连乘后换算回单一比例。
+	## 返回当前朝附近掉落物移动时的综合免伤比例；不同套装与其他“受到的伤害降低”来源处于同一乘区并直接加算。
 	if movement_direction.is_zero_approx():
 		return 0.0
-	# 剩余伤害倍率；初始 1，每项减伤按 1-ratio 连乘，最终用 1-结果转换为综合减伤。
-	var received_damage_multiplier: float = 1.0
+	# 综合免伤比例；这里只聚合同类套装比例，玩家控制器继续与技能、蓄力等来源统一加算和限制。
+	var combined_reduction_ratio: float = 0.0
 	for effect in _get_triggered_nearby_drop_effects(player_position, movement_direction):
-		received_damage_multiplier *= 1.0 - clampf(float(effect.get("damage_reduction_ratio", 0.0)), 0.0, 1.0)
-	return clampf(1.0 - received_damage_multiplier, 0.0, 1.0)
+		combined_reduction_ratio += clampf(float(effect.get("damage_reduction_ratio", 0.0)), 0.0, 1.0)
+	return clampf(combined_reduction_ratio, 0.0, 1.0)
+
+
+func notify_enemy_killed() -> void:
+	## 通知套装组件玩家完成一次击杀；所有达到两件门槛的套装分别读取自身持续时间，最终使用最长值刷新公共计时。
+	# 本次刷新持续时间；多个合法套装同时触发时取最长值，避免短效果覆盖长效果。
+	var refreshed_duration: float = 0.0
+	for raw_set_state in collect_active_set_states(_get_armor_equipment_resources()).values():
+		# 当前套装状态；资源没有击杀效果接口时保持兼容并跳过。
+		var set_state: Dictionary = raw_set_state as Dictionary
+		# 当前套装资源；提供门槛和击杀闪避参数查询接口。
+		var equipment_set: Resource = set_state.get("set_data") as Resource
+		if equipment_set == null or not equipment_set.has_method("get_recent_kill_dodge_effect"):
+			continue
+		# 击杀效果；空词典表示门槛未达到或套装没有配置该机制。
+		var effect: Dictionary = equipment_set.call("get_recent_kill_dodge_effect", int(set_state.get("piece_count", 0))) as Dictionary
+		refreshed_duration = maxf(refreshed_duration, float(effect.get("duration", 0.0)))
+	if refreshed_duration > 0.0:
+		_recent_kill_dodge_remaining = refreshed_duration
+
+
+func get_recent_kill_dodge_chance_bonus() -> float:
+	## 返回当前有效两件套提供的击杀后额外闪避率；计时结束、部件损坏或卸下后立即归零。
+	if _recent_kill_dodge_remaining <= 0.0:
+		return 0.0
+	# 综合额外闪避率；不同套装直接加算，最终由玩家闪避上限统一限制。
+	var combined_bonus: float = 0.0
+	for raw_set_state in collect_active_set_states(_get_armor_equipment_resources()).values():
+		# 当前套装状态；包含资源与有效部件数量。
+		var set_state: Dictionary = raw_set_state as Dictionary
+		# 当前套装资源；缺少击杀接口时不参与本次聚合。
+		var equipment_set: Resource = set_state.get("set_data") as Resource
+		if equipment_set != null and equipment_set.has_method("get_recent_kill_dodge_effect"):
+			# 当前击杀效果；只读取已满足门槛资源返回的额外闪避率。
+			var effect: Dictionary = equipment_set.call("get_recent_kill_dodge_effect", int(set_state.get("piece_count", 0))) as Dictionary
+			combined_bonus += maxf(float(effect.get("dodge_chance_bonus", 0.0)), 0.0)
+	return clampf(combined_bonus, 0.0, 1.0)
+
+
+func get_move_speed_damage_bonus_ratio(move_speed_attribute: float) -> float:
+	## 汇总当前四件套按移速提供的增伤比例；不同套装比例直接相加后由攻击入口转换为单一伤害倍率。
+	# 综合增伤比例；初始 0，每个有效套装返回值只累计一次。
+	var combined_bonus: float = 0.0
+	for effect in _get_move_speed_combat_effects(move_speed_attribute):
+		combined_bonus += maxf(float(effect.get("damage_bonus_ratio", 0.0)), 0.0)
+	return maxf(combined_bonus, 0.0)
+
+
+func get_move_speed_damage_reduction_ratio(move_speed_attribute: float) -> float:
+	## 汇总当前四件套按移速提供的免伤；不同套装与其他“受到的伤害降低”来源处于同一乘区并直接加算。
+	# 综合免伤比例；同类效果先加算，最终与其余来源一起由玩家控制器限制到 100%。
+	var combined_reduction_ratio: float = 0.0
+	for effect in _get_move_speed_combat_effects(move_speed_attribute):
+		combined_reduction_ratio += clampf(float(effect.get("damage_reduction_ratio", 0.0)), 0.0, 1.0)
+	return clampf(combined_reduction_ratio, 0.0, 1.0)
+
+
+func _get_move_speed_combat_effects(move_speed_attribute: float) -> Array[Dictionary]:
+	## 收集全部已激活套装的移速战斗效果；资源负责门槛和档数公式，组件只聚合结果。
+	# 已触发效果列表；每个套装最多追加一项结构化结果。
+	var effects: Array[Dictionary] = []
+	for raw_set_state in collect_active_set_states(_get_armor_equipment_resources()).values():
+		# 当前套装状态；包含资源与有效部件数量。
+		var set_state: Dictionary = raw_set_state as Dictionary
+		# 当前套装资源；缺少移速战斗接口时安全跳过。
+		var equipment_set: Resource = set_state.get("set_data") as Resource
+		if equipment_set == null or not equipment_set.has_method("get_move_speed_combat_effect"):
+			continue
+		# 当前移速效果；空词典表示未达到门槛或资源没有配置该机制。
+		var effect: Dictionary = equipment_set.call("get_move_speed_combat_effect", int(set_state.get("piece_count", 0)), move_speed_attribute) as Dictionary
+		if not effect.is_empty():
+			effects.append(effect)
+	return effects
 
 
 func _get_triggered_nearby_drop_effects(player_position: Vector2, movement_direction: Vector2) -> Array[Dictionary]:

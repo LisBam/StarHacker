@@ -22,7 +22,7 @@ signal combat_input_enabled_changed(enabled: bool)
 @export var melee_action: StringName = &"attack_melee"
 ## 疾跑输入动作名；默认 sprint 对应 Shift，运行时通常不修改，改名会影响按住疾跑触发。
 @export var sprint_action: StringName = &"sprint"
-## 闪避输入动作名；默认 dodge 对应 Space，运行时通常不修改，改名会影响单次突进触发。
+## 冲刺输入动作名；默认保留兼容 ID dodge 并对应 Space，运行时通常不修改，改名会影响单次突进触发与旧按键存档。
 @export var dodge_action: StringName = &"dodge"
 ## 切换到第 1 个远程槽的输入动作名；默认 switch_ranged_1 对应数字键 1，运行时通常不修改，改名会影响快捷切枪。
 @export var switch_ranged_1_action: StringName = &"switch_ranged_1"
@@ -43,7 +43,7 @@ var _left_mouse_down: bool = false
 var _right_mouse_requested: bool = false
 ## 鼠标右键按住状态；取值为 true/false，默认 false，物理回退输入在按下与松开事件中维护，供可蓄力近战武器读取。
 var _right_mouse_down: bool = false
-## 闪避单次请求缓存；取值为 true/false，默认 false 表示无待处理闪避，消费后清空以避免一次按键重复突进。
+## 冲刺单次请求缓存；取值为 true/false，默认 false 表示无待处理冲刺，消费后清空以避免一次按键重复突进。
 var _dodge_requested: bool = false
 ## 远程槽单次切换请求；取值为 -1 或有效槽索引，默认 -1 表示无请求，消费后清空以避免重复切换。
 var _ranged_slot_request: int = -1
@@ -147,7 +147,7 @@ func consume_dodge_request() -> bool:
 		_dodge_requested = false
 		return false
 
-	# 本帧闪避请求结果；取值为 true/false，默认由缓存和 InputMap 合成，修改会影响 Space 是否产生一次突进。
+	# 本帧冲刺请求结果；取值为 true/false，默认由缓存和 InputMap 合成，修改会影响 Space 是否产生一次突进。
 	var requested: bool = _dodge_requested or _is_action_just_pressed(dodge_action)
 	_dodge_requested = false
 	return requested

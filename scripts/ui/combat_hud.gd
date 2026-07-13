@@ -29,7 +29,7 @@ const ITEM_ACTION_POPUP_SCRIPT: Script = preload("res://scripts/ui/item_action_p
 const COMMON_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/common_confirmation_dialog.gd")
 ## 通用背包面板脚本；局内与局外共享分类、搜索、排序、装备、修复和拖放交互，仅丢弃策略由上下文区分。
 const SHARED_BACKPACK_PANEL_SCRIPT: Script = preload("res://scripts/ui/main_menu_backpack_panel.gd")
-## 物资撤离面板脚本；玩家在物资撤离点驻留 3 秒后按闪避打开，面板期间暂停游戏。
+## 物资撤离面板脚本；玩家在物资撤离点驻留 3 秒后按冲刺键打开，面板期间暂停游戏。
 const SUPPLY_EXTRACTION_PANEL_SCRIPT: Script = preload("res://scripts/ui/supply_extraction_panel.gd")
 ## 全局窗口样式指南；统一战斗背包、暂停菜单、地图、物资撤离、开发者菜单和结算窗口视觉。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
@@ -96,7 +96,7 @@ const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
 @export var pickup_action: StringName = &"pickup_nearby"
 ## 掉落物列表开关输入动作名；默认 toggle_drop_list 对应 G 键，运行时通常不修改，改名会影响自动展开开关。
 @export var toggle_drop_list_action: StringName = &"toggle_drop_list"
-## 撤离确认输入动作名；默认复用 dodge 对应闪避键，运行时通常不修改，改名会影响撤离点可撤离后的确认操作。
+## 撤离确认输入动作名；默认复用兼容 ID dodge 对应冲刺键，运行时通常不修改，改名会影响撤离点可撤离后的确认操作。
 @export var extraction_action: StringName = &"dodge"
 ## 主菜单场景路径；默认返回项目主菜单，必须填写 tscn 资源，运行时通常不修改，改错会导致暂停菜单返回失败。
 @export_file("*.tscn") var main_menu_scene_path: String = "res://scenes/ui/main_menu.tscn"
@@ -1462,14 +1462,14 @@ func _set_extraction_status(visible: bool, status_text: String) -> void:
 func _get_extraction_status_text() -> String:
 	if _game_world != null and _game_world.has_method("is_player_inside_supply_extraction_area") and bool(_game_world.call("is_player_inside_supply_extraction_area")):
 		if _game_world.has_method("is_supply_extraction_ready") and bool(_game_world.call("is_supply_extraction_ready")):
-			return "物资撤离就绪  按闪避打开送回面板"
+			return "物资撤离就绪  按冲刺打开送回面板"
 		# 物资撤离驻留总时长；默认 3 秒，接口缺失时使用同一玩法兜底值。
 		var supply_duration: float = maxf(float(_game_world.call("get_supply_extraction_hold_duration_seconds")), 0.1) if _game_world.has_method("get_supply_extraction_hold_duration_seconds") else 3.0
 		# 当前驻留进度；限制在 0 到总时长，避免帧延迟显示超出分母。
 		var supply_elapsed: float = clampf(float(_game_world.call("get_supply_extraction_hold_elapsed_seconds")), 0.0, supply_duration) if _game_world.has_method("get_supply_extraction_hold_elapsed_seconds") else 0.0
 		return "物资撤离准备  %d / %d秒" % [ceili(supply_elapsed), ceili(supply_duration)]
 	if _is_extraction_ready_to_leave():
-		return "撤离就绪  按闪避返回"
+		return "撤离就绪  按冲刺返回"
 
 	# 是否在撤离范围内；取值来自 GameWorld，默认用于区分驻留倒计时和地图提示。
 	var is_inside_extraction_area: bool = false
@@ -1506,7 +1506,7 @@ func _is_extraction_return_event(event: InputEvent) -> bool:
 		if _should_use_physical_fallback(extraction_action) and key_event.physical_keycode == KEY_SPACE:
 			return true
 	elif event is InputEventMouseButton:
-		# 撤离鼠标事件；取值来自输入系统，默认支持玩家把闪避动作绑定到鼠标按钮。
+		# 撤离鼠标事件；取值来自输入系统，默认支持玩家把冲刺动作绑定到鼠标按钮。
 		var mouse_event: InputEventMouseButton = event as InputEventMouseButton
 		if not mouse_event.pressed:
 			return false

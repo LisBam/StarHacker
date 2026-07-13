@@ -14,6 +14,8 @@ const TARGETING_NO_TARGET: int = 2
 const MINIMUM_CAST_RANGE: float = 1.0
 ## 蓄力持续时间安全下限；固定 0.01 秒，防止异常资源导致比例除零。
 const MINIMUM_CHARGE_DURATION: float = 0.01
+## 共用蓄力条所有者 ID；固定 active_skill，保证武器延迟取消不会隐藏当前技能蓄力显示。
+const CHARGE_BAR_OWNER_ID: StringName = &"active_skill"
 
 signal skill_loadout_changed
 signal skill_aiming_started(slot_index: int, skill_data: Resource)
@@ -36,10 +38,18 @@ signal cooldowns_changed
 
 ## 当前技能资源槽；元素为 Resource 或 null，默认空数组，角色档案应用后按三个输入槽截取并填充。
 var _skill_resources: Array = []
+## 每个技能槽的原始技能资源；多段技能临时替换显示与行为时保持根资源不变，用于最终冷却和超时恢复。
+var _root_skill_resources: Array = []
 ## 当前技能行为节点槽；元素为 Node 或 null，与 _skill_resources 保持同下标，角色切换时会完整销毁并重建。
 var _behavior_instances: Array = []
 ## 当前技能冷却剩余时间；元素为大于等于 0 的秒数，与技能槽保持同下标。
 var _cooldown_remaining: Array[float] = []
+## 每个技能槽等待下一段的剩余时间；取值大于等于 0，零表示当前没有已开启的多段释放窗口。
+var _follow_up_remaining: Array[float] = []
+## 每个技能槽整套多段技能共享的运行时状态；行为可通过释放上下文保存记录位置、生命等阶段间数据。
+var _chain_states: Array[Dictionary] = []
+## 每个技能槽本次完成时使用的根技能冷却倍率；默认 1，特殊结算可在最终段前设置并在进入冷却后自动复位。
+var _completion_cooldown_multipliers: Array[float] = []
 ## 当前正在瞄准的技能槽；取值 -1 或有效下标，默认 -1 表示没有按住任何主动技能。
 var _active_slot_index: int = -1
 ## 当前技能按住累计蓄力时间；取值大于等于 0 秒，默认 0，只有技能允许蓄力时才参与释放比例。
@@ -72,6 +82,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_update_cooldowns(delta)
+	_update_follow_up_windows(delta)
 	if _active_slot_index < 0:
 		return
 	if not _is_combat_input_enabled() or _is_caster_dead():
@@ -87,7 +98,7 @@ func _process(delta: float) -> void:
 		var maximum_charge_duration: float = maxf(float(skill_data.get("maximum_charge_duration")), MINIMUM_CHARGE_DURATION)
 		_charge_elapsed = minf(_charge_elapsed + maxf(delta, 0.0), maximum_charge_duration)
 		if _charge_bar != null and _charge_bar.has_method("set_charge_ratio"):
-			_charge_bar.call("set_charge_ratio", _charge_elapsed / maximum_charge_duration)
+			_charge_bar.call("set_charge_ratio", _charge_elapsed / maximum_charge_duration, CHARGE_BAR_OWNER_ID)
 	_targeting_refresh_remaining = maxf(_targeting_refresh_remaining - maxf(delta, 0.0), 0.0)
 	if _targeting_refresh_remaining <= 0.0:
 		_targeting_refresh_remaining = maxf(targeting_refresh_interval, 0.0)
@@ -115,8 +126,12 @@ func configure_skills(skill_resources: Array) -> void:
 	_cancel_active_skill(false)
 	_clear_behavior_instances()
 	_skill_resources.clear()
+	_root_skill_resources.clear()
 	_behavior_instances.clear()
 	_cooldown_remaining.clear()
+	_follow_up_remaining.clear()
+	_chain_states.clear()
+	_completion_cooldown_multipliers.clear()
 	for raw_skill_resource in skill_resources:
 		if _skill_resources.size() >= skill_actions.size():
 			break
@@ -125,14 +140,22 @@ func configure_skills(skill_resources: Array) -> void:
 		if not _is_valid_skill_resource(skill_data):
 			continue
 		_skill_resources.append(skill_data)
+		_root_skill_resources.append(skill_data)
 		# 技能行为节点；每个槽独立创建，避免同资源多次装备时共享运行时命中状态。
 		var behavior_instance: Node = _create_behavior_instance(skill_data)
 		_behavior_instances.append(behavior_instance)
 		_cooldown_remaining.append(0.0)
+		_follow_up_remaining.append(0.0)
+		_chain_states.append({})
+		_completion_cooldown_multipliers.append(1.0)
 	while _skill_resources.size() < skill_actions.size():
 		_skill_resources.append(null)
+		_root_skill_resources.append(null)
 		_behavior_instances.append(null)
 		_cooldown_remaining.append(0.0)
+		_follow_up_remaining.append(0.0)
+		_chain_states.append({})
+		_completion_cooldown_multipliers.append(1.0)
 	skill_loadout_changed.emit()
 	cooldowns_changed.emit()
 
@@ -163,6 +186,18 @@ func get_cooldown_remaining(slot_index: int) -> float:
 	return maxf(_cooldown_remaining[slot_index], 0.0)
 
 
+func get_follow_up_remaining(slot_index: int) -> float:
+	## 返回指定槽下一段技能的剩余释放窗口；无效下标或普通技能返回 0，HUD 可用它区别阶段等待与冷却。
+	if slot_index < 0 or slot_index >= _follow_up_remaining.size():
+		return 0.0
+	return maxf(_follow_up_remaining[slot_index], 0.0)
+
+
+func is_follow_up_pending(slot_index: int) -> bool:
+	## 返回指定槽是否已经释放前一段并正在等待后续段；该状态不属于冷却，技能按键仍可继续释放当前段。
+	return get_follow_up_remaining(slot_index) > 0.0
+
+
 func get_cooldown_ratio(slot_index: int) -> float:
 	## 返回指定槽 0 至 1 的冷却比例；1 表示刚释放，0 表示可用或空槽。
 	# 当前技能资源；缺失时没有可计算的冷却总时长。
@@ -182,6 +217,14 @@ func is_aiming() -> bool:
 func get_active_slot_index() -> int:
 	## 返回当前瞄准技能槽；-1 表示没有活动技能，供 HUD 或测试读取但不得直接改写。
 	return _active_slot_index
+
+
+func cancel_aiming() -> bool:
+	## 取消当前主动技能瞄准或蓄力且不释放效果、不消耗能量、不进入冷却；冲刺等已成功动作可通过该接口打断技能。
+	if _active_slot_index < 0:
+		return false
+	_cancel_active_skill(false)
+	return true
 
 
 func get_legal_targets(skill_data: Resource) -> Array[Node2D]:
@@ -235,7 +278,7 @@ func _try_begin_skill(slot_index: int) -> void:
 		_targeting_visual.call("show_targeting", skill_data)
 		_update_targeting_visual()
 	if bool(skill_data.get("can_charge")) and _charge_bar != null and _charge_bar.has_method("show_charge"):
-		_charge_bar.call("show_charge")
+		_charge_bar.call("show_charge", CHARGE_BAR_OWNER_ID)
 	# 施法者移动倍率；可蓄力技能可在资源中声明按住期间减速，来源 ID 保证结束时只移除自身效果。
 	var caster: Node = get_parent()
 	if bool(skill_data.get("can_charge")) and caster != null and caster.has_method("set_movement_speed_multiplier_source"):
@@ -279,6 +322,7 @@ func _release_active_skill() -> void:
 		"target": _locked_target,
 		"charge_seconds": _charge_elapsed,
 		"charge_ratio": charge_ratio,
+		"chain_state": _chain_states[slot_index] if slot_index < _chain_states.size() else {},
 	}
 	# 对应行为节点；配置时已验证存在，运行时失效按释放失败处理。
 	var behavior_instance: Node = _behavior_instances[slot_index] as Node if slot_index < _behavior_instances.size() else null
@@ -288,10 +332,10 @@ func _release_active_skill() -> void:
 		# 技能能量消耗；行为同步成功后只结算一次，属性组件缺失时保持无消耗的隔离测试行为。
 		if _stats_component != null and _stats_component.has_method("spend_energy"):
 			_stats_component.call("spend_energy", energy_cost)
-		_cooldown_remaining[slot_index] = maxf(float(skill_data.get("cooldown_duration")), 0.0)
-		cooldowns_changed.emit()
 		skill_released.emit(slot_index, skill_data, context)
 	_cancel_active_skill(released_successfully)
+	if released_successfully:
+		_handle_successful_stage(slot_index, skill_data)
 
 
 func _cancel_active_skill(released: bool) -> void:
@@ -312,7 +356,7 @@ func _cancel_active_skill(released: bool) -> void:
 	if _targeting_visual != null and _targeting_visual.has_method("hide_targeting"):
 		_targeting_visual.call("hide_targeting")
 	if _charge_bar != null and _charge_bar.has_method("hide_charge"):
-		_charge_bar.call("hide_charge")
+		_charge_bar.call("hide_charge", CHARGE_BAR_OWNER_ID)
 	skill_aiming_ended.emit(slot_index, skill_data, released)
 
 
@@ -372,6 +416,144 @@ func _update_cooldowns(delta: float) -> void:
 		changed = true
 	if changed:
 		cooldowns_changed.emit()
+
+
+func _update_follow_up_windows(delta: float) -> void:
+	## 递减全部多段技能释放窗口；窗口归零时立即恢复根技能并按根技能完整冷却结算。
+	# 安全帧增量；负数按 0 处理，避免异常调用延长后续段窗口。
+	var resolved_delta: float = maxf(delta, 0.0)
+	if resolved_delta <= 0.0:
+		return
+	for slot_index in range(_follow_up_remaining.size()):
+		if _follow_up_remaining[slot_index] <= 0.0:
+			continue
+		_follow_up_remaining[slot_index] = maxf(_follow_up_remaining[slot_index] - resolved_delta, 0.0)
+		if _follow_up_remaining[slot_index] > 0.0:
+			continue
+		if _active_slot_index == slot_index:
+			_cancel_active_skill(false)
+		_complete_skill_chain(slot_index)
+
+
+func _handle_successful_stage(slot_index: int, released_skill_data: Resource) -> void:
+	## 根据已成功释放段的 next_stage 决定继续等待或完成整套技能；任何阶段成功前都不会提前写入根技能冷却。
+	if slot_index < 0 or slot_index >= _skill_resources.size() or released_skill_data == null:
+		return
+	# 下一段资源；必须符合普通主动技能配置，否则把当前段视为最终段，避免无效资源永久占用技能槽。
+	var next_stage_resource: Resource = released_skill_data.get("next_stage") as Resource
+	# 下一段窗口；只有正持续时间才允许技能槽进入等待状态，零窗口按没有下一段处理。
+	var follow_up_duration: float = maxf(float(released_skill_data.get("next_stage_window_duration")), 0.0)
+	if _is_valid_skill_resource(next_stage_resource) and follow_up_duration > 0.0:
+		_replace_slot_skill(slot_index, next_stage_resource)
+		_follow_up_remaining[slot_index] = follow_up_duration
+		skill_loadout_changed.emit()
+		cooldowns_changed.emit()
+		return
+	_complete_skill_chain(slot_index)
+
+
+func _complete_skill_chain(slot_index: int) -> void:
+	## 恢复指定槽的根技能并开始本套技能唯一一次冷却；阶段状态和一次性冷却倍率在结算后全部清空。
+	if slot_index < 0 or slot_index >= _root_skill_resources.size():
+		return
+	# 根技能资源；普通单段技能与多段技能最终都以它的冷却时长为准。
+	var root_skill_data: Resource = _root_skill_resources[slot_index] as Resource
+	if get_skill_resource(slot_index) != root_skill_data:
+		_replace_slot_skill(slot_index, root_skill_data)
+	_follow_up_remaining[slot_index] = 0.0
+	_chain_states[slot_index] = {}
+	# 本次完成冷却倍率；最低为 0，允许专属技能免除冷却或延长冷却，不会影响后续释放。
+	var completion_multiplier: float = maxf(_completion_cooldown_multipliers[slot_index], 0.0)
+	_completion_cooldown_multipliers[slot_index] = 1.0
+	_cooldown_remaining[slot_index] = maxf(float(root_skill_data.get("cooldown_duration")), 0.0) * completion_multiplier if root_skill_data != null else 0.0
+	skill_loadout_changed.emit()
+	cooldowns_changed.emit()
+
+
+func _replace_slot_skill(slot_index: int, skill_data: Resource) -> void:
+	## 替换一个槽当前显示与执行的技能段；根技能数组保持不变，旧行为先 shutdown 再释放以清理独立运行状态。
+	if slot_index < 0 or slot_index >= _skill_resources.size():
+		return
+	# 旧行为实例；阶段切换只销毁当前槽节点，不影响其他技能槽的行为和冷却。
+	var previous_behavior: Node = _behavior_instances[slot_index] as Node if slot_index < _behavior_instances.size() else null
+	if is_instance_valid(previous_behavior):
+		if previous_behavior.has_method("shutdown"):
+			previous_behavior.call("shutdown")
+		previous_behavior.queue_free()
+	_skill_resources[slot_index] = skill_data
+	_behavior_instances[slot_index] = _create_behavior_instance(skill_data) if skill_data != null else null
+
+
+func set_completion_cooldown_multiplier(slot_index: int, multiplier: float) -> void:
+	## 设置指定多段技能本次完成时的根冷却倍率；相同槽后写入值覆盖旧值，进入冷却后自动恢复 1 倍。
+	if slot_index < 0 or slot_index >= _completion_cooldown_multipliers.size():
+		return
+	_completion_cooldown_multipliers[slot_index] = maxf(multiplier, 0.0)
+
+
+func scale_cooldown_remaining(slot_index: int, multiplier: float) -> void:
+	## 按倍率缩放指定槽当前剩余冷却；0.9 表示减少剩余冷却的 10%，不会改变资源中的基础冷却。
+	if slot_index < 0 or slot_index >= _cooldown_remaining.size():
+		return
+	_cooldown_remaining[slot_index] = maxf(_cooldown_remaining[slot_index] * maxf(multiplier, 0.0), 0.0)
+	cooldowns_changed.emit()
+
+
+func execute_pending_stage_immediately(slot_index: int, context_overrides: Dictionary = {}) -> bool:
+	## 不经过输入瞄准立即执行一个正在等待的后续段；供死亡拦截等同步机制复用，能量、阶段推进和最终冷却仍由本组件统一结算。
+	if not is_follow_up_pending(slot_index) or slot_index < 0 or slot_index >= _behavior_instances.size():
+		return false
+	# 当前后续段；已经由阶段切换完成配置，仍复核资源和行为节点以隔离运行时损坏。
+	var skill_data: Resource = get_skill_resource(slot_index)
+	# 当前后续段行为；必须仍在场景树中并实现 execute 才允许自动触发。
+	var behavior_instance: Node = _behavior_instances[slot_index] as Node
+	if skill_data == null or not is_instance_valid(behavior_instance) or not behavior_instance.has_method("execute"):
+		return false
+	# 后续段能耗；自动触发与手动释放遵守相同资源成本，能量不足时不能绕过技能配置。
+	var energy_cost: float = maxf(float(skill_data.get("energy_cost")), 0.0)
+	if _stats_component != null and _stats_component.has_method("can_spend_energy") and not bool(_stats_component.call("can_spend_energy", energy_cost)):
+		return false
+	# 自动释放上下文；默认使用施法者当前位置与最后有效方向，调用方只覆盖死亡来源等必要字段。
+	var caster: Node2D = get_parent() as Node2D
+	# 自动释放数据；字段与手动释放一致，并额外标记 automatic_release 供专属行为判断来源。
+	var context: Dictionary = {
+		"caster": caster,
+		"stats_component": _stats_component,
+		"skill_data": skill_data,
+		"slot_index": slot_index,
+		"aim_direction": _aim_direction,
+		"target_position": caster.global_position if caster != null else Vector2.ZERO,
+		"target": null,
+		"charge_seconds": 0.0,
+		"charge_ratio": 0.0,
+		"chain_state": _chain_states[slot_index],
+		"automatic_release": true,
+	}
+	context.merge(context_overrides, true)
+	if not bool(behavior_instance.call("execute", context)):
+		return false
+	if _stats_component != null and _stats_component.has_method("spend_energy"):
+		_stats_component.call("spend_energy", energy_cost)
+	skill_released.emit(slot_index, skill_data, context)
+	_handle_successful_stage(slot_index, skill_data)
+	return true
+
+
+func try_intercept_lethal_damage(incoming_damage: float, source: Node) -> bool:
+	## 允许当前等待中的后续段声明致命伤害拦截；组件只负责协议与结算，是否拦截由具体阶段行为决定。
+	if incoming_damage <= 0.0:
+		return false
+	for slot_index in range(_behavior_instances.size()):
+		if not is_follow_up_pending(slot_index):
+			continue
+		# 当前阶段行为；只有显式实现拦截判断的技能才可能消费本次致命伤害。
+		var behavior_instance: Node = _behavior_instances[slot_index] as Node
+		if not is_instance_valid(behavior_instance) or not behavior_instance.has_method("can_intercept_lethal_damage"):
+			continue
+		if not bool(behavior_instance.call("can_intercept_lethal_damage", incoming_damage, source)):
+			continue
+		return execute_pending_stage_immediately(slot_index, {"triggered_by_lethal_damage": true, "incoming_damage": incoming_damage, "damage_source": source})
+	return false
 
 
 func _create_behavior_instance(skill_data: Resource) -> Node:

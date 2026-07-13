@@ -1,0 +1,34 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/weapon_data.gd" id="1_weapon"]
+[ext_resource type="PackedScene" path="res://scenes/projectiles/player_projectile.tscn" id="2_projectile"]
+
+[resource]
+script = ExtResource("1_weapon")
+weapon_id = "prometheus"
+display_name = "普罗米修斯"
+weapon_type = "hybrid"
+description = "每次攻击同时触发近战伤害并发射可穿透一名额外目标的远程子弹。"
+icon_text = "P"
+value = 99
+max_durability = 999.0
+current_durability = 999.0
+energy_consumption = 9.0
+projectile_scene = ExtResource("2_projectile")
+projectile_speed = 999.0
+attack_distance = 400.0
+ranged_damage = 9.0
+cooldown = 0.9
+deviation_degrees = 0.0
+has_piercing = true
+piercing_count = 1
+has_front_recoil = true
+front_recoil_force = 20.0
+impact_force = 25.0
+melee_damage = 9.0
+ranged_attack_distance = 400.0
+melee_attack_distance = 49.0
+ranged_impact_force = 25.0
+melee_impact_force = 25.0
+critical_chance = 0.2
+melee_active_duration = 0.12

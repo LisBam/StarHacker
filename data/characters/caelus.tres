@@ -18,6 +18,6 @@ attack_power = 90.0
 defense_power = 120.0
 energy_regeneration = 18.0
 passive = "拾荒：成功撤离时，获得地图上掉落物总价值20%的金币。"
-active = "炎墙，冲锋！：长按进行蓄力，朝指定方向持续冲锋持续1s，冲锋期间不可操控角色，且受到的伤害降低80%，期间撞击敌人造成10（+20%防御力）点威力的伤害并朝两侧击退敌人。至多蓄力2秒并延长等量时间的冲锋时长。"
+active = "炎墙，冲锋！：长按进行蓄力，朝指定方向持续冲锋持续1s，冲锋期间不可操控角色，且受到的伤害降低80%，期间撞击敌人造成10（+20%防御力）点威力的伤害并朝两侧击退敌人。至多蓄力2秒并延长等量时间的冲锋时长。冲锋期间撞击墙体会提前结束冲锋。"
 passive_skills = Array[Resource]([ExtResource("2_scavenging")])
 active_skills = Array[Resource]([ExtResource("3_firewall_charge")])

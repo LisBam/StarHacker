@@ -27,7 +27,7 @@ var _action_entries: Array[Dictionary] = [
 	{"action": "active_skill_2", "label": "技能二"},
 	{"action": "active_skill_3", "label": "技能三"},
 	{"action": "sprint", "label": "疾跑"},
-	{"action": "dodge", "label": "闪避"},
+	{"action": "dodge", "label": "冲刺"},
 	{"action": "switch_ranged_1", "label": "远程槽 1"},
 	{"action": "switch_ranged_2", "label": "远程槽 2"},
 	{"action": "switch_ranged_previous", "label": "上一把远程"},

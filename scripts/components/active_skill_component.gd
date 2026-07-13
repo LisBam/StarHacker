@@ -54,6 +54,8 @@ var _follow_up_remaining: Array[float] = []
 var _chain_states: Array[Dictionary] = []
 ## 每个技能槽本次完成时使用的根技能冷却倍率；默认 1，特殊结算可在最终段前设置并在进入冷却后自动复位。
 var _completion_cooldown_multipliers: Array[float] = []
+## 每个技能槽的冷却暂停来源表；键为稳定来源 ID、值为 true，任一来源存在时该槽剩余冷却保持不变。
+var _cooldown_pause_sources: Array[Dictionary] = []
 ## 当前装备提供的主动技能冷却缩减；使用 0 到 1 小数，默认 0，不影响武器冷却或后续段释放窗口。
 var _equipment_cooldown_reduction: float = 0.0
 ## 是否由训练场设置禁用主动技能冷却；默认 false，开启时所有技能立即可用且后续释放不会写入冷却，不会保存到角色或装备数据。
@@ -143,6 +145,7 @@ func configure_skills(skill_resources: Array) -> void:
 	_follow_up_remaining.clear()
 	_chain_states.clear()
 	_completion_cooldown_multipliers.clear()
+	_cooldown_pause_sources.clear()
 	for raw_skill_resource in skill_resources:
 		if _skill_resources.size() >= skill_actions.size():
 			break
@@ -161,6 +164,7 @@ func configure_skills(skill_resources: Array) -> void:
 		_follow_up_remaining.append(0.0)
 		_chain_states.append({})
 		_completion_cooldown_multipliers.append(1.0)
+		_cooldown_pause_sources.append({})
 	while _skill_resources.size() < skill_actions.size():
 		_skill_resources.append(null)
 		_root_skill_resources.append(null)
@@ -171,6 +175,7 @@ func configure_skills(skill_resources: Array) -> void:
 		_follow_up_remaining.append(0.0)
 		_chain_states.append({})
 		_completion_cooldown_multipliers.append(1.0)
+		_cooldown_pause_sources.append({})
 	skill_loadout_changed.emit()
 	cooldowns_changed.emit()
 
@@ -435,6 +440,8 @@ func _update_cooldowns(delta: float) -> void:
 	for slot_index in range(_cooldown_remaining.size()):
 		if _cooldown_remaining[slot_index] <= 0.0:
 			continue
+		if slot_index < _cooldown_pause_sources.size() and not _cooldown_pause_sources[slot_index].is_empty():
+			continue
 		_cooldown_remaining[slot_index] = maxf(_cooldown_remaining[slot_index] - maxf(delta, 0.0), 0.0)
 		changed = true
 	if changed:
@@ -526,6 +533,29 @@ func scale_cooldown_remaining(slot_index: int, multiplier: float) -> void:
 	if slot_index < 0 or slot_index >= _cooldown_remaining.size():
 		return
 	_cooldown_remaining[slot_index] = maxf(_cooldown_remaining[slot_index] * maxf(multiplier, 0.0), 0.0)
+	cooldowns_changed.emit()
+
+
+func reduce_cooldown_remaining(slot_index: int, seconds: float) -> void:
+	## 按固定秒数减少指定槽当前剩余冷却；不会改变基础冷却时长，最低归零。
+	if slot_index < 0 or slot_index >= _cooldown_remaining.size() or seconds <= 0.0:
+		return
+	_cooldown_remaining[slot_index] = maxf(_cooldown_remaining[slot_index] - seconds, 0.0)
+	cooldowns_changed.emit()
+
+
+func set_cooldown_paused_source(slot_index: int, source_id: String, paused: bool) -> void:
+	## 设置指定槽的独立冷却暂停来源；所有来源清空后下一帧恢复递减，暂停不改变 HUD 的剩余秒数。
+	if slot_index < 0 or slot_index >= _cooldown_pause_sources.size():
+		return
+	# 标准来源 ID；空字符串无法稳定解除，因此直接忽略。
+	var normalized_source_id: String = source_id.strip_edges()
+	if normalized_source_id.is_empty():
+		return
+	if paused:
+		_cooldown_pause_sources[slot_index][normalized_source_id] = true
+	else:
+		_cooldown_pause_sources[slot_index].erase(normalized_source_id)
 	cooldowns_changed.emit()
 
 

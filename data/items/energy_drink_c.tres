@@ -6,9 +6,9 @@
 script = ExtResource("1_consumable")
 item_id = "energy_drink_c"
 display_name = "C型能量饮料"
-description = "使用后提高5点每秒能量恢复持续60s。"
+description = "使用后提高2点每秒能量恢复持续60s。"
 icon_text = "C"
 value = 60
 effect_stat = "energy_regeneration"
-effect_amount = 5.0
+effect_amount = 2.0
 duration_seconds = 60.0

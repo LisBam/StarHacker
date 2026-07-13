@@ -11,6 +11,8 @@ signal weapon_attack_succeeded(source_kind: String, source_index: int, weapon_da
 signal damage_received(final_damage: float, source: Node)
 ## 玩家固定移速技能来源变化后派发；角色面板据此即时刷新“技能”移速分项，不参与实际移动结算。
 signal movement_speed_attribute_bonus_changed
+## 玩家技能命中合法目标后派发；限时状态可按技能 ID 追加效果，不需要依赖具体行为节点实例。
+signal skill_target_hit(skill_id: String, target: Node)
 
 ## 战斗爆发特效脚本；默认通过路径预加载，避免依赖 Godot 全局类名缓存解析顺序。
 const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat_burst_effect.gd")
@@ -38,6 +40,8 @@ const ATTACK_MODE_MELEE: String = "melee"
 @export var weapon_charge_component_path: NodePath = ^"WeaponChargeComponent"
 ## 战斗属性组件路径；默认指向 StatsComponent，必须解析到提供能量和生命方法的节点，修改会影响武器消耗与受伤转发。
 @export var stats_component_path: NodePath = ^"StatsComponent"
+## 护盾组件路径；默认指向 ShieldComponent，组件存在时所有最终伤害先扣除护盾，运行时通常不动态修改。
+@export var shield_component_path: NodePath = ^"ShieldComponent"
 ## 装备组件路径；默认指向 EquipmentComponent，必须解析到提供当前武器和切换方法的节点，修改会影响武器选择。
 @export var equipment_component_path: NodePath = ^"EquipmentComponent"
 ## 装备套装组件路径；默认指向 EquipmentSetComponent，用于查询朝掉落物移动等运行时套装效果，缺失时普通装备属性仍正常生效。
@@ -131,6 +135,8 @@ var _is_sprinting: bool = false
 @onready var _weapon_charge_component: Node = get_node_or_null(weapon_charge_component_path)
 ## 战斗属性组件实例缓存；默认在 ready 阶段按路径获取，保持动态类型以支持可替换属性系统，修改会影响能量消耗和生命处理。
 @onready var _stats_component = get_node(stats_component_path)
+## 护盾组件缓存；默认从 shield_component_path 解析，缺失时伤害直接进入生命值以兼容旧场景。
+@onready var _shield_component: Node = get_node_or_null(shield_component_path)
 ## 装备组件实例缓存；默认在 ready 阶段按路径获取，保持动态类型以支持可替换装备系统，修改会影响当前武器读取和切换。
 @onready var _equipment_component = get_node(equipment_component_path)
 ## 装备套装组件实例缓存；默认按路径解析，允许为空，缺失时只跳过套装特殊移动和减伤效果。
@@ -203,12 +209,14 @@ func apply_damage(damage: float, source: Node) -> void:
 	_damage_interval_remaining = maxf(damage_interval, 0.0)
 	# 受伤前死亡状态；取值来自属性组件，默认用于避免死亡特效重复生成。
 	var was_dead: bool = _is_stats_dead()
+	# 护盾结算后的生命伤害；护盾组件返回未吸收部分，组件缺失时保持完整最终伤害。
+	var health_damage: float = float(_shield_component.call("absorb_damage", final_damage)) if _shield_component != null and _shield_component.has_method("absorb_damage") else final_damage
 	# 致命伤害拦截；只有正在等待的技能后续段可以同步处理，成功后本次扣血由回溯效果替代且不会发出死亡信号。
 	var current_health_before_damage: float = float(_stats_component.get("current_health")) if _stats_component != null else 0.0
 	# 是否完成致命伤害回溯；只有伤害达到当前生命且技能组件明确成功执行后续段时为 true。
-	var lethal_damage_intercepted: bool = final_damage >= current_health_before_damage and _active_skill_component != null and _active_skill_component.has_method("try_intercept_lethal_damage") and bool(_active_skill_component.call("try_intercept_lethal_damage", final_damage, source))
-	if not lethal_damage_intercepted and _stats_component.has_method("take_damage"):
-		_stats_component.call("take_damage", final_damage)
+	var lethal_damage_intercepted: bool = health_damage >= current_health_before_damage and health_damage > 0.0 and _active_skill_component != null and _active_skill_component.has_method("try_intercept_lethal_damage") and bool(_active_skill_component.call("try_intercept_lethal_damage", health_damage, source))
+	if not lethal_damage_intercepted and health_damage > 0.0 and _stats_component.has_method("take_damage"):
+		_stats_component.call("take_damage", health_damage)
 	if _equipment_component != null and _equipment_component.has_method("consume_armor_durability_on_hit"):
 		_equipment_component.call("consume_armor_durability_on_hit")
 	damage_received.emit(final_damage, source)
@@ -930,6 +938,23 @@ func _is_stats_dead() -> bool:
 		return bool(_stats_component.call("is_dead"))
 
 	return false
+
+
+func get_shield_component() -> Node:
+	## 返回玩家护盾组件；技能、调试工具和 HUD 可通过该入口访问，不需要依赖固定子节点路径。
+	return _shield_component
+
+
+func get_current_shield() -> float:
+	## 返回当前护盾值；组件缺失时返回 0，供通用单位与 UI 查询。
+	return maxf(float(_shield_component.get("current_shield")), 0.0) if _shield_component != null else 0.0
+
+
+func notify_skill_target_hit(skill_id: String, target: Node) -> void:
+	## 转发一次技能命中事件；空 ID 或无效目标不会派发，调用方仍负责先完成原技能伤害。
+	if skill_id.strip_edges().is_empty() or not is_instance_valid(target):
+		return
+	skill_target_hit.emit(skill_id, target)
 
 
 func _apply_knockback_from_source(source: Node) -> void:

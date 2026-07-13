@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="StelleStardustAceSkillData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/stelle_stardust_ace_skill_data.gd" id="1_data"]
+[ext_resource type="Script" path="res://scripts/skills/stelle_stardust_ace_behavior.gd" id="2_behavior"]
+
+[resource]
+script = ExtResource("1_data")
+skill_id = "stelle_stardust_ace"
+display_name = "星尘王牌"
+description = "进入“星尘王牌”状态。该状态下，使用武器或【银河全垒打】攻击时，若该武器来自远程武器槽，则对第一个命中的目标额外造成8（+5%攻击力）点伤害；若该武器来自近战武器槽或【银河全垒打】，则对所有命中的目标额外造成5（+2.5%攻击力）点伤害。当使用武器攻击3次，或释放技能的10s后，结束“星尘王牌”状态。"
+behavior_script = ExtResource("2_behavior")
+targeting_mode = 2
+cooldown_duration = 60.0
+energy_cost = 40.0
+cast_range = 1.0
+target_group = &"skill_targets"
+can_charge = false
+effect_duration = 10.0
+maximum_weapon_attack_count = 3
+ranged_bonus_base_damage = 8.0
+ranged_bonus_attack_power_ratio = 0.05
+melee_bonus_base_damage = 5.0
+melee_bonus_attack_power_ratio = 0.025
+damage_formula_attack_power = 100.0
+melee_resolution_grace_duration = 0.13

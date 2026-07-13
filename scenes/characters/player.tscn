@@ -1,4 +1,4 @@
-[gd_scene load_steps=21 format=3 uid="uid://b8ap3osklnsmt"]
+[gd_scene load_steps=22 format=3 uid="uid://b8ap3osklnsmt"]
 
 [ext_resource type="Script" uid="uid://mkfqfypf8jpw" path="res://scripts/player/player_controller.gd" id="1_player_controller"]
 [ext_resource type="Script" uid="uid://dy2ap8k4mwko" path="res://scripts/components/player_input_component.gd" id="2_player_input"]
@@ -20,6 +20,7 @@
 [ext_resource type="Script" path="res://scripts/components/weapon_charge_component.gd" id="26_weapon_charge"]
 [ext_resource type="Script" path="res://scripts/components/temporary_buff_component.gd" id="27_temporary_buff"]
 [ext_resource type="Script" path="res://scripts/components/dodge_feedback_component.gd" id="28_dodge_feedback"]
+[ext_resource type="Script" path="res://scripts/components/shield_component.gd" id="29_shield"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_body"]
 radius = 18.0
@@ -56,6 +57,9 @@ script = ExtResource("3_movement")
 
 [node name="StatsComponent" type="Node" parent="." unique_id=345942444]
 script = ExtResource("7_stats")
+
+[node name="ShieldComponent" type="Node" parent="."]
+script = ExtResource("29_shield")
 
 [node name="InventoryComponent" type="Node" parent="." unique_id=990293600]
 script = ExtResource("8_inventory")

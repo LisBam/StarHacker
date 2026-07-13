@@ -6,6 +6,8 @@ extends Node
 const ATTACK_SPEED_SOURCE_ID: String = "silver_wolf_double_speed"
 ## 玩家固定移速来源 ID；与攻速来源分离，使两个属性可通过各自公开接口独立清理。
 const MOVE_SPEED_SOURCE_ID: String = "silver_wolf_double_speed"
+## 技能冷却暂停来源 ID；效果持续期间保持本槽完整冷却不递减，状态结束后才正式开始计时。
+const COOLDOWN_PAUSE_SOURCE_ID: String = "silver_wolf_double_speed_state"
 ## 世界飘字脚本；无伤完成时用于生成绿色 COMBO! 反馈。
 const FLOATING_TEXT_POPUP_SCRIPT: Script = preload("res://scripts/effects/floating_text_popup.gd")
 ## 持续头顶状态文本脚本；二倍速生效期间用它显示跟随银狼的固定 2× 标记。
@@ -64,6 +66,8 @@ func execute(context: Dictionary) -> bool:
 	_effect_strength = 1.0
 	_was_hit = false
 	_energy_spent_during_effect = 0.0
+	if _active_skill_component != null and _active_skill_component.has_method("set_cooldown_paused_source") and _slot_index >= 0:
+		_active_skill_component.call("set_cooldown_paused_source", _slot_index, COOLDOWN_PAUSE_SOURCE_ID, true)
 	_apply_current_strength()
 	_show_overhead_status_text()
 	set_process(true)
@@ -112,6 +116,8 @@ func _finish_effect(allow_no_hit_reward: bool) -> void:
 	_remaining_duration = 0.0
 	set_process(false)
 	_clear_overhead_status_text()
+	if _active_skill_component != null and _active_skill_component.has_method("set_cooldown_paused_source") and _slot_index >= 0:
+		_active_skill_component.call("set_cooldown_paused_source", _slot_index, COOLDOWN_PAUSE_SOURCE_ID, false)
 	if is_instance_valid(_caster):
 		if _caster.has_method("remove_attack_speed_bonus_source"):
 			_caster.call("remove_attack_speed_bonus_source", ATTACK_SPEED_SOURCE_ID)

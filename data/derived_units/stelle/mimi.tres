@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="DerivedUnitData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/derived_unit_data.gd" id="1_data"]
+[ext_resource type="PackedScene" path="res://scenes/friendlies/mimi.tscn" id="2_scene"]
+
+[resource]
+script = ExtResource("1_data")
+unit_id = "stelle_mimi"
+display_name = "迷迷"
+unit_type = "友方单位"
+attack_type = "近战"
+unit_scene = ExtResource("2_scene")
+movable = true
+max_health = 200.0
+attack_power = 100.0
+defense_power = 100.0
+move_speed = 150.0
+toughness = 0.0
+vision_range = 500.0
+damage = 20.0
+attack_range = 60.0
+attack_cooldown = 1.0
+front_recoil_force = 10.0
+impact_force = 15.0

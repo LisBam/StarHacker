@@ -19,6 +19,7 @@ current_health = 50.0
 attack_damage = 20.0
 attack_power = 100.0
 defense_power = 100.0
+attack_impact_force = 20.0
 move_speed = 110.0
 vision_range = 500.0
 attack_range = 45.0

@@ -48,6 +48,8 @@ var _character_button_container: VBoxContainer
 var _passive_skill_cards: Array[Control] = []
 ## 主动技能卡片缓存；元素为 CharacterSkillCard，切换角色时释放旧卡片并按资源数组重建。
 var _active_skill_cards: Array[Control] = []
+## 衍生单位卡片缓存；元素为可展开详情卡，切换角色时释放旧卡片并按角色资源重建。
+var _derived_unit_cards: Array[Control] = []
 
 ## 页面背景缓存；完整选择模式显示不透明页面背景，战斗内展示模式显示统一半透明遮罩。
 @onready var _background: ColorRect = get_node("Background") as ColorRect
@@ -105,6 +107,10 @@ var _active_skill_cards: Array[Control] = []
 @onready var _active_label: Label = %ActiveLabel
 ## 主动技能卡片容器；默认绑定 ActiveSkillCards，按角色资源数组顺序承载全部主动技能。
 @onready var _active_skill_cards_container: VBoxContainer = %ActiveSkillCards
+## 衍生单位分类标题；当前角色没有衍生单位资源时与卡片容器一起隐藏。
+@onready var _derived_unit_label: Label = %DerivedUnitLabel
+## 衍生单位卡片容器；位于主动技能之后，按角色资源数组顺序显示可展开单位详情。
+@onready var _derived_unit_cards_container: VBoxContainer = %DerivedUnitCards
 ## 确认进入按钮缓存；默认绑定 ConfirmButton，点击后写入角色并进入游戏世界。
 @onready var _confirm_button: Button = %ConfirmButton
 ## 返回按钮缓存；默认绑定 BackButton，点击后回到主菜单。
@@ -210,6 +216,35 @@ func _refresh_character_detail() -> void:
 	_active_label.text = "主动技能"
 	_refresh_skill_cards(_passive_skill_cards_container, _passive_skill_cards, profile.get("passive_skills", []) as Array, str(profile.get("passive", "被动技能：待配置")), "被动")
 	_refresh_skill_cards(_active_skill_cards_container, _active_skill_cards, profile.get("active_skills", []) as Array, str(profile.get("active", "主动技能：待配置")), "主动")
+	_refresh_derived_unit_cards(profile.get("derived_units", []) as Array)
+
+
+func _refresh_derived_unit_cards(derived_unit_resources: Array) -> void:
+	## 重建当前角色衍生单位分类；空数组隐藏整个分类，不生成占位卡片。
+	for unit_card in _derived_unit_cards:
+		if unit_card != null and is_instance_valid(unit_card):
+			unit_card.queue_free()
+	_derived_unit_cards.clear()
+	for raw_unit_resource in derived_unit_resources:
+		# 衍生单位资源；必须至少提供可读取的名称，空资源直接跳过。
+		var unit_resource: Resource = raw_unit_resource as Resource
+		if unit_resource == null:
+			continue
+		# 单位名称；资源缺失名称时使用稳定兜底，避免卡片标题为空。
+		var unit_name: String = str(unit_resource.get("display_name")).strip_edges()
+		# 单位类型；默认“衍生单位”，友方单位资源可显示更具体阵营。
+		var unit_type: String = str(unit_resource.get("unit_type")).strip_edges()
+		# 单位详情；优先使用资源格式化入口，缺失时显示暂无详情。
+		var detail_text: String = str(unit_resource.call("get_detail_text")) if unit_resource.has_method("get_detail_text") else "暂无单位详情"
+		# 通用展开卡片；复用技能卡规格但隐藏无意义的冷却与能耗徽章。
+		var unit_card: CharacterSkillCard = CHARACTER_SKILL_CARD_SCRIPT.new() as CharacterSkillCard
+		unit_card.configure_detail_card(unit_name, detail_text, unit_type)
+		_derived_unit_cards_container.add_child(unit_card)
+		_derived_unit_cards.append(unit_card)
+	# 分类可见性；标题和容器始终同步，防止空分类留下多余间距。
+	var has_derived_units: bool = not _derived_unit_cards.is_empty()
+	_derived_unit_label.visible = has_derived_units
+	_derived_unit_cards_container.visible = has_derived_units
 
 
 func _build_skill_detail_text(section_name: String, skill_resources: Array, fallback_text: String) -> String:

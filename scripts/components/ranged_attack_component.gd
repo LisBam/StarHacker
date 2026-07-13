@@ -98,7 +98,7 @@ func try_attack(direction: Vector2, weapon_data: Resource = null, attack_modifie
 	# 本次弹射次数；表示每颗弹体在墙体或可穿透目标命中后最多还能改变方向的次数。
 	var selected_bounce_count: int = maxi(roundi(_get_weapon_float(weapon_data, "bounce_count", 0.0)), 0) if _weapon_has_attribute(weapon_data, "has_bounce") else 0
 
-	if selected_projectile_scene == null or _cooldown_remaining > 0.0 or _combo_rounds_remaining > 0 or direction.is_zero_approx():
+	if not _is_attack_ready(direction, weapon_data):
 		return false
 	# 连击运行参数；集中保存本次攻击数据，后续轮次无需依赖玩家当前装备槽状态。
 	weapon_data.set_meta("active_scatter_count", selected_scatter_count)
@@ -122,6 +122,24 @@ func try_attack(direction: Vector2, weapon_data: Resource = null, attack_modifie
 	# 首轮成功时立即显示完整冷却；连击期间保持满值，末轮结束后重新开始减少。
 	_start_cooldown(selected_cooldown)
 	return true
+
+
+func can_attack(direction: Vector2, weapon_data: Resource = null) -> bool:
+	## 返回组件当前是否具备开始一次远程攻击的基础条件；控制器可在混合攻击前预检双通道，避免只启动其中一侧。
+	if not _is_attack_ready(direction, weapon_data):
+		return false
+	# 标准化攻击方向；预检使用瞄准中心线，确保枪口被墙体阻挡时混合攻击不会先启动近战效果。
+	var resolved_direction: Vector2 = direction.normalized()
+	# 标准枪口位置；与实际生成流程使用同一出生点解析，避免预检和执行读取不同节点。
+	var spawn_position: Vector2 = _get_spawn_position(resolved_direction)
+	return not _is_spawn_blocked(resolved_direction, spawn_position)
+
+
+func _is_attack_ready(direction: Vector2, weapon_data: Resource = null) -> bool:
+	## 返回不包含环境阻挡的远程组件可用状态；普通射击继续让每颗偏移弹体独立检测枪口，避免中心线预检改变散射和偏移武器行为。
+	# 本次使用的弹体场景；优先读取武器资源覆盖值，空资源时回退组件默认场景。
+	var selected_projectile_scene: PackedScene = _get_weapon_packed_scene(weapon_data, "projectile_scene", projectile_scene)
+	return selected_projectile_scene != null and _cooldown_remaining <= 0.0 and _combo_rounds_remaining <= 0 and not direction.is_zero_approx()
 
 
 func _fire_round(direction: Vector2, weapon_data: Resource) -> bool:

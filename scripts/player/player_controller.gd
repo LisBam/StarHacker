@@ -5,9 +5,8 @@ class_name PlayerController
 ## 具体能力放在独立组件中实现，后续替换角色、武器或控制方式时可以局部替换节点。
 
 signal weapon_durability_changed(weapon_data: Resource)
-## 玩家成功完成一次武器攻击请求后派发实际来源槽；HUD 据此区分混合武器的执行通道冷却与玩家可见槽位冷却。
-## 当前规则补充：信号同时提供实际攻击通道与装备来源，使混合武器的远程、近战 CD 可以独立映射到真实槽位。
-signal weapon_attack_succeeded(attack_mode: String, source_kind: String, source_index: int, weapon_data: Resource)
+## 玩家成功完成一次武器攻击请求后派发输入对应的装备来源槽；混合副通道不会作为独立 HUD 冷却来源重复派发。
+signal weapon_attack_succeeded(source_kind: String, source_index: int, weapon_data: Resource)
 ## 玩家实际受到一次未闪避攻击后派发；技能可据此缩短持续时间，但不得从信号回调重复扣除生命或防具耐久。
 signal damage_received(final_damage: float, source: Node)
 ## 玩家固定移速技能来源变化后派发；角色面板据此即时刷新“技能”移速分项，不参与实际移动结算。
@@ -21,11 +20,6 @@ const SPRINT_ENERGY_REGENERATION_BLOCK_SOURCE_ID: String = "player_sprint"
 const ATTACK_MODE_RANGED: String = "ranged"
 ## 近战攻击通道标识；固定 melee，与输入、武器数据和攻击组件协议保持一致。
 const ATTACK_MODE_MELEE: String = "melee"
-## 远程装备来源标识；固定 ranged，信号使用它把冷却反馈映射到具体远程槽。
-const WEAPON_SOURCE_RANGED: String = "ranged"
-## 近战装备来源标识；固定 melee，信号使用它把冷却反馈映射到近战槽。
-const WEAPON_SOURCE_MELEE: String = "melee"
-
 ## 玩家显示名称；默认值为“角色”，会由当前选择角色覆盖，运行时修改会影响后续 UI 展示文本。
 @export var player_display_name: String = "角色"
 ## 输入组件路径；默认指向同场景子节点 InputComponent，必须解析到提供输入查询方法的节点，修改会影响所有玩家操作来源。
@@ -36,6 +30,10 @@ const WEAPON_SOURCE_MELEE: String = "melee"
 @export var ranged_attack_component_path: NodePath = ^"RangedAttackComponent"
 ## 近战攻击组件路径；默认指向 MeleeAttackComponent，必须解析到提供 try_attack 方法的节点，修改会影响鼠标右键近战逻辑。
 @export var melee_attack_component_path: NodePath = ^"MeleeAttackComponent"
+## 混合武器远程副通道组件路径；默认指向 HybridRangedAttackComponent，仅由近战槽混合攻击调用，独立冷却避免占用远程槽武器的主攻击组件。
+@export var hybrid_ranged_attack_component_path: NodePath = ^"HybridRangedAttackComponent"
+## 混合武器近战副通道组件路径；默认指向 HybridMeleeAttackComponent，仅由远程槽混合攻击调用，独立冷却避免占用近战槽武器的主攻击组件。
+@export var hybrid_melee_attack_component_path: NodePath = ^"HybridMeleeAttackComponent"
 ## 武器蓄力组件路径；默认指向 WeaponChargeComponent，必须解析到通用蓄力状态组件，缺失时可蓄力武器不会接受攻击输入。
 @export var weapon_charge_component_path: NodePath = ^"WeaponChargeComponent"
 ## 战斗属性组件路径；默认指向 StatsComponent，必须解析到提供能量和生命方法的节点，修改会影响武器消耗与受伤转发。
@@ -125,6 +123,10 @@ var _is_sprinting: bool = false
 @onready var _ranged_attack_component = get_node(ranged_attack_component_path)
 ## 近战攻击组件实例缓存；默认在 ready 阶段按路径获取，保持动态类型以避免自定义类解析顺序问题，修改会影响近战命中框开启。
 @onready var _melee_attack_component = get_node(melee_attack_component_path)
+## 混合武器远程副通道组件缓存；默认按路径获取，缺失时混合武器无法完成近战槽来源的双通道攻击。
+@onready var _hybrid_ranged_attack_component = get_node_or_null(hybrid_ranged_attack_component_path)
+## 混合武器近战副通道组件缓存；默认按路径获取，缺失时混合武器无法完成远程槽来源的双通道攻击。
+@onready var _hybrid_melee_attack_component = get_node_or_null(hybrid_melee_attack_component_path)
 ## 武器蓄力组件实例缓存；默认在 ready 阶段按路径获取，保持动态类型以支持独立替换蓄力表现与状态管理。
 @onready var _weapon_charge_component: Node = get_node_or_null(weapon_charge_component_path)
 ## 战斗属性组件实例缓存；默认在 ready 阶段按路径获取，保持动态类型以支持可替换属性系统，修改会影响能量消耗和生命处理。
@@ -234,69 +236,31 @@ func _handle_weapon_switch_input() -> void:
 		_equipment_component.call("cycle_ranged_weapon", cycle_step)
 
 
-func _resolve_weapon_attack_context(requested_mode: String) -> Dictionary:
-	## 解析一个攻击通道实际使用的装备资源和槽位；主通道槽优先，只有主槽为空时才回退到另一槽的混合武器。
-	if _equipment_component == null:
-		return {}
-	if requested_mode == ATTACK_MODE_RANGED:
-		# 当前远程武器；非空时始终作为左键来源，不被近战槽中的混合武器覆盖。
-		var ranged_weapon: Resource = _equipment_component.call("get_current_ranged_weapon") as Resource if _equipment_component.has_method("get_current_ranged_weapon") else null
-		if ranged_weapon != null:
-			# 当前远程槽索引；缺少接口时使用 -1，攻击仍可执行但 HUD 不映射具体槽位。
-			var ranged_slot_index: int = int(_equipment_component.call("get_current_ranged_slot")) if _equipment_component.has_method("get_current_ranged_slot") else -1
-			return {"weapon": ranged_weapon, "source_kind": WEAPON_SOURCE_RANGED, "source_index": ranged_slot_index}
-		# 近战槽武器；只有混合类型可以在远程槽为空时响应左键。
-		var melee_slot_weapon: Resource = _equipment_component.call("get_melee_weapon") as Resource if _equipment_component.has_method("get_melee_weapon") else null
-		if _is_hybrid_weapon(melee_slot_weapon):
-			return {"weapon": melee_slot_weapon, "source_kind": WEAPON_SOURCE_MELEE, "source_index": -1}
-		return {}
-	if requested_mode == ATTACK_MODE_MELEE:
-		# 当前近战武器；非空时始终作为右键来源，不被远程槽中的混合武器覆盖。
-		var melee_weapon: Resource = _equipment_component.call("get_melee_weapon") as Resource if _equipment_component.has_method("get_melee_weapon") else null
-		if melee_weapon != null:
-			return {"weapon": melee_weapon, "source_kind": WEAPON_SOURCE_MELEE, "source_index": -1}
-		# 当前远程武器；只有混合类型可以在近战槽为空时响应右键。
-		var ranged_slot_weapon: Resource = _equipment_component.call("get_current_ranged_weapon") as Resource if _equipment_component.has_method("get_current_ranged_weapon") else null
-		if _is_hybrid_weapon(ranged_slot_weapon):
-			# 混合武器所在远程槽；右键近战成功后仍把耐久和冷却反馈映射到真实装备卡片。
-			var source_ranged_slot_index: int = int(_equipment_component.call("get_current_ranged_slot")) if _equipment_component.has_method("get_current_ranged_slot") else -1
-			return {"weapon": ranged_slot_weapon, "source_kind": WEAPON_SOURCE_RANGED, "source_index": source_ranged_slot_index}
-	return {}
-
-
 func _is_hybrid_weapon(weapon_data: Resource) -> bool:
-	## 判断资源是否同时支持远程和近战通道；空资源安全返回 false。
+	## 判断资源是否会在一次使用中同时执行远程和近战效果；空资源安全返回 false。
 	if weapon_data == null:
 		return false
 	return bool(weapon_data.call("is_hybrid")) if weapon_data.has_method("is_hybrid") else str(weapon_data.get("weapon_type")) == "hybrid"
 
 
 func _try_fire_ranged_weapon() -> void:
-	# 当前远程攻击上下文；优先使用当前远程槽，空槽时允许近战槽中的混合武器提供远程通道。
-	var attack_context: Dictionary = _resolve_weapon_attack_context(ATTACK_MODE_RANGED)
-	# 当前远程武器资源；取值为 Resource 或 null，默认来自攻击上下文，修改会影响本次左键攻击参数。
-	var current_weapon: Resource = attack_context.get("weapon") as Resource
+	if not _equipment_component.has_method("get_current_ranged_weapon"):
+		return
+	# 当前远程武器资源；取值为 Resource 或 null，默认来自当前远程槽，修改会影响本次左键攻击参数。
+	var current_weapon: Resource = _equipment_component.call("get_current_ranged_weapon") as Resource
 	if current_weapon == null or not _can_use_weapon(current_weapon):
 		return
-	# 实际装备来源；远程槽为 ranged，近战槽混合武器回退时为 melee。
-	var source_kind: String = str(attack_context.get("source_kind", WEAPON_SOURCE_RANGED))
-	# 实际远程槽索引；来源为近战槽时固定 -1。
-	var source_index: int = int(attack_context.get("source_index", -1))
-	_execute_weapon_attack(current_weapon, ATTACK_MODE_RANGED, 0.0, source_kind, source_index)
+	_execute_weapon_attack(current_weapon, ATTACK_MODE_RANGED, 0.0)
 
 
 func _try_use_melee_weapon() -> void:
-	# 当前近战攻击上下文；优先使用近战槽，空槽时允许当前远程槽中的混合武器提供近战通道。
-	var attack_context: Dictionary = _resolve_weapon_attack_context(ATTACK_MODE_MELEE)
-	# 当前近战武器资源；取值为 Resource 或 null，默认来自攻击上下文，修改会影响本次右键攻击参数。
-	var current_weapon: Resource = attack_context.get("weapon") as Resource
+	if not _equipment_component.has_method("get_melee_weapon"):
+		return
+	# 当前近战武器资源；取值为 Resource 或 null，默认来自近战槽，修改会影响本次右键攻击参数。
+	var current_weapon: Resource = _equipment_component.call("get_melee_weapon") as Resource
 	if current_weapon == null or not _can_use_weapon(current_weapon):
 		return
-	# 实际装备来源；近战槽为 melee，远程槽混合武器回退时为 ranged。
-	var source_kind: String = str(attack_context.get("source_kind", WEAPON_SOURCE_MELEE))
-	# 实际远程槽索引；来源为近战槽时固定 -1。
-	var source_index: int = int(attack_context.get("source_index", -1))
-	_execute_weapon_attack(current_weapon, ATTACK_MODE_MELEE, 0.0, source_kind, source_index)
+	_execute_weapon_attack(current_weapon, ATTACK_MODE_MELEE, 0.0)
 
 
 func _update_weapon_attack_input(delta: float) -> void:
@@ -348,25 +312,21 @@ func _update_weapon_attack_input(delta: float) -> void:
 			return
 		_release_charged_weapon_attack(charging_mode)
 		return
-	# 当前远程攻击上下文；包含左键实际使用的武器及其装备来源，主远程槽为空时可回退近战槽混合武器。
-	var ranged_attack_context: Dictionary = _resolve_weapon_attack_context(ATTACK_MODE_RANGED)
-	# 当前远程武器；只在左键按住时读取，可蓄力武器开始蓄力，普通武器沿用远程组件独立冷却控制的连续射击。
-	var ranged_weapon: Resource = ranged_attack_context.get("weapon") as Resource
+	# 当前远程武器；只从当前远程槽读取，可蓄力武器开始蓄力，普通武器沿用远程主组件冷却控制的连续射击。
+	var ranged_weapon: Resource = _equipment_component.call("get_current_ranged_weapon") as Resource if _equipment_component.has_method("get_current_ranged_weapon") else null
 	if (fire_requested or fire_held) and ranged_weapon != null and bool(ranged_weapon.get("has_charge_effect")):
 		# 是否成功开始远程武器蓄力；资源或组件状态异常时保持原有不攻击语义，不绕过组件直接结算。
-		var ranged_charge_started: bool = bool(_weapon_charge_component.call("begin_charge", ranged_weapon, ATTACK_MODE_RANGED, str(ranged_attack_context.get("source_kind", WEAPON_SOURCE_RANGED)), int(ranged_attack_context.get("source_index", -1))))
+		var ranged_charge_started: bool = bool(_weapon_charge_component.call("begin_charge", ranged_weapon, ATTACK_MODE_RANGED))
 		if ranged_charge_started and not fire_held:
 			_release_charged_weapon_attack(ATTACK_MODE_RANGED)
 		return
 	if fire_requested or fire_held:
 		_try_fire_ranged_weapon()
-	# 当前近战攻击上下文；包含右键实际使用的武器及其装备来源，近战槽为空时可回退当前远程槽混合武器。
-	var melee_attack_context: Dictionary = _resolve_weapon_attack_context(ATTACK_MODE_MELEE)
-	# 当前近战武器；普通近战保持单次请求语义，可蓄力近战从第一次按下开始累计。
-	var melee_weapon: Resource = melee_attack_context.get("weapon") as Resource
+	# 当前近战武器；只从近战槽读取，普通近战保持单次请求语义，可蓄力近战从第一次按下开始累计。
+	var melee_weapon: Resource = _equipment_component.call("get_melee_weapon") as Resource if _equipment_component.has_method("get_melee_weapon") else null
 	if melee_requested and melee_weapon != null and bool(melee_weapon.get("has_charge_effect")):
 		# 是否成功开始近战武器蓄力；极短单击已经松开时在同一物理帧立即生成最低蓄力释放快照。
-		var melee_charge_started: bool = bool(_weapon_charge_component.call("begin_charge", melee_weapon, ATTACK_MODE_MELEE, str(melee_attack_context.get("source_kind", WEAPON_SOURCE_MELEE)), int(melee_attack_context.get("source_index", -1))))
+		var melee_charge_started: bool = bool(_weapon_charge_component.call("begin_charge", melee_weapon, ATTACK_MODE_MELEE))
 		if melee_charge_started and not melee_held:
 			_release_charged_weapon_attack(ATTACK_MODE_MELEE)
 	elif melee_requested:
@@ -395,20 +355,14 @@ func _release_charged_weapon_attack(fallback_attack_mode: String) -> bool:
 	var released_attack_mode: String = str(release_context.get("attack_mode", fallback_attack_mode))
 	# 本次蓄力比例；单击最低值为 0，长按按组件累计结果限制到 0 至 1。
 	var released_charge_ratio: float = clampf(float(release_context.get("charge_ratio", 0.0)), 0.0, 1.0)
-	# 本次释放装备来源；固定取蓄力开始时缓存的槽位类型，避免蓄力期间切换装备后冷却反馈映射错误。
-	var released_source_kind: String = str(release_context.get("source_kind", released_attack_mode))
-	# 本次释放远程槽索引；近战槽来源固定为 -1。
-	var released_source_index: int = int(release_context.get("source_index", -1))
-	return _execute_weapon_attack(released_weapon, released_attack_mode, released_charge_ratio, released_source_kind, released_source_index)
+	return _execute_weapon_attack(released_weapon, released_attack_mode, released_charge_ratio)
 
 
-func _execute_weapon_attack(weapon_data: Resource, requested_mode: String, charge_ratio: float, source_kind: String = "", source_index: int = -1) -> bool:
-	## 执行一次武器使用并统一结算能量、耐久、冷却反馈和坐力；混合武器同时调用两个攻击组件但成本只结算一次。
-	## 当前规则补充：每次请求只调用 requested_mode 对应组件；混合武器的左右键分别结算并保留两套独立冷却。
+func _execute_weapon_attack(weapon_data: Resource, requested_mode: String, charge_ratio: float) -> bool:
+	## 执行一次武器使用并统一结算能量、耐久、冷却反馈和坐力；混合武器每次同时调用远程与近战组件，但副通道不占用另一装备槽的主组件。
 	if weapon_data == null or not _can_use_weapon(weapon_data):
 		return false
 	# 本次武器能耗；远程与近战通道共享该成本，混合攻击不得因生成两个命中而重复扣除。
-	# 当前规则补充：共享的是武器配置值，不是一次输入的成本；左右键每次成功攻击各支付一次该能耗。
 	var energy_consumption: float = _get_weapon_energy_consumption(weapon_data)
 	if _stats_component.has_method("can_spend_energy") and not bool(_stats_component.call("can_spend_energy", energy_consumption)):
 		return false
@@ -429,30 +383,46 @@ func _execute_weapon_attack(weapon_data: Resource, requested_mode: String, charg
 	var attack_modifiers: Dictionary = {"damage_multiplier": damage_multiplier, "impact_multiplier": impact_multiplier, "cooldown_multiplier": 1.0 / maxf(attack_speed_multiplier, 0.01)}
 	# 是否为混合武器；兼容资源缺少方法时按 weapon_type 字段判断。
 	var is_hybrid_weapon: bool = bool(weapon_data.call("is_hybrid")) if weapon_data.has_method("is_hybrid") else str(weapon_data.get("weapon_type")) == "hybrid"
-	# 远程通道是否成功；混合武器始终尝试，普通武器只按请求通道执行。
-	# 当前规则补充：混合武器也只在左键远程请求时尝试该通道，远程组件 CD 不读取近战组件状态。
+	# 远程通道是否成功；混合武器始终要求成功，普通武器只按远程请求执行。
 	var ranged_succeeded: bool = false
-	# 近战通道是否成功；与远程结果共同决定是否支付本次使用成本。
-	# 当前规则补充：混合武器只在右键近战请求时尝试该通道，近战组件 CD 不读取远程组件状态。
+	# 近战通道是否成功；混合武器始终要求成功，普通武器只按近战请求执行。
 	var melee_succeeded: bool = false
-	# 请求通道是否合法；普通武器只能执行自身类型，混合武器允许两个通道分别进入。
+	# 请求通道是否合法；普通武器只能从对应装备槽执行，混合武器允许从任一兼容槽发起完整双通道攻击。
 	var requested_mode_supported: bool = is_hybrid_weapon or str(weapon_data.get("weapon_type")) == requested_mode
 	if not requested_mode_supported:
 		return false
-	if requested_mode == ATTACK_MODE_RANGED:
+	if requested_mode not in [ATTACK_MODE_RANGED, ATTACK_MODE_MELEE]:
+		return false
+	if is_hybrid_weapon:
+		# 混合攻击主组件；使用输入所属装备槽的主组件，使该武器后续使用仍由来源槽冷却限制。
+		var primary_attack_component: Node = _ranged_attack_component if requested_mode == ATTACK_MODE_RANGED else _melee_attack_component
+		# 混合攻击副组件；使用专用副通道组件，使本次双通道攻击不会写入另一装备槽的主组件冷却。
+		var secondary_attack_component: Node = _hybrid_melee_attack_component if requested_mode == ATTACK_MODE_RANGED else _hybrid_ranged_attack_component
+		if not _can_attack_with_component(primary_attack_component, weapon_data) or not _can_attack_with_component(secondary_attack_component, weapon_data):
+			return false
+		if requested_mode == ATTACK_MODE_RANGED:
+			ranged_succeeded = bool(primary_attack_component.call("try_attack", _last_aim_direction, weapon_data, attack_modifiers))
+			if not ranged_succeeded:
+				return false
+			melee_succeeded = bool(secondary_attack_component.call("try_attack", _last_aim_direction, weapon_data, attack_modifiers))
+		else:
+			ranged_succeeded = bool(secondary_attack_component.call("try_attack", _last_aim_direction, weapon_data, attack_modifiers))
+			if not ranged_succeeded:
+				return false
+			melee_succeeded = bool(primary_attack_component.call("try_attack", _last_aim_direction, weapon_data, attack_modifiers))
+		if not ranged_succeeded or not melee_succeeded:
+			return false
+	elif requested_mode == ATTACK_MODE_RANGED:
 		ranged_succeeded = bool(_ranged_attack_component.call("try_attack", _last_aim_direction, weapon_data, attack_modifiers))
-	elif requested_mode == ATTACK_MODE_MELEE:
-		melee_succeeded = bool(_melee_attack_component.call("try_attack", _last_aim_direction, weapon_data, attack_modifiers))
+		if not ranged_succeeded:
+			return false
 	else:
-		return false
-	if not ranged_succeeded and not melee_succeeded:
-		return false
-	# 攻击来源槽索引；远程请求记录当前手持远程槽，近战请求固定为 -1，混合武器不会因同时执行两个通道改变来源归属。
-	# 当前规则补充：来源由攻击开始时解析的真实装备槽提供，允许远程槽混合武器通过右键触发近战组件。
-	var resolved_source_kind: String = source_kind if source_kind in [WEAPON_SOURCE_RANGED, WEAPON_SOURCE_MELEE] else requested_mode
-	# 实际来源索引；只有远程槽使用非负索引，近战槽固定为 -1。
-	var resolved_source_index: int = source_index if resolved_source_kind == WEAPON_SOURCE_RANGED else -1
-	weapon_attack_succeeded.emit(requested_mode, resolved_source_kind, resolved_source_index, weapon_data)
+		melee_succeeded = bool(_melee_attack_component.call("try_attack", _last_aim_direction, weapon_data, attack_modifiers))
+		if not melee_succeeded:
+			return false
+	# 攻击来源槽索引；远程请求记录当前手持远程槽，近战请求固定为 -1，混合副通道不会产生额外 HUD 来源。
+	var source_slot_index: int = int(_equipment_component.call("get_current_ranged_slot")) if requested_mode == ATTACK_MODE_RANGED and _equipment_component != null and _equipment_component.has_method("get_current_ranged_slot") else -1
+	weapon_attack_succeeded.emit(requested_mode, source_slot_index, weapon_data)
 	if ranged_succeeded:
 		_record_stock_metric("shots", 1.0)
 	_apply_weapon_recoil(weapon_data, _last_aim_direction, recoil_multiplier)
@@ -461,9 +431,17 @@ func _execute_weapon_attack(weapon_data: Resource, requested_mode: String, charg
 	if _stats_component.has_method("spend_energy"):
 		_stats_component.call("spend_energy", energy_consumption)
 	# 本次耐久成本；混合武器固定 2 点，当前仅剩 1 点时资源接口会消耗剩余 1 点并允许这次攻击完成。
-	# 当前规则补充：每个成功的远程或近战通道都是一次独立使用，全部武器统一消耗 1 点耐久。
-	var durability_cost: float = 1.0
+	var durability_cost: float = 2.0 if is_hybrid_weapon else 1.0
 	_consume_weapon_durability(weapon_data, durability_cost)
+	return true
+
+
+func _can_attack_with_component(attack_component: Node, weapon_data: Resource) -> bool:
+	## 在混合攻击写入任一组件状态前检查两个通道是否都可用，避免某一通道冷却中时退化成单通道攻击。
+	if attack_component == null or not attack_component.has_method("try_attack"):
+		return false
+	if attack_component.has_method("can_attack"):
+		return bool(attack_component.call("can_attack", _last_aim_direction, weapon_data))
 	return true
 
 
@@ -485,9 +463,8 @@ func _consume_weapon_durability(weapon_data: Resource, durability_cost: float = 
 	if _should_skip_weapon_durability_consumption() or weapon_data == null or not weapon_data.has_method("consume_durability"):
 		return
 	# 是否实际消耗耐久；耐久消耗为 0 或武器已损坏时不触发持久化和 UI 刷新。
-	# 固定消耗补充：现行武器成功使用统一扣除 1 点，此返回值只用于识别损坏武器等未发生变化的情况。
+	# 固定消耗补充：普通武器成功使用扣除 1 点、混合武器完整攻击扣除 2 点，此返回值只用于识别损坏武器等未发生变化的情况。
 	# 消耗前耐久；用于股市指标记录真实变化，混合武器剩余 1 点时只能记录 1 点而不是固定 2 点。
-	# 当前规则补充：单次通道请求固定最多消耗 1 点，该快照用于记录本通道真实变化并兼容不足 1 点的浮点耐久。
 	var durability_before: float = maxf(float(weapon_data.get("current_durability")), 0.0)
 	var durability_changed: bool = bool(weapon_data.call("consume_durability", durability_cost))
 	if not durability_changed:

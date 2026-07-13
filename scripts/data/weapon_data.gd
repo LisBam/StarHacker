@@ -13,7 +13,7 @@ class_name WeaponData
 ## 武器显示名称；默认“未命名武器”用于兜底显示，运行时通常不修改，改名会影响 HUD 和背包文本。
 @export var display_name: String = "未命名武器"
 ## 武器类型；取值为 ranged、melee 或 hybrid，默认 ranged，hybrid 可放入任一武器槽且每次使用同时执行远程与近战攻击。
-## 当前混合武器规则补充：hybrid 仍可放入任一武器槽，但左键只执行远程通道、右键只执行近战通道，两套冷却互不写入。
+## 混合武器的副通道由玩家专用组件执行，不占用另一装备槽的主攻击组件，因此完整混合攻击后仍可立即使用另一把武器。
 @export_enum("ranged", "melee", "hybrid") var weapon_type: String = "ranged"
 ## 武器说明文本；默认空字符串，主要用于背包详情和调试展示，运行时通常不动态修改。
 @export_multiline var description: String = ""
@@ -29,7 +29,7 @@ class_name WeaponData
 @export_range(0.0, 999999.0, 0.1) var current_durability: float = 500.0
 ## 每次成功使用消耗的耐久；取值大于等于 0，默认 1，远程射击和近战挥击成功后各扣除一次。
 ## 独立消耗配置补充：默认参考值为 1.0，每把武器资源可覆盖为不同浮点消耗。
-## 固定消耗规则补充：武器不再暴露独立耐久消耗属性，所有成功使用统一扣除 1 点且运行时不可按武器修改。
+## 固定消耗规则补充：武器不再暴露独立耐久消耗属性；普通武器成功使用扣除 1 点，混合武器完整攻击由控制器传入 2 点且运行时不可按武器修改。
 const FIXED_DURABILITY_COST_PER_USE: float = 1.0
 ## 每次成功使用武器的基础能耗；取值为非负整数，默认 0 表示免费攻击，强化后的最终值也会统一取整。
 @export_range(0, 9999, 1, "or_greater") var energy_consumption: int = 0
@@ -141,7 +141,6 @@ func is_melee() -> bool:
 
 func is_hybrid() -> bool:
 	## 返回武器是否会在一次使用中同时触发远程和近战攻击；调用方不得用该结果重复结算能量、冷却或坐力。
-	## 当前规则补充：返回 true 只表示资源同时支持两个独立通道，不再表示一次输入同时执行两种攻击。
 	return weapon_type == "hybrid"
 
 
@@ -171,7 +170,6 @@ func consume_durability(requested_amount: float = FIXED_DURABILITY_COST_PER_USE)
 	if is_broken():
 		return false
 	# 实际消耗量；普通武器固定传入 1，混合武器传入 2；当前耐久不足时只消耗剩余值，因此 1 点耐久仍可完成最后一次攻击。
-	# 当前规则补充：远程与近战通道均按一次独立使用传入 1，混合武器不再因类型额外消耗耐久。
 	var resolved_amount: float = minf(maxf(requested_amount, 0.0), current_durability)
 	if resolved_amount <= 0.0:
 		return false

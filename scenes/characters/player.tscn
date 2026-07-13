@@ -80,6 +80,17 @@ monitoring = false
 monitorable = false
 script = ExtResource("5_melee_attack")
 
+[node name="HybridRangedAttackComponent" type="Node2D" parent="."]
+script = ExtResource("4_ranged_attack")
+projectile_scene = ExtResource("6_player_projectile")
+
+[node name="HybridMeleeAttackComponent" type="Area2D" parent="."]
+collision_layer = 4
+collision_mask = 34
+monitoring = false
+monitorable = false
+script = ExtResource("5_melee_attack")
+
 [node name="SkillTargetingVisual" type="Node2D" parent="."]
 visible = false
 z_index = 5
@@ -112,6 +123,16 @@ shape = SubResource("RectangleShape2D_melee")
 disabled = true
 
 [node name="HitboxVisual" type="Polygon2D" parent="MeleeAttackComponent" unique_id=651912627]
+visible = false
+color = Color(0.494118, 0.913725, 1, 0.32)
+polygon = PackedVector2Array(20, -22, 72, -22, 92, 0, 72, 22, 20, 22)
+
+[node name="HitboxShape" type="CollisionShape2D" parent="HybridMeleeAttackComponent"]
+position = Vector2(56, 0)
+shape = SubResource("RectangleShape2D_melee")
+disabled = true
+
+[node name="HitboxVisual" type="Polygon2D" parent="HybridMeleeAttackComponent"]
 visible = false
 color = Color(0.494118, 0.913725, 1, 0.32)
 polygon = PackedVector2Array(20, -22, 72, -22, 92, 0, 72, 22, 20, 22)

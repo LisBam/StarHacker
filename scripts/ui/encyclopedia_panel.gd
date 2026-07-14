@@ -18,6 +18,14 @@ const TAB_EQUIPMENT: String = "equipment"
 const TAB_RESOURCES: String = "resources"
 ## 未解锁条目的统一占位文本；名称、类型与说明均使用该文本，避免泄露未获取物品信息。
 const UNKNOWN_ENTRY_TEXT: String = "？？？"
+## 扩展包筛选全部标识；默认显示基础内容与全部扩展包内容，不限制图鉴条目归属。
+const CONTENT_PACK_FILTER_ALL: String = ""
+## 扩展包筛选基础内容标识；固定内部值，匹配未归入任何内容包的资源和强化石通用条目。
+const CONTENT_PACK_FILTER_BASE: String = "__base_content__"
+## 图鉴搜索框最小宽度；默认 260 像素，容纳中文关键词并与扩展包下拉框保持单行布局。
+const SEARCH_FIELD_MINIMUM_WIDTH: float = 260.0
+## 扩展包筛选框最小宽度；默认 180 像素，足以显示现有三份扩展包的正式名称。
+const CONTENT_PACK_FILTER_MINIMUM_WIDTH: float = 180.0
 ## 左侧条目列表最小宽度；默认 280 像素，保证较长物品名称可读且为右侧完整详情保留主要空间。
 const ENTRY_LIST_MINIMUM_WIDTH: float = 280.0
 ## 左侧单个条目按钮最小高度；默认 40 像素，兼顾紧凑列表密度与清晰的鼠标点击区域。
@@ -43,6 +51,12 @@ var _content_catalog: Node
 var _tab_buttons: Dictionary = {}
 ## 收集进度文本缓存；显示当前类别已解锁数和总条目数，不参与解锁判定。
 var _progress_label: Label
+## 图鉴关键词搜索框；默认空字符串，按正式名称、类型和说明过滤左侧条目列表。
+var _search_edit: LineEdit
+## 扩展包筛选下拉框；默认选择全部内容，选项由 ContentCatalog 的全部扩展包清单动态建立。
+var _content_pack_filter_option: OptionButton
+## 当前扩展包筛选标识；为空表示全部，基础内容使用专用常量，其余值为稳定 pack_id。
+var _selected_content_pack_id: String = CONTENT_PACK_FILTER_ALL
 ## 图鉴条目列表容器缓存；当前页签切换或解锁状态变化时清理并重建可点击名称按钮。
 var _entry_grid: GridContainer
 ## 当前页签的图鉴条目快照；列表点击和右侧详情共用同一只读条目数组，避免两侧分别读取内容目录。
@@ -73,22 +87,26 @@ func refresh() -> void:
 	if _content_catalog == null or _global_inventory == null:
 		_resolve_services()
 		_connect_inventory_signal()
+	_refresh_content_pack_filter_options()
 	_clear_entry_grid()
-	# 当前类别条目；包含可静态发现的目录资源，以及资源页统一的强化石条目。
-	_current_entries = _build_catalog_entries(_active_tab)
-	# 已解锁条目数；只统计当前页签内通过 GlobalInventory 发现记录验证的条目。
+	# 当前类别全部条目；包含可静态发现的目录资源，以及资源页统一的强化石条目，筛选前用于统计完整收集进度。
+	var all_entries: Array[Dictionary] = _build_catalog_entries(_active_tab)
+	# 已解锁条目数；只统计当前类别全部条目，不因搜索或扩展包筛选改变永久收集进度。
 	var discovered_count: int = 0
+	for entry in all_entries:
+		if _is_entry_discovered(entry):
+			discovered_count += 1
+	# 当前类别可见条目；关键词与扩展包筛选仅缩小左侧列表，不修改内容目录或解锁状态。
+	_current_entries = _filter_catalog_entries(all_entries)
 	for entry_index in range(_current_entries.size()):
 		# 当前条目是否已解锁；没有库存服务时安全回退为 false，避免目录数据直接泄露。
 		var entry: Dictionary = _current_entries[entry_index]
 		var is_discovered: bool = _is_entry_discovered(entry)
-		if is_discovered:
-			discovered_count += 1
 		# 当前列表条目按钮；点击后仅更新右侧详情，不会改变图鉴解锁或库存状态。
 		var entry_button: Button = _build_entry_card(entry, is_discovered, entry_index) as Button
 		_entry_grid.add_child(entry_button)
 		_entry_buttons.append(entry_button)
-	_progress_label.text = "收集进度：%d / %d" % [discovered_count, _current_entries.size()]
+	_progress_label.text = "显示：%d 项  ·  收集进度：%d / %d" % [_current_entries.size(), discovered_count, all_entries.size()]
 	# 选中条目下标；优先按稳定键恢复上次查看内容，不存在时回退当前分类第一项。
 	var selected_index: int = _get_selected_entry_index()
 	if selected_index >= 0:
@@ -135,6 +153,27 @@ func _build_content() -> void:
 	_add_tab_button(tabs, TAB_WEAPONS, "武器")
 	_add_tab_button(tabs, TAB_EQUIPMENT, "装备")
 	_add_tab_button(tabs, TAB_RESOURCES, "资源")
+	# 图鉴查询栏；关键词与扩展包筛选共同作用于当前分类，行为与仓库搜索一致但不改变图鉴永久状态。
+	var query_bar: HBoxContainer = HBoxContainer.new()
+	query_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+	query_bar.add_theme_constant_override("separation", 8)
+	content.add_child(query_bar)
+	# 关键词搜索框；输入名称、类型或说明片段后立即刷新左侧条目列表并保留当前页签。
+	var search_edit: LineEdit = LineEdit.new()
+	search_edit.name = "EncyclopediaSearch"
+	search_edit.placeholder_text = "搜索名称、类型或说明"
+	search_edit.custom_minimum_size = Vector2(SEARCH_FIELD_MINIMUM_WIDTH, 36.0)
+	search_edit.text_changed.connect(_on_search_text_changed)
+	query_bar.add_child(search_edit)
+	_search_edit = search_edit
+	# 扩展包筛选框；全部、基础内容和每份内容包使用稳定元数据区分，选项文本读取内容包正式名称。
+	var content_pack_filter_option: OptionButton = OptionButton.new()
+	content_pack_filter_option.name = "EncyclopediaContentPackFilter"
+	content_pack_filter_option.custom_minimum_size = Vector2(CONTENT_PACK_FILTER_MINIMUM_WIDTH, 36.0)
+	content_pack_filter_option.item_selected.connect(_on_content_pack_filter_selected)
+	query_bar.add_child(content_pack_filter_option)
+	_content_pack_filter_option = content_pack_filter_option
+	_refresh_content_pack_filter_options()
 	# 当前分类收集进度；刷新时按当前目录全部条目和永久发现记录更新。
 	var progress_label: Label = Label.new()
 	progress_label.name = "EncyclopediaProgress"
@@ -254,6 +293,89 @@ func _sync_tab_buttons() -> void:
 				tab_button.theme_type_variation = &""
 
 
+func _on_search_text_changed(_new_text: String) -> void:
+	## 处理图鉴关键词变化；输入即时过滤当前分类列表，不改变当前扩展包筛选、解锁记录或详情数据。
+	refresh()
+
+
+func _on_content_pack_filter_selected(item_index: int) -> void:
+	if _content_pack_filter_option == null or item_index < 0 or item_index >= _content_pack_filter_option.item_count:
+		return
+	# 当前筛选元数据；空字符串表示全部内容，基础内容和正式扩展包均使用稳定内部标识。
+	var selected_metadata: String = str(_content_pack_filter_option.get_item_metadata(item_index))
+	_selected_content_pack_id = selected_metadata
+	refresh()
+
+
+func _refresh_content_pack_filter_options() -> void:
+	## 重建扩展包筛选选项；内容目录完成扫描或新增内容包后，图鉴刷新时自动同步正式名称与稳定 pack_id。
+	if _content_pack_filter_option == null:
+		return
+	# 当前筛选标识；选项重建后尽量保留玩家已选择的扩展包，已删除内容包则安全回退全部内容。
+	var previous_selection_id: String = _selected_content_pack_id
+	_content_pack_filter_option.clear()
+	_content_pack_filter_option.add_item("全部内容")
+	_content_pack_filter_option.set_item_metadata(0, CONTENT_PACK_FILTER_ALL)
+	_content_pack_filter_option.add_item("基础内容")
+	_content_pack_filter_option.set_item_metadata(1, CONTENT_PACK_FILTER_BASE)
+	if _content_catalog != null and _content_catalog.has_method("get_content_pack_ids"):
+		# 全部扩展包标识；目录返回稳定排序结果，未解锁内容包也会保留为图鉴筛选目标。
+		var content_pack_ids: Array = _content_catalog.call("get_content_pack_ids") as Array
+		for raw_content_pack_id in content_pack_ids:
+			# 当前扩展包标识；目录只返回字符串数组，仍统一标准化以避免异常数据污染筛选元数据。
+			var content_pack_id: String = str(raw_content_pack_id).strip_edges()
+			if content_pack_id.is_empty():
+				continue
+			# 扩展包只读档案；优先显示正式名称，资源异常或缺名时回退稳定 ID 以确保筛选项仍可使用。
+			var content_pack_profile: Dictionary = {}
+			if _content_catalog.has_method("get_content_pack_profile"):
+				content_pack_profile = _content_catalog.call("get_content_pack_profile", content_pack_id) as Dictionary
+			var content_pack_label: String = str(content_pack_profile.get("display_name", "")).strip_edges()
+			_content_pack_filter_option.add_item(content_pack_label if not content_pack_label.is_empty() else content_pack_id)
+			_content_pack_filter_option.set_item_metadata(_content_pack_filter_option.item_count - 1, content_pack_id)
+	# 匹配到的选项下标；找不到旧选择时回退第一项“全部内容”。
+	var selected_index: int = 0
+	for option_index in range(_content_pack_filter_option.item_count):
+		if str(_content_pack_filter_option.get_item_metadata(option_index)) == previous_selection_id:
+			selected_index = option_index
+			break
+	_selected_content_pack_id = str(_content_pack_filter_option.get_item_metadata(selected_index))
+	_content_pack_filter_option.select(selected_index)
+
+
+func _filter_catalog_entries(entries: Array[Dictionary]) -> Array[Dictionary]:
+	## 返回符合关键词与扩展包条件的条目；筛选结果为新数组，绝不改变内容目录的路径顺序、模板或图鉴发现状态。
+	# 当前关键词；空字符串表示不按文本过滤，非空时匹配名称、类型与说明的任意片段。
+	var search_text: String = _search_edit.text.strip_edges().to_lower() if _search_edit != null else ""
+	# 可见图鉴条目；按传入稳定顺序追加，保证清除筛选后恢复原有显示顺序。
+	var filtered_entries: Array[Dictionary] = []
+	for entry in entries:
+		if not _does_entry_match_content_pack_filter(entry) or not _does_entry_match_search_text(entry, search_text):
+			continue
+		filtered_entries.append(entry)
+	return filtered_entries
+
+
+func _does_entry_match_content_pack_filter(entry: Dictionary) -> bool:
+	## 判断条目是否属于当前扩展包筛选；全部显示所有条目，基础内容匹配空归属，其余只匹配同一 stable pack_id。
+	if _selected_content_pack_id == CONTENT_PACK_FILTER_ALL:
+		return true
+	# 当前条目扩展包归属；未进入任何扩展包清单的静态资源和强化石通用条目均使用空字符串。
+	var entry_content_pack_id: String = str(entry.get("content_pack_id", ""))
+	if _selected_content_pack_id == CONTENT_PACK_FILTER_BASE:
+		return entry_content_pack_id.is_empty()
+	return entry_content_pack_id == _selected_content_pack_id
+
+
+func _does_entry_match_search_text(entry: Dictionary, search_text: String) -> bool:
+	## 判断条目是否匹配关键词；图鉴搜索与仓库一致地按不区分大小写的名称、类型与说明片段进行包含匹配。
+	if search_text.is_empty():
+		return true
+	# 可检索文本；连接三个对玩家开放的字段，不读取未解锁时不应显示的运行时库存信息。
+	var searchable_text: String = "%s\n%s\n%s" % [str(entry.get("display_name", "")), str(entry.get("type_text", "")), str(entry.get("description", ""))]
+	return search_text in searchable_text.to_lower()
+
+
 func _build_catalog_entries(tab_id: String) -> Array[Dictionary]:
 	## 当前类别全部图鉴条目；每项保存只读模板资源或强化石通用元数据，不保存玩家库存实例。
 	var entries: Array[Dictionary] = []
@@ -279,8 +401,13 @@ func _build_catalog_entries(tab_id: String) -> Array[Dictionary]:
 
 func _build_resource_entry(item_resource: Resource) -> Dictionary:
 	## 静态目录物品条目；显示信息全部来自模板，实际解锁资格仍由 GlobalInventory 对稳定物品标识判定。
+	# 内容包归属；基础内容保持空字符串，已登记路径通过内容目录映射到唯一稳定 pack_id。
+	var content_pack_id: String = ""
+	if _content_catalog != null and _content_catalog.has_method("get_content_pack_id_for_resource_path"):
+		content_pack_id = str(_content_catalog.call("get_content_pack_id_for_resource_path", item_resource.resource_path)).strip_edges()
 	return {
 		"entry_key": "resource:%s" % item_resource.resource_path,
+		"content_pack_id": content_pack_id,
 		"resource": item_resource,
 		"is_enhancement_stone": false,
 		"display_name": str(item_resource.get("display_name")).strip_edges(),
@@ -294,6 +421,7 @@ func _build_enhancement_stone_entry() -> Dictionary:
 	## 强化石通用条目；强化石按随机品质与词条生成，不存在固定模板，因此任意一颗实际获得后解锁这一类收集记录。
 	return {
 		"entry_key": "enhancement_stone",
+		"content_pack_id": "",
 		"resource": null,
 		"is_enhancement_stone": true,
 		"display_name": "强化石",

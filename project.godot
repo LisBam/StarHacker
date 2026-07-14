@@ -11,10 +11,10 @@ config_version=5
 [application]
 
 config/name="星穹骇客"
-config/name_en="Star Hacker"
 run/main_scene="res://scenes/ui/main_menu.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
 config/icon="res://icon.svg"
+config/name_en="Star Hacker"
 
 [autoload]
 

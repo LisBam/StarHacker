@@ -22,6 +22,16 @@ const UNKNOWN_ENTRY_TEXT: String = "？？？"
 const ENTRY_LIST_MINIMUM_WIDTH: float = 280.0
 ## 左侧单个条目按钮最小高度；默认 40 像素，兼顾紧凑列表密度与清晰的鼠标点击区域。
 const ENTRY_LIST_BUTTON_MINIMUM_HEIGHT: float = 40.0
+## 右侧详情水平内边距；默认 18 像素，使文字与左右边框保持清晰距离，运行时通常不修改。
+const DETAIL_HORIZONTAL_MARGIN: int = 18
+## 右侧详情垂直内边距；默认 16 像素，使标题、正文与上下边框保持一致留白，运行时通常不修改。
+const DETAIL_VERTICAL_MARGIN: int = 16
+## 右侧详情标题字号；默认 18 像素，比普通正文更醒目，修改只影响“详细信息”栏标题。
+const DETAIL_TITLE_FONT_SIZE: int = 18
+## 右侧详情正文字号；默认 16 像素，覆盖富文本未显式指定字号的属性与说明内容。
+const DETAIL_BODY_FONT_SIZE: int = 16
+## 右侧详情正文行距；默认 4 像素，增加长属性文本的纵向可读性，修改不改变数值或滚动范围。
+const DETAIL_BODY_LINE_SEPARATION: int = 4
 
 ## 当前激活图鉴页签；默认武器页，点击页签后只重建当前类别的纯展示卡片。
 var _active_tab: String = TAB_WEAPONS
@@ -117,12 +127,6 @@ func _build_content() -> void:
 	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	UI_STYLE_GUIDE.apply_title_label(title_label, 24)
 	content.add_child(title_label)
-	# 规则说明；明确只有实际获得后才能查看条目，出售和消耗不会重新锁定。
-	var hint_label: Label = Label.new()
-	hint_label.text = "获得物品即可解锁对应条目；未解锁内容显示“？？？”。"
-	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.SECONDARY_TEXT_COLOR)
-	content.add_child(hint_label)
 	# 分类页签容器；三个类别互斥切换，始终保持当前类别的高亮按下状态。
 	var tabs: HBoxContainer = HBoxContainer.new()
 	tabs.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -178,14 +182,21 @@ func _build_content() -> void:
 	detail_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	UI_STYLE_GUIDE.apply_section_panel(detail_panel)
 	content_split.add_child(detail_panel)
+	# 详情内边距容器；为标题和正文统一保留可调留白，避免文字直接贴住详情分区边框。
+	var detail_margin: MarginContainer = MarginContainer.new()
+	detail_margin.add_theme_constant_override("margin_left", DETAIL_HORIZONTAL_MARGIN)
+	detail_margin.add_theme_constant_override("margin_top", DETAIL_VERTICAL_MARGIN)
+	detail_margin.add_theme_constant_override("margin_right", DETAIL_HORIZONTAL_MARGIN)
+	detail_margin.add_theme_constant_override("margin_bottom", DETAIL_VERTICAL_MARGIN)
+	detail_panel.add_child(detail_margin)
 	# 详情分区内容；标题与可滚动富文本详情分离，长属性列表不会挤压窗口底部返回按钮。
 	var detail_content: VBoxContainer = VBoxContainer.new()
-	detail_content.add_theme_constant_override("separation", 8)
-	detail_panel.add_child(detail_content)
+	detail_content.add_theme_constant_override("separation", 12)
+	detail_margin.add_child(detail_content)
 	# 详情标题；始终固定在右侧顶部，实际物品名称与属性由下方详情文本提供。
 	var detail_title_label: Label = Label.new()
 	detail_title_label.text = "详细信息"
-	UI_STYLE_GUIDE.apply_title_label(detail_title_label, 16)
+	UI_STYLE_GUIDE.apply_title_label(detail_title_label, DETAIL_TITLE_FONT_SIZE)
 	detail_content.add_child(detail_title_label)
 	# 详情富文本；自身占满右侧剩余空间并使用内部纵向滚动条，避免外层滚动与自适应高度相互挤压导致文字被裁剪。
 	var detail_label: RichTextLabel = RichTextLabel.new()
@@ -195,6 +206,8 @@ func _build_content() -> void:
 	detail_label.scroll_active = true
 	detail_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	detail_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	detail_label.add_theme_font_size_override("normal_font_size", DETAIL_BODY_FONT_SIZE)
+	detail_label.add_theme_constant_override("line_separation", DETAIL_BODY_LINE_SEPARATION)
 	detail_content.add_child(detail_label)
 	_detail_label = detail_label
 	# 返回按钮；主菜单遮罩监听 closed 后隐藏面板，本组件不直接引用任何主菜单节点。

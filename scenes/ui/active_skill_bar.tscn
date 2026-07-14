@@ -1,7 +1,7 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3 uid="uid://bn0nm7dbbpk41"]
 
-[ext_resource type="Script" path="res://scripts/ui/active_skill_bar.gd" id="1_active_skill_bar"]
+[ext_resource type="Script" uid="uid://csmbwjmlaeeq0" path="res://scripts/ui/active_skill_bar.gd" id="1_active_skill_bar"]
 
-[node name="ActiveSkillBar" type="HBoxContainer"]
+[node name="ActiveSkillBar" type="HBoxContainer" unique_id=1859268227]
 mouse_filter = 2
 script = ExtResource("1_active_skill_bar")

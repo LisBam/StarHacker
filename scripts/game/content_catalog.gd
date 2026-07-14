@@ -139,6 +139,13 @@ func get_content_pack_id_for_character(character_id: String) -> String:
 	return str(_content_pack_id_by_character_id.get(character_id, ""))
 
 
+func get_content_pack_id_for_resource_path(resource_path: String) -> String:
+	## 返回内容资源所属扩展包 ID；未登记路径属于基础内容并返回空字符串，图鉴等只读界面可据此筛选而不触碰可用内容池规则。
+	# 标准化资源路径；空路径没有可追溯的内容归属，直接按基础内容处理以避免误匹配。
+	var normalized_resource_path: String = resource_path.strip_edges()
+	return str(_content_pack_id_by_resource_path.get(normalized_resource_path, "")) if not normalized_resource_path.is_empty() else ""
+
+
 func get_content_pack_profile(pack_id: String) -> Dictionary:
 	## 返回扩展包只读快照；调用方可检查归属与各类内容路径，但不能修改目录内的权威清单资源。
 	# 扩展包资源；不存在时返回空词典，调用方可据此判断无效 ID。

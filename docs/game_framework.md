@@ -6,7 +6,7 @@
 
 | 入口 | 实现 | 职责 |
 | --- | --- | --- |
-| 主菜单 | `res://scenes/ui/main_menu.tscn`、`res://scripts/ui/main_menu.gd` | 项目主场景；打开角色、背包、仓库、商店、锻造、股市、矿场及模式入口 |
+| 主菜单 | `res://scenes/ui/main_menu.tscn`、`res://scripts/ui/main_menu.gd` | 项目主场景；打开角色、图鉴、背包、仓库、商店、锻造、股市、矿场及模式入口 |
 | 角色系统 | `res://scenes/ui/character_select.tscn`、`res://scripts/ui/character_select.gd` | 完整模式展示可选角色并持久化确认结果；当前角色模式隐藏角色列表，供战斗内只读查看同一套属性与技能详情 |
 | 战斗世界 | `res://scenes/game/game_world.tscn`、`res://scripts/game/game_world.gd` | 承载玩家、地图、环境、敌人人口、宝箱、掉落与撤离流程 |
 | 玩家预制体 | `res://scenes/characters/player.tscn`、`res://scripts/player/player_controller.gd` | 组合输入、移动、战斗属性、装备和攻击组件 |
@@ -24,7 +24,7 @@
 | `SessionState` | 保存当前游戏模式、已确认角色与永久角色/扩展包解锁状态 | `user://character_unlocks.json`；角色选择和解锁永久保存，模式仅运行期 |
 | `InputBindings` | 管理默认与自定义输入映射 | `user://input_bindings.cfg` |
 | `DebugSettings` | 管理开发者调试选项 | `user://debug_settings.cfg` |
-| `GlobalInventory` | 拥有金币、仓库、随身背包、装备槽、持仓和战斗结算数据 | `user://global_inventory.json` |
+| `GlobalInventory` | 拥有金币、仓库、随身背包、装备槽、持仓、永久图鉴发现记录和战斗结算数据 | `user://global_inventory.json` |
 | `ShopService` | 生成普通商店与灰市库存，维护刷新状态 | `user://shop_state.json` |
 | `StockMarketService` | 维护行情、事件、证券币和对局行为影响 | `user://stock_market_state.json` |
 | `MiningFarmService` | 维护算力币、矿场资产、在线收益和临时增益 | `user://mining_farm_state.json` |
@@ -82,6 +82,7 @@
 ### 3.4 UI 层
 
 - `CombatHud` 负责局内信息、暂停、地图、拾取提示、物资撤离和结算编排，不直接拥有库存数据。
+- `EncyclopediaPanel` 只读取 `ContentCatalog` 的全量武器、装备与道具模板，并通过 `GlobalInventory` 的稳定发现记录决定显示正式信息或“？？？”。它不复制物品数据、不修改库存，也不把浏览、商店预览或临时快照视为获得。
 - `CombatHud` 运行时实例化角色系统的当前角色模式，负责 O 键打开、关闭、输入锁定和场景树暂停；角色档案、属性条与技能卡片仍由角色系统从 `SessionState` 读取，HUD 不保存副本。
 - 战斗常驻 HUD 将技能栏放在屏幕左下角、武器栏放在屏幕右下角，角色名字、生命与能量独立保留在底部中心；常驻 HUD 节点必须位于全部交互遮罩之前，菜单显示时不依赖逐项隐藏也不会覆盖菜单内容。
 - 右下常驻武器栏由 `CombatHud` 直接创建 `CombatHudSlotView` 并读取装备组件快照，顶部使用与技能按键相同的居中区域显示“远程 1 / 远程 2 / 近战”，下方显示武器名、能耗、耐久、当前手持高亮和攻击冷却；它不复用 `WeaponSlotControl` 或 `ItemCardView`，装备、卸下、修复、强化和拖拽操作只存在于背包等交互界面。
@@ -198,7 +199,7 @@ ContentCatalog 模板
 - 新物品展示字段进入 `ItemDetailFormatter`；标准卡片结构进入 `ItemCardView`。
 - 主菜单与战斗背包的共同交互进入 `SharedBackpackPanel`。仅场景特有的所有权结果由宿主通过信号处理。
 - 正式战斗中的普通拾取、丢弃、装备与耐久变化先写入 `GlobalInventory` 内存状态，不为每次操作重复序列化包含永久仓库的完整存档；成功撤离、失败或正常退出结算后统一落盘。物资撤离点已经送回永久仓库的资产使用强制保存路径，不等待本局最终结算。
-- `user://global_inventory.json` 只能由 `/root/GlobalInventory` AutoLoad 写入；独立测试实例、临时验证脚本和普通场景节点没有持久化权限。库存服务只维护这一份主存档，不自动生成额外恢复或备份文件。
+- `user://global_inventory.json` 只能由 `/root/GlobalInventory` AutoLoad 写入；独立测试实例、临时验证脚本和普通场景节点没有持久化权限。库存服务只维护这一份主存档，不自动生成额外恢复或备份文件。存档版本 11 起额外保存稳定图鉴发现键；旧存档首次读取时以当前仓库、背包与已装备物品补齐发现记录，之后出售、消耗、丢弃或战斗遗失都不会重新锁定条目。
 
 ### 7.3 敌人与环境
 

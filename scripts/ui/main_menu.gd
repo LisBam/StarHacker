@@ -28,6 +28,8 @@ const FORGE_PANEL_SCRIPT: Script = preload("res://scripts/ui/forge_panel.gd")
 const STOCK_MARKET_PANEL_SCRIPT: Script = preload("res://scripts/ui/stock_market_panel.gd")
 ## 矿场面板脚本；默认在主菜单点击矿场按钮后动态创建并读取全局矿场服务。
 const MINING_FARM_PANEL_SCRIPT: Script = preload("res://scripts/ui/mining_farm_panel.gd")
+## 图鉴面板脚本；默认在主菜单点击图鉴按钮后动态创建，并从内容目录和永久库存读取展示与解锁状态。
+const ENCYCLOPEDIA_PANEL_SCRIPT: Script = preload("res://scripts/ui/encyclopedia_panel.gd")
 ## 隐藏开发者菜单脚本；默认只在主菜单依次输入 LISBAM 后显示。
 const DEVELOPER_MENU_SCRIPT: Script = preload("res://scripts/ui/developer_menu.gd")
 ## 开发者模式解锁序列；默认由六个英文字母组成，输入错误会按首字母重新匹配。
@@ -59,6 +61,8 @@ const DEVELOPER_UNLOCK_SEQUENCE: String = "LISBAM"
 @onready var _stock_market_button: Button = %StockMarketButton
 ## 矿场按钮缓存；默认位于炒股按钮右侧，点击后打开常驻算力资产经营界面。
 @onready var _mining_farm_button: Button = %MiningFarmButton
+## 图鉴按钮缓存；默认位于主菜单底部功能栏末位，点击后查看武器、装备与资源的永久收集状态。
+@onready var _encyclopedia_button: Button = %EncyclopediaButton
 ## 设置面板缓存；默认绑定唯一名 SettingsPanel，控制主菜单设置界面的显示和隐藏。
 @onready var _settings_panel: Control = %SettingsPanel
 ## 设置内容容器缓存；默认通过场景路径绑定，用于动态挂载按键绑定面板。
@@ -114,6 +118,10 @@ var _stock_market_panel: Control
 var _mining_farm_overlay: Control
 ## 矿场面板实例；关闭后复用，后台收益由独立 Autoload 服务继续低频结算。
 var _mining_farm_panel: Control
+## 图鉴全屏遮罩；默认运行时创建并隐藏，显示时阻止主菜单其他入口接收鼠标输入。
+var _encyclopedia_overlay: Control
+## 图鉴面板实例；关闭后复用，打开时从内容目录重新读取全部条目并同步永久发现状态。
+var _encyclopedia_panel: Control
 ## 开发者菜单全屏遮罩；默认运行时创建并隐藏，解锁后阻止其他主菜单控件接收输入。
 var _developer_overlay: Control
 ## 开发者菜单实例；默认由 DeveloperMenu 脚本动态创建并在关闭后复用。
@@ -143,6 +151,7 @@ func _ready() -> void:
 	_forge_button.pressed.connect(_on_forge_button_pressed)
 	_stock_market_button.pressed.connect(_on_stock_market_button_pressed)
 	_mining_farm_button.pressed.connect(_on_mining_farm_button_pressed)
+	_encyclopedia_button.pressed.connect(_on_encyclopedia_button_pressed)
 	_master_volume_slider.value_changed.connect(_on_master_volume_slider_value_changed)
 	_settings_back_button.pressed.connect(_on_settings_back_button_pressed)
 	_build_key_binding_navigation()
@@ -152,6 +161,7 @@ func _ready() -> void:
 	_build_forge_overlay()
 	_build_stock_market_overlay()
 	_build_mining_farm_overlay()
+	_build_encyclopedia_overlay()
 	_build_developer_overlay()
 	_settings_panel.visible = false
 	_show_key_binding_page(false)
@@ -254,6 +264,15 @@ func _on_mining_farm_button_pressed() -> void:
 	_mining_farm_overlay.visible = true
 	if _mining_farm_panel != null and _mining_farm_panel.has_method("present"):
 		_mining_farm_panel.call("present")
+
+
+func _on_encyclopedia_button_pressed() -> void:
+	if _encyclopedia_overlay == null:
+		return
+	_settings_panel.visible = false
+	_encyclopedia_overlay.visible = true
+	if _encyclopedia_panel != null and _encyclopedia_panel.has_method("refresh"):
+		_encyclopedia_panel.call("refresh")
 
 
 func _build_warehouse_overlay() -> void:
@@ -480,6 +499,42 @@ func _build_mining_farm_overlay() -> void:
 	mining_farm_overlay.visible = false
 
 
+func _build_encyclopedia_overlay() -> void:
+	if _encyclopedia_overlay != null:
+		return
+	# 图鉴遮罩；覆盖完整主菜单并拦截输入，隐藏时不保留任何主菜单交互焦点。
+	var encyclopedia_overlay: Control = Control.new()
+	encyclopedia_overlay.name = "EncyclopediaOverlay"
+	encyclopedia_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	encyclopedia_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(encyclopedia_overlay)
+	_encyclopedia_overlay = encyclopedia_overlay
+	# 图鉴背景遮罩；使用与仓库、商店和矿场一致的深蓝黑透明层突出收集信息。
+	var encyclopedia_dim: ColorRect = ColorRect.new()
+	encyclopedia_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	encyclopedia_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
+	encyclopedia_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	encyclopedia_overlay.add_child(encyclopedia_dim)
+	# 图鉴面板；固定 1000×640 像素，四列条目网格在该尺寸下保留名称与说明的可读空间。
+	var encyclopedia_panel: Control = ENCYCLOPEDIA_PANEL_SCRIPT.new() as Control
+	if encyclopedia_panel == null:
+		encyclopedia_overlay.visible = false
+		return
+	encyclopedia_panel.name = "EncyclopediaPanel"
+	encyclopedia_panel.anchor_left = 0.5
+	encyclopedia_panel.anchor_top = 0.5
+	encyclopedia_panel.anchor_right = 0.5
+	encyclopedia_panel.anchor_bottom = 0.5
+	encyclopedia_panel.offset_left = -500.0
+	encyclopedia_panel.offset_top = -320.0
+	encyclopedia_panel.offset_right = 500.0
+	encyclopedia_panel.offset_bottom = 320.0
+	encyclopedia_panel.connect("closed", Callable(self, "_on_encyclopedia_closed"))
+	encyclopedia_overlay.add_child(encyclopedia_panel)
+	_encyclopedia_panel = encyclopedia_panel
+	encyclopedia_overlay.visible = false
+
+
 func _build_developer_overlay() -> void:
 	if _developer_overlay != null:
 		return
@@ -530,6 +585,8 @@ func _open_developer_menu() -> void:
 		_mining_farm_overlay.visible = false
 	if _mining_farm_panel != null and _mining_farm_panel.has_method("_close_panel"):
 		_mining_farm_panel.call("_close_panel")
+	if _encyclopedia_overlay != null:
+		_encyclopedia_overlay.visible = false
 	_developer_overlay.visible = true
 
 
@@ -575,6 +632,12 @@ func _on_mining_farm_closed() -> void:
 	if _mining_farm_overlay != null:
 		_mining_farm_overlay.visible = false
 	_mining_farm_button.grab_focus()
+
+
+func _on_encyclopedia_closed() -> void:
+	if _encyclopedia_overlay != null:
+		_encyclopedia_overlay.visible = false
+	_encyclopedia_button.grab_focus()
 
 
 func _on_master_volume_slider_value_changed(value: float) -> void:

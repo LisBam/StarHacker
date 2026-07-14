@@ -8,6 +8,8 @@ signal equipment_changed
 signal run_state_changed
 signal warehouse_changed
 signal coins_changed
+## 图鉴发现状态变化信号；只有首次获得新的稳定物品条目时派发，图鉴 UI 据此刷新已解锁卡片。
+signal encyclopedia_changed
 ## 股票持仓变化信号；买入、卖出、旧存档迁移或开发者清空持仓后通知股市 UI 刷新。
 signal stock_holdings_changed
 ## 战斗失败遗失记录信号；参数为本次实际遗失条目，商店灰市通过该只读快照维护最近五次失败物品。
@@ -18,7 +20,8 @@ const SAVE_PATH: String = "user://global_inventory.json"
 ## 当前库存存档版本；默认 7，版本 7 起支持可堆叠修复包的独立数据恢复。
 ## 版本 9 补充；当前值升级为 9，用于保存股票持仓数量和加权平均成本，旧存档自动初始化为空持仓。
 ## 星内容精简补充：当前值升级为 10，用于在旧内容资源移除后为旧存档补齐星扩展包的可用初始装备。
-const SAVE_VERSION: int = 10
+const SAVE_VERSION: int = 11
+## 图鉴系统补充：当前库存存档版本为 11，新增永久图鉴发现记录；旧存档会从当前持有与已装备物品初始化已发现条目。
 ## 强化公式存档版本；版本 2 起暴击率、暴击伤害和闪避率的累计值按直接百分点保存。
 const ENHANCEMENT_FORMULA_VERSION: int = 2
 ## 旧版耐久上限；固定 100.0，用于把版本 5 的当前耐久按比例迁移到新版上限。
@@ -75,6 +78,8 @@ const EQUIPMENT_LOCATION_ARMOR_PREFIX: String = "armor_"
 const ARMOR_SLOT_IDS: Array[String] = ["head", "body", "legs", "feet"]
 ## 可堆叠资源单组上限；默认 99，所有仓库、背包、转移、读档和拾取逻辑共同遵守该限制。
 const MAX_STACK_QUANTITY: int = 99
+## 强化石图鉴稳定发现键；随机生成的强化石没有固定模板，任意一颗首次获得后统一解锁该资源类别条目。
+const ENHANCEMENT_STONE_DISCOVERY_KEY: String = "enhancement_stone:any"
 ## 开发者单次发放强化石数量；默认 10，对应隐藏开发者菜单的固定调试功能。
 const DEVELOPER_STONE_GRANT_COUNT: int = 10
 ## 开发者强化石最少词条数；默认 1，与战斗掉落默认配置保持一致。
@@ -133,6 +138,8 @@ var _random: RandomNumberGenerator = RandomNumberGenerator.new()
 var _coins: int = DEFAULT_STARTING_COINS
 ## 股票持仓表；键为稳定股票标识，值包含非负整数 quantity 与非负浮点 average_cost。
 var _stock_holdings: Dictionary = {}
+## 已发现图鉴条目表；键为“物品类型:稳定 ID”或强化石统一键，值为 true，物品出售、消耗与战斗失败都不会移除记录。
+var _discovered_encyclopedia_entries: Dictionary = {}
 ## 已读取存档是否完成内容精简迁移；默认 false，版本 10 之前补齐星扩展包装备后置为 true，并在启动阶段立即回写避免重复发放。
 var _loaded_inventory_requires_resave: bool = false
 
@@ -313,6 +320,18 @@ func get_warehouse_count() -> int:
 
 func get_coins() -> int:
 	return _coins
+
+
+func is_resource_discovered(item_resource: Resource) -> bool:
+	## 查询静态物品模板是否已在图鉴中发现；只读取稳定类型与 ID，不比较运行时强化、耐久或资源实例身份。
+	# 图鉴稳定键；空键表示资源没有可持久化的物品标识，不能被图鉴错误解锁。
+	var discovery_key: String = _get_encyclopedia_discovery_key(item_resource)
+	return not discovery_key.is_empty() and _discovered_encyclopedia_entries.has(discovery_key)
+
+
+func is_enhancement_stone_discovered() -> bool:
+	## 查询随机强化石类别是否已发现；任意实际获得的强化石都会永久解锁同一个通用资源条目。
+	return _discovered_encyclopedia_entries.has(ENHANCEMENT_STONE_DISCOVERY_KEY)
 
 
 func get_stock_holdings() -> Dictionary:
@@ -712,7 +731,7 @@ func deserialize_item_snapshot(serialized_snapshot: Dictionary) -> Dictionary:
 	# 原获得序号；商店读取临时物品不应改变玩家库存的真实获得顺序，因此反序列化后立即恢复。
 	var original_acquisition_sequence: int = _acquisition_sequence
 	# 临时恢复记录；使用库存兼容加载器恢复武器强化、耐久或强化石品质与词条。
-	var restored_record: Dictionary = _deserialize_record(serialized_snapshot)
+	var restored_record: Dictionary = _deserialize_record(serialized_snapshot, false)
 	_acquisition_sequence = original_acquisition_sequence
 	if restored_record.is_empty():
 		return {}
@@ -1570,7 +1589,10 @@ func _initialize_default_inventory() -> void:
 	_sort_warehouse_default()
 
 
-func _create_record(item_resource: Resource, acquired_at: float = -1.0, record_id: String = "") -> Dictionary:
+func _create_record(item_resource: Resource, acquired_at: float = -1.0, record_id: String = "", register_encyclopedia_discovery: bool = true) -> Dictionary:
+	## 创建库存所有权记录；默认同时登记图鉴发现，商店快照等非所有权反序列化会显式关闭该行为。
+	if register_encyclopedia_discovery:
+		_register_encyclopedia_discovery(item_resource)
 	_acquisition_sequence += 1
 	# 实际获得时间；取值为 Unix 秒，新物品使用当前时间，读档时保留存档时间。
 	var resolved_acquired_at: float = Time.get_unix_time_from_system() if acquired_at < 0.0 else acquired_at
@@ -1588,6 +1610,29 @@ func _create_record(item_resource: Resource, acquired_at: float = -1.0, record_i
 		# 本局来源数量；仅在正式战斗内存中使用，不写入永久存档，取值始终限制在 0 到记录总数量。
 		"run_gained_quantity": 0,
 	}
+
+
+func _register_encyclopedia_discovery(item_resource: Resource) -> void:
+	## 登记一次永久图鉴发现；只有新的稳定条目会写入状态并派发更新信号，重复获得不造成额外存档或 UI 刷新。
+	# 图鉴稳定键；由物品类型和稳定 ID 组成，随机强化石使用统一资源类别键。
+	var discovery_key: String = _get_encyclopedia_discovery_key(item_resource)
+	if discovery_key.is_empty() or _discovered_encyclopedia_entries.has(discovery_key):
+		return
+	_discovered_encyclopedia_entries[discovery_key] = true
+	encyclopedia_changed.emit()
+
+
+func _get_encyclopedia_discovery_key(item_resource: Resource) -> String:
+	## 生成物品图鉴稳定键；资源重命名、耐久变化和强化结果不会改变已发现身份，缺少稳定 ID 的异常资源不进入图鉴。
+	if item_resource == null:
+		return ""
+	# 物品类型；强化石由随机运行时字段构成，因此统一映射到单一资源类别条目。
+	var item_kind: String = str(item_resource.get("item_kind")).strip_edges()
+	if item_kind == "enhancement_stone":
+		return ENHANCEMENT_STONE_DISCOVERY_KEY
+	# 稳定物品标识；武器、装备与通用道具分别读取既有 ID 字段，避免不同类型同名 ID 相互覆盖。
+	var item_id: String = str(item_resource.get("weapon_id")).strip_edges() if item_kind == "weapon" else (str(item_resource.get("equipment_id")).strip_edges() if item_kind == "equipment" else str(item_resource.get("item_id")).strip_edges())
+	return "%s:%s" % [item_kind, item_id] if not item_kind.is_empty() and not item_id.is_empty() else ""
 
 
 func _sort_backpack_default() -> void:
@@ -2118,6 +2163,7 @@ func _save_inventory() -> void:
 		"current_ranged_slot": _current_ranged_slot,
 		"coins": _coins,
 		"stock_holdings": _stock_holdings,
+		"encyclopedia_discovered_entries": _get_serialized_encyclopedia_discoveries(),
 		"warehouse": serialized_warehouse,
 		"backpack": serialized_backpack,
 		"ranged_equipment": serialized_ranged,
@@ -2128,6 +2174,19 @@ func _save_inventory() -> void:
 	var save_file: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if save_file != null:
 		save_file.store_string(JSON.stringify(save_data))
+
+
+func _get_serialized_encyclopedia_discoveries() -> Array[String]:
+	## 返回可写入 JSON 的图鉴发现键列表；字典键排序后保存，保证相同状态多次存档输出顺序稳定。
+	# 图鉴发现键数组；只保留非空字符串，异常键不会污染后续读档的永久解锁记录。
+	var discovered_keys: Array[String] = []
+	for raw_discovery_key in _discovered_encyclopedia_entries.keys():
+		# 当前发现键；取值来自稳定物品类型与 ID，键存在即代表玩家曾实际获得过该类别物品。
+		var discovery_key: String = str(raw_discovery_key).strip_edges()
+		if not discovery_key.is_empty():
+			discovered_keys.append(discovery_key)
+	discovered_keys.sort()
+	return discovered_keys
 
 
 func _is_canonical_persistence_owner() -> bool:
@@ -2162,6 +2221,7 @@ func _load_inventory() -> bool:
 	_warehouse_records.clear()
 	_backpack_records.clear()
 	_detached_records.clear()
+	_discovered_encyclopedia_entries.clear()
 	_melee_equipment_record = {}
 	for armor_slot in ARMOR_SLOT_IDS:
 		_armor_equipment_records[armor_slot] = {}
@@ -2170,6 +2230,18 @@ func _load_inventory() -> bool:
 	_current_ranged_slot = clampi(int(save_data.get("current_ranged_slot", 0)), 0, DEFAULT_RANGED_SLOT_COUNT - 1)
 	_coins = maxi(int(save_data.get("coins", DEFAULT_STARTING_COINS)), 0)
 	_stock_holdings.clear()
+	# 图鉴发现记录是否存在；版本 11 前的存档没有历史账本，会按本次恢复的当前持有和装备物品生成并在加载后回写。
+	var has_encyclopedia_discoveries: bool = save_data.has("encyclopedia_discovered_entries")
+	# 图鉴发现记录原始数组；只接受非空字符串，旧档或损坏项不会阻断后续库存恢复。
+	var raw_encyclopedia_discoveries: Variant = save_data.get("encyclopedia_discovered_entries", [])
+	if raw_encyclopedia_discoveries is Array:
+		for raw_discovery_key in raw_encyclopedia_discoveries:
+			# 已保存发现键；直接恢复到集合，物品即使已经出售、消耗或遗失也继续保持图鉴解锁。
+			var discovery_key: String = str(raw_discovery_key).strip_edges()
+			if not discovery_key.is_empty():
+				_discovered_encyclopedia_entries[discovery_key] = true
+	if not has_encyclopedia_discoveries:
+		_loaded_inventory_requires_resave = true
 	# 股票持仓存档；版本 9 起逐项恢复数量与成本，旧版存档自然保持空持仓。
 	var raw_stock_holdings: Variant = save_data.get("stock_holdings", {})
 	if raw_stock_holdings is Dictionary:
@@ -2330,7 +2402,8 @@ func _serialize_record(record: Dictionary) -> Dictionary:
 	return serialized_record
 
 
-func _deserialize_record(serialized_record: Dictionary) -> Dictionary:
+func _deserialize_record(serialized_record: Dictionary, register_encyclopedia_discovery: bool = true) -> Dictionary:
+	## 从存档或临时快照恢复记录；真实库存恢复默认补登记图鉴，商店等只读临时快照必须关闭发现登记。
 	# 物品类型；旧版存档缺失时按武器处理，保证版本 1/2 存档可继续读取。
 	var item_kind: String = str(serialized_record.get("item_kind", "weapon"))
 	# 武器标识；取值为稳定 weapon_id，资源路径失效时用于默认表兜底加载。
@@ -2409,7 +2482,7 @@ func _deserialize_record(serialized_record: Dictionary) -> Dictionary:
 		var saved_equipment_current_durability: float = float(serialized_record.get("current_durability", saved_equipment_max_durability))
 		item_resource.call("set_current_durability", equipment_max_durability * clampf(saved_equipment_current_durability / saved_equipment_max_durability, 0.0, 1.0))
 	# 恢复记录；保留编号和获得时间，序号缺失时使用当前递增值。
-	var record: Dictionary = _create_record(item_resource, float(serialized_record.get("acquired_at", 0.0)), str(serialized_record.get("record_id", "")))
+	var record: Dictionary = _create_record(item_resource, float(serialized_record.get("acquired_at", 0.0)), str(serialized_record.get("record_id", "")), register_encyclopedia_discovery)
 	record["acquisition_sequence"] = int(serialized_record.get("acquisition_sequence", record.get("acquisition_sequence", 0)))
 	record["last_extraction_epoch"] = int(serialized_record.get("last_extraction_epoch", 0))
 	record["quantity"] = clampi(int(serialized_record.get("quantity", 1)), 1, MAX_STACK_QUANTITY)

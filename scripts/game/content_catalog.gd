@@ -58,12 +58,27 @@ func get_weapon_paths() -> PackedStringArray:
 	return _filter_unlocked_content_paths(_dictionary_values_as_paths(_weapon_paths_by_id))
 
 
+func get_all_weapon_paths() -> PackedStringArray:
+	## 返回目录中全部已注册武器模板路径；图鉴等只读内容展示使用此接口，不受角色扩展包当前可用状态过滤。
+	return _dictionary_values_as_paths(_weapon_paths_by_id)
+
+
 func get_equipment_paths() -> PackedStringArray:
 	return _filter_unlocked_content_paths(_dictionary_values_as_paths(_equipment_paths_by_id))
 
 
+func get_all_equipment_paths() -> PackedStringArray:
+	## 返回目录中全部已注册装备模板路径；调用方只能读取模板元数据，不能把此接口作为掉落或商店内容池使用。
+	return _dictionary_values_as_paths(_equipment_paths_by_id)
+
+
 func get_item_paths() -> PackedStringArray:
 	return _filter_unlocked_content_paths(_dictionary_values_as_paths(_item_paths_by_id))
+
+
+func get_all_item_paths() -> PackedStringArray:
+	## 返回目录中全部已注册通用道具模板路径；图鉴借此为未发现的资源保留“？？？”占位条目。
+	return _dictionary_values_as_paths(_item_paths_by_id)
 
 
 func get_enemy_scene_paths() -> PackedStringArray:

@@ -18,14 +18,10 @@ const TAB_EQUIPMENT: String = "equipment"
 const TAB_RESOURCES: String = "resources"
 ## 未解锁条目的统一占位文本；名称、类型与说明均使用该文本，避免泄露未获取物品信息。
 const UNKNOWN_ENTRY_TEXT: String = "？？？"
-## 扩展包筛选全部标识；默认显示基础内容与全部扩展包内容，不限制图鉴条目归属。
-const CONTENT_PACK_FILTER_ALL: String = ""
-## 扩展包筛选基础内容标识；固定内部值，匹配未归入任何内容包的资源和强化石通用条目。
-const CONTENT_PACK_FILTER_BASE: String = "__base_content__"
-## 图鉴搜索框最小宽度；默认 260 像素，容纳中文关键词并与扩展包下拉框保持单行布局。
+## 图鉴搜索框最小宽度；默认 260 像素，容纳中文关键词并在页签下方保持清晰单行布局。
 const SEARCH_FIELD_MINIMUM_WIDTH: float = 260.0
-## 扩展包筛选框最小宽度；默认 180 像素，足以显示现有三份扩展包的正式名称。
-const CONTENT_PACK_FILTER_MINIMUM_WIDTH: float = 180.0
+## 扩展包标题分割最小高度；默认 32 像素，使每组内容在左侧列表中拥有清晰可读的视觉边界。
+const CONTENT_PACK_DIVIDER_MINIMUM_HEIGHT: float = 32.0
 ## 左侧条目列表最小宽度；默认 280 像素，保证较长物品名称可读且为右侧完整详情保留主要空间。
 const ENTRY_LIST_MINIMUM_WIDTH: float = 280.0
 ## 左侧单个条目按钮最小高度；默认 40 像素，兼顾紧凑列表密度与清晰的鼠标点击区域。
@@ -53,10 +49,10 @@ var _tab_buttons: Dictionary = {}
 var _progress_label: Label
 ## 图鉴关键词搜索框；默认空字符串，按正式名称、类型和说明过滤左侧条目列表。
 var _search_edit: LineEdit
-## 扩展包筛选下拉框；默认选择全部内容，选项由 ContentCatalog 的全部扩展包清单动态建立。
-var _content_pack_filter_option: OptionButton
-## 当前扩展包筛选标识；为空表示全部，基础内容使用专用常量，其余值为稳定 pack_id。
-var _selected_content_pack_id: String = CONTENT_PACK_FILTER_ALL
+## 扩展包显示名称表；键为稳定 pack_id，值为正式扩展包名称，用于构建左侧分组标题而不充当筛选状态。
+var _content_pack_display_names: Dictionary = {}
+## 扩展包排序序号表；键为稳定 pack_id，值为目录排序索引，基础内容固定序号 0 并排在全部扩展包之前。
+var _content_pack_sort_orders: Dictionary = {}
 ## 图鉴条目列表容器缓存；当前页签切换或解锁状态变化时清理并重建可点击名称按钮。
 var _entry_grid: GridContainer
 ## 当前页签的图鉴条目快照；列表点击和右侧详情共用同一只读条目数组，避免两侧分别读取内容目录。
@@ -87,7 +83,7 @@ func refresh() -> void:
 	if _content_catalog == null or _global_inventory == null:
 		_resolve_services()
 		_connect_inventory_signal()
-	_refresh_content_pack_filter_options()
+	_refresh_content_pack_group_metadata()
 	_clear_entry_grid()
 	# 当前类别全部条目；包含可静态发现的目录资源，以及资源页统一的强化石条目，筛选前用于统计完整收集进度。
 	var all_entries: Array[Dictionary] = _build_catalog_entries(_active_tab)
@@ -96,12 +92,19 @@ func refresh() -> void:
 	for entry in all_entries:
 		if _is_entry_discovered(entry):
 			discovered_count += 1
-	# 当前类别可见条目；关键词与扩展包筛选仅缩小左侧列表，不修改内容目录或解锁状态。
+	# 当前类别可见条目；关键词筛选仅缩小左侧列表，不修改内容目录、扩展包分组或解锁状态。
 	_current_entries = _filter_catalog_entries(all_entries)
+	# 上一个已显示条目的扩展包标识；空字符串保证第一个可见条目总会先插入对应内容组标题。
+	var previous_content_pack_id: String = "__no_previous_content_pack__"
 	for entry_index in range(_current_entries.size()):
 		# 当前条目是否已解锁；没有库存服务时安全回退为 false，避免目录数据直接泄露。
 		var entry: Dictionary = _current_entries[entry_index]
 		var is_discovered: bool = _is_entry_discovered(entry)
+		# 当前条目扩展包归属；归属变化时先插入标题分割，再追加本组的可点击名称按钮。
+		var content_pack_id: String = str(entry.get("content_pack_id", ""))
+		if content_pack_id != previous_content_pack_id:
+			_entry_grid.add_child(_build_content_pack_divider(entry))
+			previous_content_pack_id = content_pack_id
 		# 当前列表条目按钮；点击后仅更新右侧详情，不会改变图鉴解锁或库存状态。
 		var entry_button: Button = _build_entry_card(entry, is_discovered, entry_index) as Button
 		_entry_grid.add_child(entry_button)
@@ -153,7 +156,7 @@ func _build_content() -> void:
 	_add_tab_button(tabs, TAB_WEAPONS, "武器")
 	_add_tab_button(tabs, TAB_EQUIPMENT, "装备")
 	_add_tab_button(tabs, TAB_RESOURCES, "资源")
-	# 图鉴查询栏；关键词与扩展包筛选共同作用于当前分类，行为与仓库搜索一致但不改变图鉴永久状态。
+	# 图鉴查询栏；关键词筛选与仓库搜索保持相同匹配范围，只改变当前左侧列表而不改变图鉴永久状态。
 	var query_bar: HBoxContainer = HBoxContainer.new()
 	query_bar.alignment = BoxContainer.ALIGNMENT_CENTER
 	query_bar.add_theme_constant_override("separation", 8)
@@ -163,17 +166,10 @@ func _build_content() -> void:
 	search_edit.name = "EncyclopediaSearch"
 	search_edit.placeholder_text = "搜索名称、类型或说明"
 	search_edit.custom_minimum_size = Vector2(SEARCH_FIELD_MINIMUM_WIDTH, 36.0)
+	search_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	search_edit.text_changed.connect(_on_search_text_changed)
 	query_bar.add_child(search_edit)
 	_search_edit = search_edit
-	# 扩展包筛选框；全部、基础内容和每份内容包使用稳定元数据区分，选项文本读取内容包正式名称。
-	var content_pack_filter_option: OptionButton = OptionButton.new()
-	content_pack_filter_option.name = "EncyclopediaContentPackFilter"
-	content_pack_filter_option.custom_minimum_size = Vector2(CONTENT_PACK_FILTER_MINIMUM_WIDTH, 36.0)
-	content_pack_filter_option.item_selected.connect(_on_content_pack_filter_selected)
-	query_bar.add_child(content_pack_filter_option)
-	_content_pack_filter_option = content_pack_filter_option
-	_refresh_content_pack_filter_options()
 	# 当前分类收集进度；刷新时按当前目录全部条目和永久发现记录更新。
 	var progress_label: Label = Label.new()
 	progress_label.name = "EncyclopediaProgress"
@@ -298,73 +294,41 @@ func _on_search_text_changed(_new_text: String) -> void:
 	refresh()
 
 
-func _on_content_pack_filter_selected(item_index: int) -> void:
-	if _content_pack_filter_option == null or item_index < 0 or item_index >= _content_pack_filter_option.item_count:
+func _refresh_content_pack_group_metadata() -> void:
+	## 刷新扩展包分组元数据；基础内容固定排在最前，其余内容包沿目录稳定顺序生成标题与排序序号。
+	_content_pack_display_names.clear()
+	_content_pack_sort_orders.clear()
+	_content_pack_display_names[""] = "基础内容"
+	_content_pack_sort_orders[""] = 0
+	if _content_catalog == null or not _content_catalog.has_method("get_content_pack_ids"):
 		return
-	# 当前筛选元数据；空字符串表示全部内容，基础内容和正式扩展包均使用稳定内部标识。
-	var selected_metadata: String = str(_content_pack_filter_option.get_item_metadata(item_index))
-	_selected_content_pack_id = selected_metadata
-	refresh()
-
-
-func _refresh_content_pack_filter_options() -> void:
-	## 重建扩展包筛选选项；内容目录完成扫描或新增内容包后，图鉴刷新时自动同步正式名称与稳定 pack_id。
-	if _content_pack_filter_option == null:
-		return
-	# 当前筛选标识；选项重建后尽量保留玩家已选择的扩展包，已删除内容包则安全回退全部内容。
-	var previous_selection_id: String = _selected_content_pack_id
-	_content_pack_filter_option.clear()
-	_content_pack_filter_option.add_item("全部内容")
-	_content_pack_filter_option.set_item_metadata(0, CONTENT_PACK_FILTER_ALL)
-	_content_pack_filter_option.add_item("基础内容")
-	_content_pack_filter_option.set_item_metadata(1, CONTENT_PACK_FILTER_BASE)
-	if _content_catalog != null and _content_catalog.has_method("get_content_pack_ids"):
-		# 全部扩展包标识；目录返回稳定排序结果，未解锁内容包也会保留为图鉴筛选目标。
-		var content_pack_ids: Array = _content_catalog.call("get_content_pack_ids") as Array
-		for raw_content_pack_id in content_pack_ids:
-			# 当前扩展包标识；目录只返回字符串数组，仍统一标准化以避免异常数据污染筛选元数据。
-			var content_pack_id: String = str(raw_content_pack_id).strip_edges()
-			if content_pack_id.is_empty():
-				continue
-			# 扩展包只读档案；优先显示正式名称，资源异常或缺名时回退稳定 ID 以确保筛选项仍可使用。
-			var content_pack_profile: Dictionary = {}
-			if _content_catalog.has_method("get_content_pack_profile"):
-				content_pack_profile = _content_catalog.call("get_content_pack_profile", content_pack_id) as Dictionary
-			var content_pack_label: String = str(content_pack_profile.get("display_name", "")).strip_edges()
-			_content_pack_filter_option.add_item(content_pack_label if not content_pack_label.is_empty() else content_pack_id)
-			_content_pack_filter_option.set_item_metadata(_content_pack_filter_option.item_count - 1, content_pack_id)
-	# 匹配到的选项下标；找不到旧选择时回退第一项“全部内容”。
-	var selected_index: int = 0
-	for option_index in range(_content_pack_filter_option.item_count):
-		if str(_content_pack_filter_option.get_item_metadata(option_index)) == previous_selection_id:
-			selected_index = option_index
-			break
-	_selected_content_pack_id = str(_content_pack_filter_option.get_item_metadata(selected_index))
-	_content_pack_filter_option.select(selected_index)
+	# 全部扩展包标识；目录返回稳定排序结果，图鉴按该顺序建立各分类中的标题分割。
+	var content_pack_ids: Array = _content_catalog.call("get_content_pack_ids") as Array
+	for pack_index in range(content_pack_ids.size()):
+		# 当前扩展包标识；空 ID 不会作为有效内容组建立，防止异常资源产生无标题分区。
+		var content_pack_id: String = str(content_pack_ids[pack_index]).strip_edges()
+		if content_pack_id.is_empty():
+			continue
+		# 扩展包只读档案；优先显示正式名称，缺失时回退稳定 ID，保证所有已登记内容都有标题。
+		var content_pack_profile: Dictionary = {}
+		if _content_catalog.has_method("get_content_pack_profile"):
+			content_pack_profile = _content_catalog.call("get_content_pack_profile", content_pack_id) as Dictionary
+		var content_pack_label: String = str(content_pack_profile.get("display_name", "")).strip_edges()
+		_content_pack_display_names[content_pack_id] = content_pack_label if not content_pack_label.is_empty() else content_pack_id
+		_content_pack_sort_orders[content_pack_id] = pack_index + 1
 
 
 func _filter_catalog_entries(entries: Array[Dictionary]) -> Array[Dictionary]:
-	## 返回符合关键词与扩展包条件的条目；筛选结果为新数组，绝不改变内容目录的路径顺序、模板或图鉴发现状态。
+	## 返回符合关键词的条目；筛选结果为新数组，绝不改变内容目录的分组顺序、模板或图鉴发现状态。
 	# 当前关键词；空字符串表示不按文本过滤，非空时匹配名称、类型与说明的任意片段。
 	var search_text: String = _search_edit.text.strip_edges().to_lower() if _search_edit != null else ""
 	# 可见图鉴条目；按传入稳定顺序追加，保证清除筛选后恢复原有显示顺序。
 	var filtered_entries: Array[Dictionary] = []
 	for entry in entries:
-		if not _does_entry_match_content_pack_filter(entry) or not _does_entry_match_search_text(entry, search_text):
+		if not _does_entry_match_search_text(entry, search_text):
 			continue
 		filtered_entries.append(entry)
 	return filtered_entries
-
-
-func _does_entry_match_content_pack_filter(entry: Dictionary) -> bool:
-	## 判断条目是否属于当前扩展包筛选；全部显示所有条目，基础内容匹配空归属，其余只匹配同一 stable pack_id。
-	if _selected_content_pack_id == CONTENT_PACK_FILTER_ALL:
-		return true
-	# 当前条目扩展包归属；未进入任何扩展包清单的静态资源和强化石通用条目均使用空字符串。
-	var entry_content_pack_id: String = str(entry.get("content_pack_id", ""))
-	if _selected_content_pack_id == CONTENT_PACK_FILTER_BASE:
-		return entry_content_pack_id.is_empty()
-	return entry_content_pack_id == _selected_content_pack_id
 
 
 func _does_entry_match_search_text(entry: Dictionary, search_text: String) -> bool:
@@ -405,9 +369,15 @@ func _build_resource_entry(item_resource: Resource) -> Dictionary:
 	var content_pack_id: String = ""
 	if _content_catalog != null and _content_catalog.has_method("get_content_pack_id_for_resource_path"):
 		content_pack_id = str(_content_catalog.call("get_content_pack_id_for_resource_path", item_resource.resource_path)).strip_edges()
+	# 内容组标题；基础内容和所有扩展包均由本页缓存提供正式名称，未知归属安全回退其稳定 ID。
+	var content_pack_title: String = str(_content_pack_display_names.get(content_pack_id, content_pack_id if not content_pack_id.is_empty() else "基础内容"))
+	# 内容组排序序号；基础内容为 0，扩展包按目录稳定顺序递增，异常归属排到最后。
+	var content_pack_order: int = int(_content_pack_sort_orders.get(content_pack_id, 999999))
 	return {
 		"entry_key": "resource:%s" % item_resource.resource_path,
 		"content_pack_id": content_pack_id,
+		"content_pack_title": content_pack_title,
+		"content_pack_order": content_pack_order,
 		"resource": item_resource,
 		"is_enhancement_stone": false,
 		"display_name": str(item_resource.get("display_name")).strip_edges(),
@@ -422,6 +392,8 @@ func _build_enhancement_stone_entry() -> Dictionary:
 	return {
 		"entry_key": "enhancement_stone",
 		"content_pack_id": "",
+		"content_pack_title": "基础内容",
+		"content_pack_order": 0,
 		"resource": null,
 		"is_enhancement_stone": true,
 		"display_name": "强化石",
@@ -432,7 +404,13 @@ func _build_enhancement_stone_entry() -> Dictionary:
 
 
 func _compare_catalog_entries(first_entry: Dictionary, second_entry: Dictionary) -> bool:
-	## 两个图鉴条目；按正式显示名稳定排序，未解锁时仍保留该顺序但不会向玩家显示名称。
+	## 两个图鉴条目；先按基础内容与扩展包目录顺序分组，再按正式显示名稳定排序，未解锁时仍保留该顺序但不会显示名称。
+	# 第一条目内容组序号；基础内容固定为 0，数值越小越靠前。
+	var first_content_pack_order: int = int(first_entry.get("content_pack_order", 999999))
+	# 第二条目内容组序号；用于先完成组间排序，组内再比较正式名称。
+	var second_content_pack_order: int = int(second_entry.get("content_pack_order", 999999))
+	if first_content_pack_order != second_content_pack_order:
+		return first_content_pack_order < second_content_pack_order
 	return str(first_entry.get("display_name", "")) < str(second_entry.get("display_name", ""))
 
 
@@ -446,6 +424,25 @@ func _is_entry_discovered(entry: Dictionary) -> bool:
 	# 当前目录模板资源；库存服务只读取其稳定 ID，模板对象本身不会进入玩家所有权记录。
 	var item_resource: Resource = entry.get("resource") as Resource
 	return item_resource != null and _global_inventory.has_method("is_resource_discovered") and bool(_global_inventory.call("is_resource_discovered", item_resource))
+
+
+func _build_content_pack_divider(entry: Dictionary) -> Control:
+	## 创建扩展包标题分割；每个可见内容组只在首个条目前插入一次，用于明确基础内容或对应扩展包的边界。
+	# 扩展包标题分割面板；使用二级面板样式与普通条目按钮区分，不接收点击或焦点输入。
+	var divider_panel: PanelContainer = PanelContainer.new()
+	divider_panel.custom_minimum_size = Vector2(0.0, CONTENT_PACK_DIVIDER_MINIMUM_HEIGHT)
+	divider_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UI_STYLE_GUIDE.apply_section_panel(divider_panel)
+	# 标题文字；基础内容直接显示名称，扩展包标题显式追加“扩展包”语义，便于长列表快速扫描。
+	var divider_label: Label = Label.new()
+	var content_pack_id: String = str(entry.get("content_pack_id", ""))
+	var content_pack_title: String = str(entry.get("content_pack_title", "基础内容"))
+	divider_label.text = content_pack_title if content_pack_id.is_empty() else "%s · 扩展包" % content_pack_title
+	divider_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	divider_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	UI_STYLE_GUIDE.apply_title_label(divider_label, 14)
+	divider_panel.add_child(divider_label)
+	return divider_panel
 
 
 func _build_entry_card(entry: Dictionary, is_discovered: bool, entry_index: int) -> Control:

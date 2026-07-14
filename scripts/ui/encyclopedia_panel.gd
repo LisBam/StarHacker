@@ -18,10 +18,10 @@ const TAB_EQUIPMENT: String = "equipment"
 const TAB_RESOURCES: String = "resources"
 ## 未解锁条目的统一占位文本；名称、类型与说明均使用该文本，避免泄露未获取物品信息。
 const UNKNOWN_ENTRY_TEXT: String = "？？？"
-## 每张图鉴条目的固定最小尺寸；四列网格在 1000 像素宽窗口中保持稳定可读的卡片密度。
-const ENTRY_CARD_MINIMUM_SIZE: Vector2 = Vector2(220.0, 126.0)
-## 条目网格列数；武器、装备与资源页使用同一列数，窗口尺寸变化时由滚动容器承载溢出内容。
-const ENTRY_GRID_COLUMNS: int = 4
+## 左侧条目列表最小宽度；默认 280 像素，保证较长物品名称可读且为右侧完整详情保留主要空间。
+const ENTRY_LIST_MINIMUM_WIDTH: float = 280.0
+## 左侧单个条目按钮最小高度；默认 40 像素，兼顾紧凑列表密度与清晰的鼠标点击区域。
+const ENTRY_LIST_BUTTON_MINIMUM_HEIGHT: float = 40.0
 
 ## 当前激活图鉴页签；默认武器页，点击页签后只重建当前类别的纯展示卡片。
 var _active_tab: String = TAB_WEAPONS
@@ -33,8 +33,16 @@ var _content_catalog: Node
 var _tab_buttons: Dictionary = {}
 ## 收集进度文本缓存；显示当前类别已解锁数和总条目数，不参与解锁判定。
 var _progress_label: Label
-## 图鉴条目网格缓存；当前页签切换或解锁状态变化时清理并重建其子控件。
+## 图鉴条目列表容器缓存；当前页签切换或解锁状态变化时清理并重建可点击名称按钮。
 var _entry_grid: GridContainer
+## 当前页签的图鉴条目快照；列表点击和右侧详情共用同一只读条目数组，避免两侧分别读取内容目录。
+var _current_entries: Array[Dictionary] = []
+## 左侧条目按钮缓存；下标与当前条目数组一致，用于同步当前选中项的高亮状态。
+var _entry_buttons: Array[Button] = []
+## 当前选中图鉴条目的稳定键；刷新、首次解锁或切换回面板时尽量保持同一条目详情。
+var _selected_entry_key: String = ""
+## 右侧完整详情文本缓存；已解锁静态物品使用通用详情格式化器，未解锁项只显示“？？？”。
+var _detail_label: RichTextLabel
 ## 返回按钮缓存；点击后仅派发 closed 信号，由主菜单遮罩负责隐藏和恢复焦点。
 var _close_button: Button
 
@@ -52,18 +60,31 @@ func refresh() -> void:
 	## 刷新当前页签图鉴；内容模板始终从 ContentCatalog 重新读取，保证启动后新发现状态能立即反映到卡片。
 	if _entry_grid == null or _progress_label == null:
 		return
+	if _content_catalog == null or _global_inventory == null:
+		_resolve_services()
+		_connect_inventory_signal()
 	_clear_entry_grid()
 	# 当前类别条目；包含可静态发现的目录资源，以及资源页统一的强化石条目。
-	var entries: Array[Dictionary] = _build_catalog_entries(_active_tab)
+	_current_entries = _build_catalog_entries(_active_tab)
 	# 已解锁条目数；只统计当前页签内通过 GlobalInventory 发现记录验证的条目。
 	var discovered_count: int = 0
-	for entry in entries:
+	for entry_index in range(_current_entries.size()):
 		# 当前条目是否已解锁；没有库存服务时安全回退为 false，避免目录数据直接泄露。
+		var entry: Dictionary = _current_entries[entry_index]
 		var is_discovered: bool = _is_entry_discovered(entry)
 		if is_discovered:
 			discovered_count += 1
-		_entry_grid.add_child(_build_entry_card(entry, is_discovered))
-	_progress_label.text = "收集进度：%d / %d" % [discovered_count, entries.size()]
+		# 当前列表条目按钮；点击后仅更新右侧详情，不会改变图鉴解锁或库存状态。
+		var entry_button: Button = _build_entry_card(entry, is_discovered, entry_index) as Button
+		_entry_grid.add_child(entry_button)
+		_entry_buttons.append(entry_button)
+	_progress_label.text = "收集进度：%d / %d" % [discovered_count, _current_entries.size()]
+	# 选中条目下标；优先按稳定键恢复上次查看内容，不存在时回退当前分类第一项。
+	var selected_index: int = _get_selected_entry_index()
+	if selected_index >= 0:
+		_set_selected_entry(selected_index, false)
+	else:
+		_refresh_selected_detail()
 
 
 func _resolve_services() -> void:
@@ -117,20 +138,67 @@ func _build_content() -> void:
 	progress_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.ACCENT_MUTED_COLOR)
 	content.add_child(progress_label)
 	_progress_label = progress_label
-	# 图鉴滚动区域；条目超出固定窗口高度时只滚动内容，不改变顶部页签和底部返回按钮位置。
-	var scroll_container: ScrollContainer = ScrollContainer.new()
-	scroll_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll_container.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	content.add_child(scroll_container)
-	# 条目网格；每个类别以相同四列布局显示已解锁与未解锁卡片，保持收集缺口清晰可见。
+	# 图鉴主体分栏；左侧为可点击条目列表，右侧为当前选中条目的完整资料，两侧共用当前页签快照。
+	var content_split: HBoxContainer = HBoxContainer.new()
+	content_split.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content_split.add_theme_constant_override("separation", 12)
+	content.add_child(content_split)
+	# 左侧列表分区；固定最小宽度并独立滚动，条目较多时不会压缩右侧详情阅读区域。
+	var list_panel: PanelContainer = PanelContainer.new()
+	list_panel.custom_minimum_size = Vector2(ENTRY_LIST_MINIMUM_WIDTH, 0.0)
+	list_panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	UI_STYLE_GUIDE.apply_section_panel(list_panel)
+	content_split.add_child(list_panel)
+	# 列表分区内容；标题固定在滚动区上方，帮助玩家明确左侧名称用于切换详情。
+	var list_content: VBoxContainer = VBoxContainer.new()
+	list_content.add_theme_constant_override("separation", 8)
+	list_panel.add_child(list_content)
+	# 列表标题；说明当前区域仅承担条目选择，不重复展示物品数值。
+	var list_title_label: Label = Label.new()
+	list_title_label.text = "条目列表"
+	UI_STYLE_GUIDE.apply_title_label(list_title_label, 16)
+	list_content.add_child(list_title_label)
+	# 左侧列表滚动区域；只允许纵向滚动，物品名称永远按单列顺序排列。
+	var list_scroll_container: ScrollContainer = ScrollContainer.new()
+	list_scroll_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	list_scroll_container.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	list_content.add_child(list_scroll_container)
+	# 条目网格；保留单个容器缓存以统一重建流程，当前固定一列呈现可点击名称列表。
 	var entry_grid: GridContainer = GridContainer.new()
-	entry_grid.name = "EncyclopediaEntryGrid"
-	entry_grid.columns = ENTRY_GRID_COLUMNS
+	entry_grid.name = "EncyclopediaEntryList"
+	entry_grid.columns = 1
 	entry_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	entry_grid.add_theme_constant_override("h_separation", 10)
-	entry_grid.add_theme_constant_override("v_separation", 10)
-	scroll_container.add_child(entry_grid)
+	entry_grid.add_theme_constant_override("v_separation", 6)
+	list_scroll_container.add_child(entry_grid)
 	_entry_grid = entry_grid
+	# 右侧详情分区；占用剩余宽度，完整显示选中武器、装备或资源的正式资料。
+	var detail_panel: PanelContainer = PanelContainer.new()
+	detail_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UI_STYLE_GUIDE.apply_section_panel(detail_panel)
+	content_split.add_child(detail_panel)
+	# 详情分区内容；标题与可滚动富文本详情分离，长属性列表不会挤压窗口底部返回按钮。
+	var detail_content: VBoxContainer = VBoxContainer.new()
+	detail_content.add_theme_constant_override("separation", 8)
+	detail_panel.add_child(detail_content)
+	# 详情标题；始终固定在右侧顶部，实际物品名称与属性由下方详情文本提供。
+	var detail_title_label: Label = Label.new()
+	detail_title_label.text = "详细信息"
+	UI_STYLE_GUIDE.apply_title_label(detail_title_label, 16)
+	detail_content.add_child(detail_title_label)
+	# 详情滚动区域；已解锁武器和装备的完整属性文本可纵向阅读，不截断数值或说明。
+	var detail_scroll_container: ScrollContainer = ScrollContainer.new()
+	detail_scroll_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	detail_scroll_container.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	detail_content.add_child(detail_scroll_container)
+	# 详情富文本；复用库存的 BBCode 详情格式，保持图鉴与背包、仓库数值显示一致。
+	var detail_label: RichTextLabel = RichTextLabel.new()
+	detail_label.name = "EncyclopediaDetail"
+	detail_label.bbcode_enabled = true
+	detail_label.fit_content = true
+	detail_label.scroll_active = false
+	detail_label.custom_minimum_size = Vector2(0.0, 420.0)
+	detail_scroll_container.add_child(detail_label)
+	_detail_label = detail_label
 	# 返回按钮；主菜单遮罩监听 closed 后隐藏面板，本组件不直接引用任何主菜单节点。
 	var close_button: Button = Button.new()
 	close_button.text = "返回"
@@ -157,6 +225,7 @@ func _on_tab_button_pressed(tab_id: String) -> void:
 		_sync_tab_buttons()
 		return
 	_active_tab = tab_id
+	_selected_entry_key = ""
 	_sync_tab_buttons()
 	refresh()
 
@@ -200,6 +269,7 @@ func _build_catalog_entries(tab_id: String) -> Array[Dictionary]:
 func _build_resource_entry(item_resource: Resource) -> Dictionary:
 	## 静态目录物品条目；显示信息全部来自模板，实际解锁资格仍由 GlobalInventory 对稳定物品标识判定。
 	return {
+		"entry_key": "resource:%s" % item_resource.resource_path,
 		"resource": item_resource,
 		"is_enhancement_stone": false,
 		"display_name": str(item_resource.get("display_name")).strip_edges(),
@@ -212,6 +282,7 @@ func _build_resource_entry(item_resource: Resource) -> Dictionary:
 func _build_enhancement_stone_entry() -> Dictionary:
 	## 强化石通用条目；强化石按随机品质与词条生成，不存在固定模板，因此任意一颗实际获得后解锁这一类收集记录。
 	return {
+		"entry_key": "enhancement_stone",
 		"resource": null,
 		"is_enhancement_stone": true,
 		"display_name": "强化石",
@@ -238,57 +309,94 @@ func _is_entry_discovered(entry: Dictionary) -> bool:
 	return item_resource != null and _global_inventory.has_method("is_resource_discovered") and bool(_global_inventory.call("is_resource_discovered", item_resource))
 
 
-func _build_entry_card(entry: Dictionary, is_discovered: bool) -> Control:
-	## 单张图鉴卡片；已解锁时显示正式信息和原生悬停详情，未解锁时所有玩家可见文本保持“？？？”。
-	var card: PanelContainer = PanelContainer.new()
-	card.custom_minimum_size = ENTRY_CARD_MINIMUM_SIZE
-	UI_STYLE_GUIDE.apply_section_panel(card)
-	# 卡片内容容器；图标、名称、类型和说明使用垂直层级，避免未解锁条目暴露任何模板字段。
-	var card_content: VBoxContainer = VBoxContainer.new()
-	card_content.add_theme_constant_override("separation", 4)
-	card.add_child(card_content)
-	# 图标文本；已解锁读取资源图标，未解锁同样使用占位文本以隐藏稀有度和分类线索。
-	var icon_label: Label = Label.new()
-	icon_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	icon_label.add_theme_font_size_override("font_size", 22)
-	icon_label.text = str(entry.get("icon_text", UNKNOWN_ENTRY_TEXT)) if is_discovered else UNKNOWN_ENTRY_TEXT
-	card_content.add_child(icon_label)
-	# 名称文本；已解锁后显示正式名称，异常空名称仍回退“未命名物品”确保卡片可读。
-	var name_label: Label = Label.new()
-	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	name_label.add_theme_font_size_override("font_size", 16)
-	name_label.text = str(entry.get("display_name", "未命名物品")) if is_discovered else UNKNOWN_ENTRY_TEXT
-	card_content.add_child(name_label)
-	# 类型文本；已解锁后说明武器、装备或资源分类，未解锁时不泄露条目归属之外的额外信息。
-	var type_label: Label = Label.new()
-	type_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	type_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.ACCENT_MUTED_COLOR if is_discovered else UI_STYLE_GUIDE.DISABLED_TEXT_COLOR)
-	type_label.text = str(entry.get("type_text", "")) if is_discovered else UNKNOWN_ENTRY_TEXT
-	card_content.add_child(type_label)
-	# 说明文本；限制为两行并自动换行，完整信息可通过已解锁条目的悬停提示查看。
-	var description_label: Label = Label.new()
-	description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	description_label.max_lines_visible = 2
-	description_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	description_label.add_theme_font_size_override("font_size", 12)
-	description_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.SECONDARY_TEXT_COLOR if is_discovered else UI_STYLE_GUIDE.DISABLED_TEXT_COLOR)
-	description_label.text = str(entry.get("description", "")) if is_discovered else UNKNOWN_ENTRY_TEXT
-	card_content.add_child(description_label)
+func _build_entry_card(entry: Dictionary, is_discovered: bool, entry_index: int) -> Control:
+	## 创建左侧可点击图鉴名称；已解锁显示正式名称，未解锁只显示“？？？”，点击后刷新右侧详情而不改变数据状态。
+	# 条目列表按钮；固定单行高度以形成稳定纵向列表，选择状态由 _sync_entry_button_selection 统一维护。
+	var entry_button: Button = Button.new()
+	entry_button.toggle_mode = true
+	entry_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	entry_button.custom_minimum_size = Vector2(0.0, ENTRY_LIST_BUTTON_MINIMUM_HEIGHT)
+	entry_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	entry_button.text = str(entry.get("display_name", "未命名物品")) if is_discovered else UNKNOWN_ENTRY_TEXT
+	entry_button.tooltip_text = entry_button.text
+	entry_button.pressed.connect(_on_entry_button_pressed.bind(entry_index))
 	if not is_discovered:
-		card.modulate = Color(0.62, 0.66, 0.70, 1.0)
-		return card
-	# 已解锁资源；强化石通用条目没有固定 Resource，因此不创建与随机词条不匹配的详情提示。
-	var item_resource: Resource = entry.get("resource") as Resource
+		entry_button.add_theme_color_override("font_color", UI_STYLE_GUIDE.DISABLED_TEXT_COLOR)
+	return entry_button
+
+
+func _get_selected_entry_index() -> int:
+	## 返回当前选中稳定键在本页签中的下标；当前条目不存在时回退第一个条目，空分类返回 -1。
+	if _current_entries.is_empty():
+		return -1
+	for entry_index in range(_current_entries.size()):
+		# 当前候选条目；只比较稳定键，不依赖显示名称，因此改名后仍可保留当前详情选择。
+		var entry: Dictionary = _current_entries[entry_index]
+		if str(entry.get("entry_key", "")) == _selected_entry_key:
+			return entry_index
+	return 0
+
+
+func _on_entry_button_pressed(entry_index: int) -> void:
+	_set_selected_entry(entry_index)
+
+
+func _set_selected_entry(entry_index: int, focus_entry_button: bool = true) -> void:
+	## 切换当前详情条目；参数控制刷新后是否把键盘焦点交给左侧名称按钮，避免自动刷新抢走用户输入。
+	if entry_index < 0 or entry_index >= _current_entries.size():
+		return
+	# 当前选中条目；保存稳定键使图鉴发现状态变化后仍能保留玩家正在查看的详情。
+	var selected_entry: Dictionary = _current_entries[entry_index]
+	_selected_entry_key = str(selected_entry.get("entry_key", ""))
+	_sync_entry_button_selection(entry_index)
+	_refresh_selected_detail()
+	if focus_entry_button and entry_index < _entry_buttons.size():
+		_entry_buttons[entry_index].grab_focus()
+
+
+func _sync_entry_button_selection(selected_index: int) -> void:
+	## 左侧条目按钮遍历项；仅当前选中条目使用主操作高亮，其他条目恢复普通列表按钮外观。
+	for entry_index in range(_entry_buttons.size()):
+		# 当前条目按钮；数组与图鉴条目数组在刷新时按相同顺序重建，异常空值安全跳过。
+		var entry_button: Button = _entry_buttons[entry_index]
+		if entry_button == null:
+			continue
+		entry_button.set_pressed_no_signal(entry_index == selected_index)
+		if entry_index == selected_index:
+			UI_STYLE_GUIDE.apply_primary_button(entry_button)
+		else:
+			entry_button.theme_type_variation = &""
+
+
+func _refresh_selected_detail() -> void:
+	## 刷新右侧详细信息；未解锁条目不读取名称、类型或属性，已解锁静态资源复用统一库存详情格式。
+	if _detail_label == null:
+		return
+	# 当前详情下标；空列表时显示统一占位文本，避免右侧保留上个分类的过期信息。
+	var selected_index: int = _get_selected_entry_index()
+	if selected_index < 0:
+		_detail_label.text = "[center][font_size=22]%s[/font_size][/center]" % UNKNOWN_ENTRY_TEXT
+		return
+	# 当前详情条目；已解锁判定始终由永久库存服务计算，不由列表按钮文本反推。
+	var selected_entry: Dictionary = _current_entries[selected_index]
+	if not _is_entry_discovered(selected_entry):
+		_detail_label.text = "[center][font_size=28]%s[/font_size][/center]" % UNKNOWN_ENTRY_TEXT
+		return
+	# 已解锁静态资源；使用库存与仓库相同的完整 BBCode，避免图鉴复制耐久、套装与强化属性公式。
+	var item_resource: Resource = selected_entry.get("resource") as Resource
 	if item_resource != null:
-		card.tooltip_text = str(ITEM_DETAIL_FORMATTER.call("build_plain_text", item_resource))
-	return card
+		_detail_label.text = str(ITEM_DETAIL_FORMATTER.call("build_bbcode", item_resource))
+		return
+	# 已解锁强化石通用条目；随机强化石没有固定实例，详情仅展示其长期不变的类别说明。
+	_detail_label.text = "[font_size=18][b]%s[/b][/font_size]\n类型：%s\n\n%s" % [str(selected_entry.get("display_name", "强化石")), str(selected_entry.get("type_text", "资源 · 强化石")), str(selected_entry.get("description", ""))]
 
 
 func _clear_entry_grid() -> void:
-	## 待移除图鉴卡片；条目卡片为纯运行时展示节点，刷新后释放旧节点以避免保留过期解锁文本。
-	for entry_card in _entry_grid.get_children():
-		_entry_grid.remove_child(entry_card)
-		entry_card.queue_free()
+	## 清空左侧条目列表；列表按钮为纯运行时展示节点，刷新后释放旧节点和缓存以避免保留过期选择状态。
+	_entry_buttons.clear()
+	for entry_button in _entry_grid.get_children():
+		_entry_grid.remove_child(entry_button)
+		entry_button.queue_free()
 
 
 func _on_encyclopedia_changed() -> void:

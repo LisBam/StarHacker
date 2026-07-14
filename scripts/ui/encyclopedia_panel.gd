@@ -20,6 +20,14 @@ const TAB_RESOURCES: String = "resources"
 const UNKNOWN_ENTRY_TEXT: String = "？？？"
 ## 图鉴扩展包展示优先级；默认将稳定 ID 为 stelle 的“星”扩展包固定在基础内容之后，未注册时自动跳过且不影响其余扩展包目录顺序。
 const PRIORITIZED_CONTENT_PACK_ID: String = "stelle"
+## 图鉴装备部位排序表；同一套装按头部、躯干、腿部、脚部顺序展示，未知部位使用兜底序号并排在已知部位之后。
+const EQUIPMENT_SLOT_SORT_ORDERS: Dictionary = {"head": 0, "body": 1, "legs": 2, "feet": 3}
+## 图鉴资源品质标识排序表；强化石等直接提供 quality_id 的资源按初级、中级、高级、极品顺序展示。
+const RESOURCE_QUALITY_ID_SORT_ORDERS: Dictionary = {"low": 0, "medium": 1, "high": 2, "supreme": 3}
+## 图鉴资源品质名称前缀；没有 quality_id 的资源通过正式名称前缀识别品质，顺序与强化石品质定义保持一致。
+const RESOURCE_QUALITY_NAME_PREFIXES: Array[String] = ["初级", "中级", "高级", "极品"]
+## 无法识别的装备部位或资源品质排序序号；默认 999999，确保已定义的排序规则始终优先于兼容资源。
+const FALLBACK_SORT_ORDER: int = 999999
 ## 图鉴搜索框最小宽度；默认 260 像素，容纳中文关键词并在页签下方保持清晰单行布局。
 const SEARCH_FIELD_MINIMUM_WIDTH: float = 260.0
 ## 扩展包标题分割最小高度；默认 32 像素，使每组内容在左侧列表中拥有清晰可读的视觉边界。
@@ -383,11 +391,20 @@ func _build_resource_entry(item_resource: Resource) -> Dictionary:
 	# 内容组排序序号；基础内容为 0，扩展包按目录稳定顺序递增，异常归属排到最后。
 	# 图鉴分组元数据已先应用星扩展包优先级，因此此处读取的序号同时反映基础内容、星和其余目录顺序。
 	var content_pack_order: int = int(_content_pack_sort_orders.get(content_pack_id, 999999))
+	# 装备套装排序键；同一内容包内先保持同一套装相邻，未配置套装的装备回退自身稳定路径。
+	var equipment_set_sort_key: String = _get_equipment_set_sort_key(item_resource)
+	# 装备部位排序序号；头部、躯干、腿部、脚部依次为 0 至 3，非装备资源使用兜底值。
+	var equipment_slot_sort_order: int = _get_equipment_slot_sort_order(item_resource)
+	# 资源品质排序序号；初级、中级、高级、极品依次为 0 至 3，未分级资源使用兜底值。
+	var resource_quality_sort_order: int = _get_resource_quality_sort_order(item_resource)
 	return {
 		"entry_key": "resource:%s" % item_resource.resource_path,
 		"content_pack_id": content_pack_id,
 		"content_pack_title": content_pack_title,
 		"content_pack_order": content_pack_order,
+		"equipment_set_sort_key": equipment_set_sort_key,
+		"equipment_slot_sort_order": equipment_slot_sort_order,
+		"resource_quality_sort_order": resource_quality_sort_order,
 		"resource": item_resource,
 		"is_enhancement_stone": false,
 		"display_name": str(item_resource.get("display_name")).strip_edges(),
@@ -404,6 +421,9 @@ func _build_enhancement_stone_entry() -> Dictionary:
 		"content_pack_id": "",
 		"content_pack_title": "基础内容",
 		"content_pack_order": 0,
+		"equipment_set_sort_key": "",
+		"equipment_slot_sort_order": FALLBACK_SORT_ORDER,
+		"resource_quality_sort_order": FALLBACK_SORT_ORDER,
 		"resource": null,
 		"is_enhancement_stone": true,
 		"display_name": "强化石",
@@ -422,7 +442,69 @@ func _compare_catalog_entries(first_entry: Dictionary, second_entry: Dictionary)
 	var second_content_pack_order: int = int(second_entry.get("content_pack_order", 999999))
 	if first_content_pack_order != second_content_pack_order:
 		return first_content_pack_order < second_content_pack_order
+	# 第一项装备套装排序键；同一扩展包内的装备优先按套装聚合，空键用于非装备条目。
+	var first_equipment_set_sort_key: String = str(first_entry.get("equipment_set_sort_key", ""))
+	# 第二项装备套装排序键；与第一项不同才结束比较，避免不同套装的部位被交叉排列。
+	var second_equipment_set_sort_key: String = str(second_entry.get("equipment_set_sort_key", ""))
+	if first_equipment_set_sort_key != second_equipment_set_sort_key:
+		return first_equipment_set_sort_key < second_equipment_set_sort_key
+	# 第一项装备部位排序序号；同套装备按头部、躯干、腿部、脚部的固定序列排列。
+	var first_equipment_slot_sort_order: int = int(first_entry.get("equipment_slot_sort_order", FALLBACK_SORT_ORDER))
+	# 第二项装备部位排序序号；只在同一套装内与第一项比较，保持套装部位完整连续。
+	var second_equipment_slot_sort_order: int = int(second_entry.get("equipment_slot_sort_order", FALLBACK_SORT_ORDER))
+	if first_equipment_slot_sort_order != second_equipment_slot_sort_order:
+		return first_equipment_slot_sort_order < second_equipment_slot_sort_order
+	# 第一项资源品质排序序号；资源按初级、中级、高级、极品的既定品质路径排列。
+	var first_resource_quality_sort_order: int = int(first_entry.get("resource_quality_sort_order", FALLBACK_SORT_ORDER))
+	# 第二项资源品质排序序号；仅在相同扩展包与装备排序层级后参与比较。
+	var second_resource_quality_sort_order: int = int(second_entry.get("resource_quality_sort_order", FALLBACK_SORT_ORDER))
+	if first_resource_quality_sort_order != second_resource_quality_sort_order:
+		return first_resource_quality_sort_order < second_resource_quality_sort_order
 	return str(first_entry.get("display_name", "")) < str(second_entry.get("display_name", ""))
+
+
+func _get_equipment_set_sort_key(item_resource: Resource) -> String:
+	## 返回装备套装排序键；同套装的四个部位共享稳定键，未配置套装的装备仅按自身路径参与排序。
+	if item_resource == null or str(item_resource.get("item_kind")) != "equipment":
+		return ""
+	# 装备套装资源；为空时表示独立装备，不应被错误合并到任何已有套装。
+	var equipment_set: Resource = item_resource.get("equipment_set") as Resource
+	if equipment_set == null:
+		return item_resource.resource_path
+	# 套装稳定标识；优先使用 set_id，避免显示名称调整改变已定义的图鉴组内顺序。
+	var equipment_set_id: String = str(equipment_set.get("set_id")).strip_edges()
+	return equipment_set_id if not equipment_set_id.is_empty() else equipment_set.resource_path
+
+
+func _get_equipment_slot_sort_order(item_resource: Resource) -> int:
+	## 返回装备部位排序序号；固定使用头部、躯干、腿部、脚部规则，非装备或异常部位排在其后。
+	if item_resource == null or str(item_resource.get("item_kind")) != "equipment":
+		return FALLBACK_SORT_ORDER
+	# 装备部位稳定标识；仅接受 EquipmentData 公开的 head、body、legs、feet 四种值。
+	var equipment_slot: String = str(item_resource.get("equipment_slot")).strip_edges()
+	return int(EQUIPMENT_SLOT_SORT_ORDERS.get(equipment_slot, FALLBACK_SORT_ORDER))
+
+
+func _get_resource_quality_sort_order(item_resource: Resource) -> int:
+	## 返回资源品质排序序号；优先读取 quality_id，缺失时按正式名称的初级、中级、高级、极品前缀识别。
+	if item_resource == null:
+		return FALLBACK_SORT_ORDER
+	# 物品类型；武器和装备不属于资源品质排序范围，保持图鉴各分类的独立排序规则。
+	var item_kind: String = str(item_resource.get("item_kind")).strip_edges()
+	if item_kind in ["weapon", "equipment"]:
+		return FALLBACK_SORT_ORDER
+	# 资源品质稳定标识；强化石等资源直接填写 low、medium、high 或 supreme 时无需解析显示文本。
+	var quality_id: String = str(item_resource.get("quality_id")).strip_edges()
+	if RESOURCE_QUALITY_ID_SORT_ORDERS.has(quality_id):
+		return int(RESOURCE_QUALITY_ID_SORT_ORDERS.get(quality_id, FALLBACK_SORT_ORDER))
+	# 资源正式名称；修复包等没有 quality_id 的静态资源按中文品质前缀进入相同顺序。
+	var display_name: String = str(item_resource.get("display_name")).strip_edges()
+	for quality_index in range(RESOURCE_QUALITY_NAME_PREFIXES.size()):
+		# 当前品质名称前缀；仅匹配名称开头，避免说明文本或普通名称的偶然包含改变排序。
+		var quality_name_prefix: String = RESOURCE_QUALITY_NAME_PREFIXES[quality_index]
+		if display_name.begins_with(quality_name_prefix):
+			return quality_index
+	return FALLBACK_SORT_ORDER
 
 
 func _is_entry_discovered(entry: Dictionary) -> bool:

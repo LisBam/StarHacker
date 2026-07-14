@@ -706,7 +706,8 @@ func _refresh_stats() -> void:
 
 func _format_energy_display_value(value: float) -> String:
 	## 格式化战斗 HUD 能量数值；整数不显示无意义的小数，0.1 精度的非整数值保留一位小数。
-	return str(roundi(value)) if is_equal_approx(value, roundf(value)) else "%.1f" % value
+	## 显示协议补充：底部战斗 HUD 统一四舍五入为整数，避免自然回复的 0.1 精度结算在玩家界面出现小数点；该格式化不改变实际能量、能量条比例或技能与武器的消耗判定。
+	return str(roundi(value))
 
 
 func _on_shield_changed(_current_shield: float, _max_shield: float) -> void:

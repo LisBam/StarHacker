@@ -18,6 +18,8 @@ const TAB_EQUIPMENT: String = "equipment"
 const TAB_RESOURCES: String = "resources"
 ## 未解锁条目的统一占位文本；名称、类型与说明均使用该文本，避免泄露未获取物品信息。
 const UNKNOWN_ENTRY_TEXT: String = "？？？"
+## 图鉴扩展包展示优先级；默认将稳定 ID 为 stelle 的“星”扩展包固定在基础内容之后，未注册时自动跳过且不影响其余扩展包目录顺序。
+const PRIORITIZED_CONTENT_PACK_ID: String = "stelle"
 ## 图鉴搜索框最小宽度；默认 260 像素，容纳中文关键词并在页签下方保持清晰单行布局。
 const SEARCH_FIELD_MINIMUM_WIDTH: float = 260.0
 ## 扩展包标题分割最小高度；默认 32 像素，使每组内容在左侧列表中拥有清晰可读的视觉边界。
@@ -296,6 +298,7 @@ func _on_search_text_changed(_new_text: String) -> void:
 
 func _refresh_content_pack_group_metadata() -> void:
 	## 刷新扩展包分组元数据；基础内容固定排在最前，其余内容包沿目录稳定顺序生成标题与排序序号。
+	## 图鉴会在生成排序序号前将星扩展包提升至全部扩展包首位，使目录原始顺序只用于其余扩展包。
 	_content_pack_display_names.clear()
 	_content_pack_sort_orders.clear()
 	_content_pack_display_names[""] = "基础内容"
@@ -304,6 +307,12 @@ func _refresh_content_pack_group_metadata() -> void:
 		return
 	# 全部扩展包标识；目录返回稳定排序结果，图鉴按该顺序建立各分类中的标题分割。
 	var content_pack_ids: Array = _content_catalog.call("get_content_pack_ids") as Array
+	# 图鉴优先扩展包是否已注册；只在目录中存在“星”扩展包时移动到首位，避免为缺失或无效资源创建空分组。
+	var has_prioritized_content_pack: bool = content_pack_ids.has(PRIORITIZED_CONTENT_PACK_ID)
+	if has_prioritized_content_pack:
+		# 星扩展包原始位置；先移除再插入到扩展包序列首位，使其固定显示在基础内容之后。
+		content_pack_ids.erase(PRIORITIZED_CONTENT_PACK_ID)
+		content_pack_ids.push_front(PRIORITIZED_CONTENT_PACK_ID)
 	for pack_index in range(content_pack_ids.size()):
 		# 当前扩展包标识；空 ID 不会作为有效内容组建立，防止异常资源产生无标题分区。
 		var content_pack_id: String = str(content_pack_ids[pack_index]).strip_edges()
@@ -372,6 +381,7 @@ func _build_resource_entry(item_resource: Resource) -> Dictionary:
 	# 内容组标题；基础内容和所有扩展包均由本页缓存提供正式名称，未知归属安全回退其稳定 ID。
 	var content_pack_title: String = str(_content_pack_display_names.get(content_pack_id, content_pack_id if not content_pack_id.is_empty() else "基础内容"))
 	# 内容组排序序号；基础内容为 0，扩展包按目录稳定顺序递增，异常归属排到最后。
+	# 图鉴分组元数据已先应用星扩展包优先级，因此此处读取的序号同时反映基础内容、星和其余目录顺序。
 	var content_pack_order: int = int(_content_pack_sort_orders.get(content_pack_id, 999999))
 	return {
 		"entry_key": "resource:%s" % item_resource.resource_path,
@@ -405,6 +415,7 @@ func _build_enhancement_stone_entry() -> Dictionary:
 
 func _compare_catalog_entries(first_entry: Dictionary, second_entry: Dictionary) -> bool:
 	## 两个图鉴条目；先按基础内容与扩展包目录顺序分组，再按正式显示名稳定排序，未解锁时仍保留该顺序但不会显示名称。
+	## 星扩展包在元数据生成阶段已固定为基础内容后的首个扩展包，剩余扩展包继续使用目录顺序。
 	# 第一条目内容组序号；基础内容固定为 0，数值越小越靠前。
 	var first_content_pack_order: int = int(first_entry.get("content_pack_order", 999999))
 	# 第二条目内容组序号；用于先完成组间排序，组内再比较正式名称。

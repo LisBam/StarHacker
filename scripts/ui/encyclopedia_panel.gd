@@ -147,6 +147,7 @@ func _build_content() -> void:
 	var list_panel: PanelContainer = PanelContainer.new()
 	list_panel.custom_minimum_size = Vector2(ENTRY_LIST_MINIMUM_WIDTH, 0.0)
 	list_panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	list_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	UI_STYLE_GUIDE.apply_section_panel(list_panel)
 	content_split.add_child(list_panel)
 	# 列表分区内容；标题固定在滚动区上方，帮助玩家明确左侧名称用于切换详情。
@@ -174,6 +175,7 @@ func _build_content() -> void:
 	# 右侧详情分区；占用剩余宽度，完整显示选中武器、装备或资源的正式资料。
 	var detail_panel: PanelContainer = PanelContainer.new()
 	detail_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	detail_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	UI_STYLE_GUIDE.apply_section_panel(detail_panel)
 	content_split.add_child(detail_panel)
 	# 详情分区内容；标题与可滚动富文本详情分离，长属性列表不会挤压窗口底部返回按钮。
@@ -185,19 +187,15 @@ func _build_content() -> void:
 	detail_title_label.text = "详细信息"
 	UI_STYLE_GUIDE.apply_title_label(detail_title_label, 16)
 	detail_content.add_child(detail_title_label)
-	# 详情滚动区域；已解锁武器和装备的完整属性文本可纵向阅读，不截断数值或说明。
-	var detail_scroll_container: ScrollContainer = ScrollContainer.new()
-	detail_scroll_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	detail_scroll_container.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	detail_content.add_child(detail_scroll_container)
-	# 详情富文本；复用库存的 BBCode 详情格式，保持图鉴与背包、仓库数值显示一致。
+	# 详情富文本；自身占满右侧剩余空间并使用内部纵向滚动条，避免外层滚动与自适应高度相互挤压导致文字被裁剪。
 	var detail_label: RichTextLabel = RichTextLabel.new()
 	detail_label.name = "EncyclopediaDetail"
 	detail_label.bbcode_enabled = true
-	detail_label.fit_content = true
-	detail_label.scroll_active = false
-	detail_label.custom_minimum_size = Vector2(0.0, 420.0)
-	detail_scroll_container.add_child(detail_label)
+	detail_label.fit_content = false
+	detail_label.scroll_active = true
+	detail_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	detail_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	detail_content.add_child(detail_label)
 	_detail_label = detail_label
 	# 返回按钮；主菜单遮罩监听 closed 后隐藏面板，本组件不直接引用任何主菜单节点。
 	var close_button: Button = Button.new()

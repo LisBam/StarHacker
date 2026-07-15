@@ -98,8 +98,10 @@ const ADDITIVE_VALUE_STATS: Dictionary = {
 ## 稀有属性相对常规属性的刷新权重；0.2 表示单项权重为常规属性的五分之一。
 const RARE_STAT_RELATIVE_WEIGHT: float = 0.20
 ## 稀有属性目录；强化石、商店历史强化和其他复用随机生成器的系统统一读取该集合。
-const RARE_STAT_KEYS: Array[String] = ["scatter_count", "piercing_count", "bounce_count", "combo_count", "move_speed", "vision_range", "energy_regeneration"]
+## 武器离散机制不再进入强化石池，因此当前只有移速、视野和能量恢复使用五分之一生成权重。
+const RARE_STAT_KEYS: Array[String] = ["move_speed", "vision_range", "energy_regeneration"]
 ## 加算数值属性独立幅度；能量恢复严格使用品质区间，武器离散计数每次固定改变 1。
+## 离散计数配置仅保留旧武器累计强化与历史直接调用兼容；正式强化石属性池不会再生成这些词条。
 const ADDITIVE_VALUE_MAGNITUDE_RANGES: Dictionary = {
 	"scatter_count": {
 		QUALITY_LOW: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 1.0, "detrimental_max": 1.0},
@@ -126,10 +128,10 @@ const ADDITIVE_VALUE_MAGNITUDE_RANGES: Dictionary = {
 		QUALITY_SUPREME: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
 	"energy_regeneration": {
-		QUALITY_LOW: {"beneficial_min": 0.5, "beneficial_max": 1.0, "detrimental_min": 1.0, "detrimental_max": 2.0},
-		QUALITY_MEDIUM: {"beneficial_min": 0.8, "beneficial_max": 1.5, "detrimental_min": 0.8, "detrimental_max": 1.5},
-		QUALITY_HIGH: {"beneficial_min": 1.0, "beneficial_max": 2.0, "detrimental_min": 0.5, "detrimental_max": 1.0},
-		QUALITY_SUPREME: {"beneficial_min": 1.5, "beneficial_max": 3.0, "detrimental_min": 0.0, "detrimental_max": 0.0},
+		QUALITY_LOW: {"beneficial_min": 0.4, "beneficial_max": 1.0, "detrimental_min": 0.4, "detrimental_max": 0.9},
+		QUALITY_MEDIUM: {"beneficial_min": 0.8, "beneficial_max": 1.7, "detrimental_min": 0.2, "detrimental_max": 0.8},
+		QUALITY_HIGH: {"beneficial_min": 1.5, "beneficial_max": 2.5, "detrimental_min": 0.2, "detrimental_max": 0.6},
+		QUALITY_SUPREME: {"beneficial_min": 2.1, "beneficial_max": 3.4, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
 }
 ## 乘算属性分组幅度；所有数值使用小数比例，增强与削弱按品质分别维护闭区间。
@@ -153,31 +155,107 @@ const MULTIPLICATIVE_MAGNITUDE_RANGES: Dictionary = {
 		QUALITY_SUPREME: {"beneficial_min": 0.200, "beneficial_max": 0.275, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
 }
+## 伤害等价幅度；作为逐属性平衡基准，保持现行四品质的核心输出收益与削弱风险。
+const BALANCED_DAMAGE_MAGNITUDE_RANGES: Dictionary = {
+	QUALITY_LOW: {"beneficial_min": 0.005, "beneficial_max": 0.012, "detrimental_min": 0.005, "detrimental_max": 0.012},
+	QUALITY_MEDIUM: {"beneficial_min": 0.010, "beneficial_max": 0.020, "detrimental_min": 0.003, "detrimental_max": 0.010},
+	QUALITY_HIGH: {"beneficial_min": 0.018, "beneficial_max": 0.030, "detrimental_min": 0.003, "detrimental_max": 0.008},
+	QUALITY_SUPREME: {"beneficial_min": 0.025, "beneficial_max": 0.040, "detrimental_min": 0.0, "detrimental_max": 0.0},
+}
+## 冷却等价幅度；按攻击频率与冷却时长的倒数关系换算，并对齐现有 0.1% 随机精度。
+const BALANCED_COOLDOWN_MAGNITUDE_RANGES: Dictionary = {
+	QUALITY_LOW: {"beneficial_min": 0.005, "beneficial_max": 0.012, "detrimental_min": 0.005, "detrimental_max": 0.012},
+	QUALITY_MEDIUM: {"beneficial_min": 0.010, "beneficial_max": 0.020, "detrimental_min": 0.003, "detrimental_max": 0.010},
+	QUALITY_HIGH: {"beneficial_min": 0.018, "beneficial_max": 0.029, "detrimental_min": 0.003, "detrimental_max": 0.008},
+	QUALITY_SUPREME: {"beneficial_min": 0.024, "beneficial_max": 0.039, "detrimental_min": 0.0, "detrimental_max": 0.0},
+}
+## 能耗等价幅度；按四分之一战斗时间受能量约束的标准场景换算持续输出收益。
+const BALANCED_ENERGY_CONSUMPTION_MAGNITUDE_RANGES: Dictionary = {
+	QUALITY_LOW: {"beneficial_min": 0.020, "beneficial_max": 0.047, "detrimental_min": 0.020, "detrimental_max": 0.050},
+	QUALITY_MEDIUM: {"beneficial_min": 0.039, "beneficial_max": 0.076, "detrimental_min": 0.012, "detrimental_max": 0.041},
+	QUALITY_HIGH: {"beneficial_min": 0.069, "beneficial_max": 0.112, "detrimental_min": 0.012, "detrimental_max": 0.033},
+	QUALITY_SUPREME: {"beneficial_min": 0.094, "beneficial_max": 0.145, "detrimental_min": 0.0, "detrimental_max": 0.0},
+}
+## 操控等价幅度；用于偏移、坐力、冲击力和移速等对命中、安全或位移产生间接收益的属性。
+const BALANCED_CONTROL_MAGNITUDE_RANGES: Dictionary = {
+	QUALITY_LOW: {"beneficial_min": 0.020, "beneficial_max": 0.048, "detrimental_min": 0.020, "detrimental_max": 0.048},
+	QUALITY_MEDIUM: {"beneficial_min": 0.040, "beneficial_max": 0.080, "detrimental_min": 0.012, "detrimental_max": 0.040},
+	QUALITY_HIGH: {"beneficial_min": 0.072, "beneficial_max": 0.120, "detrimental_min": 0.012, "detrimental_max": 0.032},
+	QUALITY_SUPREME: {"beneficial_min": 0.100, "beneficial_max": 0.160, "detrimental_min": 0.0, "detrimental_max": 0.0},
+}
+## 触达等价幅度；用于弹体速度、攻击距离、判定时长、耐久和最大生命等被整体数值稀释的属性。
+const BALANCED_REACH_MAGNITUDE_RANGES: Dictionary = {
+	QUALITY_LOW: {"beneficial_min": 0.040, "beneficial_max": 0.096, "detrimental_min": 0.040, "detrimental_max": 0.096},
+	QUALITY_MEDIUM: {"beneficial_min": 0.080, "beneficial_max": 0.160, "detrimental_min": 0.024, "detrimental_max": 0.080},
+	QUALITY_HIGH: {"beneficial_min": 0.144, "beneficial_max": 0.240, "detrimental_min": 0.024, "detrimental_max": 0.064},
+	QUALITY_SUPREME: {"beneficial_min": 0.200, "beneficial_max": 0.320, "detrimental_min": 0.0, "detrimental_max": 0.0},
+}
+## 恢复与视野等价幅度；用于周期治疗和视野这两类持续但不直接转化为单次伤害的属性。
+const BALANCED_SUSTAIN_MAGNITUDE_RANGES: Dictionary = {
+	QUALITY_LOW: {"beneficial_min": 0.030, "beneficial_max": 0.072, "detrimental_min": 0.030, "detrimental_max": 0.072},
+	QUALITY_MEDIUM: {"beneficial_min": 0.060, "beneficial_max": 0.120, "detrimental_min": 0.018, "detrimental_max": 0.060},
+	QUALITY_HIGH: {"beneficial_min": 0.108, "beneficial_max": 0.180, "detrimental_min": 0.018, "detrimental_max": 0.048},
+	QUALITY_SUPREME: {"beneficial_min": 0.150, "beneficial_max": 0.240, "detrimental_min": 0.0, "detrimental_max": 0.0},
+}
+## 装备攻击力等价幅度；按角色总攻击力与单件装备基础攻击力的平均稀释比例换算。
+const BALANCED_ATTACK_POWER_MAGNITUDE_RANGES: Dictionary = {
+	QUALITY_LOW: {"beneficial_min": 0.070, "beneficial_max": 0.168, "detrimental_min": 0.070, "detrimental_max": 0.168},
+	QUALITY_MEDIUM: {"beneficial_min": 0.140, "beneficial_max": 0.280, "detrimental_min": 0.042, "detrimental_max": 0.140},
+	QUALITY_HIGH: {"beneficial_min": 0.252, "beneficial_max": 0.420, "detrimental_min": 0.042, "detrimental_max": 0.112},
+	QUALITY_SUPREME: {"beneficial_min": 0.350, "beneficial_max": 0.560, "detrimental_min": 0.0, "detrimental_max": 0.0},
+}
+## 装备防御力等价幅度；按防御平滑常数 100 与现有单件装备基础防御力的平均稀释比例换算。
+const BALANCED_DEFENSE_POWER_MAGNITUDE_RANGES: Dictionary = {
+	QUALITY_LOW: {"beneficial_min": 0.060, "beneficial_max": 0.144, "detrimental_min": 0.060, "detrimental_max": 0.144},
+	QUALITY_MEDIUM: {"beneficial_min": 0.120, "beneficial_max": 0.240, "detrimental_min": 0.036, "detrimental_max": 0.120},
+	QUALITY_HIGH: {"beneficial_min": 0.216, "beneficial_max": 0.360, "detrimental_min": 0.036, "detrimental_max": 0.096},
+	QUALITY_SUPREME: {"beneficial_min": 0.300, "beneficial_max": 0.480, "detrimental_min": 0.0, "detrimental_max": 0.0},
+}
+## 逐属性乘算幅度目录；正式属性优先读取本表，旧分组仅作为扩展内容未登记时的兼容回退。
+const MULTIPLICATIVE_STAT_MAGNITUDE_RANGES: Dictionary = {
+	"damage": BALANCED_DAMAGE_MAGNITUDE_RANGES,
+	"cooldown": BALANCED_COOLDOWN_MAGNITUDE_RANGES,
+	"energy_consumption": BALANCED_ENERGY_CONSUMPTION_MAGNITUDE_RANGES,
+	"projectile_speed": BALANCED_REACH_MAGNITUDE_RANGES,
+	"attack_distance": BALANCED_REACH_MAGNITUDE_RANGES,
+	"deviation_degrees": BALANCED_CONTROL_MAGNITUDE_RANGES,
+	"recoil_force": BALANCED_CONTROL_MAGNITUDE_RANGES,
+	"front_recoil_force": BALANCED_CONTROL_MAGNITUDE_RANGES,
+	"impact_force": BALANCED_CONTROL_MAGNITUDE_RANGES,
+	"melee_active_duration": BALANCED_REACH_MAGNITUDE_RANGES,
+	"max_durability": BALANCED_REACH_MAGNITUDE_RANGES,
+	"attack_power": BALANCED_ATTACK_POWER_MAGNITUDE_RANGES,
+	"defense_power": BALANCED_DEFENSE_POWER_MAGNITUDE_RANGES,
+	"max_health": BALANCED_REACH_MAGNITUDE_RANGES,
+	"health_regeneration_per_five_seconds": BALANCED_SUSTAIN_MAGNITUDE_RANGES,
+	"move_speed": BALANCED_CONTROL_MAGNITUDE_RANGES,
+	"vision_range": BALANCED_SUSTAIN_MAGNITUDE_RANGES,
+}
 ## 加算属性独立幅度；数值仍以 0 到 1 小数保存，0.005 表示直接增加 0.5 个百分点。
 const ADDITIVE_POINT_MAGNITUDE_RANGES: Dictionary = {
 	"critical_chance": {
-		QUALITY_LOW: {"beneficial_min": 0.005, "beneficial_max": 0.020, "detrimental_min": 0.010, "detrimental_max": 0.030},
-		QUALITY_MEDIUM: {"beneficial_min": 0.015, "beneficial_max": 0.035, "detrimental_min": 0.010, "detrimental_max": 0.020},
-		QUALITY_HIGH: {"beneficial_min": 0.025, "beneficial_max": 0.050, "detrimental_min": 0.005, "detrimental_max": 0.015},
-		QUALITY_SUPREME: {"beneficial_min": 0.040, "beneficial_max": 0.070, "detrimental_min": 0.0, "detrimental_max": 0.0},
+		QUALITY_LOW: {"beneficial_min": 0.011, "beneficial_max": 0.026, "detrimental_min": 0.011, "detrimental_max": 0.026},
+		QUALITY_MEDIUM: {"beneficial_min": 0.022, "beneficial_max": 0.044, "detrimental_min": 0.007, "detrimental_max": 0.022},
+		QUALITY_HIGH: {"beneficial_min": 0.040, "beneficial_max": 0.066, "detrimental_min": 0.007, "detrimental_max": 0.018},
+		QUALITY_SUPREME: {"beneficial_min": 0.055, "beneficial_max": 0.088, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
 	"critical_damage": {
-		QUALITY_LOW: {"beneficial_min": 0.010, "beneficial_max": 0.030, "detrimental_min": 0.015, "detrimental_max": 0.040},
-		QUALITY_MEDIUM: {"beneficial_min": 0.025, "beneficial_max": 0.050, "detrimental_min": 0.010, "detrimental_max": 0.030},
-		QUALITY_HIGH: {"beneficial_min": 0.040, "beneficial_max": 0.070, "detrimental_min": 0.005, "detrimental_max": 0.020},
-		QUALITY_SUPREME: {"beneficial_min": 0.055, "beneficial_max": 0.090, "detrimental_min": 0.0, "detrimental_max": 0.0},
+		QUALITY_LOW: {"beneficial_min": 0.009, "beneficial_max": 0.021, "detrimental_min": 0.009, "detrimental_max": 0.021},
+		QUALITY_MEDIUM: {"beneficial_min": 0.018, "beneficial_max": 0.035, "detrimental_min": 0.005, "detrimental_max": 0.018},
+		QUALITY_HIGH: {"beneficial_min": 0.032, "beneficial_max": 0.053, "detrimental_min": 0.005, "detrimental_max": 0.014},
+		QUALITY_SUPREME: {"beneficial_min": 0.044, "beneficial_max": 0.070, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
 	"dodge_chance": {
-		QUALITY_LOW: {"beneficial_min": 0.003, "beneficial_max": 0.015, "detrimental_min": 0.015, "detrimental_max": 0.035},
-		QUALITY_MEDIUM: {"beneficial_min": 0.010, "beneficial_max": 0.025, "detrimental_min": 0.010, "detrimental_max": 0.030},
-		QUALITY_HIGH: {"beneficial_min": 0.018, "beneficial_max": 0.035, "detrimental_min": 0.005, "detrimental_max": 0.020},
-		QUALITY_SUPREME: {"beneficial_min": 0.025, "beneficial_max": 0.050, "detrimental_min": 0.0, "detrimental_max": 0.0},
+		QUALITY_LOW: {"beneficial_min": 0.005, "beneficial_max": 0.011, "detrimental_min": 0.005, "detrimental_max": 0.011},
+		QUALITY_MEDIUM: {"beneficial_min": 0.009, "beneficial_max": 0.018, "detrimental_min": 0.003, "detrimental_max": 0.009},
+		QUALITY_HIGH: {"beneficial_min": 0.016, "beneficial_max": 0.026, "detrimental_min": 0.003, "detrimental_max": 0.007},
+		QUALITY_SUPREME: {"beneficial_min": 0.022, "beneficial_max": 0.035, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
 	"cooldown_reduction": {
-		QUALITY_LOW: {"beneficial_min": 0.010, "beneficial_max": 0.040, "detrimental_min": 0.040, "detrimental_max": 0.080},
-		QUALITY_MEDIUM: {"beneficial_min": 0.020, "beneficial_max": 0.060, "detrimental_min": 0.040, "detrimental_max": 0.060},
-		QUALITY_HIGH: {"beneficial_min": 0.030, "beneficial_max": 0.080, "detrimental_min": 0.030, "detrimental_max": 0.050},
-		QUALITY_SUPREME: {"beneficial_min": 0.050, "beneficial_max": 0.100, "detrimental_min": 0.0, "detrimental_max": 0.0},
+		QUALITY_LOW: {"beneficial_min": 0.005, "beneficial_max": 0.012, "detrimental_min": 0.005, "detrimental_max": 0.012},
+		QUALITY_MEDIUM: {"beneficial_min": 0.010, "beneficial_max": 0.020, "detrimental_min": 0.003, "detrimental_max": 0.010},
+		QUALITY_HIGH: {"beneficial_min": 0.018, "beneficial_max": 0.029, "detrimental_min": 0.003, "detrimental_max": 0.008},
+		QUALITY_SUPREME: {"beneficial_min": 0.024, "beneficial_max": 0.039, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
 }
 ## 强化数值保存精度；0.001 对应 0.1 个百分点，可完整保存闪避率等小数区间。
@@ -217,14 +295,11 @@ const STAT_KEYS: Array[String] = [
 	"cooldown_reduction",
 	"move_speed",
 	"vision_range",
-	"scatter_count",
-	"piercing_count",
-	"bounce_count",
-	"combo_count",
 	"energy_regeneration",
 ]
 ## 武器强化石属性池；只包含武器能够应用的属性。
-const WEAPON_STAT_KEYS: Array[String] = ["damage", "cooldown", "energy_consumption", "attack_distance", "projectile_speed", "deviation_degrees", "recoil_force", "front_recoil_force", "impact_force", "melee_active_duration", "critical_chance", "critical_damage", "max_durability", "scatter_count", "piercing_count", "bounce_count", "combo_count"]
+## 散射、穿透、弹射和连击保留为武器基础机制，但不再作为强化石词条生成或出现在开发者自定义列表。
+const WEAPON_STAT_KEYS: Array[String] = ["damage", "cooldown", "energy_consumption", "attack_distance", "projectile_speed", "deviation_degrees", "recoil_force", "front_recoil_force", "impact_force", "melee_active_duration", "critical_chance", "critical_damage", "max_durability"]
 ## 装备强化石属性池；冷却缩减仅腿部、移速仅脚部、视野仅头部、能量恢复仅躯干可应用。
 const EQUIPMENT_STAT_KEYS: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance", "cooldown_reduction", "move_speed", "vision_range", "energy_regeneration"]
 ## 属性中文名称；键为统一属性名，值用于强化石、搜索、筛选和武器详情。
@@ -473,6 +548,9 @@ static func get_stat_magnitude_config(stat_name: String, quality_id: String) -> 
 	stat_name = canonicalize_stat_name(stat_name)
 	# 属性级配置；加算属性直接读取自身区间，保证暴击率、暴击伤害和闪避率互不共用幅度。
 	var stat_configs: Dictionary = ADDITIVE_POINT_MAGNITUDE_RANGES.get(stat_name, {}) as Dictionary if is_additive_point_stat(stat_name) else (ADDITIVE_VALUE_MAGNITUDE_RANGES.get(stat_name, {}) as Dictionary if is_additive_value_stat(stat_name) else {})
+	if stat_configs.is_empty():
+		# 逐属性乘算配置；正式属性在此读取战斗收益平衡后的独立区间，不再受共享属性组限制。
+		stat_configs = MULTIPLICATIVE_STAT_MAGNITUDE_RANGES.get(stat_name, {}) as Dictionary
 	if stat_configs.is_empty():
 		# 乘算属性组；未登记属性返回空配置，使错误数据在使用时安全跳过而不是套用其他属性区间。
 		var magnitude_group: String = str(MULTIPLICATIVE_STAT_GROUPS.get(stat_name, ""))

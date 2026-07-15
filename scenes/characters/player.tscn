@@ -1,4 +1,4 @@
-[gd_scene load_steps=22 format=3 uid="uid://b8ap3osklnsmt"]
+[gd_scene format=3 uid="uid://b8ap3osklnsmt"]
 
 [ext_resource type="Script" uid="uid://mkfqfypf8jpw" path="res://scripts/player/player_controller.gd" id="1_player_controller"]
 [ext_resource type="Script" uid="uid://dy2ap8k4mwko" path="res://scripts/components/player_input_component.gd" id="2_player_input"]
@@ -9,18 +9,18 @@
 [ext_resource type="Script" uid="uid://c4nua6h4h6v0j" path="res://scripts/components/combat_stats_component.gd" id="7_stats"]
 [ext_resource type="Script" uid="uid://bnptom72jfqpo" path="res://scripts/components/inventory_component.gd" id="8_inventory"]
 [ext_resource type="Script" uid="uid://xouhfg5s44n0" path="res://scripts/components/equipment_component.gd" id="9_equipment"]
-[ext_resource type="Resource" path="res://data/weapons/stelle/as_ive_written.tres" id="10_as_ive_written"]
+[ext_resource type="Resource" uid="uid://ctsdbcjoa81nr" path="res://data/weapons/stelle/as_ive_written.tres" id="10_as_ive_written"]
 [ext_resource type="Resource" path="res://data/weapons/stelle/galactic_baseball_bat.tres" id="12_galactic_baseball_bat"]
-[ext_resource type="Script" path="res://scripts/camera/combat_camera.gd" id="17_combat_camera"]
-[ext_resource type="Script" path="res://scripts/components/equipment_set_component.gd" id="21_equipment_set"]
-[ext_resource type="Script" path="res://scripts/components/active_skill_component.gd" id="22_active_skill"]
-[ext_resource type="Script" path="res://scripts/components/passive_skill_component.gd" id="23_passive_skill"]
-[ext_resource type="Script" path="res://scripts/components/skill_targeting_visual.gd" id="24_skill_targeting_visual"]
-[ext_resource type="Script" path="res://scripts/components/skill_charge_bar.gd" id="25_skill_charge_bar"]
-[ext_resource type="Script" path="res://scripts/components/weapon_charge_component.gd" id="26_weapon_charge"]
-[ext_resource type="Script" path="res://scripts/components/temporary_buff_component.gd" id="27_temporary_buff"]
-[ext_resource type="Script" path="res://scripts/components/dodge_feedback_component.gd" id="28_dodge_feedback"]
-[ext_resource type="Script" path="res://scripts/components/shield_component.gd" id="29_shield"]
+[ext_resource type="Script" uid="uid://pujjmsdixv2m" path="res://scripts/camera/combat_camera.gd" id="17_combat_camera"]
+[ext_resource type="Script" uid="uid://bkn4ecftio0so" path="res://scripts/components/equipment_set_component.gd" id="21_equipment_set"]
+[ext_resource type="Script" uid="uid://dfoha1yjp2fe0" path="res://scripts/components/active_skill_component.gd" id="22_active_skill"]
+[ext_resource type="Script" uid="uid://dl5mfslg6bjav" path="res://scripts/components/passive_skill_component.gd" id="23_passive_skill"]
+[ext_resource type="Script" uid="uid://v50xdixyrjpk" path="res://scripts/components/skill_targeting_visual.gd" id="24_skill_targeting_visual"]
+[ext_resource type="Script" uid="uid://dueh4yryrfbb2" path="res://scripts/components/skill_charge_bar.gd" id="25_skill_charge_bar"]
+[ext_resource type="Script" uid="uid://d10vci53hggad" path="res://scripts/components/weapon_charge_component.gd" id="26_weapon_charge"]
+[ext_resource type="Script" uid="uid://nyaueo1x0rhq" path="res://scripts/components/temporary_buff_component.gd" id="27_temporary_buff"]
+[ext_resource type="Script" uid="uid://c640v3rgr6i8r" path="res://scripts/components/dodge_feedback_component.gd" id="28_dodge_feedback"]
+[ext_resource type="Script" uid="uid://c5hbp5so2uxy" path="res://scripts/components/shield_component.gd" id="29_shield"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_body"]
 radius = 18.0
@@ -58,14 +58,14 @@ script = ExtResource("3_movement")
 [node name="StatsComponent" type="Node" parent="." unique_id=345942444]
 script = ExtResource("7_stats")
 
-[node name="ShieldComponent" type="Node" parent="."]
+[node name="ShieldComponent" type="Node" parent="." unique_id=974842857]
 script = ExtResource("29_shield")
 
 [node name="InventoryComponent" type="Node" parent="." unique_id=990293600]
 script = ExtResource("8_inventory")
 initial_items = Array[Resource]([ExtResource("10_as_ive_written"), ExtResource("12_galactic_baseball_bat")])
 
-[node name="EquipmentSetComponent" type="Node" parent="."]
+[node name="EquipmentSetComponent" type="Node" parent="." unique_id=419476065]
 script = ExtResource("21_equipment_set")
 
 [node name="EquipmentComponent" type="Node" parent="." unique_id=1247807795]
@@ -84,43 +84,6 @@ monitoring = false
 monitorable = false
 script = ExtResource("5_melee_attack")
 
-[node name="HybridRangedAttackComponent" type="Node2D" parent="."]
-script = ExtResource("4_ranged_attack")
-projectile_scene = ExtResource("6_player_projectile")
-
-[node name="HybridMeleeAttackComponent" type="Area2D" parent="."]
-collision_layer = 4
-collision_mask = 34
-monitoring = false
-monitorable = false
-script = ExtResource("5_melee_attack")
-
-[node name="SkillTargetingVisual" type="Node2D" parent="."]
-visible = false
-z_index = 5
-script = ExtResource("24_skill_targeting_visual")
-
-[node name="SkillChargeBar" type="Node2D" parent="."]
-visible = false
-z_index = 20
-script = ExtResource("25_skill_charge_bar")
-
-[node name="ActiveSkillComponent" type="Node" parent="."]
-script = ExtResource("22_active_skill")
-
-[node name="PassiveSkillComponent" type="Node" parent="."]
-script = ExtResource("23_passive_skill")
-
-[node name="WeaponChargeComponent" type="Node" parent="."]
-script = ExtResource("26_weapon_charge")
-
-[node name="TemporaryBuffComponent" type="Node" parent="."]
-script = ExtResource("27_temporary_buff")
-
-[node name="DodgeFeedbackComponent" type="Node" parent="."]
-script = ExtResource("28_dodge_feedback")
-visual_node_paths = Array[NodePath]([NodePath("../Body"), NodePath("../Core")])
-
 [node name="HitboxShape" type="CollisionShape2D" parent="MeleeAttackComponent" unique_id=1235241484]
 position = Vector2(56, 0)
 shape = SubResource("RectangleShape2D_melee")
@@ -131,19 +94,55 @@ visible = false
 color = Color(0.494118, 0.913725, 1, 0.32)
 polygon = PackedVector2Array(20, -22, 72, -22, 92, 0, 72, 22, 20, 22)
 
-[node name="HitboxShape" type="CollisionShape2D" parent="HybridMeleeAttackComponent"]
+[node name="HybridRangedAttackComponent" type="Node2D" parent="." unique_id=1106770476]
+script = ExtResource("4_ranged_attack")
+projectile_scene = ExtResource("6_player_projectile")
+
+[node name="HybridMeleeAttackComponent" type="Area2D" parent="." unique_id=1219874580]
+collision_layer = 4
+collision_mask = 34
+monitoring = false
+monitorable = false
+script = ExtResource("5_melee_attack")
+
+[node name="HitboxShape" type="CollisionShape2D" parent="HybridMeleeAttackComponent" unique_id=2089629635]
 position = Vector2(56, 0)
 shape = SubResource("RectangleShape2D_melee")
 disabled = true
 
-[node name="HitboxVisual" type="Polygon2D" parent="HybridMeleeAttackComponent"]
+[node name="HitboxVisual" type="Polygon2D" parent="HybridMeleeAttackComponent" unique_id=1882748814]
 visible = false
 color = Color(0.494118, 0.913725, 1, 0.32)
 polygon = PackedVector2Array(20, -22, 72, -22, 92, 0, 72, 22, 20, 22)
 
+[node name="SkillTargetingVisual" type="Node2D" parent="." unique_id=1368698963]
+visible = false
+z_index = 5
+script = ExtResource("24_skill_targeting_visual")
+
+[node name="SkillChargeBar" type="Node2D" parent="." unique_id=1691702944]
+visible = false
+z_index = 20
+script = ExtResource("25_skill_charge_bar")
+
+[node name="ActiveSkillComponent" type="Node" parent="." unique_id=175625004]
+script = ExtResource("22_active_skill")
+
+[node name="PassiveSkillComponent" type="Node" parent="." unique_id=982152564]
+script = ExtResource("23_passive_skill")
+
+[node name="WeaponChargeComponent" type="Node" parent="." unique_id=1426867277]
+script = ExtResource("26_weapon_charge")
+
+[node name="TemporaryBuffComponent" type="Node" parent="." unique_id=1380539740]
+script = ExtResource("27_temporary_buff")
+
+[node name="DodgeFeedbackComponent" type="Node" parent="." unique_id=1411604380]
+script = ExtResource("28_dodge_feedback")
+visual_node_paths = Array[NodePath]([NodePath("../Body"), NodePath("../Core")])
+
 [node name="Camera2D" type="Camera2D" parent="." unique_id=389718966]
 zoom = Vector2(0.95, 0.95)
-script = ExtResource("17_combat_camera")
-position_smoothing_enabled = false
 process_callback = 0
 position_smoothing_speed = 8.0
+script = ExtResource("17_combat_camera")

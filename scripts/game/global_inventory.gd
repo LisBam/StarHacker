@@ -20,8 +20,10 @@ const SAVE_PATH: String = "user://global_inventory.json"
 ## 当前库存存档版本；默认 7，版本 7 起支持可堆叠修复包的独立数据恢复。
 ## 版本 9 补充；当前值升级为 9，用于保存股票持仓数量和加权平均成本，旧存档自动初始化为空持仓。
 ## 星内容精简补充：当前值升级为 10，用于在旧内容资源移除后为旧存档补齐星扩展包的可用初始装备。
-const SAVE_VERSION: int = 11
+## 强化石词条清理补充：版本 12 会移除旧强化石中的散射、穿透、弹射和连击词条并回写有效结果。
+const SAVE_VERSION: int = 12
 ## 图鉴系统补充：当前库存存档版本为 11，新增永久图鉴发现记录；旧存档会从当前持有与已装备物品初始化已发现条目。
+## 当前版本说明：库存版本现为 12；版本 11 的图鉴发现迁移继续保留，版本 12 在其后追加强化石词条清理。
 ## 强化公式存档版本；版本 2 起暴击率、暴击伤害和闪避率的累计值按直接百分点保存。
 const ENHANCEMENT_FORMULA_VERSION: int = 2
 ## 旧版耐久上限；固定 100.0，用于把版本 5 的当前耐久按比例迁移到新版上限。
@@ -2424,8 +2426,14 @@ func _deserialize_record(serialized_record: Dictionary, register_encyclopedia_di
 		enhancement_stone.display_name = EnhancementStoneData._build_display_name(enhancement_stone.quality_id, enhancement_stone.get_resolved_target_kind()) if saved_display_name.is_empty() or not ("武器强化石" in saved_display_name or "装备强化石" in saved_display_name) else saved_display_name
 		enhancement_stone.description = str(serialized_record.get("description", enhancement_stone.description))
 		enhancement_stone.icon_text = str(serialized_record.get("icon_text", enhancement_stone.icon_text))
-		enhancement_stone.value = maxi(int(serialized_record.get("value", serialized_record.get("sell_price", 0))), 0)
-		enhancement_stone.modifiers = EnhancementRules.normalize_modifiers(serialized_record.get("modifiers", {}) as Dictionary)
+		# 有效强化词条；归一化时自动移除不再进入强化石系统的离散武器机制，其他词条与方向保持不变。
+		var normalized_modifiers: Dictionary = EnhancementRules.normalize_modifiers(serialized_record.get("modifiers", {}) as Dictionary)
+		if normalized_modifiers.is_empty():
+			# 空强化石没有可展示或可应用属性，载入时直接丢弃以免形成无法处理的库存记录。
+			return {}
+		enhancement_stone.modifiers = normalized_modifiers
+		# 迁移后价值；继续遵守每条有效词条 30 金币，移除旧词条后不会保留已经失效的价值。
+		enhancement_stone.value = EnhancementStoneData.VALUE_PER_MODIFIER * normalized_modifiers.size()
 		item_resource = enhancement_stone
 	elif item_kind == "repair_kit":
 		# 修复包资源；优先从项目模板深拷贝恢复，字段异常时仍可按存档内容构建独立道具。

@@ -39,7 +39,7 @@
 
 - `CharacterData`、`ActiveSkillData`、`PassiveSkillData`、`WeaponData`、`EquipmentData`、`RepairKitData` 和 `ConsumableData` 描述可保存、可复制的角色、技能与物品配置；技能详细协议见 `docs/skill_system.md`。
 - `ContentPackData` 只声明一个角色扩展包拥有的武器、装备、道具与怪物路径；`EquipmentSetData` 只声明共享套装门槛、显示原文、属性加成与特殊效果参数。
-- `EnhancementStoneData` 保存强化石品质、目标类型和词条方向；强化幅度与兼容规则集中在 `EnhancementRules`。
+- `EnhancementStoneData` 保存强化石品质、目标类型和词条方向；逐属性强化幅度、兼容规则与正式词条池集中在 `EnhancementRules`。散射、穿透、弹射和连击属于武器模板机制，不进入强化石词条池。
 - `.tres` 保存单个内容的基础数值。脚本默认值只作为缺省值，场景或资源覆盖值优先。
 - 新内容通过 `ContentCatalog` 自动注册，创建流程见 `docs/content_authoring.md`。
 
@@ -199,7 +199,7 @@ ContentCatalog 模板
 - 新物品展示字段进入 `ItemDetailFormatter`；标准卡片结构进入 `ItemCardView`。
 - 主菜单与战斗背包的共同交互进入 `SharedBackpackPanel`。仅场景特有的所有权结果由宿主通过信号处理。
 - 正式战斗中的普通拾取、丢弃、装备与耐久变化先写入 `GlobalInventory` 内存状态，不为每次操作重复序列化包含永久仓库的完整存档；成功撤离、失败或正常退出结算后统一落盘。物资撤离点已经送回永久仓库的资产使用强制保存路径，不等待本局最终结算。
-- `user://global_inventory.json` 只能由 `/root/GlobalInventory` AutoLoad 写入；独立测试实例、临时验证脚本和普通场景节点没有持久化权限。库存服务只维护这一份主存档，不自动生成额外恢复或备份文件。存档版本 11 起额外保存稳定图鉴发现键；旧存档首次读取时以当前仓库、背包与已装备物品补齐发现记录，之后出售、消耗、丢弃或战斗遗失都不会重新锁定条目。
+- `user://global_inventory.json` 只能由 `/root/GlobalInventory` AutoLoad 写入；独立测试实例、临时验证脚本和普通场景节点没有持久化权限。库存服务只维护这一份主存档，不自动生成额外恢复或备份文件。存档版本 11 起额外保存稳定图鉴发现键；版本 12 起载入旧强化石时移除散射、穿透、弹射和连击词条，只含已移除词条的空强化石直接丢弃，混合词条强化石按剩余有效词条重算价值。旧存档首次读取时以当前仓库、背包与已装备物品补齐发现记录，之后出售、消耗、丢弃或战斗遗失都不会重新锁定条目。
 
 ### 7.3 敌人与环境
 

@@ -68,7 +68,7 @@ var _display_name_override: String = ""
 var _empty_text: String = "空"
 ## 当前底部摘要富文本；默认空字符串时仅保留类型与名称，价格、词条或能量等由调用方传入。
 var _detail_bbcode: String = ""
-## 当前第四行摘要富文本；默认空字符串并隐藏，仅商店强化石用于把星穹价格与第三行属性分离。
+## 当前第四行摘要富文本；默认空字符串并隐藏，商店、仓库与背包强化石用于把价值或价格与第三行属性分离。
 var _secondary_detail_bbcode: String = ""
 ## 当前卡片是否处于选中状态；默认 false，启用时使用统一青色边框。
 var _selected: bool = false
@@ -90,7 +90,7 @@ var _context_label: Label
 var _name_label: Label
 ## 底部摘要标签缓存；默认在首次进入场景树时创建，支持价格与强化方向颜色。
 var _detail_label: RichTextLabel
-## 第四行摘要标签缓存；默认隐藏，启用时显示商店强化石星穹且不改变其他物品三行结构。
+## 第四行摘要标签缓存；默认隐藏，启用时显示强化石价值或星穹价格且不改变其他物品三行结构。
 var _secondary_detail_label: RichTextLabel
 ## 耐久条缓存；默认在首次进入场景树时创建，无耐久属性物品会自动隐藏。
 var _durability_bar: Control

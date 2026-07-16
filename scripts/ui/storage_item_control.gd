@@ -75,6 +75,8 @@ var _displayed_price_override: int = -1
 ## 是否在价格前显示剩余强化次数；默认 false，仅锻造仓库与背包来源卡牌启用，避免改变其他库存界面摘要。
 ## 显示语义补充：变量名为旧接口兼容保留，现行卡牌分子显示累计已强化次数而非剩余次数。
 var _show_remaining_enhancement_count: bool = false
+## 是否把强化石价值拆到第四行；默认 false，仓库与共享背包显式启用，其他宿主保持原摘要协议。
+var _show_stone_value_on_fourth_line: bool = false
 ## 不可选目标灰色覆盖层；默认隐藏，选择状态阻止当前物品时完整覆盖按钮、富文本与耐久条。
 var _target_filter_overlay: ColorRect
 ## 通用物品卡片视图缓存；默认首次配置时创建，承担全部物品名称、类型、摘要、尺寸与耐久显示。
@@ -173,6 +175,13 @@ func set_weapon_slot_visual_style(enabled: bool) -> void:
 	if _stone_summary_label != null and (_is_enhancement_stone() or _is_repair_kit()):
 		_stone_summary_label.text = _build_stone_card_bbcode("") if _is_enhancement_stone() else _build_repair_kit_card_bbcode("")
 	_refresh_item_card_view()
+
+
+func set_stone_value_on_fourth_line(enabled: bool) -> void:
+	## 配置强化石卡牌是否使用“第三行属性、第四行价值”布局；只改变显示，不修改物品价值或堆叠数量。
+	_show_stone_value_on_fourth_line = enabled
+	if _item_card_view != null:
+		_refresh_item_card_view()
 
 
 func refresh_durability() -> void:
@@ -396,7 +405,9 @@ func _refresh_item_card_view() -> void:
 	var display_name: String = "%s%s" % [_extraction_prefix, _get_item_display_name()]
 	# 底部摘要；不同物品只提供数据文本，字号、位置、颜色承载与耐久组件均由通用模板控制。
 	var detail_bbcode: String = _build_common_detail_bbcode()
-	_item_card_view.call("configure", _item_resource, _quantity, _get_weapon_type_label(), detail_bbcode, "空", display_name)
+	# 第四行摘要；仓库与共享背包中的强化石独立显示整组价值，其他物品与界面保持空值。
+	var secondary_detail_bbcode: String = _build_secondary_detail_bbcode()
+	_item_card_view.call("configure", _item_resource, _quantity, _get_weapon_type_label(), detail_bbcode, "空", display_name, secondary_detail_bbcode)
 	_item_card_view.call("set_visual_state", false, _enhancement_target_highlight or _item_selection_highlight)
 
 
@@ -409,6 +420,8 @@ func _build_common_detail_bbcode() -> String:
 		_append_colored_stone_tokens(colored_tokens, modifiers, true)
 		_append_colored_stone_tokens(colored_tokens, modifiers, false)
 		var stone_text: String = " ".join(colored_tokens) if not colored_tokens.is_empty() else "无词条"
+		if _show_stone_value_on_fourth_line:
+			return stone_text
 		return "%s · %s %d" % [stone_text, _price_label, _get_displayed_price()] if not _weapon_slot_visual_style_enabled else stone_text
 	if _is_repair_kit():
 		# 修复包摘要；恢复值继续使用绿色，名称与数量统一由通用模板上方两行显示。
@@ -423,6 +436,13 @@ func _build_common_detail_bbcode() -> String:
 		# 已强化次数；优先读取资源公开接口，旧扩展资源回退持久化字段并限制到统一范围。
 		var enhancement_count: int = int(_item_resource.call("get_enhancement_count")) if _item_resource.has_method("get_enhancement_count") else clampi(int(_item_resource.get("enhancement_count")), 0, maximum_enhancement_count)
 		return "%d/%d · %s %d" % [enhancement_count, maximum_enhancement_count, _price_label, _get_displayed_price()]
+	return "%s %d" % [_price_label, _get_displayed_price()]
+
+
+func _build_secondary_detail_bbcode() -> String:
+	## 构建通用卡牌第四行；当前只允许仓库与共享背包强化石显示整组价值。
+	if not _show_stone_value_on_fourth_line or not _is_enhancement_stone():
+		return ""
 	return "%s %d" % [_price_label, _get_displayed_price()]
 
 

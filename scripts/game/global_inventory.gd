@@ -1073,7 +1073,7 @@ func use_enhancement_stone_with_result(stone_resource: Resource, source_location
 	elif stone_resource.has_method("get_normalized_modifiers"):
 		modifiers = stone_resource.call("get_normalized_modifiers") as Dictionary
 	else:
-		modifiers = EnhancementRules.normalize_modifiers(stone_resource.get("modifiers") as Dictionary)
+		modifiers = EnhancementRules.normalize_modifiers(stone_resource.get("modifiers") as Dictionary, str(stone_resource.get("quality_id")) == EnhancementRules.QUALITY_SPECIALIZED)
 	if modifiers.is_empty() or not weapon_resource.has_method("apply_enhancement"):
 		return failed_result
 	# 强化石品质；用于在使用瞬间选择对应的增强与削弱随机数值区间。
@@ -2364,13 +2364,14 @@ func _serialize_record(record: Dictionary) -> Dictionary:
 	if _is_enhancement_stone(item_resource):
 		# 强化石品质；版本 4 起与实际百分比一起保存，旧存档读取时回退为低级。
 		# 方向化存档补充：当前版本只保存品质、属性和方向，旧百分比读取后会归一化为 +/-1。
+		# 特化品质补充：离散正向词条保存 +1/+2 实际点数，负面词条仍只保存方向。
 		serialized_record["quality_id"] = str(item_resource.get("quality_id"))
 		serialized_record["target_kind"] = str(item_resource.get("target_kind"))
 		serialized_record["display_name"] = str(item_resource.get("display_name"))
 		serialized_record["description"] = str(item_resource.get("description"))
 		serialized_record["icon_text"] = str(item_resource.get("icon_text"))
 		serialized_record["value"] = int(item_resource.get("value"))
-		serialized_record["modifiers"] = EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary)
+		serialized_record["modifiers"] = item_resource.call("get_normalized_modifiers") as Dictionary if item_resource.has_method("get_normalized_modifiers") else EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary, str(item_resource.get("quality_id")) == EnhancementRules.QUALITY_SPECIALIZED)
 	elif _is_repair_kit(item_resource):
 		# 修复包字段；保存稳定标识与显示配置，允许未来运行时生成的道具安全恢复。
 		serialized_record["item_id"] = str(item_resource.get("item_id"))
@@ -2427,7 +2428,8 @@ func _deserialize_record(serialized_record: Dictionary, register_encyclopedia_di
 		enhancement_stone.description = str(serialized_record.get("description", enhancement_stone.description))
 		enhancement_stone.icon_text = str(serialized_record.get("icon_text", enhancement_stone.icon_text))
 		# 有效强化词条；归一化时自动移除不再进入强化石系统的离散武器机制，其他词条与方向保持不变。
-		var normalized_modifiers: Dictionary = EnhancementRules.normalize_modifiers(serialized_record.get("modifiers", {}) as Dictionary)
+		# 特化品质补充：仅 specialized 品质保留四项离散词条与 +1/+2，普通旧石仍按原迁移规则清理。
+		var normalized_modifiers: Dictionary = EnhancementRules.normalize_modifiers(serialized_record.get("modifiers", {}) as Dictionary, enhancement_stone.get_resolved_quality_id() == EnhancementRules.QUALITY_SPECIALIZED)
 		if normalized_modifiers.is_empty():
 			# 空强化石没有可展示或可应用属性，载入时直接丢弃以免形成无法处理的库存记录。
 			return {}

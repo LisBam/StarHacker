@@ -395,7 +395,7 @@ func _refresh_item_card_view() -> void:
 func _build_common_detail_bbcode() -> String:
 	if _is_enhancement_stone():
 		# 强化石方向摘要；保留绿色增益与红色减益，但不再创建独立资源卡片布局。
-		var modifiers: Dictionary = EnhancementRules.normalize_modifiers(_item_resource.get("modifiers") as Dictionary)
+		var modifiers: Dictionary = _item_resource.call("get_normalized_modifiers") as Dictionary if _item_resource.has_method("get_normalized_modifiers") else EnhancementRules.normalize_modifiers(_item_resource.get("modifiers") as Dictionary, str(_item_resource.get("quality_id")) == EnhancementRules.QUALITY_SPECIALIZED)
 		# 彩色方向词条；顺序继续遵循强化规则目录，保证堆叠资源显示稳定。
 		var colored_tokens: PackedStringArray = PackedStringArray()
 		_append_colored_stone_tokens(colored_tokens, modifiers, true)
@@ -455,7 +455,7 @@ func _build_stone_card_bbcode(extraction_prefix: String) -> String:
 	else:
 		card_lines.append("[center][b]%s%s[/b]  x%d[/center]" % [extraction_prefix, _get_item_display_name(), _quantity])
 	# 归一化词典；按规则目录顺序生成稳定且可堆叠识别的词条组合。
-	var modifiers: Dictionary = EnhancementRules.normalize_modifiers(_item_resource.get("modifiers") as Dictionary)
+	var modifiers: Dictionary = _item_resource.call("get_normalized_modifiers") as Dictionary if _item_resource.has_method("get_normalized_modifiers") else EnhancementRules.normalize_modifiers(_item_resource.get("modifiers") as Dictionary, str(_item_resource.get("quality_id")) == EnhancementRules.QUALITY_SPECIALIZED)
 	# 彩色词条；增强为绿色，削弱为红色，不显示具体百分比。
 	# 品质化数值补充；当前卡片会直接显示每条实际百分比，上述颜色规则保持不变。
 	# 方向化显示补充；当前卡片只显示属性与 +/-，具体百分比在使用时随机后由结果弹窗展示。

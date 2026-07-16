@@ -252,7 +252,12 @@ func _start_cooldown(duration: float) -> void:
 
 
 func _weapon_has_attribute(weapon_data: Resource, property_name: StringName) -> bool:
-	return weapon_data != null and bool(weapon_data.get(property_name))
+	if weapon_data == null:
+		return false
+	# 有效机制持有状态；支持武器数据把模板开关与特化累计点数统一结算。
+	if weapon_data.has_method("has_effective_attribute"):
+		return bool(weapon_data.call("has_effective_attribute", str(property_name)))
+	return bool(weapon_data.get(property_name))
 
 
 func _get_spawn_position(direction: Vector2) -> Vector2:

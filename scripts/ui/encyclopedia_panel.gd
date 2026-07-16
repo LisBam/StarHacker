@@ -23,9 +23,10 @@ const PRIORITIZED_CONTENT_PACK_ID: String = "stelle"
 ## 图鉴装备部位排序表；同一套装按头部、躯干、腿部、脚部顺序展示，未知部位使用兜底序号并排在已知部位之后。
 const EQUIPMENT_SLOT_SORT_ORDERS: Dictionary = {"head": 0, "body": 1, "legs": 2, "feet": 3}
 ## 图鉴资源品质标识排序表；强化石等直接提供 quality_id 的资源按初级、中级、高级、极品顺序展示。
-const RESOURCE_QUALITY_ID_SORT_ORDERS: Dictionary = {"low": 0, "medium": 1, "high": 2, "supreme": 3}
+## 特化品质排序补充；特化是独立品质而非普通升阶节点，稳定排在四个普通品质之后。
+const RESOURCE_QUALITY_ID_SORT_ORDERS: Dictionary = {"low": 0, "medium": 1, "high": 2, "supreme": 3, "specialized": 4}
 ## 图鉴资源品质名称前缀；没有 quality_id 的资源通过正式名称前缀识别品质，顺序与强化石品质定义保持一致。
-const RESOURCE_QUALITY_NAME_PREFIXES: Array[String] = ["初级", "中级", "高级", "极品"]
+const RESOURCE_QUALITY_NAME_PREFIXES: Array[String] = ["初级", "中级", "高级", "极品", "特化"]
 ## 无法识别的装备部位或资源品质排序序号；默认 999999，确保已定义的排序规则始终优先于兼容资源。
 const FALLBACK_SORT_ORDER: int = 999999
 ## 图鉴搜索框最小宽度；默认 260 像素，容纳中文关键词并在页签下方保持清晰单行布局。
@@ -396,6 +397,7 @@ func _build_resource_entry(item_resource: Resource) -> Dictionary:
 	# 装备部位排序序号；头部、躯干、腿部、脚部依次为 0 至 3，非装备资源使用兜底值。
 	var equipment_slot_sort_order: int = _get_equipment_slot_sort_order(item_resource)
 	# 资源品质排序序号；初级、中级、高级、极品依次为 0 至 3，未分级资源使用兜底值。
+	# 特化品质补充：特化使用序号 4，稳定排在四个普通品质之后。
 	var resource_quality_sort_order: int = _get_resource_quality_sort_order(item_resource)
 	return {
 		"entry_key": "resource:%s" % item_resource.resource_path,
@@ -455,6 +457,7 @@ func _compare_catalog_entries(first_entry: Dictionary, second_entry: Dictionary)
 	if first_equipment_slot_sort_order != second_equipment_slot_sort_order:
 		return first_equipment_slot_sort_order < second_equipment_slot_sort_order
 	# 第一项资源品质排序序号；资源按初级、中级、高级、极品的既定品质路径排列。
+	# 特化品质补充：特化不属于升阶路径，但资源列表统一放在极品之后。
 	var first_resource_quality_sort_order: int = int(first_entry.get("resource_quality_sort_order", FALLBACK_SORT_ORDER))
 	# 第二项资源品质排序序号；仅在相同扩展包与装备排序层级后参与比较。
 	var second_resource_quality_sort_order: int = int(second_entry.get("resource_quality_sort_order", FALLBACK_SORT_ORDER))
@@ -487,6 +490,7 @@ func _get_equipment_slot_sort_order(item_resource: Resource) -> int:
 
 func _get_resource_quality_sort_order(item_resource: Resource) -> int:
 	## 返回资源品质排序序号；优先读取 quality_id，缺失时按正式名称的初级、中级、高级、极品前缀识别。
+	## 特化品质补充：quality_id 为 specialized 或名称以“特化”开头时返回特化排序序号。
 	if item_resource == null:
 		return FALLBACK_SORT_ORDER
 	# 物品类型；武器和装备不属于资源品质排序范围，保持图鉴各分类的独立排序规则。
@@ -494,6 +498,7 @@ func _get_resource_quality_sort_order(item_resource: Resource) -> int:
 	if item_kind in ["weapon", "equipment"]:
 		return FALLBACK_SORT_ORDER
 	# 资源品质稳定标识；强化石等资源直接填写 low、medium、high 或 supreme 时无需解析显示文本。
+	# 特化品质补充：specialized 与四个普通品质使用相同的稳定 ID 直接查表流程。
 	var quality_id: String = str(item_resource.get("quality_id")).strip_edges()
 	if RESOURCE_QUALITY_ID_SORT_ORDERS.has(quality_id):
 		return int(RESOURCE_QUALITY_ID_SORT_ORDERS.get(quality_id, FALLBACK_SORT_ORDER))

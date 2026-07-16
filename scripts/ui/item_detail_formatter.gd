@@ -369,12 +369,12 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 
 
 static func _append_remaining_enhancement_count_line(detail_lines: Array[String], item_resource: Resource) -> void:
-	## 在武器或装备耐久下方追加剩余强化次数；分子是仍可使用数量，分母是统一 20 次上限。
+	## 在武器或装备耐久下方追加强化次数；函数名为旧调用兼容保留，分子是累计已强化次数，分母是统一 20 次上限。
 	# 强化次数上限；统一规则目录固定为 20，避免武器与装备显示不同分母。
 	var maximum_enhancement_count: int = EnhancementRules.MAX_TARGET_ENHANCEMENT_COUNT
-	# 剩余强化次数；新资源读取公开接口，旧扩展资源按已使用次数安全换算。
-	var remaining_enhancement_count: int = int(item_resource.call("get_remaining_enhancement_count")) if item_resource.has_method("get_remaining_enhancement_count") else maxi(maximum_enhancement_count - clampi(int(item_resource.get("enhancement_count")), 0, maximum_enhancement_count), 0)
-	detail_lines.append("剩余强化次数：%d/%d" % [remaining_enhancement_count, maximum_enhancement_count])
+	# 已强化次数；新资源读取公开接口，旧扩展资源回退持久化字段并限制到统一范围。
+	var enhancement_count: int = int(item_resource.call("get_enhancement_count")) if item_resource.has_method("get_enhancement_count") else clampi(int(item_resource.get("enhancement_count")), 0, maximum_enhancement_count)
+	detail_lines.append("强化次数：%d/%d" % [enhancement_count, maximum_enhancement_count])
 
 
 static func _weapon_has_effective_attribute(item_resource: Resource, attribute_property_name: String) -> bool:

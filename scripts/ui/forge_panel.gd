@@ -501,15 +501,15 @@ func _refresh_preview() -> void:
 	var restored_durability: float = float(preview.get("durability_restored", 0.0))
 	# 主物品类型名称；武器与装备共用强化次数上限，只区分玩家可见标题。
 	var main_item_type_name: String = "装备" if main_weapon != null and str(main_weapon.get("item_kind")) == "equipment" else "武器"
-	# 武器与装备锻造预览；剩余次数放在价值之前，分子表示本次锻造完成后仍可继续使用的强化石数量。
-	_preview_label.text = "主%s：%s\n耐久：%.1f → %.1f（+%.1f）\n强化石：%d 颗\n剩余强化次数：%d/%d\n价值：%d 星穹\n费用倍率：×%.2f" % [
+	# 武器与装备锻造预览；强化次数放在价值之前，分子表示本次锻造完成后的累计已强化次数。
+	_preview_label.text = "主%s：%s\n耐久：%.1f → %.1f（+%.1f）\n强化石：%d 颗\n强化次数：%d/%d\n价值：%d 星穹\n费用倍率：×%.2f" % [
 		main_item_type_name,
 		str(main_weapon.get("display_name")) if main_weapon != null else "未知%s" % main_item_type_name,
 		float(preview.get("durability_before", 0.0)),
 		float(preview.get("durability_after", 0.0)),
 		restored_durability,
 		int(preview.get("compatible_stone_count", 0)),
-		int(preview.get("remaining_enhancement_count", 0)),
+		int(preview.get("enhancement_count_after", 0)),
 		int(preview.get("maximum_enhancement_count", EnhancementRules.MAX_TARGET_ENHANCEMENT_COUNT)),
 		int(preview.get("main_weapon_value", 0)),
 		float(preview.get("cost_multiplier", 1.0)),

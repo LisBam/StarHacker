@@ -137,6 +137,7 @@ static func _append_equipment_lines(detail_lines: Array[String], item_resource: 
 	# 最大耐久；取值至少为 1，确保装备详情始终明确显示耐久上限。
 	var max_durability: float = float(item_resource.call("get_maximum_durability")) if item_resource.has_method("get_maximum_durability") else maxf(float(item_resource.get("max_durability")), 1.0)
 	detail_lines.append("耐久：%.1f / %.1f" % [current_durability, max_durability])
+	_append_remaining_enhancement_count_line(detail_lines, item_resource)
 	if item_resource.has_method("is_broken") and bool(item_resource.call("is_broken")):
 		detail_lines.append("[color=%s]状态：损坏，全部装备属性失效[/color]" % NEGATIVE_COLOR)
 	_append_equipment_set_lines(detail_lines, item_resource)
@@ -323,11 +324,7 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 	# 单次耐久消耗；每把武器独立配置，成功射击或近战使用时按该浮点数扣除。
 	# 固定消耗显示补充：耐久成本由普通/混合类型规则固定决定，不是资源可强化字段，因此详情不重复展示“耐久消耗”属性行。
 	detail_lines.append("耐久：%.1f / %.1f" % [current_durability, max_durability])
-	# 已强化次数；武器固定显示当前值与 20 颗上限，并紧跟在耐久信息下方。
-	var enhancement_count: int = int(item_resource.call("get_enhancement_count")) if item_resource.has_method("get_enhancement_count") else maxi(int(item_resource.get("enhancement_count")), 0)
-	# 强化次数上限；所有武器共用数据资源中的固定 20 颗规则。
-	var maximum_enhancement_count: int = WeaponData.MAX_ENHANCEMENT_COUNT
-	detail_lines.append("强化次数：%d/%d" % [enhancement_count, maximum_enhancement_count])
+	_append_remaining_enhancement_count_line(detail_lines, item_resource)
 	if item_resource.has_method("is_broken") and bool(item_resource.call("is_broken")):
 		detail_lines.append("[color=%s]状态：损坏，无法使用[/color]" % NEGATIVE_COLOR)
 	# 武器类型；决定伤害、冷却及远近战专属属性的基础字段映射。
@@ -369,6 +366,15 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 		_append_weapon_attack_channel_stat_line(detail_lines, item_resource, "近战冲击", "impact_force", "melee", 1)
 	else:
 		_append_weapon_stat_line(detail_lines, item_resource, "impact_force", 1)
+
+
+static func _append_remaining_enhancement_count_line(detail_lines: Array[String], item_resource: Resource) -> void:
+	## 在武器或装备耐久下方追加剩余强化次数；分子是仍可使用数量，分母是统一 20 次上限。
+	# 强化次数上限；统一规则目录固定为 20，避免武器与装备显示不同分母。
+	var maximum_enhancement_count: int = EnhancementRules.MAX_TARGET_ENHANCEMENT_COUNT
+	# 剩余强化次数；新资源读取公开接口，旧扩展资源按已使用次数安全换算。
+	var remaining_enhancement_count: int = int(item_resource.call("get_remaining_enhancement_count")) if item_resource.has_method("get_remaining_enhancement_count") else maxi(maximum_enhancement_count - clampi(int(item_resource.get("enhancement_count")), 0, maximum_enhancement_count), 0)
+	detail_lines.append("剩余强化次数：%d/%d" % [remaining_enhancement_count, maximum_enhancement_count])
 
 
 static func _weapon_has_effective_attribute(item_resource: Resource, attribute_property_name: String) -> bool:

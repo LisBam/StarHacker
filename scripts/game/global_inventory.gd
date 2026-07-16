@@ -2527,7 +2527,7 @@ func _serialize_record(record: Dictionary) -> Dictionary:
 		# 防具运行时字段；保存耐久和强化累计值，基础属性继续由项目模板提供。
 		serialized_record["enhancement_formula_version"] = ENHANCEMENT_FORMULA_VERSION
 		serialized_record["enhancement_modifiers"] = (item_resource.get("enhancement_modifiers") as Dictionary).duplicate(true)
-		serialized_record["enhancement_count"] = maxi(int(item_resource.get("enhancement_count")), 0)
+		serialized_record["enhancement_count"] = clampi(int(item_resource.get("enhancement_count")), 0, EquipmentData.MAX_ENHANCEMENT_COUNT)
 		serialized_record["is_second_hand"] = bool(item_resource.get("is_second_hand"))
 		serialized_record["current_durability"] = maxf(float(item_resource.get("current_durability")), 0.0)
 		serialized_record["max_durability"] = _get_resource_maximum_durability(item_resource)
@@ -2614,8 +2614,8 @@ func _deserialize_record(serialized_record: Dictionary, register_encyclopedia_di
 		# 武器二手状态；旧存档缺失时视为全新，现行掉落与商店物品会永久保存该标记。
 		item_resource.set("is_second_hand", bool(serialized_record.get("is_second_hand", false)))
 	if _is_equipment_resource(item_resource):
-		# 装备强化次数；当前不设上限，旧存档缺失时回退 0 并拒绝负数。
-		item_resource.set("enhancement_count", maxi(int(serialized_record.get("enhancement_count", 0)), 0))
+		# 装备强化次数；旧存档缺失时回退 0，历史超过上限的异常值限制到统一 20 次。
+		item_resource.set("enhancement_count", clampi(int(serialized_record.get("enhancement_count", 0)), 0, EquipmentData.MAX_ENHANCEMENT_COUNT))
 		# 装备二手状态；与武器使用同一持久化字段和名称前缀规则。
 		item_resource.set("is_second_hand", bool(serialized_record.get("is_second_hand", false)))
 	if _is_weapon_resource(item_resource):

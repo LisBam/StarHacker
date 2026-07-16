@@ -51,6 +51,14 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 	var durability_before: float = maxf(float(main_weapon.get("current_durability")), 0.0)
 	# 最大耐久；支持未来不同武器拥有不同上限。
 	var maximum_durability: float = _get_maximum_durability(main_weapon)
+	# 主物品是否为真实武器；装备继续允许强化且不应用单把武器 20 颗次数上限。
+	var main_is_weapon: bool = _is_actual_weapon(main_weapon)
+	# 当前强化次数；武器读取持久化字段，装备保持 0 仅用于统一预览结构。
+	var enhancement_count_before: int = int(main_weapon.call("get_enhancement_count")) if main_is_weapon and main_weapon.has_method("get_enhancement_count") else (clampi(int(main_weapon.get("enhancement_count")), 0, WeaponData.MAX_ENHANCEMENT_COUNT) if main_is_weapon else 0)
+	# 强化次数上限；所有武器固定 20，装备使用 0 表示本规则不适用。
+	var maximum_enhancement_count: int = WeaponData.MAX_ENHANCEMENT_COUNT if main_is_weapon else 0
+	# 剩余强化次数；锻造材料中的有效强化石数量不得超过该值。
+	var remaining_enhancement_count: int = maxi(maximum_enhancement_count - enhancement_count_before, 0) if main_is_weapon else 0
 	# 剩余可恢复耐久；牺牲武器或装备依次提供当前耐久的 10%，超过上限的部分不收费也不计入结果。
 	var remaining_durability_capacity: float = maxf(maximum_durability - durability_before, 0.0)
 	# 实际预计恢复耐久；默认 0，按牺牲槽顺序累加并限制到缺失耐久。
@@ -66,6 +74,8 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 	var effective_sacrifice_entries: Array[Dictionary] = []
 	# 无效牺牲材料；任一非空槽不能产生锻造效果时整次锻造禁用，UI 会将对应槽位标为红色。
 	var invalid_sacrifice_entries: Array[Dictionary] = []
+	# 是否因武器强化次数不足出现无效材料；用于返回比普通不兼容更明确的限制提示。
+	var enhancement_limit_exceeded: bool = false
 	for sacrifice_entry in sacrifice_entries:
 		# 牺牲资源；武器和装备提供耐久，匹配主物品类型的强化石提供随机强化，其他资源不参与锻造。
 		var sacrifice_resource: Resource = sacrifice_entry.get("resource") as Resource
@@ -83,15 +93,21 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 			else:
 				invalid_sacrifice_entries.append(sacrifice_entry)
 		elif _is_enhancement_stone(sacrifice_resource) and bool(sacrifice_resource.call("can_apply_to_weapon", main_weapon)):
-			stone_base_cost += _get_stone_quality_cost(sacrifice_resource)
-			compatible_stone_count += 1
-			effective_material_count += 1
-			effective_sacrifice_entries.append(sacrifice_entry)
+			if main_is_weapon and compatible_stone_count >= remaining_enhancement_count:
+				enhancement_limit_exceeded = true
+				invalid_sacrifice_entries.append(sacrifice_entry)
+			else:
+				stone_base_cost += _get_stone_quality_cost(sacrifice_resource)
+				compatible_stone_count += 1
+				effective_material_count += 1
+				effective_sacrifice_entries.append(sacrifice_entry)
 		else:
 			invalid_sacrifice_entries.append(sacrifice_entry)
 	if sacrifice_entries.is_empty():
 		return _build_invalid_preview("请至少放入一件牺牲材料")
 	if not invalid_sacrifice_entries.is_empty():
+		if enhancement_limit_exceeded:
+			return _build_invalid_preview("武器剩余强化次数不足，请移除超出上限的强化石", invalid_sacrifice_entries)
 		return _build_invalid_preview("牺牲槽中存在无法用于当前主物品的材料", invalid_sacrifice_entries)
 	if effective_material_count <= 0:
 		return _build_invalid_preview("当前材料无法为主物品提供有效锻造效果")
@@ -114,6 +130,11 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 		"durability_after": minf(durability_before + durability_restored, maximum_durability),
 		"durability_restored": durability_restored,
 		"compatible_stone_count": compatible_stone_count,
+		"enhancement_count_before": enhancement_count_before,
+		"enhancement_count_after": enhancement_count_before + compatible_stone_count,
+		"maximum_enhancement_count": maximum_enhancement_count,
+		"remaining_enhancement_count": maxi(remaining_enhancement_count - compatible_stone_count, 0) if main_is_weapon else 0,
+		"has_enhancement_limit": main_is_weapon,
 		"effective_sacrifice_entries": effective_sacrifice_entries,
 		"invalid_sacrifice_entries": [],
 		"cost": total_cost,
@@ -211,7 +232,10 @@ func can_use_as_sacrifice(main_resource: Resource, candidate_resource: Resource)
 		# 牺牲武器或装备必须仍有耐久且主物品存在耐久缺口；两类耐久物品允许跨类型互相作为牺牲品。
 		var main_maximum_durability: float = _get_maximum_durability(main_resource)
 		return float(main_resource.get("current_durability")) < main_maximum_durability and float(candidate_resource.get("current_durability")) > 0.0
-	return _is_enhancement_stone(candidate_resource) and bool(candidate_resource.call("can_apply_to_weapon", main_resource))
+	if not _is_enhancement_stone(candidate_resource) or not bool(candidate_resource.call("can_apply_to_weapon", main_resource)):
+		return false
+	# 武器强化上限；达到 20 次后仍可使用耐久牺牲品修复，但所有强化石候选立即禁用。
+	return not _is_actual_weapon(main_resource) or not main_resource.has_method("can_receive_enhancement") or bool(main_resource.call("can_receive_enhancement", 1))
 
 
 func _build_stone_upgrade_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary]) -> Dictionary:
@@ -351,6 +375,11 @@ func _build_invalid_preview(message: String, invalid_sacrifice_entries: Array[Di
 func _is_weapon(item_resource: Resource) -> bool:
 	# 可锻造耐久物品；保留历史函数名以避免改动既有调用，实际同时识别武器和四部位装备。
 	return item_resource != null and (str(item_resource.get("weapon_type")) in ["ranged", "melee", "hybrid"] or str(item_resource.get("item_kind")) == "equipment")
+
+
+func _is_actual_weapon(item_resource: Resource) -> bool:
+	## 判断主物品是否为受 20 颗强化石上限约束的武器；四部位装备不进入该限制。
+	return item_resource != null and str(item_resource.get("item_kind")) == "weapon" and str(item_resource.get("weapon_type")) in ["ranged", "melee", "hybrid"]
 
 
 func _is_enhancement_stone(item_resource: Resource) -> bool:

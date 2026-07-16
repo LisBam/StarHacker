@@ -345,6 +345,7 @@ func _build_backpack_overlay() -> void:
 	backpack_panel.offset_right = 480.0
 	backpack_panel.offset_bottom = 310.0
 	backpack_panel.connect("closed", Callable(self, "_on_backpack_closed"))
+	backpack_panel.connect("warehouse_requested", Callable(self, "_on_backpack_warehouse_requested"))
 	backpack_overlay.add_child(backpack_panel)
 	_backpack_panel = backpack_panel
 	backpack_overlay.visible = false
@@ -606,6 +607,13 @@ func _on_backpack_closed() -> void:
 	if _backpack_overlay != null:
 		_backpack_overlay.visible = false
 	_backpack_button.grab_focus()
+
+
+func _on_backpack_warehouse_requested() -> void:
+	## 从局外背包一键切换到仓库；复用已有两个遮罩与面板实例，不重复创建库存界面。
+	if _backpack_overlay != null:
+		_backpack_overlay.visible = false
+	_on_warehouse_button_pressed()
 
 
 func _on_shop_closed() -> void:

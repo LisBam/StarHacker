@@ -5,6 +5,8 @@ class_name SharedBackpackPanel
 ## 局外没有地面掉落容器，因此丢弃操作直接永久移除对应背包记录，不生成可重新拾取的物品。
 
 signal closed
+## 仓库打开请求；仅局外背包右上角按钮发出，宿主负责关闭背包遮罩并展示已有仓库面板。
+signal warehouse_requested
 ## 丢弃请求；战斗上下文由 CombatHud 生成地面掉落，局外上下文由组件直接永久删除。
 signal combat_discard_requested(item_resource: Resource, quantity: int)
 
@@ -32,6 +34,8 @@ const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quant
 const CHARACTER_STATS_PANEL_SCRIPT: Script = preload("res://scripts/ui/character_stats_panel.gd")
 ## 套装筛选控件脚本；装备分类使用与强化石筛选一致的多选与清空交互。
 const EQUIPMENT_SET_FILTER_CONTROL_SCRIPT: Script = preload("res://scripts/ui/equipment_set_filter_control.gd")
+## 库存限制配置；容量标签在全局库存服务缺失时仍使用项目统一的 50 组上限兜底。
+const INVENTORY_LIMITS: Script = preload("res://scripts/data/inventory_limits.gd")
 ## 装备操作编号；背包武器或装备点击后按类型进入对应装备槽。
 const ACTION_EQUIP: int = 1
 ## 远程装备槽一操作编号；远程武器可明确选择第一个远程槽。
@@ -96,6 +100,10 @@ var _pending_repair_kit_location: String = ""
 var _status_label: Label
 ## 取消修复包使用按钮；只在目标选择期间显示，避免玩家被锁定在选择状态。
 var _cancel_use_button: Button
+## 局外仓库快捷按钮；默认仅主菜单上下文显示，点击后由主菜单宿主切换到仓库界面。
+var _warehouse_button: Button
+## 背包容量标签；固定显示当前物品组数与 50 组上限，并与二级分类栏保持同一垂直高度。
+var _capacity_label: Label
 ## 当前运行上下文；默认主菜单，必须在加入场景树前通过 configure_context 修改。
 var _context_mode: String = CONTEXT_MAIN_MENU
 ## 当前一级分类；默认全部，取值与 InventoryQuery 主分类常量一致。
@@ -141,6 +149,8 @@ func _ready() -> void:
 func configure_context(context_mode: String) -> void:
 	# 上下文模式；只接受主菜单或战斗两个稳定值，异常输入回退主菜单安全策略。
 	_context_mode = context_mode if context_mode in [CONTEXT_MAIN_MENU, CONTEXT_COMBAT] else CONTEXT_MAIN_MENU
+	if _warehouse_button != null:
+		_warehouse_button.visible = _context_mode == CONTEXT_MAIN_MENU
 
 
 func configure_runtime_character_components(stats_component: Node, equipment_component: Node, temporary_buff_component: Node = null) -> void:
@@ -190,6 +200,12 @@ func _build_interface() -> void:
 	_cancel_use_button.visible = false
 	_cancel_use_button.pressed.connect(_cancel_repair_kit_use)
 	header.add_child(_cancel_use_button)
+	_warehouse_button = Button.new()
+	_warehouse_button.text = "仓库"
+	_warehouse_button.custom_minimum_size = Vector2(90.0, 36.0)
+	_warehouse_button.visible = _context_mode == CONTEXT_MAIN_MENU
+	_warehouse_button.pressed.connect(func() -> void: warehouse_requested.emit())
+	header.add_child(_warehouse_button)
 	var close_button: Button = Button.new()
 	close_button.text = "关闭背包"
 	close_button.custom_minimum_size = Vector2(116.0, 36.0)
@@ -245,9 +261,22 @@ func _build_interface() -> void:
 	_create_category_button(primary_bar, "武器", InventoryQuery.PRIMARY_WEAPONS, true)
 	_create_category_button(primary_bar, "装备", InventoryQuery.PRIMARY_EQUIPMENT, true)
 	_create_category_button(primary_bar, "资源", InventoryQuery.PRIMARY_RESOURCES, true)
+	# 二级分类行；左侧弹性空间保持分类居中，右侧固定显示完整背包组数与上限。
+	var subcategory_row: HBoxContainer = HBoxContainer.new()
+	category_columns.add_child(subcategory_row)
+	# 二级分类左侧占位；与右侧容量标签使用相同最小宽度，使分类按钮保持页面中心对齐。
+	var subcategory_left_spacer: Control = Control.new()
+	subcategory_left_spacer.custom_minimum_size = Vector2(92.0, 0.0)
+	subcategory_row.add_child(subcategory_left_spacer)
 	_subcategory_bar = HBoxContainer.new()
 	_subcategory_bar.alignment = BoxContainer.ALIGNMENT_CENTER
-	category_columns.add_child(_subcategory_bar)
+	_subcategory_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	subcategory_row.add_child(_subcategory_bar)
+	_capacity_label = Label.new()
+	_capacity_label.custom_minimum_size = Vector2(92.0, 30.0)
+	_capacity_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_capacity_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	subcategory_row.add_child(_capacity_label)
 	_rebuild_subcategory_buttons()
 	# 左右分栏；左侧固定装备栏，右侧背包物品独立滚动。
 	var split: HSplitContainer = HSplitContainer.new()
@@ -383,6 +412,7 @@ func _refresh_all() -> void:
 	_refresh_pending = false
 	_rebuild_equipment()
 	_rebuild_items()
+	_refresh_capacity_label()
 	if _character_stats_panel != null:
 		_character_stats_panel.refresh()
 
@@ -469,6 +499,20 @@ func _rebuild_items() -> void:
 		var empty_label: Label = Label.new()
 		empty_label.text = "当前分类与筛选没有物品"
 		_item_grid.add_child(empty_label)
+
+
+func _refresh_capacity_label() -> void:
+	## 刷新背包组数显示；筛选结果不会改变已占用组数，始终读取全局库存真实记录数量。
+	if _capacity_label == null:
+		return
+	if _global_inventory == null:
+		_capacity_label.text = "--/--"
+		return
+	# 当前背包组数；武器、装备和每个资源堆叠记录都各计为一组。
+	var current_group_count: int = int(_global_inventory.call("get_backpack_count")) if _global_inventory.has_method("get_backpack_count") else 0
+	# 背包组数上限；优先读取库存服务公开接口，兼容旧服务时回退现行固定 50 组。
+	var maximum_group_count: int = int(_global_inventory.call("get_backpack_max_groups")) if _global_inventory.has_method("get_backpack_max_groups") else INVENTORY_LIMITS.BACKPACK_MAX_GROUPS
+	_capacity_label.text = "%d/%d" % [current_group_count, maximum_group_count]
 
 
 func _create_category_button(target_bar: HBoxContainer, button_text: String, category_name: String, is_primary: bool) -> void:

@@ -6,6 +6,8 @@ class_name ItemDetailFormatter
 
 ## 装备套装组件脚本；悬停详情调用其纯统计接口，保证激活颜色与实际套装效果使用同一有效件数规则。
 const EQUIPMENT_SET_COMPONENT_SCRIPT: Script = preload("res://scripts/components/equipment_set_component.gd")
+## 库存限制配置；悬停数量上限必须与背包、仓库和地面掉落保持一致。
+const INVENTORY_LIMITS: Script = preload("res://scripts/data/inventory_limits.gd")
 
 ## 正强化颜色；默认亮绿色，用于高于基础值的总值与正数强化差值。
 const POSITIVE_COLOR: String = "#70e889"
@@ -53,7 +55,9 @@ static func get_item_display_name(item_resource: Resource) -> String:
 	var display_name: String = str(item_resource.get("display_name"))
 	if display_name.is_empty():
 		display_name = str(item_resource.get("weapon_id"))
-	return "%s（损坏）" % display_name if (is_weapon(item_resource) or is_equipment(item_resource)) and item_resource.has_method("is_broken") and bool(item_resource.call("is_broken")) else display_name
+	# 二手前缀；武器与装备命中二手生成规则后在所有库存、掉落和商店界面持续显示。
+	var prefixed_display_name: String = "【二手】%s" % display_name if (is_weapon(item_resource) or is_equipment(item_resource)) and bool(item_resource.get("is_second_hand")) else display_name
+	return "%s（损坏）" % prefixed_display_name if (is_weapon(item_resource) or is_equipment(item_resource)) and item_resource.has_method("is_broken") and bool(item_resource.call("is_broken")) else prefixed_display_name
 
 
 static func get_item_type_label(item_resource: Resource) -> String:
@@ -101,7 +105,7 @@ static func build_bbcode(item_resource: Resource, quantity: int = 1, value_label
 	detail_lines.append("[font_size=18][b]%s[/b][/font_size]" % get_item_display_name(item_resource))
 	detail_lines.append("类型：%s" % get_item_type_label(item_resource))
 	if quantity > 1 or is_enhancement_stone(item_resource):
-		detail_lines.append("数量：%d / 99" % maxi(quantity, 1))
+		detail_lines.append("数量：%d / %d" % [maxi(quantity, 1), INVENTORY_LIMITS.MAX_STACK_QUANTITY])
 	# 单件价值；资源堆叠额外展示整组价值，避免菜单摘要与详情不一致。
 	var unit_value: int = get_item_value(item_resource)
 	# 详情价值；普通界面显示价值，物资撤离界面传入实际撤离收费覆盖值。
@@ -319,6 +323,11 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 	# 单次耐久消耗；每把武器独立配置，成功射击或近战使用时按该浮点数扣除。
 	# 固定消耗显示补充：耐久成本由普通/混合类型规则固定决定，不是资源可强化字段，因此详情不重复展示“耐久消耗”属性行。
 	detail_lines.append("耐久：%.1f / %.1f" % [current_durability, max_durability])
+	# 已强化次数；武器固定显示当前值与 20 颗上限，并紧跟在耐久信息下方。
+	var enhancement_count: int = int(item_resource.call("get_enhancement_count")) if item_resource.has_method("get_enhancement_count") else maxi(int(item_resource.get("enhancement_count")), 0)
+	# 强化次数上限；所有武器共用数据资源中的固定 20 颗规则。
+	var maximum_enhancement_count: int = WeaponData.MAX_ENHANCEMENT_COUNT
+	detail_lines.append("强化次数：%d/%d" % [enhancement_count, maximum_enhancement_count])
 	if item_resource.has_method("is_broken") and bool(item_resource.call("is_broken")):
 		detail_lines.append("[color=%s]状态：损坏，无法使用[/color]" % NEGATIVE_COLOR)
 	# 武器类型；决定伤害、冷却及远近战专属属性的基础字段映射。

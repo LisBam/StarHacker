@@ -16,6 +16,8 @@ const DRAG_DATA_TYPE: String = "global_storage_item"
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
 ## 通用物品卡片视图；仓库、背包、锻造来源、物资撤离与结算必须统一复用该固定尺寸模板。
 const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
+## 库存限制配置；卡片显示数量和跨容器移动数量统一使用单组 10 件上限。
+const INVENTORY_LIMITS: Script = preload("res://scripts/data/inventory_limits.gd")
 ## 强化词条增强颜色；默认亮绿色，与悬停详情保持一致。
 const STONE_BENEFICIAL_COLOR: String = "#70e889"
 ## 强化词条削弱颜色；默认亮红色，与悬停详情保持一致。
@@ -39,6 +41,7 @@ var _item_index: int = -1
 ## 是否允许左键快捷操作；默认 false，纯仓库模式只浏览和出售，展开背包后才启用容器互转。
 var _quick_action_enabled: bool = false
 ## 当前堆叠数量；武器固定为 1，强化石取值 1 到 99，修改会影响卡片数量角标和整组价值。
+## 现行限制补充：武器与装备固定为 1，强化石与其他可堆叠资源取值 1 到 10。
 var _quantity: int = 1
 ## 强化石卡片富文本；默认运行时按需创建，用于在方形资源格内直接区分绿色增强与红色削弱词条。
 ## 宽卡布局补充；强化石已与武器统一为宽卡片，该富文本仅负责品质、百分比和利弊颜色。
@@ -84,7 +87,7 @@ func configure(item_resource: Resource, location: String, item_index: int, quick
 	_location = location
 	_item_index = item_index
 	_quick_action_enabled = quick_action_enabled
-	_quantity = clampi(quantity, 1, 99)
+	_quantity = clampi(quantity, 1, INVENTORY_LIMITS.MAX_STACK_QUANTITY)
 	_price_label = price_label if not price_label.is_empty() else "价值"
 	_displayed_price_override = displayed_price_override
 	_extraction_prefix = extraction_prefix
@@ -115,7 +118,8 @@ func configure(item_resource: Resource, location: String, item_index: int, quick
 func update_storage_context(item_resource: Resource, location: String, item_index: int, quick_action_enabled: bool, extraction_prefix: String = "", quantity: int = 1) -> void:
 	## 复用现有卡片并同步库存上下文；资源、数量或显示前缀变化时执行完整配置，仅下标或容器变化时只更新拖拽数据，避免长列表移动物品后重复生成详情与视觉节点。
 	# 实际数量；与完整配置保持相同的 1 至 99 堆叠范围，异常调用不会写入非法卡片状态。
-	var resolved_quantity: int = clampi(quantity, 1, 99)
+	# 现行限制补充：正式范围已调整为 1 至 10，旧注释中的 99 仅表示历史兼容来源。
+	var resolved_quantity: int = clampi(quantity, 1, INVENTORY_LIMITS.MAX_STACK_QUANTITY)
 	if _item_resource != item_resource or _quantity != resolved_quantity or _extraction_prefix != extraction_prefix:
 		configure(item_resource, location, item_index, quick_action_enabled, extraction_prefix, resolved_quantity)
 		return

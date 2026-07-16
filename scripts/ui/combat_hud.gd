@@ -41,6 +41,8 @@ const PROGRESS_SLIDER_VISUAL_SCRIPT: Script = preload("res://scripts/ui/progress
 const ACTIVE_SKILL_BAR_SCRIPT: Script = preload("res://scripts/ui/active_skill_bar.gd")
 ## 局内共享槽位视图；左侧技能栏和右侧纯展示武器栏直接复用同一视觉组件。
 const COMBAT_HUD_SLOT_VIEW_SCRIPT: Script = preload("res://scripts/ui/combat_hud_slot_view.gd")
+## 库存限制配置；旧背包兼容界面、地面丢弃与结算卡片统一使用单组 10 件上限。
+const INVENTORY_LIMITS: Script = preload("res://scripts/data/inventory_limits.gd")
 ## 角色系统当前角色展示模式编号；与 CharacterSelect 的公开展示模式保持一致，只隐藏角色选择栏并复用完整详情。
 const CHARACTER_SHOWCASE_DISPLAY_MODE: int = 1
 ## 战斗开发者模式解锁序列；默认六个英文字母，输入错误时按首字母重新开始匹配。
@@ -830,7 +832,8 @@ func _rebuild_inventory_slots() -> void:
 		visible_item_count += 1
 		if str(item_data.get("weapon_type")) not in ["ranged", "melee", "hybrid"]:
 			# 资源数量；取值 1 到 99，强化石与修复包都使用资源方格显示。
-			var quantity: int = clampi(int((raw_entry as Dictionary).get("quantity", 1)), 1, 99)
+			# 现行限制补充：正式取值为 1 到 10，旧 99 件堆叠在进入战斗前已经拆组。
+			var quantity: int = clampi(int((raw_entry as Dictionary).get("quantity", 1)), 1, INVENTORY_LIMITS.MAX_STACK_QUANTITY)
 			# 资源方格；复用仓库控件的方形布局，修复包可点击或拖动到武器，强化石仅保留锻造材料属性。
 			# 通用模板补充：资源交互规则保持不变，实际显示区域统一为 160×72 物品卡片。
 			var resource_slot: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
@@ -3092,6 +3095,7 @@ func _discard_combat_inventory_item(item_resource: Resource, requested_quantity:
 		# 实际丢弃数量；限制到当前真实堆叠，防止旧弹窗数量过期。
 		var discard_quantity: int = clampi(requested_quantity, 1, stored_quantity)
 		# 地面堆叠资源；整组只创建一个节点并携带数量，避免最多 99 件资源在同一帧深拷贝和实例化造成卡顿。
+		# 现行限制补充：每个地面堆叠节点最多携带 10 件资源。
 		var dropped_resource: Resource = item_resource.duplicate(true) as Resource
 		if dropped_resource == null or not bool(_game_world.call("spawn_item_drop_near_player", dropped_resource, discard_quantity)):
 			return
@@ -3786,7 +3790,7 @@ func _build_settlement_section(section_name: String, entries: Array, empty_text:
 		var item_resource: Resource = entry.get("resource") as Resource
 		if item_resource != null:
 			# 结算数量；强化石堆叠在同一卡片显示 xN，武器保持数量 1。
-			var quantity: int = clampi(int(entry.get("quantity", 1)), 1, 99)
+			var quantity: int = clampi(int(entry.get("quantity", 1)), 1, INVENTORY_LIMITS.MAX_STACK_QUANTITY)
 			var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
 			item_control.custom_minimum_size = ITEM_CARD_VIEW_SCRIPT.get_standard_size()
 			item_control.size_flags_horizontal = Control.SIZE_SHRINK_CENTER

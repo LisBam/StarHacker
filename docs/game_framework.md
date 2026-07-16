@@ -40,6 +40,8 @@
 - `CharacterData`、`ActiveSkillData`、`PassiveSkillData`、`WeaponData`、`EquipmentData`、`RepairKitData` 和 `ConsumableData` 描述可保存、可复制的角色、技能与物品配置；技能详细协议见 `docs/skill_system.md`。
 - `ContentPackData` 只声明一个角色扩展包拥有的武器、装备、道具与怪物路径；`EquipmentSetData` 只声明共享套装门槛、显示原文、属性加成与特殊效果参数。
 - `EnhancementStoneData` 保存强化石品质、目标类型和词条方向；逐属性强化幅度、兼容规则与正式词条池集中在 `EnhancementRules`。特化品质额外在资源中保存散射、穿透、弹射或连击的 `+1/+2` 离散点数；四项机制不进入普通四品质词条池。
+- `InventoryLimits` 集中声明背包 50 组容量、资源单组 10 件上限与旧 99 件堆叠读取边界；库存、地面掉落和 UI 不各自复制这些数字。
+- `SecondHandItemGenerator` 集中执行武器装备 30% 二手判定、1 至 20 颗正式概率历史强化石与 1% 至 99% 耐久消耗；怪物、宝箱和普通商店只负责提供新物品实例与随机源。
 - `.tres` 保存单个内容的基础数值。脚本默认值只作为缺省值，场景或资源覆盖值优先。
 - 新内容通过 `ContentCatalog` 自动注册，创建流程见 `docs/content_authoring.md`。
 
@@ -75,7 +77,7 @@
 - `GameWorld` 负责地图边界、独立背景网格绘制、环境生成、探索记录、撤离点、宝箱、掉落池、虚拟人口目标和共享导航缓存；怪物类型按各场景根节点的 `spawn_weight` 占比抽取，背景网格间距不参与玩法边界或导航计算。
 - `MonsterSimulationManager` 只负责虚拟敌人记录与真实节点之间的分批物化和休眠。
 - `BasicMonster` 组合感知、战术和移动组件；`RangedMonster` 只增加安全距离与射击行为。
-- `WeaponDrop` 是统一地面物品载体，可承载武器、装备、强化石和道具的独立资源副本；武器与自然掉落默认数量为 1，玩家整组丢弃的可堆叠资源由单个节点保存 1 至 99 的数量并在拾取时原子合并。
+- `WeaponDrop` 是统一地面物品载体，可承载武器、装备、强化石和道具的独立资源副本；武器与自然掉落默认数量为 1，玩家整组丢弃的可堆叠资源由单个节点保存 1 至 10 的数量并在拾取时原子合并。
 
 敌人状态机与加载协议见 `docs/enemy_ai.md`，掉落概率、人口曲线和撤离数值见机制总表。
 
@@ -87,7 +89,7 @@
 - 战斗常驻 HUD 将技能栏放在屏幕左下角、武器栏放在屏幕右下角，角色名字、生命与能量独立保留在底部中心；常驻 HUD 节点必须位于全部交互遮罩之前，菜单显示时不依赖逐项隐藏也不会覆盖菜单内容。
 - 右下常驻武器栏由 `CombatHud` 直接创建 `CombatHudSlotView` 并读取装备组件快照，顶部使用与技能按键相同的居中区域显示“远程 1 / 远程 2 / 近战”，下方显示武器名、能耗、耐久、当前手持高亮和攻击冷却；它不复用 `WeaponSlotControl` 或 `ItemCardView`，装备、卸下、修复、强化和拖拽操作只存在于背包等交互界面。
 - 主菜单与暂停设置复用 `SaveTransferControl` 提供存档导出、导入和文件选择；控件只调用 `SaveArchiveService`，不直接访问各业务存档。
-- `SharedBackpackPanel` 同时服务主菜单和战斗 HUD；上下文只决定丢弃等少量业务差异。
+- `SharedBackpackPanel` 同时服务主菜单和战斗 HUD；上下文只决定丢弃和局外仓库快捷入口等少量业务差异，容量标签始终读取 `GlobalInventory` 的真实背包组数。
 - `InventoryQuery` 为仓库、背包、商店、锻造与结算提供无副作用的分类、强化词条筛选、套装筛选、搜索和排序结果；`EquipmentSetFilterControl` 统一维护套装多选 UI，不拥有库存数据。
 - `ItemCardView`、`WeaponDurabilityBar` 和 `ItemDetailFormatter` 统一物品展示，宿主只提供操作协议。
 - `CommonConfirmationDialog`、`SellQuantityDialog`、`SecuritiesTransferDialog`、`EnhancementResultDialog` 和 `ItemActionPopup` 分别承载明确的弹窗交互。
@@ -199,6 +201,7 @@ ContentCatalog 模板
 - 新物品展示字段进入 `ItemDetailFormatter`；标准卡片结构进入 `ItemCardView`。
 - 主菜单与战斗背包的共同交互进入 `SharedBackpackPanel`。仅场景特有的所有权结果由宿主通过信号处理。
 - 正式战斗中的普通拾取、丢弃、装备与耐久变化先写入 `GlobalInventory` 内存状态，不为每次操作重复序列化包含仓库的完整存档；成功撤离、失败或正常退出结算后统一落盘。物资撤离点已经送回仓库的资产使用强制保存路径，不等待本局最终结算。
+- `GlobalInventory` 对背包执行 50 组原子容量预检，并把所有正式可堆叠资源限制为每组 10 件；武器和装备始终单件成组。旧 99 件堆叠读档时会拆成多个十件组，拆分后超过背包容量的记录转入仓库，不删除玩家资产。
 - `user://global_inventory.json` 只能由 `/root/GlobalInventory` AutoLoad 写入；独立测试实例、临时验证脚本和普通场景节点没有持久化权限。库存服务只维护这一份主存档，不自动生成额外恢复或备份文件。存档版本 11 起额外保存稳定图鉴发现键；版本 12 起载入普通品质旧强化石时移除散射、穿透、弹射和连击词条，只含已移除词条的空强化石直接丢弃，混合词条强化石按剩余有效词条重算价值；只有 `specialized` 特化品质允许持久化这四类词条的 `+1/+2`。旧存档首次读取时以当前仓库、背包与已装备物品补齐发现记录，之后出售、消耗、丢弃或战斗遗失都不会重新锁定条目。
 
 ### 7.3 敌人与环境

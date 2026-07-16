@@ -234,7 +234,15 @@ func apply_damage(damage: float, source: Node) -> void:
 	var current_health_before_damage: float = float(_stats_component.get("current_health")) if _stats_component != null else 0.0
 	# 是否完成致命伤害回溯；只有伤害达到当前生命且技能组件明确成功执行后续段时为 true。
 	var lethal_damage_intercepted: bool = health_damage >= current_health_before_damage and health_damage > 0.0 and _active_skill_component != null and _active_skill_component.has_method("try_intercept_lethal_damage") and bool(_active_skill_component.call("try_intercept_lethal_damage", health_damage, source))
-	if not lethal_damage_intercepted and health_damage > 0.0 and _stats_component.has_method("take_damage"):
+	# 套装致命恢复比例；技能未拦截且本次伤害足以致命时才尝试消费，取值 0 表示当前装备没有可用的首次复苏效果。
+	var equipment_set_lethal_recovery_ratio: float = 0.0
+	if not lethal_damage_intercepted and health_damage >= current_health_before_damage and health_damage > 0.0 and _equipment_set_component != null and _equipment_set_component.has_method("try_consume_first_lethal_recovery"):
+		equipment_set_lethal_recovery_ratio = clampf(float(_equipment_set_component.call("try_consume_first_lethal_recovery")), 0.0, 1.0)
+	# 套装复苏后的生命值；按当前生命上限结算，直接设置可保证致命伤害不会先触发死亡状态与死亡信号。
+	var equipment_set_recovered_health: float = float(_stats_component.get("max_health")) * equipment_set_lethal_recovery_ratio if equipment_set_lethal_recovery_ratio > 0.0 else 0.0
+	if equipment_set_recovered_health > 0.0 and _stats_component.has_method("set_health"):
+		_stats_component.call("set_health", equipment_set_recovered_health)
+	if not lethal_damage_intercepted and equipment_set_recovered_health <= 0.0 and health_damage > 0.0 and _stats_component.has_method("take_damage"):
 		_stats_component.call("take_damage", health_damage)
 	if _equipment_component != null and _equipment_component.has_method("consume_armor_durability_on_hit"):
 		_equipment_component.call("consume_armor_durability_on_hit")

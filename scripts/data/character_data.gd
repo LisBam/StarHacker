@@ -30,7 +30,8 @@ class_name CharacterData
 ## 基础视野倍率；默认 1.0 表示 100% 视野，装备视野加成会在其上继续结算。
 @export_range(0.01, 10.0, 0.01, "or_greater") var vision_range: float = 1.0
 ## 基础闪避率；默认 0，使用 0 到 1 小数表示 0% 到 100%。
-@export_range(0.0, 1.0, 0.01) var dodge_chance: float = 0.0
+## 当前配置上限补充：检查器最多允许 0.80，运行时与装备、套装和临时效果汇总后仍统一限制到 80%。
+@export_range(0.0, 0.8, 0.01) var dodge_chance: float = 0.0
 ## 基础每秒能量恢复；默认 15，支持 0.1 精度，装备与消耗品能量恢复会在该值上继续结算。
 @export_range(0.0, 99999.0, 0.1, "or_greater") var energy_regeneration: float = 15.0
 ## 被动技能说明；默认待配置，当前用于角色选择详情占位，未来可扩展为技能资源引用。

@@ -177,11 +177,19 @@ const BALANCED_ENERGY_CONSUMPTION_MAGNITUDE_RANGES: Dictionary = {
 	QUALITY_SUPREME: {"beneficial_min": 0.094, "beneficial_max": 0.145, "detrimental_min": 0.0, "detrimental_max": 0.0},
 }
 ## 操控等价幅度；用于偏移、坐力、冲击力和移速等对命中、安全或位移产生间接收益的属性。
+## 移速平衡补充：移速已改用独立区间，本表继续服务偏移、坐力与冲击力，不再决定移速词条幅度。
 const BALANCED_CONTROL_MAGNITUDE_RANGES: Dictionary = {
 	QUALITY_LOW: {"beneficial_min": 0.020, "beneficial_max": 0.048, "detrimental_min": 0.020, "detrimental_max": 0.048},
 	QUALITY_MEDIUM: {"beneficial_min": 0.040, "beneficial_max": 0.080, "detrimental_min": 0.012, "detrimental_max": 0.040},
 	QUALITY_HIGH: {"beneficial_min": 0.072, "beneficial_max": 0.120, "detrimental_min": 0.012, "detrimental_max": 0.032},
 	QUALITY_SUPREME: {"beneficial_min": 0.100, "beneficial_max": 0.160, "detrimental_min": 0.0, "detrimental_max": 0.0},
+}
+## 移速独立幅度；增强与削弱均为原操控等价区间的四分之一，并保持 0.1% 抽取精度。
+const BALANCED_MOVE_SPEED_MAGNITUDE_RANGES: Dictionary = {
+	QUALITY_LOW: {"beneficial_min": 0.005, "beneficial_max": 0.012, "detrimental_min": 0.005, "detrimental_max": 0.012},
+	QUALITY_MEDIUM: {"beneficial_min": 0.010, "beneficial_max": 0.020, "detrimental_min": 0.003, "detrimental_max": 0.010},
+	QUALITY_HIGH: {"beneficial_min": 0.018, "beneficial_max": 0.030, "detrimental_min": 0.003, "detrimental_max": 0.008},
+	QUALITY_SUPREME: {"beneficial_min": 0.025, "beneficial_max": 0.040, "detrimental_min": 0.0, "detrimental_max": 0.0},
 }
 ## 触达等价幅度；用于弹体速度、攻击距离、判定时长、耐久和最大生命等被整体数值稀释的属性。
 const BALANCED_REACH_MAGNITUDE_RANGES: Dictionary = {
@@ -191,11 +199,19 @@ const BALANCED_REACH_MAGNITUDE_RANGES: Dictionary = {
 	QUALITY_SUPREME: {"beneficial_min": 0.200, "beneficial_max": 0.320, "detrimental_min": 0.0, "detrimental_max": 0.0},
 }
 ## 恢复与视野等价幅度；用于周期治疗和视野这两类持续但不直接转化为单次伤害的属性。
+## 视野平衡补充：视野已改用独立区间，本表继续服务周期治疗，不再决定视野词条幅度。
 const BALANCED_SUSTAIN_MAGNITUDE_RANGES: Dictionary = {
 	QUALITY_LOW: {"beneficial_min": 0.030, "beneficial_max": 0.072, "detrimental_min": 0.030, "detrimental_max": 0.072},
 	QUALITY_MEDIUM: {"beneficial_min": 0.060, "beneficial_max": 0.120, "detrimental_min": 0.018, "detrimental_max": 0.060},
 	QUALITY_HIGH: {"beneficial_min": 0.108, "beneficial_max": 0.180, "detrimental_min": 0.018, "detrimental_max": 0.048},
 	QUALITY_SUPREME: {"beneficial_min": 0.150, "beneficial_max": 0.240, "detrimental_min": 0.0, "detrimental_max": 0.0},
+}
+## 视野独立幅度；增强与削弱按原持续收益区间四等分，半步端点取最近的 0.1% 合法值。
+const BALANCED_VISION_RANGE_MAGNITUDE_RANGES: Dictionary = {
+	QUALITY_LOW: {"beneficial_min": 0.008, "beneficial_max": 0.018, "detrimental_min": 0.008, "detrimental_max": 0.018},
+	QUALITY_MEDIUM: {"beneficial_min": 0.015, "beneficial_max": 0.030, "detrimental_min": 0.005, "detrimental_max": 0.015},
+	QUALITY_HIGH: {"beneficial_min": 0.027, "beneficial_max": 0.045, "detrimental_min": 0.005, "detrimental_max": 0.012},
+	QUALITY_SUPREME: {"beneficial_min": 0.038, "beneficial_max": 0.060, "detrimental_min": 0.0, "detrimental_max": 0.0},
 }
 ## 装备攻击力等价幅度；按角色总攻击力与单件装备基础攻击力的平均稀释比例换算。
 const BALANCED_ATTACK_POWER_MAGNITUDE_RANGES: Dictionary = {
@@ -228,8 +244,8 @@ const MULTIPLICATIVE_STAT_MAGNITUDE_RANGES: Dictionary = {
 	"defense_power": BALANCED_DEFENSE_POWER_MAGNITUDE_RANGES,
 	"max_health": BALANCED_REACH_MAGNITUDE_RANGES,
 	"health_regeneration_per_five_seconds": BALANCED_SUSTAIN_MAGNITUDE_RANGES,
-	"move_speed": BALANCED_CONTROL_MAGNITUDE_RANGES,
-	"vision_range": BALANCED_SUSTAIN_MAGNITUDE_RANGES,
+	"move_speed": BALANCED_MOVE_SPEED_MAGNITUDE_RANGES,
+	"vision_range": BALANCED_VISION_RANGE_MAGNITUDE_RANGES,
 }
 ## 加算属性独立幅度；数值仍以 0 到 1 小数保存，0.005 表示直接增加 0.5 个百分点。
 const ADDITIVE_POINT_MAGNITUDE_RANGES: Dictionary = {
@@ -271,7 +287,10 @@ const ENERGY_REGENERATION_ROLL_STEP: float = 0.1
 ## 暴击率最终上限；1.0 表示 100%，武器与装备的有效属性统一应用该限制。
 const CRITICAL_CHANCE_MAXIMUM: float = 1.0
 ## 闪避率最终上限；0.60 表示 60%，单件装备和装备聚合结果均不得超过该值。
-const DODGE_CHANCE_MAXIMUM: float = 0.60
+## 当前闪避上限补充：现行上限为 0.80，即装备、套装与临时效果合计最多提供 80% 闪避率。
+const DODGE_CHANCE_MAXIMUM: float = 0.80
+## 冷却缩减最终上限；0.40 表示 40%，腿部装备及其强化累计超过该值的部分不再缩短主动技能冷却。
+const COOLDOWN_REDUCTION_MAXIMUM: float = 0.40
 ## 冷却和判定时长最终下限；0.01 秒可防止零时长导致无限触发或除零。
 const MINIMUM_DURATION_VALUE: float = 0.01
 ## 全部可随机生成的强化属性；顺序同时用于属性筛选下拉框和随机词条池。
@@ -450,6 +469,8 @@ static func calculate_effective_stat(base_value: float, stat_name: String, accum
 		return clampf(calculated_value, 0.0, CRITICAL_CHANCE_MAXIMUM)
 	if stat_name == "dodge_chance":
 		return clampf(calculated_value, 0.0, DODGE_CHANCE_MAXIMUM)
+	if stat_name == "cooldown_reduction":
+		return clampf(calculated_value, 0.0, COOLDOWN_REDUCTION_MAXIMUM)
 	if stat_name == "critical_damage":
 		return calculated_value
 	if stat_name in ["cooldown", "melee_active_duration"]:

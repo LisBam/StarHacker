@@ -35,9 +35,11 @@ class_name EquipmentData
 ## 每 5 秒回血值；默认 0，装备有效时由属性组件每 5 秒结算一次。
 @export_range(0.0, 99999.0, 0.1, "or_greater") var health_regeneration_per_five_seconds: float = 0.0
 ## 闪避率；使用 0 到 1 小数，默认 0，受到攻击时独立判定。
-@export_range(0.0, 1.0, 0.01) var dodge_chance: float = 0.0
+## 当前配置上限补充：检查器最多允许 0.80，装备、套装与临时效果汇总后仍由战斗属性组件执行同一最终上限。
+@export_range(0.0, 0.8, 0.01) var dodge_chance: float = 0.0
 ## 技能冷却缩减；使用 0 到 1 小数，默认 0 表示不缩短主动技能冷却，0.05 表示主动技能基础冷却时间减少 5%，仅腿部装备支持且可被强化石在运行时动态改变。
-@export_range(0.0, 1.0, 0.001) var cooldown_reduction: float = 0.0
+## 当前配置上限补充：检查器最多允许 0.40，强化累计和运行时聚合结果超过该值的部分不会继续缩短主动技能冷却。
+@export_range(0.0, 0.4, 0.001) var cooldown_reduction: float = 0.0
 ## 移速加成比例；使用 0 到 1 小数，默认 0，仅脚部装备支持，0.06 表示提高 6%。
 @export_range(0.0, 10.0, 0.01, "or_greater") var move_speed: float = 0.0
 ## 视野加成比例；使用 0 到 1 小数，默认 0，仅头部装备支持，数值越高相机视野越广。

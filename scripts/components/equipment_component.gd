@@ -225,6 +225,7 @@ func get_character_attribute_snapshot() -> Dictionary:
 	# 装备实际移速；比例属性换算为速度点数，确保面板不直接显示内部小数比例。
 	var equipment_move_speed: float = _base_move_speed * _equipment_move_speed_ratio
 	# 装备实际冷却缩减；有效腿部装备属性已在刷新时聚合并限制为 0 至 100%，角色基础值固定为 0。
+	# 当前上限补充：面板快照与主动技能结算统一限制到 40%，超过部分不计入装备值或总值。
 	var equipment_cooldown_reduction: float = _active_skill_component.call("get_equipment_cooldown_reduction") if _active_skill_component != null and _active_skill_component.has_method("get_equipment_cooldown_reduction") else 0.0
 	return {
 		"move_speed": {
@@ -239,8 +240,8 @@ func get_character_attribute_snapshot() -> Dictionary:
 		},
 		"cooldown_reduction": {
 			"base": 0.0,
-			"equipment": clampf(equipment_cooldown_reduction, 0.0, 1.0),
-			"total": clampf(equipment_cooldown_reduction, 0.0, 1.0)
+			"equipment": clampf(equipment_cooldown_reduction, 0.0, EnhancementRules.COOLDOWN_REDUCTION_MAXIMUM),
+			"total": clampf(equipment_cooldown_reduction, 0.0, EnhancementRules.COOLDOWN_REDUCTION_MAXIMUM)
 		}
 	}
 
@@ -416,7 +417,8 @@ func _apply_armor_attributes() -> void:
 		_stats_component.call("set_equipment_set_stat_multipliers", set_attribute_multipliers)
 	if _active_skill_component != null and _active_skill_component.has_method("set_equipment_cooldown_reduction"):
 		# 实际技能冷却缩减；取有效腿部属性总和并限制为 0 至 100%，损坏或卸下腿部装备会在同一刷新中恢复默认 0。
-		var cooldown_reduction: float = clampf(float(attributes.get("cooldown_reduction", 0.0)), 0.0, 1.0)
+		# 当前上限补充：聚合结果最多取 40%，确保装备应用入口与主动技能组件使用同一规则常量。
+		var cooldown_reduction: float = clampf(float(attributes.get("cooldown_reduction", 0.0)), 0.0, EnhancementRules.COOLDOWN_REDUCTION_MAXIMUM)
 		_active_skill_component.call("set_equipment_cooldown_reduction", cooldown_reduction)
 	_equipment_move_speed_ratio = maxf(float(attributes.get("move_speed", 0.0)), 0.0)
 	_equipment_vision_range_ratio = maxf(float(attributes.get("vision_range", 0.0)), 0.0)

@@ -3645,7 +3645,8 @@ func _present_run_outcome(outcome: Dictionary) -> void:
 	_settlement_outcome = outcome.duplicate()
 	_settlement_primary_category = InventoryQuery.PRIMARY_ALL
 	_settlement_subcategory = InventoryQuery.SUBCATEGORY_ALL
-	_death_title_label.text = str(outcome.get("title", "战斗结算"))
+	# 结算窗口标题；统一只显示“结算”，具体获得与损失结果继续由下方物品分区呈现。
+	_death_title_label.text = "结算"
 	_rebuild_settlement_list()
 	_death_return_main_menu_button.text = "确定"
 	if result_type == "success":
@@ -3657,16 +3658,8 @@ func _present_run_outcome(outcome: Dictionary) -> void:
 
 func _rebuild_settlement_list() -> void:
 	_clear_container(_death_settlement_list)
-	# 结算结果类型；success 使用撤离说明，失败只说明损失规则，不展示随机保留物品列表。
+	# 结算结果类型；用于决定是否创建失败时的实际丢失物品分区。
 	var result_type: String = str(_settlement_outcome.get("result", "failure"))
-	# 失败损失比例；优先读取本次实际规则，兼容旧结果时回退 50%。
-	var failure_loss_ratio: float = clampf(float(_settlement_outcome.get("lost_ratio", 0.5)), 0.0, 1.0)
-	# 结算说明；明确列表统计口径，本局获得区不会重复展示本次已经遗失的战利品。
-	var summary_label: Label = Label.new()
-	summary_label.text = "已保留本次撤离携带的全部物品，物品仍在背包中，可返回仓库后手动存放。下方仅统计本局首次获得的战利品。" if result_type == "success" else "背包物品按规则随机保留约 %d%%、丢失约 %d%%，已装备物品不参与损失。下方“本局获得”不含本次已丢失物品，“丢失物品”包含全部实际损失。" % [roundi((1.0 - failure_loss_ratio) * 100.0), roundi(failure_loss_ratio * 100.0)]
-	summary_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	summary_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_death_settlement_list.add_child(summary_label)
 	_build_settlement_category_controls()
 
 	# 本局获得条目；优先读取包含 Resource 的结构化列表，鼠标悬停时可显示完整物品属性。

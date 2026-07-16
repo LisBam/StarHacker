@@ -132,7 +132,8 @@ const MINIMUM_DURABILITY_VALUE_MULTIPLIER: float = 0.1
 ## 冷却和判定时长最小有效值；默认 0.01 秒，防止负强化导致除零或无限攻击。
 const MINIMUM_DURATION_VALUE: float = 0.01
 ## 单把武器强化石使用上限；固定为 20 颗，锻造预览、最终执行、悬停详情和二手生成共同读取该值。
-const MAX_ENHANCEMENT_COUNT: int = 20
+## 通用限制补充：武器与四部位装备现共用 EnhancementRules 中的单件 20 颗上限。
+const MAX_ENHANCEMENT_COUNT: int = EnhancementRules.MAX_TARGET_ENHANCEMENT_COUNT
 ## 可应用于所有武器的统一强化属性；新增通用战斗字段时应同步详情格式化器。
 const COMMON_ENHANCEMENT_STATS: Array[String] = ["damage", "cooldown", "energy_consumption", "attack_distance", "recoil_force", "front_recoil_force", "impact_force", "critical_chance", "critical_damage", "max_durability"]
 ## 远程武器专属强化属性；只允许远程武器消费包含这些字段的强化石效果。

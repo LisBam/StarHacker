@@ -499,30 +499,21 @@ func _refresh_preview() -> void:
 	var main_weapon: Resource = preview.get("weapon") as Resource
 	# 耐久恢复；只展示最终可确定值，超过上限的牺牲耐久不会计入。
 	var restored_durability: float = float(preview.get("durability_restored", 0.0))
-	if bool(preview.get("has_enhancement_limit", false)):
-		# 武器锻造预览；剩余次数放在价值之前，分子表示本次锻造完成后仍可继续使用的强化石数量。
-		_preview_label.text = "主武器：%s\n耐久：%.1f → %.1f（+%.1f）\n强化石：%d 颗\n剩余强化次数：%d/%d\n价值：%d 星穹\n费用倍率：×%.2f" % [
-			str(main_weapon.get("display_name")) if main_weapon != null else "未知武器",
-			float(preview.get("durability_before", 0.0)),
-			float(preview.get("durability_after", 0.0)),
-			restored_durability,
-			int(preview.get("compatible_stone_count", 0)),
-			int(preview.get("remaining_enhancement_count", 0)),
-			int(preview.get("maximum_enhancement_count", WeaponData.MAX_ENHANCEMENT_COUNT)),
-			int(preview.get("main_weapon_value", 0)),
-			float(preview.get("cost_multiplier", 1.0)),
-		]
-	else:
-		# 装备锻造预览；装备不受武器次数上限约束，只展示耐久、材料、价值与费用倍率。
-		_preview_label.text = "主装备：%s\n耐久：%.1f → %.1f（+%.1f）\n强化石：%d 颗\n价值：%d 星穹\n费用倍率：×%.2f" % [
-			str(main_weapon.get("display_name")) if main_weapon != null else "未知装备",
-			float(preview.get("durability_before", 0.0)),
-			float(preview.get("durability_after", 0.0)),
-			restored_durability,
-			int(preview.get("compatible_stone_count", 0)),
-			int(preview.get("main_weapon_value", 0)),
-			float(preview.get("cost_multiplier", 1.0)),
-		]
+	# 主物品类型名称；武器与装备共用强化次数上限，只区分玩家可见标题。
+	var main_item_type_name: String = "装备" if main_weapon != null and str(main_weapon.get("item_kind")) == "equipment" else "武器"
+	# 武器与装备锻造预览；剩余次数放在价值之前，分子表示本次锻造完成后仍可继续使用的强化石数量。
+	_preview_label.text = "主%s：%s\n耐久：%.1f → %.1f（+%.1f）\n强化石：%d 颗\n剩余强化次数：%d/%d\n价值：%d 星穹\n费用倍率：×%.2f" % [
+		main_item_type_name,
+		str(main_weapon.get("display_name")) if main_weapon != null else "未知%s" % main_item_type_name,
+		float(preview.get("durability_before", 0.0)),
+		float(preview.get("durability_after", 0.0)),
+		restored_durability,
+		int(preview.get("compatible_stone_count", 0)),
+		int(preview.get("remaining_enhancement_count", 0)),
+		int(preview.get("maximum_enhancement_count", EnhancementRules.MAX_TARGET_ENHANCEMENT_COUNT)),
+		int(preview.get("main_weapon_value", 0)),
+		float(preview.get("cost_multiplier", 1.0)),
+	]
 	_forge_cost_label.text = "本次锻造消耗：%d 星穹" % int(preview.get("cost", 0))
 	_forge_button.disabled = _forging_in_progress
 
@@ -555,7 +546,7 @@ func _rebuild_inventory_items() -> void:
 		# 锻造候选卡片；单击发出放入请求，拖拽数据可投放到指定主锻造槽或牺牲槽。
 		var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
 		item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		item_control.call("configure", item_resource, _current_source, int(entry.get("source_index", -1)), false, "", int(entry.get("quantity", 1)))
+		item_control.call("configure", item_resource, _current_source, int(entry.get("source_index", -1)), false, "", int(entry.get("quantity", 1)), "价值", -1, true)
 		# 武器与装备统一使用深色宽卡排版和底部耐久条。
 		# 通用模板补充：当前所有锻造来源物品均复用固定尺寸卡片，不再按物品类型切换视觉风格。
 		item_control.call("set_weapon_slot_visual_style", true)

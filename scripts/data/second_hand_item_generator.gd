@@ -13,7 +13,8 @@ const DURABILITY_CONSUMPTION_PERCENT_MAXIMUM: int = 99
 ## 二手物品最少历史强化石数量；固定为 1 颗，命中二手状态后必定拥有至少一次强化。
 const ENHANCEMENT_STONE_COUNT_MINIMUM: int = 1
 ## 二手物品最多历史强化石数量；固定为 20 颗，与单把武器强化次数上限保持一致。
-const ENHANCEMENT_STONE_COUNT_MAXIMUM: int = 20
+## 通用限制补充：武器与装备现共用单件 20 颗强化上限。
+const ENHANCEMENT_STONE_COUNT_MAXIMUM: int = EnhancementRules.MAX_TARGET_ENHANCEMENT_COUNT
 ## 单颗历史强化石寻找兼容词条的最大尝试次数；默认 128 次，保证标准武器装备稳定获得目标数量并为异常扩展资源保留退出边界。
 const COMPATIBILITY_ATTEMPT_LIMIT_PER_STONE: int = 128
 ## 强化石兼容最少词条数量；正式词条数量由品质规则决定，该值只保持统一生成接口完整。

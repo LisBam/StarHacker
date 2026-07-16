@@ -9,6 +9,8 @@ class_name EnhancementRules
 ## 单次强化固定比例；默认 0.10 表示每颗强化石的每条有效词条改变对应武器基础属性 10%。
 ## 旧调用兼容补充：该步长只用于把历史 +1/-1 直接调用迁移为 10%，现行强化石实际幅度全部由属性独立区间抽取。
 const ENHANCEMENT_STEP_RATIO: float = 0.10
+## 单件武器或装备可使用的强化石总上限；固定为 20 颗，数据层、锻造服务、二手生成和界面共同读取。
+const MAX_TARGET_ENHANCEMENT_COUNT: int = 20
 ## 乘算百分比公式标识；对应“基础值 × (1 + 累计比例)”，用于普通数值属性的统一结算。
 const CALCULATION_MULTIPLICATIVE_RATIO: String = "multiplicative_ratio"
 ## 加算百分点公式标识；对应“基础值 + 累计百分点”，用于暴击率、暴击伤害与闪避率。

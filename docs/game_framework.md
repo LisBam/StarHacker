@@ -40,6 +40,7 @@
 - `CharacterData`、`ActiveSkillData`、`PassiveSkillData`、`WeaponData`、`EquipmentData`、`RepairKitData` 和 `ConsumableData` 描述可保存、可复制的角色、技能与物品配置；技能详细协议见 `docs/skill_system.md`。
 - `ContentPackData` 只声明一个角色扩展包拥有的武器、装备、道具与怪物路径；`EquipmentSetData` 只声明共享套装门槛、显示原文、属性加成与特殊效果参数。
 - `EnhancementStoneData` 保存强化石品质、目标类型和词条方向；逐属性强化幅度、兼容规则与正式词条池集中在 `EnhancementRules`。特化品质额外在资源中保存散射、穿透、弹射或连击的 `+1/+2` 离散点数；四项机制不进入普通四品质词条池。
+- `EnhancementRules` 同时声明单件武器或装备最多使用 20 颗强化石；`WeaponData` 与 `EquipmentData` 分别在数据层记录已使用次数、返回剩余次数并拒绝第 21 次强化。
 - `InventoryLimits` 集中声明背包 50 组容量、资源单组 10 件上限与旧 99 件堆叠读取边界；库存、地面掉落和 UI 不各自复制这些数字。
 - `SecondHandItemGenerator` 集中执行武器装备 30% 二手判定、1 至 20 颗正式概率历史强化石与 1% 至 99% 耐久消耗；怪物、宝箱和普通商店只负责提供新物品实例与随机源。
 - `.tres` 保存单个内容的基础数值。脚本默认值只作为缺省值，场景或资源覆盖值优先。

@@ -28,8 +28,8 @@ class_name EquipmentData
 @export_range(0.0, 999999.0, 0.1) var current_durability: float = 500.0
 ## 是否为二手装备；默认 false 表示全新物品，怪物、宝箱或商店命中二手规则后设为 true，影响名称前缀并随物品存档永久保留。
 @export var is_second_hand: bool = false
-## 已使用强化石次数；默认 0，玩家锻造和二手历史强化成功后各增加 1，用于保存物品完整强化历史且当前不限制装备继续强化。
-@export_range(0, 999999, 1) var enhancement_count: int = 0
+## 已使用强化石次数；取值为 0 至 20，默认 0，玩家锻造和二手历史强化成功后各增加 1，达到上限后拒绝继续赋予强化石。
+@export_range(0, 20, 1) var enhancement_count: int = 0
 ## 攻击力加成；默认 0，装备有效时加到玩家基础攻击力。
 @export_range(0.0, 99999.0, 1.0, "or_greater") var attack_power: float = 0.0
 ## 防御力加成；默认 0，装备有效时加到玩家基础防御力。
@@ -57,6 +57,9 @@ class_name EquipmentData
 ## 累计强化百分比；键为统一属性名，值为相对基础值的小数比例。
 ## 加算属性补充：暴击率、暴击伤害、闪避率和冷却缩减的值表示直接百分点偏移，例如 0.015 表示 1.5 个百分点。
 @export var enhancement_modifiers: Dictionary = {}
+
+## 单件装备强化石使用上限；与武器共用强化规则目录中的固定 20 颗限制。
+const MAX_ENHANCEMENT_COUNT: int = EnhancementRules.MAX_TARGET_ENHANCEMENT_COUNT
 
 ## 装备通用强化属性；所有部位均可应用。
 const COMMON_ENHANCEMENT_STATS: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance"]
@@ -99,9 +102,26 @@ func can_apply_enhancement(modifiers: Dictionary) -> bool:
 	return false
 
 
+func get_enhancement_count() -> int:
+	## 返回已经成功用于本装备的强化石数量；异常旧存档数值会限制在 0 至 20。
+	return clampi(enhancement_count, 0, MAX_ENHANCEMENT_COUNT)
+
+
+func get_remaining_enhancement_count() -> int:
+	## 返回本装备仍可使用的强化石数量；达到上限后固定为 0，供锻造与界面显示。
+	return maxi(MAX_ENHANCEMENT_COUNT - get_enhancement_count(), 0)
+
+
+func can_receive_enhancement(requested_stone_count: int = 1) -> bool:
+	## 判断装备是否还能接收指定数量强化石；请求必须为正数且不能超过剩余次数。
+	return requested_stone_count > 0 and requested_stone_count <= get_remaining_enhancement_count()
+
+
 func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
 	# 强化结果；结构与武器强化完全一致，UI 可直接复用结果弹窗。
 	var result: Dictionary = {"success": false, "weapon": self, "beneficial_changes": [], "detrimental_changes": []}
+	if not can_receive_enhancement():
+		return result
 	for raw_stat_name in modifiers.keys():
 		# 属性名；不支持的部位专属属性直接跳过。
 		var stat_name: String = str(raw_stat_name)
@@ -128,7 +148,7 @@ func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
 		result["success"] = true
 	if bool(result.get("success", false)):
 		# 强化次数；一次 apply 调用代表消费一颗装备强化石，多词条仍只累计一次。
-		enhancement_count = maxi(enhancement_count, 0) + 1
+		enhancement_count = clampi(get_enhancement_count() + 1, 0, MAX_ENHANCEMENT_COUNT)
 	return result
 
 

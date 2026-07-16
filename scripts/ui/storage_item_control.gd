@@ -72,6 +72,8 @@ var _selection_hover_tween: Tween
 var _price_label: String = "价值"
 ## 当前卡片数值覆盖；默认 -1 使用物品有效价值，物资撤离面板传入实际运费。
 var _displayed_price_override: int = -1
+## 是否在价格前显示剩余强化次数；默认 false，仅锻造仓库与背包来源卡牌启用，避免改变其他库存界面摘要。
+var _show_remaining_enhancement_count: bool = false
 ## 不可选目标灰色覆盖层；默认隐藏，选择状态阻止当前物品时完整覆盖按钮、富文本与耐久条。
 var _target_filter_overlay: ColorRect
 ## 通用物品卡片视图缓存；默认首次配置时创建，承担全部物品名称、类型、摘要、尺寸与耐久显示。
@@ -82,7 +84,7 @@ var _extraction_prefix: String = ""
 var _is_drag_source_active: bool = false
 
 
-func configure(item_resource: Resource, location: String, item_index: int, quick_action_enabled: bool, extraction_prefix: String = "", quantity: int = 1, price_label: String = "价值", displayed_price_override: int = -1) -> void:
+func configure(item_resource: Resource, location: String, item_index: int, quick_action_enabled: bool, extraction_prefix: String = "", quantity: int = 1, price_label: String = "价值", displayed_price_override: int = -1, show_remaining_enhancement_count: bool = false) -> void:
 	_item_resource = item_resource
 	_location = location
 	_item_index = item_index
@@ -90,6 +92,7 @@ func configure(item_resource: Resource, location: String, item_index: int, quick
 	_quantity = clampi(quantity, 1, INVENTORY_LIMITS.MAX_STACK_QUANTITY)
 	_price_label = price_label if not price_label.is_empty() else "价值"
 	_displayed_price_override = displayed_price_override
+	_show_remaining_enhancement_count = show_remaining_enhancement_count
 	_extraction_prefix = extraction_prefix
 	# 物品摘要；强化石和修复包共用紧凑富文本资源卡，武器保持两列宽卡片显示分类和动态价值。
 	# 通用模板补充：当前所有物品使用相同固定卡片，类型差异只影响摘要内容，不影响布局结构。
@@ -411,6 +414,13 @@ func _build_common_detail_bbcode() -> String:
 		var repair_amount: float = maxf(float(_item_resource.get("repair_amount")), 0.0)
 		var repair_text: String = "[color=%s]耐久+%.0f[/color]" % [STONE_BENEFICIAL_COLOR, repair_amount]
 		return "%s · %s %d" % [repair_text, _price_label, _get_displayed_price()] if not _weapon_slot_visual_style_enabled else repair_text
+	# 普通价值摘要；锻造来源中的武器与装备在价格前追加“剩余/上限”，其他界面保持原格式。
+	if _show_remaining_enhancement_count and _is_weapon_resource():
+		# 强化次数上限；所有武器与四部位装备统一为 20。
+		var maximum_enhancement_count: int = EnhancementRules.MAX_TARGET_ENHANCEMENT_COUNT
+		# 剩余强化次数；优先读取资源公开接口，旧扩展资源按已使用次数换算。
+		var remaining_enhancement_count: int = int(_item_resource.call("get_remaining_enhancement_count")) if _item_resource.has_method("get_remaining_enhancement_count") else maxi(maximum_enhancement_count - clampi(int(_item_resource.get("enhancement_count")), 0, maximum_enhancement_count), 0)
+		return "%d/%d · %s %d" % [remaining_enhancement_count, maximum_enhancement_count, _price_label, _get_displayed_price()]
 	return "%s %d" % [_price_label, _get_displayed_price()]
 
 

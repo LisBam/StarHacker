@@ -88,7 +88,10 @@ var _mode_toggle_button: Button
 ## 新版星穹标签；默认显示局外星穹余额，出售仓库物品后即时刷新。
 var _coins_label: Label
 ## 新版仓库摘要标签；默认显示仓库与背包数量，并明确安全和死亡损失边界。
+## 现行摘要补充：常规状态仅显示仓库与背包组数，目标选择状态显示当前操作说明。
 var _storage_summary_label: Label
+## 展开仓库中的背包标题；显示真实背包组数与容量上限，库存变化后由统一重建入口刷新。
+var _backpack_title_label: Label
 ## 当前主分类；取值为 all、weapons 或 resources，默认全部并同步作用于仓库和背包。
 var _storage_primary_category: String = InventoryQuery.PRIMARY_ALL
 ## 当前子分类；默认 all，进入武器或资源主分类时分别显示对应二级分类。
@@ -377,11 +380,12 @@ func _build_storage_interface() -> void:
 	_backpack_section.add_theme_constant_override("separation", 6)
 	_backpack_scroll.add_child(_backpack_section)
 	# 随身区标题；默认强调下半区会进入战斗并参与失败损失结算。
-	var backpack_title: Label = Label.new()
-	backpack_title.text = "背包 · 会带入战斗；死亡通常保留约 50%，进入战斗 30 秒内逃跑保留约 80%"
-	backpack_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	backpack_title.add_theme_font_size_override("font_size", 17)
-	_backpack_section.add_child(backpack_title)
+	# 容量标题补充：现行文本改为“背包 当前组数/容量上限”，不再展示失败保留说明。
+	_backpack_title_label = Label.new()
+	_backpack_title_label.text = "背包 --/--"
+	_backpack_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_backpack_title_label.add_theme_font_size_override("font_size", 17)
+	_backpack_section.add_child(_backpack_title_label)
 
 	# 随身区双栏；左侧固定装备槽，右侧显示背包物品并接收仓库拖拽。
 	var carried_columns: HBoxContainer = HBoxContainer.new()
@@ -440,12 +444,16 @@ func _rebuild_storage_content() -> void:
 	if _global_inventory == null:
 		_coins_label.text = "星穹：不可用"
 		_storage_summary_label.text = "全局物品服务不可用"
+		if _backpack_title_label != null:
+			_backpack_title_label.text = "背包 --/--"
 		return
 
 	# 仓库条目；顺序由全局服务按上次撤离优先和获得时间维护。
 	var warehouse_entries: Array = _global_inventory.call("get_warehouse_entries")
 	# 背包条目；顺序只影响当前携带布局，进入战斗后由 HUD 读取同一数组。
 	var backpack_entries: Array = _global_inventory.call("get_backpack_entries")
+	if _backpack_title_label != null:
+		_backpack_title_label.text = _get_backpack_capacity_title(backpack_entries)
 	_equipment_set_filter_control.configure_entries(warehouse_entries + backpack_entries)
 	_coins_label.text = "星穹：%d" % int(_global_inventory.call("get_coins"))
 	_storage_summary_label.text = _get_storage_summary_text(warehouse_entries, backpack_entries)
@@ -531,6 +539,7 @@ func _create_storage_entry_control(entry: Dictionary, location: String, entry_in
 	var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
 	item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	item_control.call("configure", item_resource, location, entry_index, _backpack_expanded, extraction_prefix, quantity)
+	item_control.call("set_stone_value_on_fourth_line", true)
 	item_control.call("set_weapon_target_selection_state", _is_weapon_target_selection_active(), _is_pending_item_usable_on_weapon(item_resource))
 	item_control.connect("quick_action_requested", Callable(self, "_on_quick_action_requested").bind(location))
 	item_control.connect("item_action_requested", Callable(self, "_on_item_action_requested").bind(location))
@@ -554,6 +563,7 @@ func _update_storage_entry_control(item_control: Button, entry: Dictionary, loca
 	# 上次撤离前缀；状态变化时由卡片组件刷新文字，普通移动只更新来源下标。
 	var extraction_prefix: String = "[上次撤离] " if bool(entry.get("is_last_extraction", false)) else ""
 	item_control.call("update_storage_context", item_resource, location, entry_index, _backpack_expanded, extraction_prefix, quantity)
+	item_control.call("set_stone_value_on_fourth_line", true)
 	item_control.call("set_weapon_target_selection_state", _is_weapon_target_selection_active(), _is_pending_item_usable_on_weapon(item_resource))
 
 
@@ -769,6 +779,17 @@ func _get_storage_summary_text(warehouse_entries: Array, backpack_entries: Array
 	if _pending_stone_resource != null:
 		return "正在使用 %s：请选择仓库、背包或装备栏中的一把兼容武器" % str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", _pending_stone_resource))
 	return "仓库 %d 组 · 背包 %d 组" % [warehouse_entries.size(), backpack_entries.size()]
+
+
+func _get_backpack_capacity_title(backpack_entries: Array) -> String:
+	## 返回仓库展开区域的背包容量标题；真实库存接口优先，传入条目仅作为旧服务兼容回退。
+	if _global_inventory == null:
+		return "背包 --/--"
+	# 背包当前组数；读取未筛选的真实库存数量，分类、搜索与排序不会改变显示。
+	var backpack_group_count: int = int(_global_inventory.call("get_backpack_count")) if _global_inventory.has_method("get_backpack_count") else backpack_entries.size()
+	# 背包容量上限；优先读取库存服务公开接口，旧服务回退项目统一 50 组配置。
+	var backpack_maximum_groups: int = int(_global_inventory.call("get_backpack_max_groups")) if _global_inventory.has_method("get_backpack_max_groups") else INVENTORY_LIMITS.BACKPACK_MAX_GROUPS
+	return "背包 %d/%d" % [backpack_group_count, backpack_maximum_groups]
 
 
 func _apply_storage_display_mode() -> void:

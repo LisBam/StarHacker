@@ -478,6 +478,7 @@ func _rebuild_items() -> void:
 		if item_control == null:
 			item_control = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
 			item_control.call("configure", item_resource, "backpack", entry_index, false, "", int(entry.get("quantity", 1)))
+			item_control.call("set_stone_value_on_fourth_line", true)
 			item_control.call("set_weapon_slot_visual_style", true)
 			item_control.connect("item_action_requested", Callable(self, "_on_item_pressed"))
 			item_control.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
@@ -485,6 +486,7 @@ func _rebuild_items() -> void:
 			_item_grid.add_child(item_control)
 		else:
 			item_control.call("update_storage_context", item_resource, "backpack", entry_index, false, "", int(entry.get("quantity", 1)))
+			item_control.call("set_stone_value_on_fourth_line", true)
 		# 修复目标选择；背包武器与装备使用和左侧装备栏相同的可选与灰显规则。
 		var is_durable_item: bool = str(item_resource.get("weapon_type")) in ["ranged", "melee", "hybrid"] or str(item_resource.get("item_kind")) == "equipment"
 		item_control.call("set_weapon_target_selection_state", _pending_repair_kit_resource != null and is_durable_item, _can_repair_target(item_resource))

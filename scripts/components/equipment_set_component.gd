@@ -14,6 +14,8 @@ const ARMOR_SLOT_IDS: Array[String] = ["head", "body", "legs", "feet"]
 var _equipment_component: Node
 ## 最近一次满足套装条件的击杀增益剩余时间；取值大于等于 0，重复击杀刷新为当前有效套装的最长持续时间。
 var _recent_kill_dodge_remaining: float = 0.0
+## 本场战斗是否已经消耗任意套装提供的首次致命恢复；默认 false，成功拦截一次致命伤害后永久变为 true，组件重新进入战斗场景时重置。
+var _first_lethal_recovery_consumed: bool = false
 
 
 func _ready() -> void:
@@ -127,6 +129,30 @@ func roll_manual_chest_extra_drop_count(random_source: RandomNumberGenerator) ->
 			continue
 		extra_drop_count += maxi(int(equipment_set.call("roll_manual_chest_extra_drop_count", int(set_state.get("piece_count", 0)), random_source)), 0)
 	return extra_drop_count
+
+
+func try_consume_first_lethal_recovery() -> float:
+	## 尝试消费本场战斗唯一一次套装致命恢复；成功返回应恢复的生命上限比例，失败返回 0。
+	if _first_lethal_recovery_consumed:
+		return 0.0
+	# 当前防具；只统计致命伤害发生瞬间仍穿戴且未损坏的套装部件，背包与仓库装备不会参与。
+	var armor_equipment: Dictionary = _get_armor_equipment_resources()
+	# 最终恢复比例；多个套装同时提供效果时取最高值，确保一次致命伤害只消费一次且不会叠加超过设计值。
+	var recovery_health_ratio: float = 0.0
+	for raw_set_state in collect_active_set_states(armor_equipment).values():
+		# 当前套装状态；包含共享套装资源与当前有效件数，异常资源会被安全跳过。
+		var set_state: Dictionary = raw_set_state as Dictionary
+		# 套装数据；只有实现统一致命恢复查询接口的资源才参与，组件不依赖具体 set_id。
+		var equipment_set: Resource = set_state.get("set_data") as Resource
+		if equipment_set == null or not equipment_set.has_method("get_first_lethal_recovery_health_ratio"):
+			continue
+		# 当前套装恢复比例；限制到 0 至 1，防止异常资源把生命设置到上限之外。
+		var set_recovery_health_ratio: float = clampf(float(equipment_set.call("get_first_lethal_recovery_health_ratio", int(set_state.get("piece_count", 0)))), 0.0, 1.0)
+		recovery_health_ratio = maxf(recovery_health_ratio, set_recovery_health_ratio)
+	if recovery_health_ratio <= 0.0:
+		return 0.0
+	_first_lethal_recovery_consumed = true
+	return recovery_health_ratio
 
 
 func get_contextual_movement_speed_multiplier(player_position: Vector2, movement_direction: Vector2) -> float:

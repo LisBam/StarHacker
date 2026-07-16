@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/weapon_data.gd" id="1_weapon"]
+[ext_resource type="PackedScene" path="res://scenes/projectiles/player_projectile.tscn" id="2_projectile"]
+
+[resource]
+script = ExtResource("1_weapon")
+weapon_id = "heavenly_maiden"
+display_name = "天女"
+icon_text = "天"
+value = 50
+max_durability = 500.0
+current_durability = 500.0
+energy_consumption = 20
+projectile_scene = ExtResource("2_projectile")
+projectile_speed = 1000.0
+attack_distance = 200.0
+ranged_damage = 10.0
+cooldown = 0.8
+deviation_degrees = 10.0
+has_scatter = true
+scatter_count = 5
+has_recoil = true
+recoil_force = 50.0
+impact_force = 60.0

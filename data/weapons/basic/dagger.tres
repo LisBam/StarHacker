@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/weapon_data.gd" id="1_weapon"]
+
+[resource]
+script = ExtResource("1_weapon")
+weapon_id = "dagger"
+display_name = "匕首"
+weapon_type = "melee"
+icon_text = "匕"
+value = 50
+max_durability = 500.0
+current_durability = 500.0
+energy_consumption = 10
+attack_distance = 60.0
+cooldown = 0.25
+has_front_recoil = true
+front_recoil_force = 50.0
+impact_force = 50.0
+melee_damage = 20.0
+melee_active_duration = 0.12

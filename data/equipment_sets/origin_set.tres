@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="EquipmentSetData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/equipment_set_data.gd" id="1_equipment_set"]
+
+[resource]
+script = ExtResource("1_equipment_set")
+set_id = "origin_set"
+display_name = "起源套装"
+two_piece_required_count = 2
+two_piece_description = "提高100点最大生命值。"
+two_piece_attribute_bonuses = {
+"max_health": 100.0
+}
+four_piece_required_count = 4
+four_piece_description = "当你于一场战斗中生命值首次降为0时，立即将生命回复至等同于30%的生命上限。"
+first_lethal_recovery_health_ratio = 0.3

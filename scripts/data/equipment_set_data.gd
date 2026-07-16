@@ -48,6 +48,9 @@ class_name EquipmentSetData
 @export_range(0.0, 1.0, 0.001) var move_speed_damage_bonus_per_stack: float = 0.0
 ## 四件套每档受到伤害降低比例；默认 0，0.01 表示每档降低 1%，最终结果限制在 0% 至 100%。
 @export_range(0.0, 1.0, 0.001) var move_speed_damage_reduction_per_stack: float = 0.0
+## 四件套单场战斗首次致命伤害后的生命恢复比例；默认 0 表示没有复苏效果，0.3 表示阻止该次死亡并把当前生命设置为生命上限的 30%。
+## 该参数只由战斗中的套装组件消费一次，运行时不应动态修改；卸下、损坏或重新穿齐套装不会重置同一场战斗内已经消耗的次数。
+@export_range(0.0, 1.0, 0.01) var first_lethal_recovery_health_ratio: float = 0.0
 
 
 func get_tier_definitions() -> Array[Dictionary]:
@@ -132,6 +135,13 @@ func get_move_speed_combat_effect(active_piece_count: int, move_speed_attribute:
 		"damage_bonus_ratio": float(stack_count) * maxf(move_speed_damage_bonus_per_stack, 0.0),
 		"damage_reduction_ratio": clampf(float(stack_count) * maxf(move_speed_damage_reduction_per_stack, 0.0), 0.0, 1.0),
 	}
+
+
+func get_first_lethal_recovery_health_ratio(active_piece_count: int) -> float:
+	## 返回四件套首次致命伤害后的生命恢复比例；未达到门槛或未配置效果时固定返回 0。
+	if active_piece_count < maxi(four_piece_required_count, 1):
+		return 0.0
+	return clampf(first_lethal_recovery_health_ratio, 0.0, 1.0)
 
 
 func _merge_attribute_bonuses(target_bonuses: Dictionary, source_bonuses: Dictionary) -> void:

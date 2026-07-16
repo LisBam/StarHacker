@@ -502,9 +502,11 @@ static func calculate_effective_stat(base_value: float, stat_name: String, accum
 		return maxf(calculated_value, MINIMUM_DURATION_VALUE)
 	if stat_name == "energy_consumption":
 		return maxf(roundf(calculated_value), 0.0)
-	if stat_name in ["scatter_count", "bounce_count", "combo_count"]:
+	# 最低一次机制；散射表示每轮弹体总数、连击表示每次攻击轮数，两者基础语义都不能低于 1。
+	if stat_name in ["scatter_count", "combo_count"]:
 		return maxf(roundf(calculated_value), 1.0)
-	if stat_name == "piercing_count":
+	# 可选额外次数；穿透与弹射都允许 0，表示持有属性但不提供额外穿过目标或改变方向的次数。
+	if stat_name in ["piercing_count", "bounce_count"]:
 		return maxf(roundf(calculated_value), 0.0)
 	return maxf(calculated_value, 0.0)
 

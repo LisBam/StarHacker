@@ -52,10 +52,13 @@ const DISABLED_OVERLAY_COLOR: Color = Color(0.16, 0.16, 0.16, 0.72)
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
 ## 通用耐久条组件；只有同时带有当前耐久和最大耐久属性的物品才会显示。
 const DURABILITY_BAR_SCRIPT: Script = preload("res://scripts/ui/weapon_durability_bar.gd")
+## 库存限制配置；通用卡片数量必须与库存服务的单组上限保持一致。
+const INVENTORY_LIMITS: Script = preload("res://scripts/data/inventory_limits.gd")
 
 ## 当前展示的物品资源；默认 null 表示空槽，修改后会同步名称、类型和耐久显示。
 var _item_resource: Resource
 ## 当前展示数量；默认 1，堆叠资源使用 1 至 99，修改会影响名称后的数量标记。
+## 现行限制补充：所有可堆叠资源统一使用 1 至 10，旧 99 件记录会在库存层先完成拆分。
 var _quantity: int = 1
 ## 当前上下文标签；默认空字符串时自动显示物品类型，可由装备槽或锻造槽传入职责名称。
 var _context_text: String = ""
@@ -117,7 +120,7 @@ func _ready() -> void:
 func configure(item_resource: Resource, quantity: int = 1, context_text: String = "", detail_bbcode: String = "", empty_text: String = "空", display_name_override: String = "", secondary_detail_bbcode: String = "") -> void:
 	# 配置入口；所有系统只提供数据与上下文文本，不得自行创建差异化名称、摘要或耐久节点。
 	_item_resource = item_resource
-	_quantity = clampi(quantity, 1, 99)
+	_quantity = clampi(quantity, 1, INVENTORY_LIMITS.MAX_STACK_QUANTITY)
 	_context_text = context_text
 	_detail_bbcode = detail_bbcode
 	_secondary_detail_bbcode = secondary_detail_bbcode

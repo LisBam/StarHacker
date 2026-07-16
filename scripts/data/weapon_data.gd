@@ -27,6 +27,10 @@ class_name WeaponData
 ## 武器当前耐久；取值会限制在 0 到最大耐久，默认 500.0 表示新武器以满耐久创建，归零后武器保留但不可继续使用。
 ## 该字段允许运行时因攻击、修复与强化变化，不应绕过统一耐久接口直接写入。
 @export_range(0.0, 999999.0, 0.1) var current_durability: float = 500.0
+## 是否为二手武器；默认 false 表示全新物品，怪物、宝箱或商店命中二手规则后设为 true，影响名称前缀并随物品存档永久保留。
+@export var is_second_hand: bool = false
+## 已使用强化石次数；取值为 0 至 20，默认 0，玩家锻造和二手历史强化成功后各增加 1，达到上限后拒绝继续赋予强化石。
+@export_range(0, 20, 1) var enhancement_count: int = 0
 ## 每次成功使用消耗的耐久；取值大于等于 0，默认 1，远程射击和近战挥击成功后各扣除一次。
 ## 独立消耗配置补充：默认参考值为 1.0，每把武器资源可覆盖为不同浮点消耗。
 ## 固定消耗规则补充：武器不再暴露独立耐久消耗属性；普通武器成功使用扣除 1 点，混合武器完整攻击由控制器传入 2 点且运行时不可按武器修改。
@@ -127,6 +131,8 @@ const MINIMUM_VALUE_MULTIPLIER: float = 0.1
 const MINIMUM_DURABILITY_VALUE_MULTIPLIER: float = 0.1
 ## 冷却和判定时长最小有效值；默认 0.01 秒，防止负强化导致除零或无限攻击。
 const MINIMUM_DURATION_VALUE: float = 0.01
+## 单把武器强化石使用上限；固定为 20 颗，锻造预览、最终执行、悬停详情和二手生成共同读取该值。
+const MAX_ENHANCEMENT_COUNT: int = 20
 ## 可应用于所有武器的统一强化属性；新增通用战斗字段时应同步详情格式化器。
 const COMMON_ENHANCEMENT_STATS: Array[String] = ["damage", "cooldown", "energy_consumption", "attack_distance", "recoil_force", "front_recoil_force", "impact_force", "critical_chance", "critical_damage", "max_durability"]
 ## 远程武器专属强化属性；只允许远程武器消费包含这些字段的强化石效果。
@@ -181,6 +187,21 @@ func is_broken() -> bool:
 
 func can_be_used() -> bool:
 	return not is_broken()
+
+
+func get_enhancement_count() -> int:
+	## 返回已经成功用于本武器的强化石数量；异常旧存档数值会限制在 0 至 20。
+	return clampi(enhancement_count, 0, MAX_ENHANCEMENT_COUNT)
+
+
+func get_remaining_enhancement_count() -> int:
+	## 返回仍可使用的强化石数量；达到上限后固定为 0，供锻造和悬停详情显示。
+	return maxi(MAX_ENHANCEMENT_COUNT - get_enhancement_count(), 0)
+
+
+func can_receive_enhancement(requested_stone_count: int = 1) -> bool:
+	## 判断武器是否还能接收指定数量强化石；请求必须为正数且不能超过剩余次数。
+	return requested_stone_count > 0 and requested_stone_count <= get_remaining_enhancement_count()
 
 
 func set_current_durability(value: float) -> void:
@@ -270,6 +291,8 @@ func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
 		"beneficial_changes": [],
 		"detrimental_changes": [],
 	}
+	if not can_receive_enhancement():
+		return result
 	# 已迁移累计强化；应用新词条前合并历史偏移键，确保旧武器继续强化时不会丢失原累计幅度。
 	enhancement_modifiers = EnhancementRules.migrate_stat_aliases(enhancement_modifiers)
 	# 是否实际应用词条；只有与当前武器兼容的字段会写入，避免远程专属属性污染近战武器。
@@ -315,6 +338,9 @@ func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
 		else:
 			(result["detrimental_changes"] as Array).append(change_entry)
 		applied_any_modifier = true
+	if applied_any_modifier:
+		# 强化次数；一次 apply 调用代表消费一颗强化石，不按该石包含的词条数量重复累计。
+		enhancement_count = clampi(get_enhancement_count() + 1, 0, MAX_ENHANCEMENT_COUNT)
 	result["success"] = applied_any_modifier
 	return result
 

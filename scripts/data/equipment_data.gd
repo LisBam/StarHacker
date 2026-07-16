@@ -26,6 +26,10 @@ class_name EquipmentData
 @export_range(1.0, 999999.0, 0.1, "or_greater") var max_durability: float = 500.0
 ## 当前耐久值；默认 500.0 表示新装备以满耐久创建，受到玩家伤害时由装备组件统一动态消耗。
 @export_range(0.0, 999999.0, 0.1) var current_durability: float = 500.0
+## 是否为二手装备；默认 false 表示全新物品，怪物、宝箱或商店命中二手规则后设为 true，影响名称前缀并随物品存档永久保留。
+@export var is_second_hand: bool = false
+## 已使用强化石次数；默认 0，玩家锻造和二手历史强化成功后各增加 1，用于保存物品完整强化历史且当前不限制装备继续强化。
+@export_range(0, 999999, 1) var enhancement_count: int = 0
 ## 攻击力加成；默认 0，装备有效时加到玩家基础攻击力。
 @export_range(0.0, 99999.0, 1.0, "or_greater") var attack_power: float = 0.0
 ## 防御力加成；默认 0，装备有效时加到玩家基础防御力。
@@ -122,6 +126,9 @@ func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
 		else:
 			(result["detrimental_changes"] as Array).append(change_entry)
 		result["success"] = true
+	if bool(result.get("success", false)):
+		# 强化次数；一次 apply 调用代表消费一颗装备强化石，多词条仍只累计一次。
+		enhancement_count = maxi(enhancement_count, 0) + 1
 	return result
 
 

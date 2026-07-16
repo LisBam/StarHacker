@@ -26,6 +26,8 @@ const ENHANCEMENT_RESULT_DIALOG_SCRIPT: Script = preload("res://scripts/ui/enhan
 const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
 ## 仓库与背包垂直分隔拖条脚本；默认只计算布局占比，不访问库存数据。
 const VERTICAL_SPLIT_HANDLE_SCRIPT: Script = preload("res://scripts/ui/vertical_split_handle.gd")
+## 库存限制配置；仓库与展开背包的卡片数量统一使用单组 10 件上限。
+const INVENTORY_LIMITS: Script = preload("res://scripts/data/inventory_limits.gd")
 ## 操作菜单出售项编号；固定为 1，选择后出售当前仓库或背包整条记录。
 const ITEM_ACTION_SELL: int = 1
 ## 操作菜单使用项编号；固定为 2，只对强化石显示并进入武器选择状态。
@@ -520,8 +522,9 @@ func _create_storage_entry_control(entry: Dictionary, location: String, entry_in
 		return null
 
 	# 物品数量；武器固定为 1，强化石按 1 到 99 显示在方形资源格中。
+	# 现行限制补充：武器与装备固定为 1，可堆叠资源卡片按 1 到 10 显示。
 	# 通用模板补充：强化石数量规则保持不变，但显示区域现与所有物品统一为 160×72 卡片。
-	var quantity: int = clampi(int(entry.get("quantity", 1)), 1, 99)
+	var quantity: int = clampi(int(entry.get("quantity", 1)), 1, INVENTORY_LIMITS.MAX_STACK_QUANTITY)
 	# 上次撤离前缀；最近一次成功撤离携带的物品手动转入仓库后继续显示该标记。
 	var extraction_prefix: String = "[上次撤离] " if bool(entry.get("is_last_extraction", false)) else ""
 	# 物品控件；展开模式允许点击跨容器转移，纯仓库模式只提供浏览、拖拽和出售。
@@ -546,7 +549,8 @@ func _update_storage_entry_control(item_control: Button, entry: Dictionary, loca
 	if item_resource == null:
 		return
 	# 物品数量；堆叠资源限制为 1 至 99，数量变化时卡片组件会自动执行必要的完整内容刷新。
-	var quantity: int = clampi(int(entry.get("quantity", 1)), 1, 99)
+	# 现行限制补充：正式堆叠范围为 1 至 10，旧 99 件记录已在读档阶段拆分。
+	var quantity: int = clampi(int(entry.get("quantity", 1)), 1, INVENTORY_LIMITS.MAX_STACK_QUANTITY)
 	# 上次撤离前缀；状态变化时由卡片组件刷新文字，普通移动只更新来源下标。
 	var extraction_prefix: String = "[上次撤离] " if bool(entry.get("is_last_extraction", false)) else ""
 	item_control.call("update_storage_context", item_resource, location, entry_index, _backpack_expanded, extraction_prefix, quantity)
@@ -764,7 +768,7 @@ func _get_storage_summary_text(warehouse_entries: Array, backpack_entries: Array
 		return "正在使用 %s：请选择仓库、背包或装备栏中的一把武器" % str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", _pending_repair_kit_resource))
 	if _pending_stone_resource != null:
 		return "正在使用 %s：请选择仓库、背包或装备栏中的一把兼容武器" % str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", _pending_stone_resource))
-	return "仓库 %d 组 · 背包 %d 组 · 普通点击打开操作，Shift+点击快速转移%s" % [warehouse_entries.size(), backpack_entries.size(), "，拖拽可调整或装备" if _backpack_expanded else ""]
+	return "仓库 %d 组 · 背包 %d 组" % [warehouse_entries.size(), backpack_entries.size()]
 
 
 func _apply_storage_display_mode() -> void:

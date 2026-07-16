@@ -4,12 +4,18 @@ class_name WeaponDrop
 ## 通用物品掉落物在地图上保存一件武器，或保存一组堆叠资源及其数量。
 ## HUD 会扫描 item_drops 组生成附近掉落物列表，玩家点击列表或按 F 后调用 pickup_to_inventory 拾取。
 
+## 库存限制配置；地面堆叠数量必须与背包和仓库的单组上限保持一致。
+const INVENTORY_LIMITS: Script = preload("res://scripts/data/inventory_limits.gd")
+## 统一物品详情格式化器；武器与装备掉落名称通过该入口保留二手前缀和损坏状态。
+const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
+
 ## 掉落武器资源；默认空表示无效掉落，运行时由 GameWorld 或背包丢弃逻辑写入。
 @export var weapon_data: Resource
 ## 通用掉落物资源；默认空并兼容旧 weapon_data 字段，强化石等非武器物品只写入该字段。
 @export var item_data: Resource
 ## 地面掉落数量；武器固定为 1，可堆叠资源取值 1 到 99，运行时由整组丢弃流程写入且拾取后一次性合并回背包。
-@export_range(1, 99, 1) var quantity: int = 1
+## 现行限制补充：武器与装备都固定为 1，可堆叠资源正式取值为 1 到 10，旧注释中的 99 仅描述历史规则。
+@export_range(1, 10, 1) var quantity: int = 1
 ## 可拾取距离；取值建议大于玩家半径，默认 96 像素，HUD 使用该距离判断是否进入附近列表。
 @export_range(1.0, 400.0, 1.0, "or_greater") var pickup_radius: float = 96.0
 ## 掉落物悬浮幅度；取值建议 0 到 12，默认 0 表示地面武器保持静止，修改会影响地面武器轻微浮动表现。
@@ -66,7 +72,7 @@ func configure_item_drop(new_item_data: Resource, new_quantity: int = 1) -> void
 	weapon_data = new_item_data if new_item_data != null and str(new_item_data.get("item_kind")) != "enhancement_stone" else null
 	# 有效地面数量；武器和装备始终是一件，只有可堆叠资源保留传入数量。
 	var is_stackable_item: bool = new_item_data != null and str(new_item_data.get("item_kind")) in ["enhancement_stone", "repair_kit", "consumable"]
-	quantity = clampi(new_quantity, 1, 99) if is_stackable_item else 1
+	quantity = clampi(new_quantity, 1, INVENTORY_LIMITS.MAX_STACK_QUANTITY) if is_stackable_item else 1
 	_refresh_visual()
 
 
@@ -85,7 +91,7 @@ func get_pickup_radius() -> float:
 
 func get_quantity() -> int:
 	## 返回地面节点代表的实际物品数量；附近列表、拾取和结算计价均可通过该只读接口取得一致结果。
-	return clampi(quantity, 1, 99)
+	return clampi(quantity, 1, INVENTORY_LIMITS.MAX_STACK_QUANTITY)
 
 
 func play_launch_animation(target_position: Vector2, duration: float, arc_height: float) -> void:
@@ -122,7 +128,7 @@ func get_pickup_display_name() -> String:
 	if str(current_item_data.get("item_kind")) == "enhancement_stone" and current_item_data.has_method("get_pickup_preview_name"):
 		display_name = str(current_item_data.call("get_pickup_preview_name"))
 	else:
-		display_name = str(current_item_data.get("display_name"))
+		display_name = str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", current_item_data))
 	if display_name.is_empty():
 		return "未知物品"
 

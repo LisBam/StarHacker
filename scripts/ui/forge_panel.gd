@@ -495,17 +495,34 @@ func _refresh_preview() -> void:
 		_forge_button.disabled = _forging_in_progress
 		return
 	# 主武器名称；预览有效时必定为武器资源。
+	# 装备支持补充：现行主锻造物也可以是四部位装备，后续显示按资源类型区分标题。
 	var main_weapon: Resource = preview.get("weapon") as Resource
 	# 耐久恢复；只展示最终可确定值，超过上限的牺牲耐久不会计入。
 	var restored_durability: float = float(preview.get("durability_restored", 0.0))
-	_preview_label.text = "主武器：%s\n耐久：%.1f → %.1f（+%.1f）\n强化石：%d 颗\n费用倍率：×%.2f" % [
-		str(main_weapon.get("display_name")) if main_weapon != null else "未知武器",
-		float(preview.get("durability_before", 0.0)),
-		float(preview.get("durability_after", 0.0)),
-		restored_durability,
-		int(preview.get("compatible_stone_count", 0)),
-		float(preview.get("cost_multiplier", 1.0)),
-	]
+	if bool(preview.get("has_enhancement_limit", false)):
+		# 武器锻造预览；剩余次数放在价值之前，分子表示本次锻造完成后仍可继续使用的强化石数量。
+		_preview_label.text = "主武器：%s\n耐久：%.1f → %.1f（+%.1f）\n强化石：%d 颗\n剩余强化次数：%d/%d\n价值：%d 星穹\n费用倍率：×%.2f" % [
+			str(main_weapon.get("display_name")) if main_weapon != null else "未知武器",
+			float(preview.get("durability_before", 0.0)),
+			float(preview.get("durability_after", 0.0)),
+			restored_durability,
+			int(preview.get("compatible_stone_count", 0)),
+			int(preview.get("remaining_enhancement_count", 0)),
+			int(preview.get("maximum_enhancement_count", WeaponData.MAX_ENHANCEMENT_COUNT)),
+			int(preview.get("main_weapon_value", 0)),
+			float(preview.get("cost_multiplier", 1.0)),
+		]
+	else:
+		# 装备锻造预览；装备不受武器次数上限约束，只展示耐久、材料、价值与费用倍率。
+		_preview_label.text = "主装备：%s\n耐久：%.1f → %.1f（+%.1f）\n强化石：%d 颗\n价值：%d 星穹\n费用倍率：×%.2f" % [
+			str(main_weapon.get("display_name")) if main_weapon != null else "未知装备",
+			float(preview.get("durability_before", 0.0)),
+			float(preview.get("durability_after", 0.0)),
+			restored_durability,
+			int(preview.get("compatible_stone_count", 0)),
+			int(preview.get("main_weapon_value", 0)),
+			float(preview.get("cost_multiplier", 1.0)),
+		]
 	_forge_cost_label.text = "本次锻造消耗：%d 星穹" % int(preview.get("cost", 0))
 	_forge_button.disabled = _forging_in_progress
 

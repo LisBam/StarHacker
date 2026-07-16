@@ -14,6 +14,8 @@ const CHARACTER_CAEULUS: String = "caelus"
 const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 ## 宝箱脚本资源；用于调用统一品质抽取，不要求 GameWorld 强类型依赖宝箱节点类缓存。
 const LOOT_CHEST_SCRIPT: Script = preload("res://scripts/environment/loot_chest.gd")
+## 二手物品生成器；怪物与宝箱的新武器装备使用和商店完全相同的历史强化与耐久规则。
+const SECOND_HAND_ITEM_GENERATOR: Script = preload("res://scripts/data/second_hand_item_generator.gd")
 ## 宝箱高品质掉落概率；普通、中级、高级和极品分别使用 10%、30%、55% 和 75%，极品另保证至少 5 件高品质物品。
 const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, "high": 0.55, "supreme": 0.75}
 ## 宝箱武器类别权重；默认 0.25 表示每个掉落槽有 25% 概率选择武器。
@@ -148,6 +150,8 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 ## 强化石单词条基础价值；默认 30 星穹，随机多词条会按词条数量增加单颗价值。
 @export_range(0, 999999, 1) var enhancement_stone_base_value: int = 30
 ## 品质规则兼容说明；词条数量与削弱概率现由 EnhancementRules.QUALITY_CONFIGS 统一决定，上述最小/最大词条和通用削弱概率只保留旧扩展调用兼容。
+## 新生成武器装备的二手概率；默认 0.30，怪物掉落与宝箱每件独立判定且与普通商店保持一致。
+@export_range(0.0, 1.0, 0.01) var second_hand_equipment_chance: float = 0.30
 ## 道具死亡掉落概率；默认 0.05 表示每只被击杀怪物独立有 5% 基础概率掉落一个随机道具，结算时还会乘怪物掉落倍率；变量名为旧场景兼容保留。
 @export_range(0.0, 1.0, 0.001) var repair_kit_drop_chance: float = 0.05
 ## 道具掉落随机池；内容目录会自动补充所有合法通用道具，怪物或宝箱掉落时会深拷贝其中一项；变量名为旧场景兼容保留。
@@ -1956,12 +1960,18 @@ func _get_random_chest_weapon(high_quality: bool) -> Resource:
 	var selected_weapon: Resource = candidate_weapons[_random.randi_range(0, candidate_weapons.size() - 1)]
 	# 独立武器实例；保留模板数值但避免多个宝箱掉落共享耐久与强化状态。
 	var duplicated_weapon: Resource = selected_weapon.duplicate(true) as Resource
-	return duplicated_weapon if duplicated_weapon != null else selected_weapon
+	# 宝箱武器实例；复制成功后才允许写入二手状态，避免异常复制失败时污染项目模板。
+	var chest_weapon: Resource = duplicated_weapon if duplicated_weapon != null else selected_weapon
+	if duplicated_weapon != null:
+		SECOND_HAND_ITEM_GENERATOR.call("roll_and_apply", chest_weapon, _random, second_hand_equipment_chance)
+	return chest_weapon
 
 
 func _get_random_chest_equipment(high_quality: bool) -> Resource:
 	# 随机装备；高品质池选择当前基础价值最高的模板，普通池从全部合法装备中等概率抽取。
 	var selected_equipment: Resource = _duplicate_random_or_highest_value_resource(equipment_drop_table, high_quality)
+	if selected_equipment != null:
+		SECOND_HAND_ITEM_GENERATOR.call("roll_and_apply", selected_equipment, _random, second_hand_equipment_chance)
 	return selected_equipment if selected_equipment != null else _get_random_chest_stone(high_quality)
 
 
@@ -1981,7 +1991,8 @@ func _get_random_chest_stone(high_quality: bool) -> Resource:
 	if high_quality and selected_stone != null:
 		# 极小概率连续未命中时强制提升到高级，保留已生成词条方向并更新统一品质名称。
 		selected_stone.quality_id = EnhancementRules.QUALITY_HIGH
-		selected_stone.display_name = EnhancementRules.get_quality_display_name(EnhancementRules.QUALITY_HIGH)
+		selected_stone.display_name = EnhancementStoneData._build_display_name(EnhancementRules.QUALITY_HIGH, selected_stone.get_resolved_target_kind())
+		selected_stone.value = EnhancementStoneData.calculate_value(EnhancementRules.QUALITY_HIGH, selected_stone.get_normalized_modifiers())
 	return selected_stone
 
 
@@ -2295,6 +2306,8 @@ func _get_random_weapon_drop_data() -> Resource:
 
 	# 独立武器资源；取值为模板深拷贝，默认避免多个掉落物共享同一个资源实例。
 	var dropped_weapon: Resource = weapon_template.duplicate(true) as Resource
+	if dropped_weapon != null:
+		SECOND_HAND_ITEM_GENERATOR.call("roll_and_apply", dropped_weapon, _random, second_hand_equipment_chance)
 	return dropped_weapon if dropped_weapon != null else weapon_template
 
 
@@ -2308,6 +2321,7 @@ func _try_spawn_monster_equipment_drop(monster_node: Node2D) -> void:
 	# 掉落装备资源；从自动发现池等概率抽取并深拷贝，避免多个地面装备共享状态。
 	var dropped_equipment: Resource = _duplicate_random_or_highest_value_resource(equipment_drop_table, false)
 	if dropped_equipment != null:
+		SECOND_HAND_ITEM_GENERATOR.call("roll_and_apply", dropped_equipment, _random, second_hand_equipment_chance)
 		_spawn_monster_drop_with_animation(dropped_equipment, monster_node.global_position)
 
 

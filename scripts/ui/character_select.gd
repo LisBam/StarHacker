@@ -28,7 +28,8 @@ const CURRENT_CHARACTER_PANEL_MINIMUM_WIDTH: float = 480.0
 ## 数值条显示上限；取值应大于 0，默认 200 覆盖当前占位生命和能量范围，修改会影响详情面板条形比例。
 @export_range(1.0, 9999.0, 1.0, "or_greater") var stat_bar_maximum: float = 200.0
 ## 速度条显示上限；取值应大于 0，默认 140 对应旧规则 420 速度，修改会影响速度条形比例。
-@export_range(1.0, 9999.0, 1.0, "or_greater") var speed_bar_maximum: float = 140.0
+## 比例统一补充：现行默认 200，使 100 点速度与 100 点攻击力显示完全相同的进度条长度。
+@export_range(1.0, 9999.0, 1.0, "or_greater") var speed_bar_maximum: float = 200.0
 ## 攻击力条显示上限；取值应大于 0，默认 200 覆盖当前角色基础攻击力，修改会影响攻击力条形比例。
 @export_range(1.0, 99999.0, 1.0, "or_greater") var attack_bar_maximum: float = 200.0
 ## 防御力条显示上限；取值应大于 0，默认 200 覆盖当前角色基础防御力，修改会影响防御力条形比例。

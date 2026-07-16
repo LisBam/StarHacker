@@ -51,8 +51,6 @@ func configure(entry: Dictionary, is_gray_market: bool) -> void:
 	var is_weapon: bool = _item_resource != null and (str(_item_resource.get("weapon_type")) in ["ranged", "melee", "hybrid"] or str(_item_resource.get("item_kind")) == "equipment")
 	# 是否为二手商品；普通商店二手枪械仅在枪械名称前增加简短标识，不显示历史强化细节。
 	var _is_second_hand: bool = bool(entry.get("second_hand", false))
-	if _is_second_hand:
-		item_name = "【二手】%s" % item_name
 	# 价格显示文本；默认仅显示最终星穹，开发者开启调试信息后才公开原价倍率。
 	var price_text: String = _build_price_text(purchase_price, price_multiplier)
 	# 商品顶部摘要；强化石第一行显示资源类型，第二行继续由通用卡片显示名称。

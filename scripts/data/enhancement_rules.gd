@@ -233,12 +233,14 @@ const MULTIPLICATIVE_STAT_MAGNITUDE_RANGES: Dictionary = {
 }
 ## 加算属性独立幅度；数值仍以 0 到 1 小数保存，0.005 表示直接增加 0.5 个百分点。
 const ADDITIVE_POINT_MAGNITUDE_RANGES: Dictionary = {
+	# 暴击率幅度；以 20% 暴击率和 200% 暴击伤害为收益基准，按伤害词条的同品质区间换算。
 	"critical_chance": {
-		QUALITY_LOW: {"beneficial_min": 0.011, "beneficial_max": 0.026, "detrimental_min": 0.011, "detrimental_max": 0.026},
-		QUALITY_MEDIUM: {"beneficial_min": 0.022, "beneficial_max": 0.044, "detrimental_min": 0.007, "detrimental_max": 0.022},
-		QUALITY_HIGH: {"beneficial_min": 0.040, "beneficial_max": 0.066, "detrimental_min": 0.007, "detrimental_max": 0.018},
-		QUALITY_SUPREME: {"beneficial_min": 0.055, "beneficial_max": 0.088, "detrimental_min": 0.0, "detrimental_max": 0.0},
+		QUALITY_LOW: {"beneficial_min": 0.006, "beneficial_max": 0.014, "detrimental_min": 0.006, "detrimental_max": 0.014},
+		QUALITY_MEDIUM: {"beneficial_min": 0.012, "beneficial_max": 0.024, "detrimental_min": 0.004, "detrimental_max": 0.012},
+		QUALITY_HIGH: {"beneficial_min": 0.022, "beneficial_max": 0.036, "detrimental_min": 0.004, "detrimental_max": 0.010},
+		QUALITY_SUPREME: {"beneficial_min": 0.030, "beneficial_max": 0.048, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
+	# 暴击伤害幅度；以 80% 暴击率和 150% 暴击伤害为收益基准，避免与暴击率词条误用同一参考状态。
 	"critical_damage": {
 		QUALITY_LOW: {"beneficial_min": 0.009, "beneficial_max": 0.021, "detrimental_min": 0.009, "detrimental_max": 0.021},
 		QUALITY_MEDIUM: {"beneficial_min": 0.018, "beneficial_max": 0.035, "detrimental_min": 0.005, "detrimental_max": 0.018},

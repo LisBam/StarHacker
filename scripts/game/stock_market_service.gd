@@ -1,8 +1,8 @@
 extends Node
 
 ## 股市服务独立维护行情、动态价值中枢、大盘周期、随机事件和对局行为统计。
-## UI 只读取公开快照并请求交易；金币与持仓所有权由 GlobalInventory 统一结算和持久化。
-## 证券币职责补充；StockMarketService 独立持有证券币余额并结算股票，GlobalInventory 只持有永久金币与股票数量。
+## UI 只读取公开快照并请求交易；星穹与持仓所有权由 GlobalInventory 统一结算和持久化。
+## 证券币职责补充；StockMarketService 独立持有证券币余额并结算股票，GlobalInventory 只持有永久星穹与股票数量。
 
 signal market_changed
 signal event_announced(message: String)
@@ -93,10 +93,10 @@ const EVENT_DEFINITIONS: Array[Dictionary] = [
 @export_range(0.05, 1.0, 0.01) var cycle_change_limit: float = 0.30
 ## 股票买卖手续费比例；默认成交额的 0.5%，手续费最低 0.01 证券币，运行时无需动态修改。
 @export_range(0.0, 0.20, 0.001) var stock_trade_fee_ratio: float = 0.005
-## 证券币提现手续费比例；默认提现额的 0.5%，扣费后只把整数部分转为永久金币，运行时无需动态修改。
+## 证券币提现手续费比例；默认提现额的 0.5%，扣费后只把整数部分转为永久星穹，运行时无需动态修改。
 @export_range(0.0, 0.20, 0.001) var securities_withdrawal_fee_ratio: float = 0.005
 
-## 全局库存服务；负责金币、持仓和正式对局活动状态，缺失时行情仍可独立运行和调试。
+## 全局库存服务；负责星穹、持仓和正式对局活动状态，缺失时行情仍可独立运行和调试。
 var _global_inventory: Node
 ## 行情运行时状态；键为股票标识，值包含当前价、中枢、历史、周期起点和连续行为方向。
 var _stock_states: Dictionary = {}
@@ -224,7 +224,7 @@ func get_stock_snapshot(stock_id: String) -> Dictionary:
 
 
 func get_current_price(stock_id: String) -> float:
-	# 单股运行时状态；内部价格使用浮点平滑计算，成交时四舍五入为正整数金币。
+	# 单股运行时状态；内部价格使用浮点平滑计算，成交时四舍五入为正整数星穹。
 	# 证券币成交规则；旧整数说明仅保留历史注释兼容，当前返回与玩家界面一致的两位小数证券币价格，不再转换为整数。
 	var state: Dictionary = _stock_states.get(stock_id, {}) as Dictionary
 	return maxf(snappedf(float(state.get("price", 0.0)), 0.01), 0.01)
@@ -241,7 +241,7 @@ func get_withdrawal_fee_ratio() -> float:
 
 
 func get_minimum_withdrawal_amount() -> int:
-	## 返回扣除当前手续费后至少到账 1 金币所需的最小整数证券币；异常高费率无法到账时返回 0。
+	## 返回扣除当前手续费后至少到账 1 星穹所需的最小整数证券币；异常高费率无法到账时返回 0。
 	for securities_amount in range(1, 101):
 		# 当前候选手续费；复用最终提现公式，确保按钮门槛和服务执行结果一致。
 		var fee: float = _calculate_securities_fee(float(securities_amount), securities_withdrawal_fee_ratio)
@@ -256,15 +256,15 @@ func get_stock_trade_fee_ratio() -> float:
 
 
 func request_securities_deposit(coin_amount: int) -> Dictionary:
-	## 按 1:1 把整数永久金币充值为证券币；金币扣除失败时证券币余额保持不变。
+	## 按 1:1 把整数永久星穹充值为证券币；星穹扣除失败时证券币余额保持不变。
 	if coin_amount <= 0 or _global_inventory == null or not _global_inventory.has_method("spend_coins"):
 		return {"success": false, "message": "无法执行充值"}
-	# 金币扣款结果；库存服务会在同一调用中再次复核实时金币余额，防止弹窗额度过期。
+	# 星穹扣款结果；库存服务会在同一调用中再次复核实时星穹余额，防止弹窗额度过期。
 	var coins_spent: bool = bool(_global_inventory.call("spend_coins", coin_amount))
 	if not coins_spent:
-		return {"success": false, "message": "金币不足，充值未执行"}
+		return {"success": false, "message": "星穹不足，充值未执行"}
 	_securities_balance = _normalize_securities_amount(_securities_balance + float(coin_amount))
-	# 金币立即保存；与证券币状态在同一次成功兑换路径落盘，缩短两份资产存档的不一致窗口。
+	# 星穹立即保存；与证券币状态在同一次成功兑换路径落盘，缩短两份资产存档的不一致窗口。
 	if _global_inventory.has_method("flush_stock_holdings_save"):
 		_global_inventory.call("flush_stock_holdings_save")
 	_save_state()
@@ -273,7 +273,7 @@ func request_securities_deposit(coin_amount: int) -> Dictionary:
 
 
 func request_securities_withdrawal(securities_amount: int) -> Dictionary:
-	## 把整数证券币提现为永久金币；手续费从提现额中扣除，到账金币取扣费后金额的整数部分。
+	## 把整数证券币提现为永久星穹；手续费从提现额中扣除，到账星穹取扣费后金额的整数部分。
 	if securities_amount <= 0 or _global_inventory == null or not _global_inventory.has_method("adjust_coins"):
 		return {"success": false, "message": "无法执行提现"}
 	# 当前提现额；接口只接受整数，仍转为浮点用于证券币两位小数结算。
@@ -282,33 +282,33 @@ func request_securities_withdrawal(securities_amount: int) -> Dictionary:
 		return {"success": false, "message": "证券币不足，提现未执行"}
 	# 提现手续费；按配置比例计算并向上保留到 0.01 证券币，正额提现最低收取 0.01。
 	var fee: float = _calculate_securities_fee(requested_amount, securities_withdrawal_fee_ratio)
-	# 扣费后可兑换额；外部金币只支持整数，因此只发放向下取整的整数部分。
+	# 扣费后可兑换额；外部星穹只支持整数，因此只发放向下取整的整数部分。
 	var received_coins: int = floori(maxf(requested_amount - fee, 0.0))
 	if received_coins <= 0:
-		return {"success": false, "message": "扣除手续费后不足 1 金币"}
+		return {"success": false, "message": "扣除手续费后不足 1 星穹"}
 	_global_inventory.call("adjust_coins", received_coins)
 	_securities_balance = _normalize_securities_amount(_securities_balance - requested_amount)
-	# 金币立即保存；与证券币状态在同一次成功兑换路径落盘，缩短两份资产存档的不一致窗口。
+	# 星穹立即保存；与证券币状态在同一次成功兑换路径落盘，缩短两份资产存档的不一致窗口。
 	if _global_inventory.has_method("flush_stock_holdings_save"):
 		_global_inventory.call("flush_stock_holdings_save")
 	_save_state()
 	securities_balance_changed.emit(_securities_balance)
-	return {"success": true, "message": "提现成功，到账 %d 金币" % received_coins, "securities": requested_amount, "fee": fee, "coins": received_coins}
+	return {"success": true, "message": "提现成功，到账 %d 星穹" % received_coins, "securities": requested_amount, "fee": fee, "coins": received_coins}
 
 
 func get_maximum_buy_quantity(stock_id: String) -> int:
 	# 当前整数成交价；必须大于 0 才可计算可买数量。
 	# 证券币成交规则；旧整数说明仅保留历史注释兼容，当前价格为两位小数证券币。
 	var price: float = get_current_price(stock_id)
-	# 当前永久金币；由 GlobalInventory 作为唯一所有者提供。
-	# 证券币余额规则；旧金币说明仅保留历史注释兼容，股票买入只使用股市服务独立证券币余额。
+	# 当前永久星穹；由 GlobalInventory 作为唯一所有者提供。
+	# 证券币余额规则；旧星穹说明仅保留历史注释兼容，股票买入只使用股市服务独立证券币余额。
 	var coins: float = get_securities_balance()
 	if price <= 0.0 or coins <= 0.0:
 		return 0
 	# 初始数量估算；先按不含手续费的整股数量计算，再向下校验含费实际花费。
 	var estimated_quantity: int = maxi(floori(coins / price), 0)
 	while estimated_quantity > 0:
-		# 估算总额；手续费按总成交额 0.5% 向上取整且最低 1 金币。
+		# 估算总额；手续费按总成交额 0.5% 向上取整且最低 1 星穹。
 		# 证券币手续费规则；旧整数说明仅保留历史注释兼容，手续费向上保留至 0.01 证券币且最低 0.01。
 		var estimated_gross: float = _normalize_securities_amount(price * estimated_quantity)
 		# 估算手续费；与最终买入请求使用同一公式，防止数量弹窗出现无法成交的上限。
@@ -320,7 +320,7 @@ func get_maximum_buy_quantity(stock_id: String) -> int:
 
 
 func get_trade_quote(stock_id: String, quantity: int, trade_type: String) -> Dictionary:
-	## 生成指定数量的实时交易报价；该接口只读取行情、金币和持仓，不修改任何资产。
+	## 生成指定数量的实时交易报价；该接口只读取行情、星穹和持仓，不修改任何资产。
 	## 返回字典包含单价、成交额、手续费、最终金额和当前可执行状态，供所有交易界面统一展示。
 	if not stock_id in STOCK_IDS or quantity <= 0 or not trade_type in ["buy", "sell"]:
 		return {"valid": false, "executable": false, "message": "交易参数无效"}
@@ -330,18 +330,18 @@ func get_trade_quote(stock_id: String, quantity: int, trade_type: String) -> Dic
 	# 实时成交额；数量乘当前整数单价，不包含手续费。
 	# 证券币成交规则；旧整数说明仅保留历史注释兼容，成交额按两位小数证券币结算。
 	var gross: float = _normalize_securities_amount(price * quantity)
-	# 实时手续费；买卖均按成交额 0.5% 向上取整且最低 1 金币。
+	# 实时手续费；买卖均按成交额 0.5% 向上取整且最低 1 星穹。
 	# 证券币手续费规则；旧整数说明仅保留历史注释兼容，手续费向上保留至 0.01 且最低 0.01 证券币。
 	var fee: float = _calculate_securities_fee(gross, stock_trade_fee_ratio)
-	# 当前可用金币；库存服务不可用时按 0 处理并令买入报价不可执行。
-	# 证券币余额规则；旧金币说明仅保留历史注释兼容，买入可用余额来自股市独立账户。
+	# 当前可用星穹；库存服务不可用时按 0 处理并令买入报价不可执行。
+	# 证券币余额规则；旧星穹说明仅保留历史注释兼容，买入可用余额来自股市独立账户。
 	var available_coins: float = get_securities_balance()
 	# 当前持仓数量；库存服务不可用或没有持仓时按 0 处理并令卖出报价不可执行。
 	var available_quantity: int = int((_global_inventory.call("get_stock_holding", stock_id) as Dictionary).get("quantity", 0)) if _global_inventory != null and _global_inventory.has_method("get_stock_holding") else 0
-	# 最终结算金额；买入为成交额加手续费，卖出为扣除 0.5% 后向下取整且最低 1 金币。
+	# 最终结算金额；买入为成交额加手续费，卖出为扣除 0.5% 后向下取整且最低 1 星穹。
 	# 证券币最终金额；买入加手续费，卖出扣手续费，全部保留两位小数且卖出最低为 0.01 证券币。
 	var total: float = _normalize_securities_amount(gross + fee) if trade_type == "buy" else maxf(_normalize_securities_amount(gross - fee), 0.01)
-	# 当前报价是否可执行；买入复核金币，卖出复核持仓，防止弹窗展示期间资产或价格变化造成非法成交。
+	# 当前报价是否可执行；买入复核星穹，卖出复核持仓，防止弹窗展示期间资产或价格变化造成非法成交。
 	var executable: bool = available_coins + 0.0001 >= total if trade_type == "buy" else available_quantity >= quantity
 	# 不可执行原因；用于二次确认窗口明确提示玩家需要等待价格回落、减少数量或检查持仓。
 	var message: String = "可以成交"
@@ -370,12 +370,12 @@ func request_buy(stock_id: String, quantity: int, quoted_price: int = -1) -> Dic
 	var price: float = get_current_price(stock_id)
 	# 买入成交额；数量乘当前价，不包含手续费。
 	var gross: float = _normalize_securities_amount(price * quantity)
-	# 买入手续费；成交额 0.5% 向上取整且最低 1 金币。
+	# 买入手续费；成交额 0.5% 向上取整且最低 1 星穹。
 	var fee: float = _calculate_securities_fee(gross, stock_trade_fee_ratio)
 	# 买入总花费；成交额与手续费相加后交给库存原子扣款。
 	var total_cost: float = _normalize_securities_amount(gross + fee)
-	# 买入结果；库存服务会再次校验金币并更新加权成本。
-	# 证券币原子校验；旧金币说明仅保留历史注释兼容，先复核股市余额，再写入不处理货币的持仓接口。
+	# 买入结果；库存服务会再次校验星穹并更新加权成本。
+	# 证券币原子校验；旧星穹说明仅保留历史注释兼容，先复核股市余额，再写入不处理货币的持仓接口。
 	if _securities_balance + 0.0001 < total_cost:
 		return {"success": false, "message": "证券币不足，需要 %.2f，当前仅有 %.2f" % [total_cost, _securities_balance], "quantity": quantity, "price": price, "fee": fee, "total": total_cost}
 	# 本次含费单位成本；持仓加权成本使用证券币实际支出，不丢弃小数部分。
@@ -389,7 +389,7 @@ func request_buy(stock_id: String, quantity: int, quoted_price: int = -1) -> Dic
 		_save_state()
 		securities_balance_changed.emit(_securities_balance)
 	# 买入失败说明；库存原子扣款失败时返回点击瞬间所需金额与余额，避免旧弹窗价格造成原因不明。
-	# 证券币失败说明；旧金币说明仅保留历史注释兼容，持仓接口失败时不会扣除证券币。
+	# 证券币失败说明；旧星穹说明仅保留历史注释兼容，持仓接口失败时不会扣除证券币。
 	var failure_message: String = "持仓服务不可用，证券币未扣除"
 	return {"success": success, "message": "买入成功" if success else failure_message, "quantity": quantity, "price": price, "fee": fee, "total": total_cost}
 
@@ -405,11 +405,11 @@ func request_sell(stock_id: String, quantity: int, quoted_price: int = -1) -> Di
 	var gross: float = _normalize_securities_amount(price * quantity)
 	# 卖出手续费；用于确认框明示，实际所得按乘 0.995 后向下取整。
 	var fee: float = _calculate_securities_fee(gross, stock_trade_fee_ratio)
-	# 卖出实际所得；向下取整且最低 1 金币。
+	# 卖出实际所得；向下取整且最低 1 星穹。
 	# 证券币卖出所得；旧整数说明仅保留历史注释兼容，成交额扣除两位小数手续费后最低为 0.01 证券币。
 	var proceeds: float = maxf(_normalize_securities_amount(gross - fee), 0.01)
-	# 卖出结果；库存服务会再次校验持仓数量并实时增加永久金币。
-	# 证券币结算规则；旧金币说明仅保留历史注释兼容，持仓扣除成功后才增加股市独立账户余额。
+	# 卖出结果；库存服务会再次校验持仓数量并实时增加永久星穹。
+	# 证券币结算规则；旧星穹说明仅保留历史注释兼容，持仓扣除成功后才增加股市独立账户余额。
 	var success: bool = bool(_global_inventory.call("remove_stock_holding_without_currency", stock_id, quantity))
 	if success:
 		_securities_balance = _normalize_securities_amount(_securities_balance + proceeds)
@@ -516,9 +516,9 @@ func _refresh_stock(stock_id: String, refresh_source: String, player_impact: flo
 	var definition: Dictionary = STOCK_DEFINITIONS.get(stock_id, {}) as Dictionary
 	# 股票运行时状态；刷新后会原位更新并重新写回状态表。
 	var state: Dictionary = _stock_states.get(stock_id, {}) as Dictionary
-	# 刷新前价格；至少 1 金币，作为本次涨跌幅与单次限制的基准。
+	# 刷新前价格；至少 1 星穹，作为本次涨跌幅与单次限制的基准。
 	var old_price: float = maxf(float(state.get("price", definition.get("base_price", 1.0))), 1.0)
-	# 当前动态价值中枢；至少 1 金币，长期回归只围绕该值而非初始价。
+	# 当前动态价值中枢；至少 1 星穹，长期回归只围绕该值而非初始价。
 	var center: float = maxf(float(state.get("center", old_price)), 1.0)
 	# 是否正式结算刷新；决定波动倍率、中枢概率和玩家行为是否启用。
 	var is_settlement: bool = refresh_source == REFRESH_SETTLEMENT
@@ -593,7 +593,7 @@ func _refresh_stock(stock_id: String, refresh_source: String, player_impact: flo
 	var cycle_start_price: float = maxf(float(state.get("cycle_start_price", old_price)), 1.0)
 	new_price = clampf(new_price, cycle_start_price * (1.0 - cycle_change_limit), cycle_start_price * (1.0 + cycle_change_limit))
 	if is_display_refresh and is_equal_approx(snappedf(new_price, 0.01), snappedf(old_price, 0.01)):
-		# 微行情可见步长；当随机结果不足 0.01 金币时强制移动一分钱，确保每秒刷新肉眼可见。
+		# 微行情可见步长；当随机结果不足 0.01 星穹时强制移动一分钱，确保每秒刷新肉眼可见。
 		var visible_step: float = 0.01 if sentiment >= 0.0 else -0.01
 		# 微行情有效最低价；同时遵守初始价软下限和当前涨跌周期下限。
 		var visible_minimum_price: float = maxf(base_price * 0.5, cycle_start_price * (1.0 - cycle_change_limit))
@@ -826,7 +826,7 @@ func _collect_outcome_metrics() -> void:
 	var gained_entries: Array = outcome.get("gained_entries", []) as Array
 	# 本局丢失总价值；每个条目按单位售价乘实际丢失数量累计。
 	var lost_value: int = 0
-	# 本局丢失高价值物品累计；单条总价值达到 800 金币时计入。
+	# 本局丢失高价值物品累计；单条总价值达到 800 星穹时计入。
 	var lost_high_value: int = 0
 	# 成功撤离带出总价值；按本局首次获得条目累计。
 	var extracted_value: int = 0
@@ -907,7 +907,7 @@ func _calculate_securities_fee(gross: float, fee_ratio: float) -> float:
 
 
 func _save_state() -> void:
-	# 股市存档根字典；保存全部长期行情状态，不包含玩家持仓和金币。
+	# 股市存档根字典；保存全部长期行情状态，不包含玩家持仓和星穹。
 	var save_data: Dictionary = {
 		"version": SAVE_VERSION,
 		"market_state": _market_state,
@@ -945,7 +945,7 @@ func _load_state() -> bool:
 	var save_data: Dictionary = parsed as Dictionary
 	# 已保存股市版本；版本 3 之前使用原在线阈值，读取后需要按 3 倍比例迁移。
 	var saved_version: int = maxi(int(save_data.get("version", 1)), 1)
-	# 证券币余额；版本 3 及更旧存档没有该字段，升级时从 0.00 开始且不自动搬运永久金币。
+	# 证券币余额；版本 3 及更旧存档没有该字段，升级时从 0.00 开始且不自动搬运永久星穹。
 	_securities_balance = _normalize_securities_amount(float(save_data.get("securities_balance", 0.0)))
 	_market_state = str(save_data.get("market_state", MARKET_SIDEWAYS))
 	if not _market_state in [MARKET_BULL, MARKET_BEAR, MARKET_SIDEWAYS]:

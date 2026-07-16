@@ -1,7 +1,7 @@
 extends ConfirmationDialog
 class_name SecuritiesTransferDialog
 
-## 证券币转账弹窗只负责整数充值或提现金额输入，不直接读取金币、证券币或存档服务。
+## 证券币转账弹窗只负责整数充值或提现金额输入，不直接读取星穹、证券币或存档服务。
 ## 宿主负责提供当前最大额度并在确认后调用股市服务执行最终原子校验。
 
 signal transfer_confirmed(amount: int, is_deposit: bool)
@@ -20,11 +20,11 @@ const DIALOG_OUTER_FRAME_SCRIPT: Script = preload("res://scripts/ui/dialog_outer
 ## 弹窗背景透明度；默认 0.82，与股票数量选择弹窗保持一致，运行时无需动态修改。
 @export_range(0.40, 1.0, 0.01) var dialog_background_alpha: float = 0.82
 
-## 当前是否为充值模式；默认 true，false 表示把整数证券币提现为永久金币。
+## 当前是否为充值模式；默认 true，false 表示把整数证券币提现为永久星穹。
 var _is_deposit: bool = true
-## 当前最大可转账整数数量；默认 1，由宿主按金币或证券币余额提供。
+## 当前最大可转账整数数量；默认 1，由宿主按星穹或证券币余额提供。
 var _maximum_amount: int = 1
-## 当前最小可转账整数数量；默认 1，提现模式由服务提供至少到账 1 金币所需门槛。
+## 当前最小可转账整数数量；默认 1，提现模式由服务提供至少到账 1 星穹所需门槛。
 var _minimum_amount: int = 1
 ## 当前提现手续费比例；默认 0.005 即 0.5%，充值模式不使用该值扣费。
 var _withdrawal_fee_ratio: float = 0.005
@@ -34,7 +34,7 @@ var _amount_slider: HSlider
 var _amount_spin_box: SpinBox
 ## 兑换说明标签；默认运行时创建，显示方向、最大额度和 1:1 基础兑换规则。
 var _description_label: Label
-## 兑换结果标签；默认运行时创建，充值显示到账证券币，提现显示手续费和整数金币到账额。
+## 兑换结果标签；默认运行时创建，充值显示到账证券币，提现显示手续费和整数星穹到账额。
 var _result_label: Label
 ## 界面是否已经初始化；默认 false，公开展示接口会通过幂等初始化保证控件可用。
 var _interface_initialized: bool = false
@@ -46,7 +46,7 @@ func _ready() -> void:
 
 
 func present_deposit(maximum_amount: int) -> void:
-	## 展示金币充值界面；输入单位为整数金币，证券币按 1:1 增加相同数值。
+	## 展示星穹充值界面；输入单位为整数星穹，证券币按 1:1 增加相同数值。
 	_ensure_interface_initialized()
 	_is_deposit = true
 	_maximum_amount = maxi(maximum_amount, 1)
@@ -54,12 +54,12 @@ func present_deposit(maximum_amount: int) -> void:
 	_withdrawal_fee_ratio = 0.0
 	title = "充值证券币"
 	get_ok_button().text = "确认充值"
-	_description_label.text = "金币 1:1 转入证券币 · 最多可充值 %d" % maximum_amount
+	_description_label.text = "星穹 1:1 转入证券币 · 最多可充值 %d" % maximum_amount
 	_present_current_configuration()
 
 
 func present_withdrawal(maximum_amount: int, withdrawal_fee_ratio: float, minimum_amount: int = 1) -> void:
-	## 展示证券币提现界面；只允许整数证券币，到账金币为扣除手续费后的向下取整结果。
+	## 展示证券币提现界面；只允许整数证券币，到账星穹为扣除手续费后的向下取整结果。
 	_ensure_interface_initialized()
 	_is_deposit = false
 	_maximum_amount = maxi(maximum_amount, 1)
@@ -67,7 +67,7 @@ func present_withdrawal(maximum_amount: int, withdrawal_fee_ratio: float, minimu
 	_withdrawal_fee_ratio = clampf(withdrawal_fee_ratio, 0.0, 1.0)
 	title = "提现证券币"
 	get_ok_button().text = "确认提现"
-	_description_label.text = "整数证券币提现为金币 · 最多可提现 %d" % maximum_amount
+	_description_label.text = "整数证券币提现为星穹 · 最多可提现 %d" % maximum_amount
 	_present_current_configuration()
 
 
@@ -178,15 +178,15 @@ func _refresh_result(amount: int) -> void:
 	## 刷新转账结果摘要；提现手续费和到账额仅作预览，最终结果由股市服务重新计算。
 	var resolved_amount: int = clampi(amount, _minimum_amount, _maximum_amount)
 	if _is_deposit:
-		_result_label.text = "消耗 %d 金币 · 到账 %.2f 证券币" % [resolved_amount, float(resolved_amount)]
+		_result_label.text = "消耗 %d 星穹 · 到账 %.2f 证券币" % [resolved_amount, float(resolved_amount)]
 		get_ok_button().disabled = false
 		return
 	# 提现手续费；证券币支持两位小数，因此预览保留两位，不向整数取整。
 	# 手续费进位规则；乘 100 后向上取整，与股市服务的最终提现费用保持完全一致。
 	var withdrawal_fee: float = maxf(float(ceili(maxf(float(resolved_amount) * _withdrawal_fee_ratio * 100.0 - 0.000001, 0.0))) / 100.0, 0.01)
-	# 实际到账金币；外部金币只支持整数，扣费后的小数部分留在本次手续费中并向下取整到账。
+	# 实际到账星穹；外部星穹只支持整数，扣费后的小数部分留在本次手续费中并向下取整到账。
 	var received_coins: int = floori(float(resolved_amount) - withdrawal_fee)
-	_result_label.text = "手续费 %.2f 证券币 · 到账 %d 金币" % [withdrawal_fee, received_coins]
+	_result_label.text = "手续费 %.2f 证券币 · 到账 %d 星穹" % [withdrawal_fee, received_coins]
 	get_ok_button().disabled = received_coins <= 0
 
 

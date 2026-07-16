@@ -338,7 +338,7 @@ func get_effective_value() -> int:
 	var durability_value_multiplier: float = lerpf(MINIMUM_DURABILITY_VALUE_MULTIPLIER, 1.0, get_durability_ratio())
 	# 四舍五入价值；强化变化和耐久折损依次组合，零耐久时为强化后满耐久价值的 10%。
 	var calculated_value: int = roundi(enhanced_value * durability_value_multiplier)
-	# 最终价值；原始价值大于 0 的武器至少可出售 1 金币，避免低价值损坏武器因整数舍入变为不可出售。
+	# 最终价值；原始价值大于 0 的武器至少可出售 1 星穹，避免低价值损坏武器因整数舍入变为不可出售。
 	return maxi(calculated_value, 1) if value > 0 else 0
 
 

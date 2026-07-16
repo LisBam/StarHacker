@@ -334,7 +334,7 @@ func clear_skill_stat_multipliers() -> void:
 
 
 func get_skill_stat_bonus_ratio(stat_name: String) -> float:
-	## 返回所有技能倍率相对 1 的综合增幅；例如单一 20% 来源返回 0.20，供角色属性面板归入技能值展示。
+	## 返回所有技能倍率相对 1 的综合增幅；例如单一 20% 来源返回 0.20，供角色属性面板合并到额外值。
 	return maxf(_get_combined_skill_multiplier(stat_name) - 1.0, 0.0)
 
 
@@ -379,12 +379,12 @@ func _build_skill_attribute_snapshot(base_value: float, equipment_value: float, 
 	var equipment_set_stat_name: String = "attack_power" if stat_name == "attack" else "defense_power"
 	# 基础与装备合计；套装最终倍率在其上乘算，直接装备点数保持可追溯。
 	var base_and_equipment_value: float = maxf(base_value + equipment_value, 0.0)
-	# 套装额外值；由倍率后的结果减原合计得到，拾荒者两件套防御在此单独显示。
+	# 套装额外值；由倍率后的结果减原合计得到，角色面板会与其他非基础来源统一合并。
 	var equipment_set_bonus_value: float = base_and_equipment_value * (_get_equipment_set_stat_multiplier(equipment_set_stat_name) - 1.0)
 	# 技能倍率前数值；已经包含套装最终倍率，随后由全部被动技能比例连乘。
 	var pre_skill_value: float = base_and_equipment_value + equipment_set_bonus_value
-	# 技能额外值；用最终值减倍率前数值得出，面板兼容原“基础+额外”结构。
-	var skill_bonus_value: float = pre_skill_value * get_skill_stat_bonus_ratio(stat_name)
+	# 技能额外值；同时合并比例与固定点数来源，保证角色面板总值与实际攻防结算完全一致。
+	var skill_bonus_value: float = pre_skill_value * get_skill_stat_bonus_ratio(stat_name) + _get_combined_skill_flat_bonus(stat_name)
 	return {
 		"base": base_value,
 		"equipment": equipment_value,

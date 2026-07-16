@@ -2,7 +2,7 @@ extends Resource
 class_name RepairKitData
 
 ## 修复包数据资源描述可堆叠的武器耐久修复道具。
-## 修复包只能由仓库或随身背包对玩家持有的武器使用，不能作为锻造材料或作用于其他资源。
+## 修复包只能由仓库或背包对玩家持有的武器使用，不能作为锻造材料或作用于其他资源。
 
 ## 物品类型；固定为 repair_kit，供库存、分类、UI 与武器和强化石解耦识别。
 @export var item_kind: String = "repair_kit"

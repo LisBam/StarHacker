@@ -40,11 +40,11 @@ const FORGE_ANIMATION_ROTATIONS: float = 1.5
 ## 下方两个牺牲槽额外下移距离；默认 24 像素，用于避免固定宽卡片与主道具槽发生重叠，运行时无需动态修改。
 @export_range(0.0, 64.0, 1.0) var bottom_sacrifice_slot_downward_offset: float = 24.0
 
-## 全局库存服务缓存；提供背包/仓库条目、金币、材料数量与强化应用。
+## 全局库存服务缓存；提供背包/仓库条目、星穹、材料数量与强化应用。
 var _global_inventory: Node
 ## 锻造规则服务；只持有全局库存引用，不依赖当前面板节点结构。
 var _forge_service: ForgeService
-## 当前下半区来源；默认背包，可通过按钮切换到永久仓库。
+## 当前下半区来源；默认背包，可通过按钮切换到仓库。
 var _current_source: String = SOURCE_BACKPACK
 ## 当前一级分类；默认全部，切换来源时保留方便连续挑选武器与资源材料。
 var _primary_category: String = InventoryQuery.PRIMARY_ALL
@@ -66,15 +66,15 @@ var _sacrifice_slots: Array[Button] = []
 var _forge_board: Control
 ## 背包来源按钮；选中时禁用并显示背包条目。
 var _backpack_source_button: Button
-## 仓库来源按钮；选中时禁用并显示永久仓库条目。
+## 仓库来源按钮；选中时禁用并显示仓库条目。
 var _warehouse_source_button: Button
-## 金币标签；锻造完成扣款后即时刷新。
+## 星穹标签；锻造完成扣款后即时刷新。
 var _coins_label: Label
 ## 锻造预览标签；显示主武器、耐久前后和强化石数量，但不泄露最终强化倍率。
 var _preview_label: Label
 ## 锻造按钮；预览有效时可点击，动画期间禁用。
 var _forge_button: Button
-## 锻造费用标签；固定显示在按钮下方并包含本次总金币费用。
+## 锻造费用标签；固定显示在按钮下方并包含本次总星穹费用。
 var _forge_cost_label: Label
 ## 状态提示标签；用于显示放入失败、材料不足或锻造结果。
 var _status_label: Label
@@ -162,11 +162,11 @@ func _build_interface() -> void:
 	var content: VBoxContainer = VBoxContainer.new()
 	content.add_theme_constant_override("separation", 5)
 	margin.add_child(content)
-	# 标题栏；显示锻造标题、金币与关闭按钮。
+	# 标题栏；显示锻造标题、星穹与关闭按钮。
 	var header: HBoxContainer = HBoxContainer.new()
 	header.add_theme_constant_override("separation", 10)
 	content.add_child(header)
-	# 标题文本；占据剩余宽度，避免金币和关闭按钮挤压。
+	# 标题文本；占据剩余宽度，避免星穹和关闭按钮挤压。
 	var title_label: Label = Label.new()
 	title_label.text = "锻造"
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -231,7 +231,7 @@ func _build_interface() -> void:
 	# 分隔线；明确上方锻造区和下方库存选择区的职责边界。
 	var separator: HSeparator = HSeparator.new()
 	content.add_child(separator)
-	# 下半区标题与来源切换；玩家可在背包和永久仓库之间选择材料来源。
+	# 下半区标题与来源切换；玩家可在背包和仓库之间选择材料来源。
 	var inventory_header: HBoxContainer = HBoxContainer.new()
 	inventory_header.add_theme_constant_override("separation", 8)
 	content.add_child(inventory_header)
@@ -472,7 +472,7 @@ func _refresh_slots() -> void:
 
 
 func _refresh_preview() -> void:
-	_coins_label.text = "金币：%d" % int(_global_inventory.call("get_coins")) if _global_inventory != null else "金币：不可用"
+	_coins_label.text = "星穹：%d" % int(_global_inventory.call("get_coins")) if _global_inventory != null else "星穹：不可用"
 	# 当前非空牺牲材料；锻造服务不需要处理固定五槽中的空字典。
 	var active_sacrifices: Array[Dictionary] = _get_active_sacrifice_entries()
 	# 锻造预览；只包含确定的耐久、材料数量和费用，不包含强化石最终随机倍率。
@@ -483,7 +483,7 @@ func _refresh_preview() -> void:
 		_forge_button.disabled = true
 		return
 	if str(preview.get("forge_mode", ForgeService.FORGE_MODE_WEAPON)) == ForgeService.FORGE_MODE_STONE_UPGRADE:
-		# 强化石升阶预览；只显示品质、材料数量和确定成功率，不收取金币。
+		# 强化石升阶预览；只显示品质、材料数量和确定成功率，不收取星穹。
 		var main_stone: Resource = preview.get("main_stone") as Resource
 		_preview_label.text = "主强化石：%s\n升阶结果：%s\n牺牲石：%d 颗\n当前成功率：%d%%" % [
 			str(main_stone.get("display_name")) if main_stone != null else "未知强化石",
@@ -491,7 +491,7 @@ func _refresh_preview() -> void:
 			int(preview.get("compatible_stone_count", 0)),
 			roundi(float(preview.get("success_rate", 0.0)) * 100.0),
 		]
-		_forge_cost_label.text = "本次升阶消耗：0 金币"
+		_forge_cost_label.text = "本次升阶消耗：0 星穹"
 		_forge_button.disabled = _forging_in_progress
 		return
 	# 主武器名称；预览有效时必定为武器资源。
@@ -506,7 +506,7 @@ func _refresh_preview() -> void:
 		int(preview.get("compatible_stone_count", 0)),
 		float(preview.get("cost_multiplier", 1.0)),
 	]
-	_forge_cost_label.text = "本次锻造消耗：%d 金币" % int(preview.get("cost", 0))
+	_forge_cost_label.text = "本次锻造消耗：%d 星穹" % int(preview.get("cost", 0))
 	_forge_button.disabled = _forging_in_progress
 
 
@@ -588,7 +588,7 @@ func _rebuild_equipment_items() -> void:
 
 
 func _on_quick_unequip_requested(equipment_location: String) -> void:
-	## Shift+点击锻造来源装备栏时直接卸回随身背包，并刷新可用候选与已选槽位校验。
+	## Shift+点击锻造来源装备栏时直接卸回背包，并刷新可用候选与已选槽位校验。
 	if _global_inventory != null and not equipment_location.is_empty() and bool(_global_inventory.call("transfer_equipment_to_storage", equipment_location, SOURCE_BACKPACK)):
 		_refresh_all()
 
@@ -725,13 +725,13 @@ func _on_forge_pressed() -> void:
 		return
 	# 非空牺牲材料；动画和最终服务执行共用同一槽位快照。
 	var active_sacrifices: Array[Dictionary] = _get_active_sacrifice_entries()
-	# 点击时预览；先验证金币以避免金币不足时仍播放完整动画。
+	# 点击时预览；先验证星穹以避免星穹不足时仍播放完整动画。
 	var preview: Dictionary = _forge_service.build_preview(_main_entry, active_sacrifices)
 	if not bool(preview.get("valid", false)):
 		_status_label.text = str(preview.get("message", "无法锻造"))
 		return
 	if _global_inventory == null or int(_global_inventory.call("get_coins")) < int(preview.get("cost", 0)):
-		_status_label.text = "金币不足，无法开始锻造"
+		_status_label.text = "星穹不足，无法开始锻造"
 		return
 	_forging_in_progress = true
 	_status_label.text = "锻造中……"

@@ -28,7 +28,7 @@ const STORAGE_DROP_AREA_SCRIPT: Script = preload("res://scripts/ui/storage_drop_
 const ITEM_ACTION_POPUP_SCRIPT: Script = preload("res://scripts/ui/item_action_popup.gd")
 ## 数量选择弹窗脚本；堆叠物品部分丢弃时复用战斗背包相同数量输入界面。
 const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
-## 角色属性面板脚本；共享背包在主菜单和战斗中复用同一三值属性展示组件。
+## 角色属性面板脚本；共享背包在主菜单和战斗中复用同一“基础值+额外值”展示组件。
 const CHARACTER_STATS_PANEL_SCRIPT: Script = preload("res://scripts/ui/character_stats_panel.gd")
 ## 套装筛选控件脚本；装备分类使用与强化石筛选一致的多选与清空交互。
 const EQUIPMENT_SET_FILTER_CONTROL_SCRIPT: Script = preload("res://scripts/ui/equipment_set_filter_control.gd")
@@ -42,7 +42,7 @@ const ACTION_EQUIP_RANGED_TWO: int = 3
 const ACTION_DISCARD_ALL: int = 4
 ## 部分丢弃操作编号；只在堆叠数量大于一时显示。
 const ACTION_DISCARD_PARTIAL: int = 5
-## 卸下装备操作编号；点击左侧非空装备槽后把物品移动回随身背包。
+## 卸下装备操作编号；点击左侧非空装备槽后把物品移动回背包。
 const ACTION_UNEQUIP: int = 6
 ## 使用修复包操作编号；点击后进入背包与装备栏耐久目标选择状态。
 const ACTION_USE_REPAIR_KIT: int = 7
@@ -58,7 +58,7 @@ var _global_inventory: Node
 var _equipment_list: VBoxContainer
 ## 左侧装备页滚动容器；切换到角色页时隐藏，垂直滚动条始终可拖动。
 var _equipment_scroll: ScrollContainer
-## 左侧角色属性页；展示总值、基础值和装备贡献，切换到装备页时隐藏。
+## 左侧角色属性页；展示总值、基础值和全部额外贡献，切换到装备页时隐藏。
 var _character_stats_panel: CharacterStatsPanel
 ## 左侧角色页滚动容器；窄栏文本换行后仍可拖动查看全部九项属性。
 var _character_scroll: ScrollContainer
@@ -98,8 +98,6 @@ var _status_label: Label
 var _cancel_use_button: Button
 ## 当前运行上下文；默认主菜单，必须在加入场景树前通过 configure_context 修改。
 var _context_mode: String = CONTEXT_MAIN_MENU
-## 顶部上下文提示；主菜单说明永久删除，战斗说明物品会掉落到角色附近。
-var _context_hint_label: Label
 ## 当前一级分类；默认全部，取值与 InventoryQuery 主分类常量一致。
 var _primary_category: String = InventoryQuery.PRIMARY_ALL
 ## 当前二级分类；默认全部，切换一级分类时重置并重建按钮。
@@ -187,10 +185,6 @@ func _build_interface() -> void:
 	UI_STYLE_GUIDE.apply_title_label(title_label)
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title_label)
-	_context_hint_label = Label.new()
-	_context_hint_label.text = "丢弃会掉落到角色附近" if _context_mode == CONTEXT_COMBAT else "局外丢弃会直接永久失去物品"
-	_context_hint_label.modulate = Color(1.0, 0.72, 0.42, 1.0) if _context_mode == CONTEXT_COMBAT else Color(1.0, 0.55, 0.55, 1.0)
-	header.add_child(_context_hint_label)
 	_cancel_use_button = Button.new()
 	_cancel_use_button.text = "取消使用"
 	_cancel_use_button.visible = false
@@ -400,6 +394,10 @@ func _rebuild_equipment() -> void:
 	for slot_index in range(int(_global_inventory.call("get_ranged_slot_count"))):
 		_add_equipment_slot("远程 %d" % (slot_index + 1), "ranged_%d" % slot_index, "ranged")
 	_add_equipment_slot("近战", "melee", "melee")
+	# 武器与防具分组间距；独立空白控件只负责视觉分组，不参与拖放、选择或装备位置计算。
+	var weapon_armor_spacer: Control = Control.new()
+	weapon_armor_spacer.custom_minimum_size = Vector2(0.0, UI_STYLE_GUIDE.EQUIPMENT_GROUP_SPACER_HEIGHT)
+	_equipment_list.add_child(weapon_armor_spacer)
 	for armor_slot in ["head", "body", "legs", "feet"]:
 		_add_equipment_slot({"head": "头部", "body": "躯干", "legs": "腿部", "feet": "脚部"}[armor_slot], "armor_" + armor_slot, armor_slot)
 
@@ -654,7 +652,7 @@ func _on_equipment_selected(item_resource: Resource, equipment_location: String)
 
 
 func _on_quick_unequip_requested(equipment_location: String) -> void:
-	## Shift+点击装备槽时直接卸到随身背包；目标选择期间由槽控件保留普通点击语义，不会误卸下。
+	## Shift+点击装备槽时直接卸到背包；目标选择期间由槽控件保留普通点击语义，不会误卸下。
 	if _global_inventory != null and not equipment_location.is_empty():
 		_global_inventory.call("transfer_equipment_to_storage", equipment_location, "backpack")
 

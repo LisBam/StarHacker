@@ -82,7 +82,7 @@ func present_result(enhancement_result: Dictionary) -> void:
 	result_lines.append("价值变化")
 	# 价值颜色；价值上升为绿色、下降为红色、无变化使用中性色。
 	var value_color: String = BENEFICIAL_COLOR if value_change > 0 else (DETRIMENTAL_COLOR if value_change < 0 else NEUTRAL_COLOR)
-	result_lines.append("[color=%s]%d → %d 金币（%s%d）[/color]" % [value_color, value_before, value_after, "+" if value_change >= 0 else "", value_change])
+	result_lines.append("[color=%s]%d → %d 星穹（%s%d）[/color]" % [value_color, value_before, value_after, "+" if value_change >= 0 else "", value_change])
 	dialog_text = ""
 	_result_label.text = "\n".join(result_lines)
 	present_information("强化完成", "", "确定", dialog_width, dialog_height)

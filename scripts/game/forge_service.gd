@@ -4,15 +4,15 @@ class_name ForgeService
 ## 锻造服务集中计算主物品价值倍率、牺牲材料费用、耐久恢复预览和最终强化结果。
 ## 服务不持有 UI 节点或槽位状态，调用方传入来源条目即可复用于其他锻造界面或自动化测试。
 
-## 主武器价值换算单位；默认每 100 金币价值提高一次倍率增量。
+## 主武器价值换算单位；默认每 100 星穹价值提高一次倍率增量。
 const MAIN_WEAPON_VALUE_STEP: float = 100.0
-## 主武器每个价值单位增加的费用倍率；默认每 100 金币增加 0.4。
+## 主武器每个价值单位增加的费用倍率；默认每 100 星穹增加 0.4。
 const MAIN_WEAPON_MULTIPLIER_PER_STEP: float = 0.4
 ## 锻造基础费用倍率；默认 1.0，低价值武器不会低于该倍率。
 const BASE_COST_MULTIPLIER: float = 1.0
 ## 牺牲武器耐久转化比例；默认取牺牲武器当前耐久的 10% 恢复主武器。
 const SACRIFICE_WEAPON_DURABILITY_RATIO: float = 0.10
-## 每实际恢复一点耐久的基础金币费用；默认 2 金币，最终还会乘主武器价值倍率。
+## 每实际恢复一点耐久的基础星穹费用；默认 2 星穹，最终还会乘主武器价值倍率。
 const COST_PER_RESTORED_DURABILITY: float = 2.0
 ## 强化石品质基础费用；每颗按品质累加后统一乘主武器价值倍率。
 const STONE_QUALITY_COSTS: Dictionary = {
@@ -26,10 +26,10 @@ const STONE_QUALITY_COSTS: Dictionary = {
 const STONE_UPGRADE_SUCCESS_RATE_PER_SACRIFICE: float = 0.20
 ## 武器锻造模式标识；用于让 UI 区分耐久/词条预览与强化石升阶预览。
 const FORGE_MODE_WEAPON: String = "weapon"
-## 强化石升阶模式标识；主锻造槽为可升阶强化石时启用，不收取金币。
+## 强化石升阶模式标识；主锻造槽为可升阶强化石时启用，不收取星穹。
 const FORGE_MODE_STONE_UPGRADE: String = "stone_upgrade"
 
-## 全局库存服务；负责校验来源数量、扣除金币、消费材料和应用随机强化倍率。
+## 全局库存服务；负责校验来源数量、扣除星穹、消费材料和应用随机强化倍率。
 var _global_inventory: Node
 ## 锻造随机数生成器；默认初始化时随机化，仅用于强化石升阶成功判定，不提前生成结果。
 var _random: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -56,7 +56,7 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 	# 实际预计恢复耐久；默认 0，按牺牲槽顺序累加并限制到缺失耐久。
 	var durability_restored: float = 0.0
 	# 强化石基础费用；按低级 2、中级 5、高级 10、极品 20 累加。
-	# 特化品质补充：特化强化石按 20 金币基础费用累加。
+	# 特化品质补充：特化强化石按 20 星穹基础费用累加。
 	var stone_base_cost: int = 0
 	# 有效强化石数量；只统计至少有一条可用于主武器的强化石。
 	var compatible_stone_count: int = 0
@@ -97,7 +97,7 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 		return _build_invalid_preview("当前材料无法为主物品提供有效锻造效果")
 	# 主武器当前价值；强化与耐久共同影响有效价值，价值越高最终锻造倍率越高。
 	var main_weapon_value: int = int(main_weapon.call("get_effective_value")) if main_weapon.has_method("get_effective_value") else maxi(int(main_weapon.get("value")), 0)
-	# 主武器价值倍率；连续按价值比例计算，例如价值 250 金币时倍率为 1 + 2.5×0.4 = 2.0。
+	# 主武器价值倍率；连续按价值比例计算，例如价值 250 星穹时倍率为 1 + 2.5×0.4 = 2.0。
 	var cost_multiplier: float = BASE_COST_MULTIPLIER + float(main_weapon_value) / MAIN_WEAPON_VALUE_STEP * MAIN_WEAPON_MULTIPLIER_PER_STEP
 	# 耐久基础费用；只对实际能恢复的耐久收费，超过最大耐久的材料部分不产生费用。
 	var durability_base_cost: float = durability_restored * COST_PER_RESTORED_DURABILITY
@@ -147,7 +147,7 @@ func execute_forge(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 	# 锻造费用；扣款前检查余额，失败时不消费任何材料或改变武器状态。
 	var forge_cost: int = int(preview.get("cost", 0))
 	if int(_global_inventory.call("get_coins")) < forge_cost:
-		return {"success": false, "message": "金币不足，无法完成锻造"}
+		return {"success": false, "message": "星穹不足，无法完成锻造"}
 	# 强化前价值；结果弹窗展示全部强化石与耐久修复共同完成后的价值变化。
 	var value_before: int = int(main_weapon.call("get_effective_value")) if main_weapon.has_method("get_effective_value") else maxi(int(main_weapon.get("value")), 0)
 	_global_inventory.call("adjust_coins", -forge_cost)

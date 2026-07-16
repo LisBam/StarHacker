@@ -2,7 +2,7 @@ extends ConfirmationDialog
 class_name SellQuantityDialog
 
 ## 堆叠物品出售数量弹窗统一提供滑条和数字输入两种选择方式。
-## 弹窗只负责数量展示与确认，不直接访问仓库、金币或存档服务。
+## 弹窗只负责数量展示与确认，不直接访问仓库、星穹或存档服务。
 ## 跨容器移动补充；同一弹窗可切换移动模式，并继续保持不直接访问库存服务的职责边界。
 
 signal quantity_confirmed(quantity: int)
@@ -14,11 +14,11 @@ const PROGRESS_SLIDER_VISUAL_SCRIPT: Script = preload("res://scripts/ui/progress
 ## 弹窗最外层框架组件；直接绘制不透明标题栏、外框、标题文字和关闭按钮。
 const DIALOG_OUTER_FRAME_SCRIPT: Script = preload("res://scripts/ui/dialog_outer_frame.gd")
 
-## 出售数量模式标识；默认显示金币收益并使用“出售”确认按钮。
+## 出售数量模式标识；默认显示星穹收益并使用“出售”确认按钮。
 const DISPLAY_MODE_SALE: String = "sale"
 ## 移动数量模式标识；跨仓库和背包拖拽堆叠时显示移动方向与实际数量。
 const DISPLAY_MODE_TRANSFER: String = "transfer"
-## 丢弃数量模式标识；战斗背包部分丢弃时显示本次丢弃数量，不计算金币。
+## 丢弃数量模式标识；战斗背包部分丢弃时显示本次丢弃数量，不计算星穹。
 const DISPLAY_MODE_DISCARD: String = "discard"
 ## 物资送回数量模式标识；显示本次价值、20% 运费和送回后的剩余额度。
 const DISPLAY_MODE_SHIPPING: String = "shipping"
@@ -26,15 +26,15 @@ const DISPLAY_MODE_SHIPPING: String = "shipping"
 const DISPLAY_MODE_STOCK_TRADE: String = "stock_trade"
 ## 矿场交易数量模式标识；复用同款滑条与数字输入，覆盖资产购买、出售、充值和提现。
 const DISPLAY_MODE_MINING_TRANSACTION: String = "mining_transaction"
-## 开发者数值模式标识；复用滑条与数字输入直接选择强化石数量或目标金币余额。
+## 开发者数值模式标识；复用滑条与数字输入直接选择强化石数量或目标星穹余额。
 const DISPLAY_MODE_DEVELOPER_VALUE: String = "developer_value"
 ## 矿场资产购买操作；数量表示购买台数，摘要显示总算力币成本。
 const MINING_ACTION_BUY: String = "buy"
 ## 矿场资产出售操作；数量表示出售台数，摘要显示按 60% 向上取整的返还。
 const MINING_ACTION_SELL: String = "sell"
-## 矿场充值操作；数量表示消耗的整数永久金币，摘要显示 1:10000 到账。
+## 矿场充值操作；数量表示消耗的整数永久星穹，摘要显示 1:10000 到账。
 const MINING_ACTION_RECHARGE: String = "recharge"
-## 矿场提现操作；数量表示到账的整数永久金币，摘要显示反推后的算力币成本与手续费。
+## 矿场提现操作；数量表示到账的整数永久星穹，摘要显示反推后的算力币成本与手续费。
 const MINING_ACTION_WITHDRAW: String = "withdraw"
 
 ## 弹窗默认宽度；默认 520 像素可容纳物品名称、数量滑条和数字输入框。
@@ -47,7 +47,7 @@ const MINING_ACTION_WITHDRAW: String = "withdraw"
 
 ## 当前最大可出售数量；取值至少为 1，默认 1 用于弹窗尚未配置时的安全范围。
 var _maximum_quantity: int = 1
-## 当前最小可选数值；默认 1 保持出售、移动等既有模式不变，开发者金币模式允许为 0。
+## 当前最小可选数值；默认 1 保持出售、移动等既有模式不变，开发者星穹模式允许为 0。
 var _minimum_quantity: int = 1
 ## 当前单位交易数值；物品出售模式表示单件价值，股票模式表示两位小数证券币价格，默认 0。
 var _unit_transaction_value: float = 0.0
@@ -59,13 +59,13 @@ var _shipping_remaining_value: int = 0
 var _shipping_fee_ratio: float = 0.20
 ## 当前物品显示名称；默认“物品”，配置后用于标题说明本次出售目标。
 var _item_display_name: String = "物品"
-## 当前展示模式；默认出售模式，移动模式下不计算金币并改为显示本次将移动的数量。
+## 当前展示模式；默认出售模式，移动模式下不计算星穹并改为显示本次将移动的数量。
 var _display_mode: String = DISPLAY_MODE_SALE
 ## 股票交易方向；默认 false 表示卖出，仅股票交易模式用于决定余额校验和摘要文案。
 var _stock_trade_is_buying: bool = false
-## 股票交易当前可执行数量上限；默认 0，买入时随实时价格和金币变化，卖出时随持仓变化。
+## 股票交易当前可执行数量上限；默认 0，买入时随实时价格和星穹变化，卖出时随持仓变化。
 var _stock_trade_executable_maximum: int = 0
-## 股票交易当前可用金币；默认 0，仅买入模式用于提示实时总花费是否超出余额。
+## 股票交易当前可用星穹；默认 0，仅买入模式用于提示实时总花费是否超出余额。
 ## 证券币余额补充；股票模式下该变量表示可带小数的证券币余额，旧名称仅为兼容既有结构保留。
 var _stock_trade_available_coins: float = 0.0
 ## 股票买卖手续费比例；默认 0.005 即 0.5%，仅股票模式用于实时计算两位小数证券币手续费。
@@ -84,7 +84,7 @@ var _mining_show_exact_values: bool = false
 var _quantity_slider: HSlider
 ## 数量数字输入框；默认运行时创建，玩家可键盘直接输入精确数量。
 var _quantity_spin_box: SpinBox
-## 总价标签；默认运行时创建，数量变化时即时显示将获得的金币。
+## 总价标签；默认运行时创建，数量变化时即时显示将获得的星穹。
 var _total_price_label: Label
 ## 数量说明标签；默认运行时创建，显示当前物品名称和最大可出售数量。
 var _description_label: Label
@@ -190,7 +190,7 @@ func present_mining_transaction(action: String, display_name: String, maximum_qu
 
 
 func present_developer_value(dialog_title: String, description: String, minimum_value: int, maximum_value: int, initial_value: int, confirm_text: String) -> void:
-	## 展示开发者整数选择弹窗；只返回选定数值，实际资源或金币修改仍由 DeveloperMenu 调用服务完成。
+	## 展示开发者整数选择弹窗；只返回选定数值，实际资源或星穹修改仍由 DeveloperMenu 调用服务完成。
 	_ensure_interface_initialized()
 	_display_mode = DISPLAY_MODE_DEVELOPER_VALUE
 	_minimum_quantity = mini(minimum_value, maximum_value)
@@ -250,7 +250,7 @@ func _present_current_configuration(initial_value: int = 1) -> void:
 	_quantity_slider.max_value = _maximum_quantity
 	_quantity_spin_box.min_value = _minimum_quantity
 	_quantity_spin_box.max_value = _maximum_quantity
-	# 初始数值；普通数量模式保持 1，开发者模式可传入当前金币或默认强化石数量。
+	# 初始数值；普通数量模式保持 1，开发者模式可传入当前星穹或默认强化石数量。
 	var resolved_initial_value: int = clampi(initial_value, _minimum_quantity, _maximum_quantity)
 	_quantity_slider.set_value_no_signal(float(resolved_initial_value))
 	_quantity_spin_box.set_value_no_signal(float(resolved_initial_value))
@@ -359,13 +359,13 @@ func _refresh_total_price(quantity: int) -> void:
 		# 股票成交额；按当前实时整数单价计算，行情刷新时会由宿主再次调用本函数更新。
 		# 证券币成交规则；旧整数说明仅保留历史注释兼容，成交额保留两位小数证券币。
 		var stock_gross: float = snappedf(_unit_transaction_value * resolved_quantity, 0.01)
-		# 股票手续费；成交额的 0.5% 向上取整且最低 1 金币，与股市服务最终成交公式一致。
+		# 股票手续费；成交额的 0.5% 向上取整且最低 1 星穹，与股市服务最终成交公式一致。
 		# 证券币手续费规则；旧整数说明仅保留历史注释兼容，手续费向上保留到 0.01 且最低 0.01 证券币。
 		var stock_fee: float = maxf(float(ceili(maxf(stock_gross * _stock_trade_fee_ratio * 100.0 - 0.000001, 0.0))) / 100.0, 0.01)
-		# 股票最终金额；买入为成交额加手续费，卖出为扣费后向下取整且最低 1 金币。
+		# 股票最终金额；买入为成交额加手续费，卖出为扣费后向下取整且最低 1 星穹。
 		# 证券币最终金额；旧整数说明仅保留历史注释兼容，买入加费、卖出扣费并统一保留两位小数。
 		var stock_total: float = snappedf(stock_gross + stock_fee, 0.01) if _stock_trade_is_buying else maxf(snappedf(stock_gross - stock_fee, 0.01), 0.01)
-		# 股票当前数量是否可执行；买入同时检查实时可买上限和金币，卖出只检查持仓上限。
+		# 股票当前数量是否可执行；买入同时检查实时可买上限和星穹，卖出只检查持仓上限。
 		var stock_trade_executable: bool = _stock_trade_executable_maximum >= resolved_quantity and (not _stock_trade_is_buying or _stock_trade_available_coins + 0.0001 >= stock_total)
 		_total_price_label.text = "%d 股 · 手续费 %.2f · %s %.2f 证券币" % [resolved_quantity, stock_fee, "需支付" if _stock_trade_is_buying else "可获得", stock_total]
 		if _stock_trade_is_buying and not stock_trade_executable:
@@ -376,11 +376,11 @@ func _refresh_total_price(quantity: int) -> void:
 		return
 	if _display_mode == DISPLAY_MODE_MINING_TRANSACTION:
 		if _mining_action == MINING_ACTION_RECHARGE:
-			_total_price_label.text = "消耗 %d 金币 · 到账 %s 算力币" % [resolved_quantity, _format_mining_value(resolved_quantity * _mining_unit_value)]
+			_total_price_label.text = "消耗 %d 星穹 · 到账 %s 算力币" % [resolved_quantity, _format_mining_value(resolved_quantity * _mining_unit_value)]
 		elif _mining_action == MINING_ACTION_WITHDRAW:
-			# 提现总成本；按到账金币整体反推并向上取整，与矿场服务正式公式一致。
+			# 提现总成本；按到账星穹整体反推并向上取整，与矿场服务正式公式一致。
 			var withdrawal_cost: int = ceili(float(resolved_quantity * _mining_unit_value) / (1.0 - _mining_withdrawal_fee_ratio))
-			_total_price_label.text = "到账 %d 金币 · 需要 %s 算力币 · 手续费 %s" % [resolved_quantity, _format_mining_value(withdrawal_cost), _format_mining_value(withdrawal_cost - resolved_quantity * _mining_unit_value)]
+			_total_price_label.text = "到账 %d 星穹 · 需要 %s 算力币 · 手续费 %s" % [resolved_quantity, _format_mining_value(withdrawal_cost), _format_mining_value(withdrawal_cost - resolved_quantity * _mining_unit_value)]
 		elif _mining_action == MINING_ACTION_SELL:
 			# 出售返还；总官方价乘 60% 后整体向上取整，与矿场服务结算顺序一致。
 			var sell_return: int = ceili(float(resolved_quantity * _mining_unit_value) * _mining_sell_return_ratio)
@@ -392,9 +392,9 @@ func _refresh_total_price(quantity: int) -> void:
 		_total_price_label.text = "当前选择：%d" % resolved_quantity
 		return
 	get_ok_button().disabled = false
-	# 出售总价值；单件价值乘当前数量，用于确认前即时预览金币收益。
+	# 出售总价值；单件价值乘当前数量，用于确认前即时预览星穹收益。
 	var total_value: int = int(_unit_transaction_value) * resolved_quantity
-	_total_price_label.text = "可获得 %d 金币" % total_value
+	_total_price_label.text = "可获得 %d 星穹" % total_value
 
 
 func _on_confirmed() -> void:

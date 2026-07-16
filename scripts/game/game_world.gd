@@ -145,7 +145,7 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 @export_range(1, 9, 1) var enhancement_stone_max_modifier_count: int = 3
 ## 强化石生成削弱词条的概率；默认 0.28，削弱方向会按属性规则决定，例如冷却增加或伤害降低。
 @export_range(0.0, 1.0, 0.01) var enhancement_stone_negative_modifier_chance: float = 0.28
-## 强化石单词条基础价值；默认 30 金币，随机多词条会按词条数量增加单颗价值。
+## 强化石单词条基础价值；默认 30 星穹，随机多词条会按词条数量增加单颗价值。
 @export_range(0, 999999, 1) var enhancement_stone_base_value: int = 30
 ## 品质规则兼容说明；词条数量与削弱概率现由 EnhancementRules.QUALITY_CONFIGS 统一决定，上述最小/最大词条和通用削弱概率只保留旧扩展调用兼容。
 ## 道具死亡掉落概率；默认 0.05 表示每只被击杀怪物独立有 5% 基础概率掉落一个随机道具，结算时还会乘怪物掉落倍率；变量名为旧场景兼容保留。
@@ -1944,7 +1944,7 @@ func _create_random_loot_chest_item(quality_id: String, force_high_quality: bool
 func _get_random_chest_weapon(high_quality: bool) -> Resource:
 	if weapon_drop_table.is_empty():
 		return _get_random_chest_stone(high_quality)
-	# 高品质武器池；当前以基础价值不低于 120 金币识别，覆盖脉冲步枪、散射爆能枪和磁轨炮等高价值枪械。
+	# 高品质武器池；当前以基础价值不低于 120 星穹识别，覆盖脉冲步枪、散射爆能枪和磁轨炮等高价值枪械。
 	# 星内容精简补充：当前两把保留武器价值均为 50，高品质候选为空时会按既有规则回退完整星武器池。
 	var candidate_weapons: Array[Resource] = []
 	for weapon_template in weapon_drop_table:

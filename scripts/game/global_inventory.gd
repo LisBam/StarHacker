@@ -49,7 +49,7 @@ const EQUIPMENT_RESOURCE_PATHS: Dictionary = {
 	"trailblazer_boots": "res://data/equipment/stelle/trailblazer_boots.tres",
 }
 ## 默认背包武器标识；首次建立存档时放入未装备武器，顺序会按获得时间默认排序。
-## 永久仓库初始化补充：常量名称为旧存档兼容保留，当前首次存档会把这些未装备武器放入永久仓库。
+## 仓库初始化补充：常量名称为旧存档兼容保留，当前首次存档会把这些未装备武器放入仓库。
 ## 星内容精简补充：当前没有额外初始仓库武器，两把星扩展包武器分别直接进入远程与近战装备槽。
 const DEFAULT_BACKPACK_WEAPON_IDS: Array[String] = []
 ## 默认远程装备标识；首次建立存档时依次装入两个远程槽。
@@ -58,17 +58,17 @@ const DEFAULT_RANGED_WEAPON_IDS: Array[String] = ["as_ive_written"]
 ## 默认近战装备标识；首次建立存档时装入近战槽。
 ## 星内容精简补充：当前近战初始武器为“银河球棒”。
 const DEFAULT_MELEE_WEAPON_ID: String = "galactic_baseball_bat"
-## 默认局外金币数量；首次建立存档时为 0，金币只能通过出售永久仓库物品增加且不会进入战斗。
+## 默认局外星穹数量；首次建立存档时为 0，星穹只能通过出售仓库物品增加且不会进入战斗。
 const DEFAULT_STARTING_COINS: int = 0
 ## 战斗失败默认保留比例；默认 0.5，使背包内每件武器和每颗资源长期平均各保留 50%。
 const DEFAULT_FAILURE_RETENTION_RATIO: float = 0.5
-## 单局物资送回价值上限；默认 1000 金币，背包与装备栏送回价值共同累计且不会因关闭面板重置。
+## 单局物资送回价值上限；默认 1000 星穹，背包与装备栏送回价值共同累计且不会因关闭面板重置。
 const COMBAT_SHIPPING_VALUE_LIMIT: int = 1000
-## 物资送回运费比例；默认按物品价值的 20% 向上取整扣除局外金币。
+## 物资送回运费比例；默认按物品价值的 20% 向上取整扣除局外星穹。
 const COMBAT_SHIPPING_FEE_RATIO: float = 0.20
-## 永久仓库位置标识；默认供局外拖拽接口识别安全存储来源和目标。
+## 仓库位置标识；默认供局外拖拽接口识别安全存储来源和目标。
 const STORAGE_LOCATION_WAREHOUSE: String = "warehouse"
-## 随身背包位置标识；默认供局外拖拽接口识别战斗携带来源和目标。
+## 背包位置标识；默认供局外拖拽接口识别战斗携带来源和目标。
 const STORAGE_LOCATION_BACKPACK: String = "backpack"
 ## 近战装备位置标识；默认对应唯一近战槽，拖拽时只接收 melee 武器。
 const EQUIPMENT_LOCATION_MELEE: String = "melee"
@@ -90,11 +90,11 @@ const DEVELOPER_STONE_MIN_MODIFIER_COUNT: int = 1
 const DEVELOPER_STONE_MAX_MODIFIER_COUNT: int = 3
 ## 开发者强化石削弱词条概率；默认 0.28，与战斗掉落默认配置保持一致。
 const DEVELOPER_STONE_DETRIMENTAL_CHANCE: float = 0.28
-## 开发者强化石单词条基础价值；默认 30 金币，与战斗掉落默认配置保持一致。
+## 开发者强化石单词条基础价值；默认 30 星穹，与战斗掉落默认配置保持一致。
 const DEVELOPER_STONE_BASE_SELL_PRICE: int = 30
 ## 开发者强化石兼容说明；词条数和削弱概率已由品质规则接管，上述三项随机常量仅用于保持旧调用签名稳定。
 
-## 永久仓库记录数组；每项包含唯一记录编号、武器资源、获得时间与撤离优先级，战斗失败不会修改该数组。
+## 仓库记录数组；每项包含唯一记录编号、武器资源、获得时间与撤离优先级，战斗失败不会修改该数组。
 var _warehouse_records: Array[Dictionary] = []
 ## 背包记录数组；每项包含唯一记录编号、武器资源、获得时间与上次撤离优先级。
 var _backpack_records: Array[Dictionary] = []
@@ -136,7 +136,7 @@ var _durability_save_queued: bool = false
 var _stock_trade_save_queued: bool = false
 ## 服务随机数生成器；默认启动时随机化，用于失败结算随机保留 50% 背包物品。
 var _random: RandomNumberGenerator = RandomNumberGenerator.new()
-## 局外金币余额；取值大于等于 0，默认 0，只在主菜单仓库出售永久物品时增加。
+## 局外星穹余额；取值大于等于 0，默认 0，只在主菜单仓库出售永久物品时增加。
 var _coins: int = DEFAULT_STARTING_COINS
 ## 股票持仓表；键为稳定股票标识，值包含非负整数 quantity 与非负浮点 average_cost。
 var _stock_holdings: Dictionary = {}
@@ -198,7 +198,7 @@ func complete_combat_run_success() -> Dictionary:
 	# 成功撤离携带记录；包含背包与装备，全部写入本次撤离编号以支持以后卸下时仍优先排序。
 	for record in _get_all_owned_records():
 		record["last_extraction_epoch"] = _last_extraction_epoch
-	# 成功撤离只保留随身背包现状，不自动转入永久仓库；玩家需要在局外仓库手动整理安全物品。
+	# 成功撤离只保留背包现状，不自动转入仓库；玩家需要在局外仓库手动整理安全物品。
 	_run_active = false
 	_run_seen_resource_instance_ids.clear()
 	_run_gained_resources.clear()
@@ -286,9 +286,9 @@ func get_last_run_outcome() -> Dictionary:
 
 
 func get_warehouse_resources() -> Array[Resource]:
-	# 永久仓库资源结果；元素与仓库记录顺序一致，返回副本防止外部直接修改所有权数据。
+	# 仓库资源结果；元素与仓库记录顺序一致，返回副本防止外部直接修改所有权数据。
 	var result: Array[Resource] = []
-	# 永久仓库记录；取值为全部局外安全物品，用于提取运行时武器资源。
+	# 仓库记录；取值为全部局外安全物品，用于提取运行时武器资源。
 	for record in _warehouse_records:
 		# 仓库物品资源；取值应为 Resource，异常记录不会暴露给外部组件。
 		var item_resource: Resource = record.get("resource") as Resource
@@ -298,7 +298,7 @@ func get_warehouse_resources() -> Array[Resource]:
 
 
 func get_warehouse_entries() -> Array[Dictionary]:
-	# 永久仓库展示条目；每项暴露资源、获得时间与上次撤离标记，UI 只能通过公开接口调整。
+	# 仓库展示条目；每项暴露资源、获得时间与上次撤离标记，UI 只能通过公开接口调整。
 	var result: Array[Dictionary] = []
 	# 仓库记录；取值按上次撤离优先、获得时间倒序排列，用于建立局外物品列表。
 	for record in _warehouse_records:
@@ -347,7 +347,7 @@ func get_stock_holding(stock_id: String) -> Dictionary:
 
 
 func spend_coins(amount: int) -> bool:
-	## 精确扣除指定整数金币；余额不足时保持原值并返回 false，供跨系统兑换执行原子付款校验。
+	## 精确扣除指定整数星穹；余额不足时保持原值并返回 false，供跨系统兑换执行原子付款校验。
 	if amount <= 0 or _coins < amount:
 		return false
 	_coins -= amount
@@ -445,7 +445,7 @@ func sell_stock_holding(stock_id: String, quantity: int, proceeds: int) -> bool:
 
 
 func clear_stock_holdings() -> int:
-	# 清空前总股数；用于开发者菜单反馈，不返还任何金币。
+	# 清空前总股数；用于开发者菜单反馈，不返还任何星穹。
 	var cleared_quantity: int = 0
 	for raw_holding in _stock_holdings.values():
 		if raw_holding is Dictionary:
@@ -519,7 +519,7 @@ func get_combat_shipping_quote(item_resource: Resource, source_location: String,
 		return quote
 	# 实际报价数量；旧弹窗确认后数量变化时限制到当前仍持有的数量。
 	var shipping_quantity: int = clampi(requested_quantity, 1, available_quantity)
-	# 送回价值；按物品当前有效单价乘数量累计到单局 1000 金币上限。
+	# 送回价值；按物品当前有效单价乘数量累计到单局 1000 星穹上限。
 	var shipping_value: int = _get_resource_value(item_resource) * shipping_quantity
 	# 运费；按总价值的 20% 向上取整，零价值物品运费保持 0。
 	var shipping_fee: int = ceili(float(shipping_value) * COMBAT_SHIPPING_FEE_RATIO) if shipping_value > 0 else 0
@@ -530,7 +530,7 @@ func get_combat_shipping_quote(item_resource: Resource, source_location: String,
 		quote["message"] = "超过本局剩余送回价值"
 		return quote
 	if _coins < shipping_fee:
-		quote["message"] = "金币不足，无法支付运费"
+		quote["message"] = "星穹不足，无法支付运费"
 		return quote
 	quote["selectable"] = true
 	quote["message"] = "可以送回仓库"
@@ -538,7 +538,7 @@ func get_combat_shipping_quote(item_resource: Resource, source_location: String,
 
 
 func ship_combat_resource_to_warehouse(item_resource: Resource, source_location: String, requested_quantity: int = 1) -> Dictionary:
-	# 执行前报价；同一接口完成数量、额度和金币复核，避免 UI 预览状态过期后产生负数或超额送回。
+	# 执行前报价；同一接口完成数量、额度和星穹复核，避免 UI 预览状态过期后产生负数或超额送回。
 	var quote: Dictionary = get_combat_shipping_quote(item_resource, source_location, requested_quantity)
 	if not bool(quote.get("selectable", false)):
 		return {"success": false, "message": str(quote.get("message", "无法送回仓库"))}
@@ -581,7 +581,7 @@ func ship_combat_resource_to_warehouse(item_resource: Resource, source_location:
 	_insert_record_with_stack_merge(_warehouse_records, moving_record)
 	# 实际费用与额度；所有权移动成功后同步扣费和累计，随后只排队一次存档。
 	var shipping_fee: int = int(quote.get("fee", 0))
-	# 实际送回价值；累计到当前战斗的 1000 金币总上限。
+	# 实际送回价值；累计到当前战斗的 1000 星穹总上限。
 	var shipping_value: int = int(quote.get("value", 0))
 	_coins = maxi(_coins - shipping_fee, 0)
 	_combat_shipped_value = clampi(_combat_shipped_value + shipping_value, 0, COMBAT_SHIPPING_VALUE_LIMIT)
@@ -592,7 +592,7 @@ func ship_combat_resource_to_warehouse(item_resource: Resource, source_location:
 		if str(item_resource.get("item_kind")) == "enhancement_stone":
 			stock_market_service.call("record_run_metric", "shipped_enhancement_stones", shipping_quantity)
 	_refresh_current_ranged_slot_after_equipment_change()
-	# 物资撤离已经把所有权转入永久仓库；即使正式战斗仍在进行也立即落盘，保证安全送回结果不会等待最终结算。
+	# 物资撤离已经把所有权转入仓库；即使正式战斗仍在进行也立即落盘，保证安全送回结果不会等待最终结算。
 	_queue_save_inventory(true)
 	inventory_changed.emit()
 	equipment_changed.emit()
@@ -602,7 +602,7 @@ func ship_combat_resource_to_warehouse(item_resource: Resource, source_location:
 
 
 func adjust_coins(amount: int) -> int:
-	# 调整后金币；取值至少为 0，开发者减少金币时不会形成负数余额。
+	# 调整后星穹；取值至少为 0，开发者减少星穹时不会形成负数余额。
 	var adjusted_coins: int = maxi(_coins + amount, 0)
 	if adjusted_coins == _coins:
 		return _coins
@@ -613,7 +613,7 @@ func adjust_coins(amount: int) -> int:
 
 
 func set_coins(amount: int) -> int:
-	## 直接设置局外金币余额；开发者数值工具使用该原子接口，负数统一限制为 0，并立即触发存档与界面刷新。
+	## 直接设置局外星穹余额；开发者数值工具使用该原子接口，负数统一限制为 0，并立即触发存档与界面刷新。
 	var resolved_coins: int = maxi(amount, 0)
 	if resolved_coins == _coins:
 		return _coins
@@ -755,7 +755,7 @@ func clear_warehouse_items() -> int:
 
 
 func grant_all_known_weapons_to_warehouse() -> int:
-	# 实际发放数量；默认从 0 累加，只统计成功加载并写入永久仓库的武器资源。
+	# 实际发放数量；默认从 0 累加，只统计成功加载并写入仓库的武器资源。
 	var granted_count: int = 0
 	# 已知武器标识；取值来自稳定资源路径表，每次调用都会为每种武器创建独立实例。
 	for weapon_id in _get_registered_resource_paths("weapon").keys():
@@ -773,7 +773,7 @@ func grant_all_known_weapons_to_warehouse() -> int:
 
 
 func grant_all_known_equipment_to_warehouse() -> int:
-	# 发放数量；每种已知装备各深拷贝一件进入永久仓库。
+	# 发放数量；每种已知装备各深拷贝一件进入仓库。
 	var granted_count: int = 0
 	for equipment_id in _get_registered_resource_paths("equipment").keys():
 		var equipment_resource: Resource = _load_equipment_resource(str(equipment_id))
@@ -788,7 +788,7 @@ func grant_all_known_equipment_to_warehouse() -> int:
 
 
 func grant_random_enhancement_stones_to_warehouse(stone_count: int = DEVELOPER_STONE_GRANT_COUNT) -> int:
-	# 实际发放数量；限制为非负数，每颗独立随机并按词条方向自动合并到永久仓库堆叠。
+	# 实际发放数量；限制为非负数，每颗独立随机并按词条方向自动合并到仓库堆叠。
 	var granted_count: int = 0
 	# 请求数量；开发者菜单默认 10，外部调试调用可传入其他非负数量。
 	var resolved_stone_count: int = maxi(stone_count, 0)
@@ -813,7 +813,7 @@ func grant_random_enhancement_stones_to_warehouse(stone_count: int = DEVELOPER_S
 
 
 func grant_custom_enhancement_stone_to_warehouse(quality_id: String, target_kind: String, beneficial_stat_name_one: String, beneficial_stat_name_two: String = "", detrimental_stat_name: String = "") -> bool:
-	## 向永久仓库发放一颗开发者自定义强化石；品质与词条方向由调用方选择，但创建、堆叠和存档仍共用正式强化石协议。
+	## 向仓库发放一颗开发者自定义强化石；品质与词条方向由调用方选择，但创建、堆叠和存档仍共用正式强化石协议。
 	# 自定义强化石；无第一条合法加强词条时创建会返回空，库存不保存任何无效资源。
 	var enhancement_stone: EnhancementStoneData = EnhancementStoneData.create_custom(quality_id, target_kind, beneficial_stat_name_one, beneficial_stat_name_two, detrimental_stat_name, DEVELOPER_STONE_BASE_SELL_PRICE)
 	if enhancement_stone == null:
@@ -825,7 +825,7 @@ func grant_custom_enhancement_stone_to_warehouse(quality_id: String, target_kind
 
 
 func grant_random_enhancement_stones_to_warehouse_gradually(stone_count: int, batch_size: int = 25) -> int:
-	## 按帧分批向永久仓库生成随机强化石；全部完成后只保存并派发一次仓库变化，避免大量 UI 重建。
+	## 按帧分批向仓库生成随机强化石；全部完成后只保存并派发一次仓库变化，避免大量 UI 重建。
 	# 实际发放数量；每颗成功创建并插入仓库后加一。
 	var granted_count: int = 0
 	# 请求数量；负数按 0 处理，上限由调用方开发者菜单限制为 1000。
@@ -874,7 +874,7 @@ func grant_all_repair_kits_to_warehouse() -> int:
 
 
 func transfer_warehouse_to_backpack(item_resource: Resource, target_index: int = -1) -> bool:
-	# 永久仓库来源索引；取值为有效下标时才允许把安全物品转为下一局随身物品。
+	# 仓库来源索引；取值为有效下标时才允许把安全物品转为下一局随身物品。
 	var warehouse_index: int = _find_warehouse_record_index(item_resource)
 	if warehouse_index < 0:
 		return false
@@ -890,7 +890,7 @@ func transfer_warehouse_to_backpack(item_resource: Resource, target_index: int =
 
 
 func transfer_backpack_to_warehouse(item_resource: Resource, target_index: int = -1) -> bool:
-	# 随身背包来源索引；取值为有效下标时才允许把物品转入永久安全仓库。
+	# 背包来源索引；取值为有效下标时才允许把物品转入永久安全仓库。
 	var backpack_index: int = _find_backpack_record_index(item_resource)
 	if backpack_index < 0:
 		return false
@@ -912,7 +912,7 @@ func transfer_storage_resource_quantity(item_resource: Resource, source_location
 		return false
 	# 来源记录下标；使用资源实例和来源容器精确定位，避免同类堆叠之间发生错误拆分。
 	var source_record_index: int = _find_storage_record_index(source_location, item_resource)
-	# 来源记录数组；只接受仓库或随身背包，非法位置会在前置校验中直接拒绝。
+	# 来源记录数组；只接受仓库或背包，非法位置会在前置校验中直接拒绝。
 	var source_records: Array[Dictionary] = _get_storage_records(source_location)
 	if source_record_index < 0 or source_record_index >= source_records.size():
 		return false
@@ -979,7 +979,7 @@ func sell_storage_resource(item_resource: Resource, source_location: String) -> 
 func sell_storage_resource_quantity(item_resource: Resource, source_location: String, requested_quantity: int) -> bool:
 	if requested_quantity <= 0:
 		return false
-	# 出售来源记录数组；局外仓库界面允许出售永久仓库或已展开的随身背包物品。
+	# 出售来源记录数组；局外仓库界面允许出售仓库或已展开的背包物品。
 	var source_records: Array[Dictionary] = _get_storage_records(source_location)
 	# 待出售索引；使用资源实例身份精确定位重复武器或强化石堆叠。
 	var record_index: int = _find_storage_record_index(source_location, item_resource)
@@ -1560,7 +1560,7 @@ func _initialize_default_inventory() -> void:
 	_coins = DEFAULT_STARTING_COINS
 
 	# 默认背包武器标识；取值来自项目初始配置，逐项加载为独立资源记录。
-	# 永久仓库初始化补充：历史常量名称保持兼容，当前这些未装备武器默认放入永久仓库而不是随身背包。
+	# 仓库初始化补充：历史常量名称保持兼容，当前这些未装备武器默认放入仓库而不是背包。
 	for weapon_id in DEFAULT_BACKPACK_WEAPON_IDS:
 		# 默认背包资源；取值为武器模板深拷贝，确保每个物品拥有独立实例身份。
 		var item_resource: Resource = _load_weapon_resource(weapon_id)
@@ -1674,7 +1674,7 @@ func _find_backpack_record_index(item_resource: Resource) -> int:
 func _find_warehouse_record_index(item_resource: Resource) -> int:
 	if item_resource == null:
 		return -1
-	# 永久仓库查找索引；取值为所有安全存储记录下标，使用资源实例身份区分同类重复物品。
+	# 仓库查找索引；取值为所有安全存储记录下标，使用资源实例身份区分同类重复物品。
 	for record_index in range(_warehouse_records.size()):
 		if _warehouse_records[record_index].get("resource") == item_resource:
 			return record_index
@@ -1806,12 +1806,12 @@ func _find_storage_record_index(location: String, item_resource: Resource) -> in
 
 func _take_storage_record_at(location: String, record_index: int) -> Dictionary:
 	if location == STORAGE_LOCATION_WAREHOUSE and record_index >= 0 and record_index < _warehouse_records.size():
-		# 永久仓库来源记录；移除后由装备槽或其他存储容器立即接管所有权。
+		# 仓库来源记录；移除后由装备槽或其他存储容器立即接管所有权。
 		var warehouse_record: Dictionary = _warehouse_records[record_index]
 		_warehouse_records.remove_at(record_index)
 		return warehouse_record
 	if location == STORAGE_LOCATION_BACKPACK and record_index >= 0 and record_index < _backpack_records.size():
-		# 随身背包来源记录；移除后由装备槽或其他存储容器立即接管所有权。
+		# 背包来源记录；移除后由装备槽或其他存储容器立即接管所有权。
 		var backpack_record: Dictionary = _backpack_records[record_index]
 		_backpack_records.remove_at(record_index)
 		return backpack_record
@@ -2006,7 +2006,7 @@ func _find_first_equipped_ranged_slot() -> int:
 
 func _get_all_owned_records() -> Array[Dictionary]:
 	# 全部所有权记录；包含背包、装备和临时记录，默认用于存档与本局快照。
-	# 战斗所有权补充：永久仓库不进入本局快照、战利品统计或死亡损失，只有随身背包、装备和临时操作记录属于当前战斗携带物。
+	# 战斗所有权补充：仓库不进入本局快照、战利品统计或死亡损失，只有背包、装备和临时操作记录属于当前战斗携带物。
 	var result: Array[Dictionary] = _backpack_records.duplicate()
 	# 远程记录原始值；取值为 Dictionary 或 null，只追加有效记录。
 	for raw_record in _ranged_equipment_records:
@@ -2115,7 +2115,7 @@ func _shuffle_integer_array(values: Array[int]) -> void:
 
 
 func _queue_save_inventory(force_during_combat: bool = false) -> void:
-	# 正式战斗中的普通背包变化属于本局临时状态；结算前不反复序列化永久仓库，物资撤离等明确要求即时持久化的流程可通过参数强制保存。
+	# 正式战斗中的普通背包变化属于本局临时状态；结算前不反复序列化仓库，物资撤离等明确要求即时持久化的流程可通过参数强制保存。
 	if _run_active and not force_during_combat:
 		_combat_inventory_save_pending = true
 		return
@@ -2131,9 +2131,9 @@ func _save_inventory() -> void:
 	if not _is_canonical_persistence_owner():
 		return
 	_combat_inventory_save_pending = false
-	# 存档永久仓库记录；只序列化局外安全物品，读取后不会加入战斗背包或死亡结算范围。
+	# 存档仓库记录；只序列化局外安全物品，读取后不会加入战斗背包或死亡结算范围。
 	var serialized_warehouse: Array[Dictionary] = []
-	# 永久仓库记录；取值为全部安全存储记录，逐项转换为可恢复的 JSON 字典。
+	# 仓库记录；取值为全部安全存储记录，逐项转换为可恢复的 JSON 字典。
 	for record in _warehouse_records:
 		serialized_warehouse.append(_serialize_record(record))
 	# 存档背包记录；临时记录会作为背包兜底写入，防止场景切换发生在分步拖拽中间时丢失物品。
@@ -2157,7 +2157,7 @@ func _save_inventory() -> void:
 		var armor_record: Dictionary = _armor_equipment_records.get(armor_slot, {}) as Dictionary
 		serialized_armor[armor_slot] = _serialize_record(armor_record) if not armor_record.is_empty() else null
 
-	# 存档根字典；保存版本、排序计数、永久仓库、随身背包、装备和局外金币状态。
+	# 存档根字典；保存版本、排序计数、仓库、背包、装备和局外星穹状态。
 	var save_data: Dictionary = {
 		"version": SAVE_VERSION,
 		"acquisition_sequence": _acquisition_sequence,
@@ -2261,15 +2261,15 @@ func _load_inventory() -> bool:
 			if quantity > 0:
 				_stock_holdings[stock_id] = {"quantity": quantity, "average_cost": average_cost}
 
-	# 存档是否包含独立永久仓库；旧版存档没有该字段，原“全局背包”物品会安全迁移到永久仓库。
+	# 存档是否包含独立仓库；旧版存档没有该字段，原“全局背包”物品会安全迁移到仓库。
 	var has_separate_warehouse: bool = save_data.has("warehouse")
-	# 存档永久仓库原始数组；新版本按安全存储恢复，异常值会被忽略。
+	# 存档仓库原始数组；新版本按安全存储恢复，异常值会被忽略。
 	var raw_warehouse: Variant = save_data.get("warehouse", [])
 	if raw_warehouse is Array:
-		# 永久仓库存档项；取值可能为 Dictionary 或异常值，只恢复合法武器记录。
+		# 仓库存档项；取值可能为 Dictionary 或异常值，只恢复合法武器记录。
 		for raw_record in raw_warehouse:
 			if raw_record is Dictionary:
-				# 恢复永久仓库记录；空字典表示资源无法加载，不会生成损坏物品。
+				# 恢复仓库记录；空字典表示资源无法加载，不会生成损坏物品。
 				var restored_record: Dictionary = _deserialize_record(raw_record as Dictionary)
 				if not restored_record.is_empty():
 					_warehouse_records.append(restored_record)
@@ -2434,7 +2434,7 @@ func _deserialize_record(serialized_record: Dictionary, register_encyclopedia_di
 			# 空强化石没有可展示或可应用属性，载入时直接丢弃以免形成无法处理的库存记录。
 			return {}
 		enhancement_stone.modifiers = normalized_modifiers
-		# 迁移后价值；继续遵守每条有效词条 30 金币，移除旧词条后不会保留已经失效的价值。
+		# 迁移后价值；继续遵守每条有效词条 30 星穹，移除旧词条后不会保留已经失效的价值。
 		enhancement_stone.value = EnhancementStoneData.VALUE_PER_MODIFIER * normalized_modifiers.size()
 		item_resource = enhancement_stone
 	elif item_kind == "repair_kit":

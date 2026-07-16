@@ -1,7 +1,7 @@
 extends PanelContainer
 class_name SupplyExtractionPanel
 
-## 物资撤离面板在暂停状态下展示玩家背包、装备栏、金币与单局剩余送回价值。
+## 物资撤离面板在暂停状态下展示玩家背包、装备栏、星穹与单局剩余送回价值。
 ## 面板只通过 GlobalInventory 的报价和原子送回接口修改所有权，数量选择复用仓库已有 UI。
 
 signal closed
@@ -30,9 +30,9 @@ const SOURCE_RANGED_PREFIX: String = "ranged_"
 ## 面板最小尺寸；默认 920×620，暂停时居中显示并保留屏幕边缘空间。
 @export var panel_minimum_size: Vector2 = Vector2(920.0, 620.0)
 
-## 全局库存服务；负责报价、金币、额度、背包、装备和仓库所有权转移。
+## 全局库存服务；负责报价、星穹、额度、背包、装备和仓库所有权转移。
 var _global_inventory: Node
-## 金币文本；每次送回后即时刷新当前余额。
+## 星穹文本；每次送回后即时刷新当前余额。
 var _coins_label: Label
 ## 剩余送回价值文本；默认显示 1000，所有物资撤离点共用同一单局额度。
 var _remaining_value_label: Label
@@ -103,7 +103,7 @@ func _build_interface() -> void:
 	var content: VBoxContainer = VBoxContainer.new()
 	content.add_theme_constant_override("separation", 10)
 	margin.add_child(content)
-	# 标题栏；横向展示标题、金币、剩余额度与关闭按钮。
+	# 标题栏；横向展示标题、星穹、剩余额度与关闭按钮。
 	var header: HBoxContainer = HBoxContainer.new()
 	header.add_theme_constant_override("separation", 12)
 	content.add_child(header)
@@ -128,7 +128,7 @@ func _build_interface() -> void:
 	header.add_child(close_button)
 	# 规则说明；长期展示运费比例和单局价值上限，避免玩家误解灰色滤镜原因。
 	var rule_label: Label = Label.new()
-	rule_label.text = "点击物品送回局外仓库 · 运费为物品价值的20% · 单局最多送回1000价值"
+	rule_label.text = "点击物品送回仓库 · 运费为物品价值的20% · 单局最多送回1000价值"
 	rule_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	rule_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(rule_label)
@@ -147,7 +147,7 @@ func _build_interface() -> void:
 	content.add_child(separator)
 	# 背包标题；下方滚动区展示全部随身物品。
 	var backpack_title: Label = Label.new()
-	backpack_title.text = "随身背包"
+	backpack_title.text = "背包"
 	backpack_title.add_theme_font_size_override("font_size", 18)
 	content.add_child(backpack_title)
 	# 背包滚动容器；物品较多时继续访问全部条目而不扩大面板。
@@ -188,7 +188,7 @@ func _connect_inventory_signals() -> void:
 func _refresh_all() -> void:
 	if _coins_label == null or _remaining_value_label == null:
 		return
-	_coins_label.text = "金币：%d" % int(_global_inventory.call("get_coins")) if _global_inventory != null else "金币：--"
+	_coins_label.text = "星穹：%d" % int(_global_inventory.call("get_coins")) if _global_inventory != null else "星穹：--"
 	_remaining_value_label.text = "剩余送回价值：%d" % int(_global_inventory.call("get_combat_shipping_remaining_value")) if _global_inventory != null else "剩余送回价值：--"
 	_rebuild_equipment_items()
 	_rebuild_backpack_items()
@@ -263,7 +263,7 @@ func _on_item_action_requested(item_resource: Resource, source_location: String,
 	_action_quantity = maxi(quantity, 1)
 	_action_menu.clear_actions()
 	if _action_quantity > 1:
-		# 整组报价；超出金币或剩余额度时仅禁用全部送回，仍保留部分送回入口。
+		# 整组报价；超出星穹或剩余额度时仅禁用全部送回，仍保留部分送回入口。
 		var full_quote: Dictionary = _global_inventory.call("get_combat_shipping_quote", item_resource, source_location, _action_quantity) as Dictionary
 		_action_menu.add_action("全部送回仓库", ACTION_SEND_ALL, not bool(full_quote.get("selectable", false)))
 		_action_menu.add_action("部分送回仓库", ACTION_SEND_PARTIAL)
@@ -278,7 +278,7 @@ func _on_action_menu_id_pressed(action_id: int) -> void:
 	if action_id == ACTION_SEND_ALL:
 		_send_resource_to_warehouse(_action_resource, _action_source_location, _action_quantity)
 	elif action_id == ACTION_SEND_PARTIAL:
-		# 最大可送回数量；同时受真实堆叠、金币和剩余价值额度限制。
+		# 最大可送回数量；同时受真实堆叠、星穹和剩余价值额度限制。
 		var maximum_quantity: int = _get_maximum_shippable_quantity(_action_resource, _action_source_location, _action_quantity)
 		if maximum_quantity <= 0:
 			return
@@ -314,7 +314,7 @@ func _on_quantity_confirmed(quantity: int) -> void:
 
 
 func _send_resource_to_warehouse(item_resource: Resource, source_location: String, quantity: int) -> void:
-	# 原子送回结果；服务会再次复核金币、额度、数量和来源所有权。
+	# 原子送回结果；服务会再次复核星穹、额度、数量和来源所有权。
 	var result: Dictionary = _global_inventory.call("ship_combat_resource_to_warehouse", item_resource, source_location, quantity) as Dictionary
 	if bool(result.get("success", false)):
 		_action_resource = null

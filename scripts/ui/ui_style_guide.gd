@@ -92,6 +92,8 @@ const DIALOG_TITLE_SIDE_PADDING: float = 34.0
 const DIALOG_CLOSE_BUTTON_SIZE: float = 26.0
 ## 滚动条可交互厚度；固定 14 像素，避免仅设置颜色样式时引擎把无图标滚动条压缩为 0 像素。
 const SCROLLBAR_THICKNESS: float = 14.0
+## 装备栏武器组与防具组之间的空白控件高度；默认 6 像素，与 VBox 两侧各 6 像素间距共同形成 18 像素总分隔。
+const EQUIPMENT_GROUP_SPACER_HEIGHT: float = 6.0
 ## 自定义弹窗标题栏背景；固定完全不透明的深蓝色，避免最外层标题区域透出场景背景。
 const DIALOG_TITLE_BACKGROUND_COLOR: Color = Color(0.025, 0.045, 0.065, 1.0)
 

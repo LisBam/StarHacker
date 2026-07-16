@@ -14,13 +14,13 @@ signal buffs_changed
 const SAVE_PATH: String = "user://mining_farm_state.json"
 ## 矿场存档版本；版本 1 保存整数余额、资产数量、永久解锁和在线增益剩余时间。
 const SAVE_VERSION: int = 1
-## 永久金币充值倍率；默认 1 金币兑换 10000 算力币，运行时不动态修改。
+## 永久星穹充值倍率；默认 1 星穹兑换 10000 算力币，运行时不动态修改。
 const COMPUTE_COINS_PER_GOLD: int = 10000
-## 基础提现手续费率；默认 10%，提现所需算力币按到账金币反推并向上取整。
+## 基础提现手续费率；默认 10%，提现所需算力币按到账星穹反推并向上取整。
 const WITHDRAWAL_FEE_RATIO: float = 0.10
 ## 资产出售返还比例；默认按当前官方购买价的 60% 向上取整返还算力币。
 const ASSET_SELL_RETURN_RATIO: float = 0.60
-## 骇入增益每金币加成比例；默认每 10 金币增加 0.01%，换算为每金币 0.00001 小数倍率。
+## 骇入增益每星穹加成比例；默认每 10 星穹增加 0.01%，换算为每星穹 0.00001 小数倍率。
 const HACK_BUFF_RATIO_PER_GOLD: float = 0.00001
 ## 骇入增益在线持续时间；默认 1800 秒即 30 分钟，游戏关闭期间不会消耗。
 const HACK_BUFF_DURATION_SECONDS: float = 1800.0
@@ -67,7 +67,7 @@ var _settlement_accumulator_seconds: float = 0.0
 var _panel_open: bool = false
 ## 是否已有存档等待执行；默认 false，用于合并频繁的逐秒收益写盘。
 var _save_queued: bool = false
-## 全局库存服务缓存；默认从 Autoload 获取，只用于永久金币的原子扣除和增加。
+## 全局库存服务缓存；默认从 Autoload 获取，只用于永久星穹的原子扣除和增加。
 var _global_inventory: Node
 
 
@@ -165,12 +165,12 @@ func get_withdrawal_cost(gold_amount: int) -> int:
 
 
 func get_maximum_withdrawable_gold() -> int:
-	## 返回当前余额最多可到账的整数金币；公式与正式提现完全一致，不使用单金币成本近似。
+	## 返回当前余额最多可到账的整数星穹；公式与正式提现完全一致，不使用单星穹成本近似。
 	if _balance <= 0:
 		return 0
-	# 理论上界；忽略手续费时余额最多兑换的金币数一定不小于真实结果，可作为二分搜索右边界。
+	# 理论上界；忽略手续费时余额最多兑换的星穹数一定不小于真实结果，可作为二分搜索右边界。
 	var upper_bound: int = maxi(int(_balance / COMPUTE_COINS_PER_GOLD), 1)
-	# 二分下界；始终表示当前已确认可支付的金币数量。
+	# 二分下界；始终表示当前已确认可支付的星穹数量。
 	var lower_bound: int = 0
 	while lower_bound < upper_bound:
 		# 中间数量；向上取中点保证相邻区间可以正常收敛。
@@ -202,11 +202,11 @@ func get_asset_sell_return(asset_id: String, quantity: int) -> int:
 
 func recharge(gold_amount: int) -> Dictionary:
 	if gold_amount <= 0:
-		return {"success": false, "message": "请输入至少 1 金币"}
+		return {"success": false, "message": "请输入至少 1 星穹"}
 	if _global_inventory == null or not _global_inventory.has_method("spend_coins"):
-		return {"success": false, "message": "永久金币服务不可用"}
+		return {"success": false, "message": "星穹服务不可用"}
 	if not bool(_global_inventory.call("spend_coins", gold_amount)):
-		return {"success": false, "message": "永久金币不足"}
+		return {"success": false, "message": "星穹不足"}
 	# 到账算力币；兑换倍率为整数，充值不会产生任何手续费或精度损失。
 	var compute_amount: int = gold_amount * COMPUTE_COINS_PER_GOLD
 	_change_balance(compute_amount)
@@ -215,14 +215,14 @@ func recharge(gold_amount: int) -> Dictionary:
 
 
 func withdraw(gold_amount: int) -> Dictionary:
-	# 所需算力币；按 10% 手续费反推并向上取整，因此提现 1 金币固定消耗 11112 算力币。
+	# 所需算力币；按 10% 手续费反推并向上取整，因此提现 1 星穹固定消耗 11112 算力币。
 	var cost: int = get_withdrawal_cost(gold_amount)
 	if gold_amount <= 0 or cost <= 0:
-		return {"success": false, "message": "请输入至少 1 金币"}
+		return {"success": false, "message": "请输入至少 1 星穹"}
 	if _balance < cost:
 		return {"success": false, "message": "算力币余额不足"}
 	if _global_inventory == null or not _global_inventory.has_method("adjust_coins"):
-		return {"success": false, "message": "永久金币服务不可用"}
+		return {"success": false, "message": "星穹服务不可用"}
 	_change_balance(-cost)
 	_global_inventory.call("adjust_coins", gold_amount)
 	_flush_linked_saves()
@@ -267,7 +267,7 @@ func sell_asset(asset_id: String, quantity: int) -> Dictionary:
 func apply_successful_extraction_buff(extracted_value_gold: int) -> void:
 	if extracted_value_gold <= 0:
 		return
-	# 新增比例；每 10 金币固定增加 0.01%，允许与当前骇入增益直接叠加。
+	# 新增比例；每 10 星穹固定增加 0.01%，允许与当前骇入增益直接叠加。
 	var added_ratio: float = float(extracted_value_gold) * HACK_BUFF_RATIO_PER_GOLD
 	_hack_buff_ratio += added_ratio
 	_hack_buff_remaining_seconds = maxf(_hack_buff_remaining_seconds, 0.0) + HACK_BUFF_DURATION_SECONDS
@@ -394,7 +394,7 @@ func _flush_linked_saves() -> void:
 	_save_queued = false
 	_save_state()
 	if _global_inventory != null and _global_inventory.has_method("flush_stock_holdings_save"):
-		# 库存即时保存接口会保存完整永久金币数据，名称虽保留股票历史用途，但可安全复用跨存档兑换。
+		# 库存即时保存接口会保存完整永久星穹数据，名称虽保留股票历史用途，但可安全复用跨存档兑换。
 		_global_inventory.call("flush_stock_holdings_save")
 
 

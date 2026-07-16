@@ -13,7 +13,7 @@ signal map_vision_requested
 
 ## 全局窗口样式指南；统一主菜单与战斗开发者窗口、调试分区和高风险操作视觉。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
-## 通用整数选择弹窗；开发者强化石数量和目标金币余额复用滑条与数字输入协议。
+## 通用整数选择弹窗；开发者强化石数量和目标星穹余额复用滑条与数字输入协议。
 const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
 ## 通用信息确认弹窗脚本；清空仓库等不可逆调试操作统一使用白边信息确认样式。
 const COMMON_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/common_confirmation_dialog.gd")
@@ -24,7 +24,7 @@ const ENHANCEMENT_RULES_SCRIPT: Script = preload("res://scripts/data/enhancement
 @export var panel_minimum_size: Vector2 = Vector2(520.0, 640.0)
 ## 战斗调试上下文面板高度；默认 580 像素，用于容纳无限属性、地图视野和训练设置入口，运行时通常不动态修改。
 @export_range(360.0, 720.0, 1.0) var combat_panel_height: float = 580.0
-## 旧版单次金币调整数量；默认 1000，仅保留历史场景兼容，现行菜单改为直接输入目标金币余额。
+## 旧版单次星穹调整数量；默认 1000，仅保留历史场景兼容，现行菜单改为直接输入目标星穹余额。
 @export_range(1, 9999999, 1) var coin_step: int = 1000
 ## 随机强化石数量默认值；默认 10，打开数量弹窗时作为初始选择，玩家可在 1 至最大值之间修改。
 @export_range(1, 1000, 1) var enhancement_stone_grant_count: int = 10
@@ -32,22 +32,22 @@ const ENHANCEMENT_RULES_SCRIPT: Script = preload("res://scripts/data/enhancement
 @export_range(1, 1000, 1) var enhancement_stone_grant_maximum: int = 1000
 ## 随机强化石每帧生成数量；默认 25，使最大 1000 颗在较短时间内分批完成并避免单帧卡顿。
 @export_range(1, 100, 1) var enhancement_stone_grant_batch_size: int = 25
-## 可直接设置的金币余额上限；默认 9999999，避免调试输入超过项目整数经济显示范围。
+## 可直接设置的星穹余额上限；默认 9999999，避免调试输入超过项目整数经济显示范围。
 @export_range(1, 999999999, 1) var coin_value_maximum: int = 9999999
 
 ## 全局物品服务；默认从 AutoLoad 获取，缺失时禁用资源修改按钮。
 var _global_inventory: Node
 ## 股市服务；默认从 AutoLoad 获取，负责行情刷新、随机事件和大盘状态调试。
 var _stock_market_service: Node
-## 金币余额标签；默认运行时创建，在金币变化后显示最新局外余额。
+## 星穹余额标签；默认运行时创建，在星穹变化后显示最新局外余额。
 var _coins_label: Label
-## 操作结果标签；默认显示开发者模式提示，执行功能后反馈发放数量或金币变化。
+## 操作结果标签；默认显示开发者模式提示，执行功能后反馈发放数量或星穹变化。
 var _status_label: Label
 ## 获取全部武器按钮；默认运行时创建，服务不可用时禁用。
 var _grant_weapons_button: Button
-## 获取全部装备按钮；点击后向永久仓库发放所有已知四部位装备。
+## 获取全部装备按钮；点击后向仓库发放所有已知四部位装备。
 var _grant_equipment_button: Button
-## 随机强化石按钮；默认运行时创建，点击后向永久仓库发放 10 颗随机强化石。
+## 随机强化石按钮；默认运行时创建，点击后向仓库发放 10 颗随机强化石。
 var _grant_stones_button: Button
 ## 自定义强化石展开按钮；默认运行时创建，点击后显示或收起详细配置，避免主菜单初始展示过长设置表单。
 var _custom_stone_toggle_button: Button
@@ -64,13 +64,13 @@ var _custom_stone_beneficial_one_option: OptionButton
 var _custom_stone_beneficial_two_option: OptionButton
 ## 自定义强化石削弱词条选项；默认无，可选填且会按属性的反向收益方向写入强化石。
 var _custom_stone_detrimental_option: OptionButton
-## 创建自定义强化石按钮；点击后把当前配置生成一颗并存入永久仓库。
+## 创建自定义强化石按钮；点击后把当前配置生成一颗并存入仓库。
 var _grant_custom_stone_button: Button
-## 获取全部道具按钮；默认运行时创建，点击后向永久仓库各发放一件内容目录当前注册道具。
+## 获取全部道具按钮；默认运行时创建，点击后向仓库各发放一件内容目录当前注册道具。
 var _grant_all_items_button: Button
-## 修改金币按钮；点击后通过滑条或数字输入直接设置目标金币余额。
+## 修改星穹按钮；点击后通过滑条或数字输入直接设置目标星穹余额。
 var _modify_coins_button: Button
-## 清空仓库按钮；默认运行时创建，点击后先弹出确认框再移除永久仓库中的全部物品。
+## 清空仓库按钮；默认运行时创建，点击后先弹出确认框再移除仓库中的全部物品。
 var _clear_warehouse_button: Button
 ## 全量行情刷新按钮；模拟一次正式对局结算级别刷新，但不修改玩家行为统计。
 var _stock_full_refresh_button: Button
@@ -80,13 +80,13 @@ var _stock_runtime_refresh_button: Button
 var _stock_event_button: Button
 ## 大盘状态切换按钮；按牛市、熊市、震荡市顺序循环切换并显示结果。
 var _stock_market_cycle_button: Button
-## 清空股票持仓按钮；移除全部持仓且不返还金币，仅用于测试迁移和空状态界面。
+## 清空股票持仓按钮；移除全部持仓且不返还星穹，仅用于测试迁移和空状态界面。
 var _clear_stock_holdings_button: Button
 ## 隐藏入口提示标签；默认显示 LISBAM 说明，战斗模式会改为局内调试提示。
 var _hint_label: Label
 ## 调试信息显示开关；默认关闭，开启后允许商店等界面显示原价倍率等开发计算信息。
 var _debug_information_check_button: CheckButton
-## 局外经济控件列表；元素为金币标签、武器、强化石和两个金币按钮，战斗模式中统一隐藏。
+## 局外经济控件列表；元素为星穹标签、武器、强化石和两个星穹按钮，战斗模式中统一隐藏。
 var _economy_controls: Array[Control] = []
 ## 战斗调试控件容器；默认隐藏，配置战斗上下文后显示无限属性与训练工具入口。
 var _combat_controls_container: VBoxContainer
@@ -108,9 +108,9 @@ var _configured_infinite_health: bool = false
 var _configured_infinite_energy: bool = false
 ## 待同步不消耗武器耐久状态；默认 false，允许在控件 ready 前先配置战斗调试状态。
 var _configured_weapon_durability_disabled: bool = false
-## 清空仓库确认框；默认运行时创建，防止开发者调试时误触不可逆的永久仓库清理。
+## 清空仓库确认框；默认运行时创建，防止开发者调试时误触不可逆的仓库清理。
 var _clear_warehouse_confirmation: CommonConfirmationDialog
-## 开发者整数选择弹窗；强化石数量与目标金币余额共用，确认时按当前操作模式执行。
+## 开发者整数选择弹窗；强化石数量与目标星穹余额共用，确认时按当前操作模式执行。
 var _developer_value_dialog: SellQuantityDialog
 ## 当前开发者数值操作；取值为 stones 或 coins，默认空字符串表示没有待确认操作。
 var _pending_developer_value_action: String = ""
@@ -155,16 +155,19 @@ func _build_interface() -> void:
 	# 滚动容器；窗口高度不足时允许访问底部关闭按钮，避免新增调试项后控件超出屏幕。
 	var scroll_container: ScrollContainer = ScrollContainer.new()
 	scroll_container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	scroll_container.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	add_child(scroll_container)
 	# 外层边距；默认让标题、按钮和状态文本与面板边缘保持稳定距离。
 	var margin: MarginContainer = MarginContainer.new()
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	margin.add_theme_constant_override("margin_left", 24)
 	margin.add_theme_constant_override("margin_top", 20)
 	margin.add_theme_constant_override("margin_right", 24)
 	margin.add_theme_constant_override("margin_bottom", 20)
 	scroll_container.add_child(margin)
-	# 主内容容器；纵向排列标题、余额、武器/强化石/金币功能、状态与关闭按钮。
+	# 主内容容器；纵向排列标题、余额、武器/强化石/星穹功能、状态与关闭按钮。
 	var content: VBoxContainer = VBoxContainer.new()
+	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.add_theme_constant_override("separation", 12)
 	margin.add_child(content)
 	# 开发者菜单标题；默认居中并使用较大字号与普通设置区分。
@@ -217,7 +220,7 @@ func _build_interface() -> void:
 	_economy_controls.append(_grant_all_items_button)
 	_modify_coins_button = Button.new()
 	_modify_coins_button.custom_minimum_size = Vector2(0.0, 46.0)
-	_modify_coins_button.text = "修改金币数量"
+	_modify_coins_button.text = "修改星穹数量"
 	_modify_coins_button.pressed.connect(_on_modify_coins_pressed)
 	content.add_child(_modify_coins_button)
 	_economy_controls.append(_modify_coins_button)
@@ -486,7 +489,7 @@ func _refresh_context_visibility() -> void:
 	custom_minimum_size = Vector2(panel_minimum_size.x, combat_panel_height if _combat_context_enabled else panel_minimum_size.y)
 	if _hint_label != null:
 		_hint_label.text = "战斗暂停时输入 LISBAM 开启" if _combat_context_enabled else "隐藏调试功能 · 输入序列 LISBAM 开启"
-	# 局外经济控件遍历项；战斗模式隐藏，避免把永久仓库和金币操作混入当前战斗工具。
+	# 局外经济控件遍历项；战斗模式隐藏，避免把仓库和星穹操作混入当前战斗工具。
 	for economy_control in _economy_controls:
 		if economy_control != null:
 			economy_control.visible = not _combat_context_enabled
@@ -500,9 +503,9 @@ func _refresh_context_visibility() -> void:
 
 func _refresh_coins() -> void:
 	if _global_inventory == null or not _global_inventory.has_method("get_coins"):
-		_coins_label.text = "当前金币：不可用"
+		_coins_label.text = "当前星穹：不可用"
 		return
-	_coins_label.text = "当前金币：%d" % int(_global_inventory.call("get_coins"))
+	_coins_label.text = "当前星穹：%d" % int(_global_inventory.call("get_coins"))
 
 
 func _refresh_debug_information_toggle() -> void:
@@ -527,9 +530,9 @@ func _on_debug_information_toggled(enabled: bool) -> void:
 func _on_grant_weapons_pressed() -> void:
 	if _global_inventory == null or not _global_inventory.has_method("grant_all_known_weapons_to_warehouse"):
 		return
-	# 发放武器数量；取值为本次成功加入永久仓库的已知武器种类数。
+	# 发放武器数量；取值为本次成功加入仓库的已知武器种类数。
 	var granted_count: int = int(_global_inventory.call("grant_all_known_weapons_to_warehouse"))
-	_status_label.text = "已向永久仓库发放 %d 件武器" % granted_count
+	_status_label.text = "已向仓库发放 %d 件武器" % granted_count
 
 
 func _on_grant_equipment_pressed() -> void:
@@ -537,14 +540,14 @@ func _on_grant_equipment_pressed() -> void:
 		return
 	# 发放装备数量；当前为四种基础装备各一件。
 	var granted_count: int = int(_global_inventory.call("grant_all_known_equipment_to_warehouse"))
-	_status_label.text = "已向永久仓库发放 %d 件装备" % granted_count
+	_status_label.text = "已向仓库发放 %d 件装备" % granted_count
 
 
 func _on_grant_stones_pressed() -> void:
 	if _global_inventory == null or _developer_value_dialog == null:
 		return
 	_pending_developer_value_action = "stones"
-	_developer_value_dialog.present_developer_value("获取强化石", "选择要生成并存入永久仓库的随机强化石数量", 1, maxi(enhancement_stone_grant_maximum, 1), clampi(enhancement_stone_grant_count, 1, maxi(enhancement_stone_grant_maximum, 1)), "获取")
+	_developer_value_dialog.present_developer_value("获取强化石", "选择要生成并存入仓库的随机强化石数量", 1, maxi(enhancement_stone_grant_maximum, 1), clampi(enhancement_stone_grant_count, 1, maxi(enhancement_stone_grant_maximum, 1)), "获取")
 
 
 func _on_grant_custom_stone_pressed() -> void:
@@ -558,7 +561,7 @@ func _on_grant_custom_stone_pressed() -> void:
 		return
 	# 创建结果；库存服务复用正式强化石数据生成与保存流程，false 表示配置与目标类型不兼容。
 	var granted: bool = bool(_global_inventory.call("grant_custom_enhancement_stone_to_warehouse", _get_custom_stone_option_value(_custom_stone_quality_option), _get_custom_stone_option_value(_custom_stone_target_option), beneficial_stat_name_one, _get_custom_stone_option_value(_custom_stone_beneficial_two_option), _get_custom_stone_option_value(_custom_stone_detrimental_option)))
-	_status_label.text = "已向永久仓库发放自定义强化石" if granted else "自定义强化石配置无效，请重新选择词条"
+	_status_label.text = "已向仓库发放自定义强化石" if granted else "自定义强化石配置无效，请重新选择词条"
 
 
 func _on_grant_all_items_pressed() -> void:
@@ -566,16 +569,16 @@ func _on_grant_all_items_pressed() -> void:
 		return
 	# 发放道具数量；当前包含三种修复包和三种能量饮料，后续新增道具由内容目录自动纳入。
 	var granted_count: int = int(_global_inventory.call("grant_all_repair_kits_to_warehouse"))
-	_status_label.text = "已向永久仓库发放 %d 种道具" % granted_count
+	_status_label.text = "已向仓库发放 %d 种道具" % granted_count
 
 
 func _on_modify_coins_pressed() -> void:
 	if _global_inventory == null or _developer_value_dialog == null or not _global_inventory.has_method("get_coins"):
 		return
 	_pending_developer_value_action = "coins"
-	# 当前金币；作为弹窗初始值，玩家可拉条或输入 0 至配置上限的目标余额。
+	# 当前星穹；作为弹窗初始值，玩家可拉条或输入 0 至配置上限的目标余额。
 	var current_coins: int = clampi(int(_global_inventory.call("get_coins")), 0, maxi(coin_value_maximum, 1))
-	_developer_value_dialog.present_developer_value("修改金币数量", "直接设置永久金币余额", 0, maxi(coin_value_maximum, 1), current_coins, "修改")
+	_developer_value_dialog.present_developer_value("修改星穹数量", "直接设置星穹余额", 0, maxi(coin_value_maximum, 1), current_coins, "修改")
 
 
 func _on_developer_value_confirmed(value: int) -> void:
@@ -589,13 +592,13 @@ func _on_developer_value_confirmed(value: int) -> void:
 		# 实际发放数量；每颗使用正式生成器，按帧分批生成并在全部完成后统一刷新仓库。
 		var granted_count: int = int(await _global_inventory.call("grant_random_enhancement_stones_to_warehouse_gradually", maxi(value, 1), maxi(enhancement_stone_grant_batch_size, 1)))
 		_grant_stones_button.disabled = false
-		_status_label.text = "已向永久仓库发放 %d 颗随机强化石" % granted_count
+		_status_label.text = "已向仓库发放 %d 颗随机强化石" % granted_count
 	elif _pending_developer_value_action == "coins":
 		if not _global_inventory.has_method("set_coins"):
 			return
-		# 修改后金币；直接设置为目标余额，不再进行固定步长的增减运算。
+		# 修改后星穹；直接设置为目标余额，不再进行固定步长的增减运算。
 		var adjusted_coins: int = int(_global_inventory.call("set_coins", maxi(value, 0)))
-		_status_label.text = "金币数量已修改为 %d" % adjusted_coins
+		_status_label.text = "星穹数量已修改为 %d" % adjusted_coins
 		_refresh_coins()
 	_pending_developer_value_action = ""
 
@@ -603,7 +606,7 @@ func _on_developer_value_confirmed(value: int) -> void:
 func _on_clear_warehouse_pressed() -> void:
 	if _clear_warehouse_confirmation == null:
 		return
-	_clear_warehouse_confirmation.present_adaptive("确认清空仓库", "将永久删除仓库中的全部物品，随身背包和装备不会受影响。", "确认清空", "取消", true)
+	_clear_warehouse_confirmation.present_adaptive("确认清空仓库", "将永久删除仓库中的全部物品，背包和装备不会受影响。", "确认清空", "取消", true)
 
 
 func _on_clear_warehouse_confirmed() -> void:
@@ -611,7 +614,7 @@ func _on_clear_warehouse_confirmed() -> void:
 		return
 	# 清空记录组数；武器每件一组，强化石按当前堆叠组统计，用于开发者操作反馈。
 	var cleared_record_count: int = int(_global_inventory.call("clear_warehouse_items"))
-	_status_label.text = "已清空永久仓库，共移除 %d 组物品" % cleared_record_count
+	_status_label.text = "已清空仓库，共移除 %d 组物品" % cleared_record_count
 
 
 func _on_stock_full_refresh_pressed() -> void:
@@ -649,9 +652,9 @@ func _on_stock_market_cycle_pressed() -> void:
 func _on_clear_stock_holdings_pressed() -> void:
 	if _global_inventory == null or not _global_inventory.has_method("clear_stock_holdings"):
 		return
-	# 清空股数；统计所有股票被移除的总股数，不返还金币。
+	# 清空股数；统计所有股票被移除的总股数，不返还星穹。
 	var cleared_quantity: int = int(_global_inventory.call("clear_stock_holdings"))
-	_status_label.text = "已清空全部持仓，共移除 %d 股，不返还金币" % cleared_quantity
+	_status_label.text = "已清空全部持仓，共移除 %d 股，不返还星穹" % cleared_quantity
 
 
 func _on_infinite_health_toggled(enabled: bool) -> void:

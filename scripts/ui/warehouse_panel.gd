@@ -42,34 +42,34 @@ const ITEM_ACTION_EQUIP_RANGED_2: int = 6
 const ITEM_ACTION_USE_REPAIR_KIT: int = 7
 ## 仓库区域最小占比；默认 0.10，保证拖条向上时仓库仍保留基础浏览空间。
 const STORAGE_SPLIT_MIN_RATIO: float = 0.10
-## 仓库区域最大占比；默认 0.90，允许玩家把随身背包缩小到仅保留必要操作入口。
+## 仓库区域最大占比；默认 0.90，允许玩家把背包缩小到仅保留必要操作入口。
 const STORAGE_SPLIT_MAX_RATIO: float = 0.90
 ## 仓库菜单可选择的远程装备槽数量；默认 2，与当前双远程装备结构保持一致。
 const WAREHOUSE_RANGED_EQUIPMENT_SLOT_COUNT: int = 2
 ## 数量弹窗空闲操作标识；默认表示当前没有待确认的出售或跨容器移动请求。
 const QUANTITY_OPERATION_NONE: String = ""
-## 数量弹窗出售操作标识；确认后按选择数量结算金币并减少来源堆叠。
+## 数量弹窗出售操作标识；确认后按选择数量结算星穹并减少来源堆叠。
 const QUANTITY_OPERATION_SALE: String = "sale"
 ## 数量弹窗移动操作标识；确认后把选择数量从仓库或背包原子拆分到另一容器。
 const QUANTITY_OPERATION_TRANSFER: String = "transfer"
 
 ## 面板最小尺寸；默认 960x620，适配当前 1280x720 主菜单并保留边缘空间。
 @export var panel_minimum_size: Vector2 = Vector2(960.0, 620.0)
-## 展开背包时永久仓库占可分配高度的比例；默认 0.38，可通过界面拖条在 0.20 至 0.75 间动态调整。
+## 展开背包时仓库占可分配高度的比例；默认 0.38，可通过界面拖条在 0.20 至 0.75 间动态调整。
 ## 比例范围补充：当前可调范围已扩展为 0.10 至 0.90，并由背包滚动容器保证极限比例下仍可访问内容。
 @export_range(0.10, 0.90, 0.01) var warehouse_split_ratio: float = 0.38
 
 ## 全局背包服务；默认从自动加载 GlobalInventory 获取，缺失时面板显示不可用提示。
 var _global_inventory: Node
-## 当前是否展开随身背包；默认 false 进入纯仓库模式，只显示安全物品并允许出售。
+## 当前是否展开背包；默认 false 进入纯仓库模式，只显示安全物品并允许出售。
 var _backpack_expanded: bool = false
-## 新版永久仓库拖放区域；默认运行时创建，上方始终显示且不参与死亡损失。
+## 新版仓库拖放区域；默认运行时创建，上方始终显示且不参与死亡损失。
 var _warehouse_drop_area: PanelContainer
-## 新版永久仓库物品列表；默认运行时从拖放区域取得，用于创建可拖拽物品行。
+## 新版仓库物品列表；默认运行时从拖放区域取得，用于创建可拖拽物品行。
 var _warehouse_item_list: HFlowContainer
-## 新版随身背包拖放区域；默认运行时创建，仅展开模式可见并会随玩家进入战斗。
+## 新版背包拖放区域；默认运行时创建，仅展开模式可见并会随玩家进入战斗。
 var _carried_drop_area: PanelContainer
-## 新版随身背包物品列表；默认运行时从拖放区域取得，用于创建快捷转仓与装备按钮。
+## 新版背包物品列表；默认运行时从拖放区域取得，用于创建快捷转仓与装备按钮。
 var _carried_item_list: HFlowContainer
 ## 新版装备栏容器；默认运行时创建并固定在展开背包区域左侧。
 var _loadout_list: VBoxContainer
@@ -83,9 +83,9 @@ var _warehouse_scroll: ScrollContainer
 var _storage_split_handle: Control
 ## 新版模式切换按钮；默认显示“展开背包”，点击后在纯仓库和仓库背包联合模式间切换。
 var _mode_toggle_button: Button
-## 新版金币标签；默认显示局外金币余额，出售永久仓库物品后即时刷新。
+## 新版星穹标签；默认显示局外星穹余额，出售仓库物品后即时刷新。
 var _coins_label: Label
-## 新版仓库摘要标签；默认显示永久仓库与随身背包数量，并明确安全和死亡损失边界。
+## 新版仓库摘要标签；默认显示仓库与背包数量，并明确安全和死亡损失边界。
 var _storage_summary_label: Label
 ## 当前主分类；取值为 all、weapons 或 resources，默认全部并同步作用于仓库和背包。
 var _storage_primary_category: String = InventoryQuery.PRIMARY_ALL
@@ -97,7 +97,7 @@ var _storage_primary_buttons: Dictionary = {}
 var _storage_subcategory_buttons: Dictionary = {}
 ## 子分类按钮容器；默认位于主分类下一行，武器显示近战/远程，资源显示强化石。
 var _storage_subcategory_bar: HBoxContainer
-## 关键词搜索框；默认空字符串，输入时同时筛选永久仓库和随身背包的名称、说明与词条。
+## 关键词搜索框；默认空字符串，输入时同时筛选仓库和背包的名称、说明与词条。
 var _storage_search_edit: LineEdit
 ## 排序下拉框；默认获得时间，可切换为物品价值降序。
 var _storage_sort_option: OptionButton
@@ -105,7 +105,7 @@ var _storage_sort_option: OptionButton
 var _stone_attribute_option: OptionButton
 ## 清空强化属性筛选按钮；默认只在资源分类显示，用于一次移除所有多选条件。
 var _stone_attribute_clear_button: Button
-## 套装多选筛选控件；同时作用于永久仓库与展开后的随身背包列表。
+## 套装多选筛选控件；同时作用于仓库与展开后的背包列表。
 var _equipment_set_filter_control: EquipmentSetFilterControl
 ## 当前强化属性筛选键集合；默认空数组表示不过滤具体属性，多项按并集匹配。
 var _stone_attribute_filter: Array[String] = []
@@ -188,7 +188,7 @@ func refresh() -> void:
 
 
 func _on_inventory_state_changed() -> void:
-	## 合并全局库存信号；隐藏仓库只标记待刷新，避免背包丢弃时按永久仓库总量重建不可见卡片。
+	## 合并全局库存信号；隐藏仓库只标记待刷新，避免背包丢弃时按仓库总量重建不可见卡片。
 	if not is_visible_in_tree():
 		_refresh_pending = true
 		return
@@ -234,18 +234,18 @@ func _build_storage_interface() -> void:
 	margin.add_theme_constant_override("margin_bottom", 10)
 	add_child(margin)
 
-	# 新版主内容容器；纵向排列标题栏、永久仓库、可折叠背包与返回按钮。
+	# 新版主内容容器；纵向排列标题栏、仓库、可折叠背包与返回按钮。
 	var content: VBoxContainer = VBoxContainer.new()
 	content.add_theme_constant_override("separation", 5)
 	margin.add_child(content)
 
-	# 新版标题栏；横向显示仓库标题、局外金币和模式切换按钮。
+	# 新版标题栏；横向显示仓库标题、局外星穹和模式切换按钮。
 	var header: HBoxContainer = HBoxContainer.new()
 	header.add_theme_constant_override("separation", 10)
 	content.add_child(header)
 	# 新版仓库标题；默认左对齐并占据标题栏剩余空间。
 	var title_label: Label = Label.new()
-	title_label.text = "局外永久仓库"
+	title_label.text = "仓库"
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.add_theme_font_size_override("font_size", 25)
 	UI_STYLE_GUIDE.apply_title_label(title_label)
@@ -336,9 +336,9 @@ func _build_storage_interface() -> void:
 	content.add_child(_storage_subcategory_bar)
 	_rebuild_storage_subcategory_buttons()
 
-	# 永久仓库标题；始终位于界面上方并说明安全存储属性。
+	# 仓库标题；始终位于界面上方并说明安全存储属性。
 	var warehouse_title: Label = Label.new()
-	warehouse_title.text = "永久仓库 · 未放入背包的物品不会因死亡或退出丢失"
+	warehouse_title.text = "仓库"
 	warehouse_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	warehouse_title.add_theme_font_size_override("font_size", 17)
 	content.add_child(warehouse_title)
@@ -376,7 +376,7 @@ func _build_storage_interface() -> void:
 	_backpack_scroll.add_child(_backpack_section)
 	# 随身区标题；默认强调下半区会进入战斗并参与失败损失结算。
 	var backpack_title: Label = Label.new()
-	backpack_title.text = "随身背包 · 会带入战斗；死亡通常保留约 50%，进入战斗 30 秒内逃跑保留约 80%"
+	backpack_title.text = "背包 · 会带入战斗；死亡通常保留约 50%，进入战斗 30 秒内逃跑保留约 80%"
 	backpack_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	backpack_title.add_theme_font_size_override("font_size", 17)
 	_backpack_section.add_child(backpack_title)
@@ -401,7 +401,7 @@ func _build_storage_interface() -> void:
 	_loadout_list.add_theme_constant_override("separation", 6)
 	loadout_margin.add_child(_loadout_list)
 
-	# 随身背包滚动区；默认填充双栏剩余宽度和高度，物品可点击快速转仓或拖拽调整。
+	# 背包滚动区；默认填充双栏剩余宽度和高度，物品可点击快速转仓或拖拽调整。
 	var carried_scroll: ScrollContainer = ScrollContainer.new()
 	carried_scroll.name = "CarriedItemScroll"
 	carried_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -436,16 +436,16 @@ func _rebuild_storage_content() -> void:
 	_refresh_pending = false
 	_clear_container(_loadout_list)
 	if _global_inventory == null:
-		_coins_label.text = "金币：不可用"
+		_coins_label.text = "星穹：不可用"
 		_storage_summary_label.text = "全局物品服务不可用"
 		return
 
-	# 永久仓库条目；顺序由全局服务按上次撤离优先和获得时间维护。
+	# 仓库条目；顺序由全局服务按上次撤离优先和获得时间维护。
 	var warehouse_entries: Array = _global_inventory.call("get_warehouse_entries")
-	# 随身背包条目；顺序只影响当前携带布局，进入战斗后由 HUD 读取同一数组。
+	# 背包条目；顺序只影响当前携带布局，进入战斗后由 HUD 读取同一数组。
 	var backpack_entries: Array = _global_inventory.call("get_backpack_entries")
 	_equipment_set_filter_control.configure_entries(warehouse_entries + backpack_entries)
-	_coins_label.text = "金币：%d" % int(_global_inventory.call("get_coins"))
+	_coins_label.text = "星穹：%d" % int(_global_inventory.call("get_coins"))
 	_storage_summary_label.text = _get_storage_summary_text(warehouse_entries, backpack_entries)
 	# 已查询仓库条目；按当前多层分类、关键词、属性和排序生成展示副本。
 	var visible_warehouse_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(warehouse_entries, _storage_primary_category, _storage_subcategory, _storage_search_edit.text, _stone_attribute_filter, _storage_sort_mode, _equipment_set_filter_control.get_selected_set_ids())
@@ -476,7 +476,7 @@ func _sync_storage_entries(entries: Array, location: String, target_container: C
 		_clear_container(target_container)
 		# 空容器提示；根据所在区域明确物品安全属性和快捷转移方向。
 		var empty_state_label: Label = Label.new()
-		empty_state_label.text = "当前分类没有永久仓库物品" if location == "warehouse" else "当前分类没有随身背包物品，可用 Shift+点击或拖入上方仓库物品"
+		empty_state_label.text = "当前分类没有仓库物品" if location == "warehouse" else "当前分类没有背包物品，可用 Shift+点击或拖入上方仓库物品"
 		empty_state_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		empty_state_label.custom_minimum_size = Vector2(0.0, 52.0)
 		target_container.add_child(empty_state_label)
@@ -522,7 +522,7 @@ func _create_storage_entry_control(entry: Dictionary, location: String, entry_in
 	# 物品数量；武器固定为 1，强化石按 1 到 99 显示在方形资源格中。
 	# 通用模板补充：强化石数量规则保持不变，但显示区域现与所有物品统一为 160×72 卡片。
 	var quantity: int = clampi(int(entry.get("quantity", 1)), 1, 99)
-	# 上次撤离前缀；最近一次成功撤离携带的物品手动转入永久仓库后继续显示该标记。
+	# 上次撤离前缀；最近一次成功撤离携带的物品手动转入仓库后继续显示该标记。
 	var extraction_prefix: String = "[上次撤离] " if bool(entry.get("is_last_extraction", false)) else ""
 	# 物品控件；展开模式允许点击跨容器转移，纯仓库模式只提供浏览、拖拽和出售。
 	var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
@@ -554,7 +554,7 @@ func _update_storage_entry_control(item_control: Button, entry: Dictionary, loca
 
 
 func _build_loadout_entries() -> void:
-	# 装备栏标题；默认说明槽内物品随角色使用但不属于永久仓库。
+	# 装备栏标题；默认说明槽内物品随角色使用但不属于仓库。
 	var loadout_title: Label = Label.new()
 	loadout_title.text = "装备栏"
 	loadout_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -567,9 +567,13 @@ func _build_loadout_entries() -> void:
 		# 远程装备资源；空值显示空槽，有资源时悬停可查看武器详细属性。
 		var item_resource: Resource = _global_inventory.call("get_ranged_equipment_resource", slot_index) as Resource
 		_loadout_list.add_child(_create_storage_equipment_slot("远程 %d" % (slot_index + 1), "ranged_%d" % slot_index, "ranged", item_resource))
-	# 近战装备资源；空值显示可接收近战武器的槽位，有资源时可拖往仓库或随身背包。
+	# 近战装备资源；空值显示可接收近战武器的槽位，有资源时可拖往仓库或背包。
 	var melee_resource: Resource = _global_inventory.call("get_melee_equipment_resource") as Resource
 	_loadout_list.add_child(_create_storage_equipment_slot("近战", "melee", "melee", melee_resource))
+	# 武器与防具分组间距；与共享背包读取同一全局样式值，保证两处装备栏层级一致。
+	var weapon_armor_spacer: Control = Control.new()
+	weapon_armor_spacer.custom_minimum_size = Vector2(0.0, UI_STYLE_GUIDE.EQUIPMENT_GROUP_SPACER_HEIGHT)
+	_loadout_list.add_child(weapon_armor_spacer)
 	# 四部位装备槽；复用武器装备槽控件、排版、耐久条和悬浮窗。
 	var armor_slot_labels: Dictionary = {"head": "头部", "body": "躯干", "legs": "腿部", "feet": "脚部"}
 	for armor_slot in ["head", "body", "legs", "feet"]:
@@ -694,7 +698,7 @@ func _on_equipment_set_filters_changed(_selected_set_ids: Array[String]) -> void
 
 
 func _on_quick_unequip_requested(equipment_location: String) -> void:
-	## Shift+点击装备栏时直接卸到随身背包；仓库是否展开不影响物品所有权目标。
+	## Shift+点击装备栏时直接卸到背包；仓库是否展开不影响物品所有权目标。
 	if _global_inventory != null and not equipment_location.is_empty():
 		_global_inventory.call("transfer_equipment_to_storage", equipment_location, "backpack")
 
@@ -760,7 +764,7 @@ func _get_storage_summary_text(warehouse_entries: Array, backpack_entries: Array
 		return "正在使用 %s：请选择仓库、背包或装备栏中的一把武器" % str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", _pending_repair_kit_resource))
 	if _pending_stone_resource != null:
 		return "正在使用 %s：请选择仓库、背包或装备栏中的一把兼容武器" % str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", _pending_stone_resource))
-	return "永久仓库 %d 组 · 随身背包 %d 组 · 普通点击打开操作，Shift+点击快速转移%s" % [warehouse_entries.size(), backpack_entries.size(), "，拖拽可调整或装备" if _backpack_expanded else ""]
+	return "仓库 %d 组 · 背包 %d 组 · 普通点击打开操作，Shift+点击快速转移%s" % [warehouse_entries.size(), backpack_entries.size(), "，拖拽可调整或装备" if _backpack_expanded else ""]
 
 
 func _apply_storage_display_mode() -> void:
@@ -860,7 +864,7 @@ func _on_item_action_menu_id_pressed(action_id: int) -> void:
 		_pending_repair_kit_resource = _action_item_resource
 		_pending_repair_kit_location = _action_item_location
 		_backpack_expanded = true
-		# 修复目标选择页；武器可位于永久仓库、随身背包或局外装备栏，因此显示完整武器浏览视图。
+		# 修复目标选择页；武器可位于仓库、背包或局外装备栏，因此显示完整武器浏览视图。
 		_storage_primary_category = InventoryQuery.PRIMARY_ALL
 		_storage_subcategory = InventoryQuery.SUBCATEGORY_ALL
 		_clear_stone_attribute_filter()
@@ -953,7 +957,7 @@ func _open_sell_quantity_dialog(item_resource: Resource, source_location: String
 	var total_value: int = int(_global_inventory.call("get_storage_resource_value", item_resource, source_location))
 	# 有效最大数量；至少为 1，防止旧操作菜单确认时物品已经发生变化。
 	var resolved_maximum_quantity: int = maxi(maximum_quantity, 1)
-	# 单件售价；整数总价由单价乘数量形成，因此整除不会丢失有效金币。
+	# 单件售价；整数总价由单价乘数量形成，因此整除不会丢失有效星穹。
 	var unit_value: int = total_value / resolved_maximum_quantity
 	# 物品名称；统一由详情格式化器解析显示名，避免武器旧资源名称为空。
 	var item_display_name: String = str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", item_resource))
@@ -984,10 +988,10 @@ func _open_transfer_quantity_dialog(item_resource: Resource, source_location: St
 	_quantity_transfer_target_index = target_index
 	# 物品名称；统一复用详情格式化器，确保修复包和不同品质强化石名称与卡片一致。
 	var item_display_name: String = str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", item_resource))
-	# 来源中文名；只对仓库和随身背包开放，便于弹窗明确显示移动方向。
-	var source_display_name: String = "永久仓库" if source_location == "warehouse" else "随身背包"
+	# 来源中文名；只对仓库和背包开放，便于弹窗明确显示移动方向。
+	var source_display_name: String = "仓库" if source_location == "warehouse" else "背包"
 	# 目标中文名；与来源使用同一术语，避免玩家误解为出售或装备操作。
-	var target_display_name: String = "永久仓库" if target_location == "warehouse" else "随身背包"
+	var target_display_name: String = "仓库" if target_location == "warehouse" else "背包"
 	_sell_quantity_dialog.present_transfer(item_display_name, maxi(maximum_quantity, 1), source_display_name, target_display_name)
 
 

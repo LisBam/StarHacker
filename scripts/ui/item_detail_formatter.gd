@@ -108,7 +108,7 @@ static func build_bbcode(item_resource: Resource, quantity: int = 1, value_label
 	var displayed_total_value: int = total_value_override if total_value_override >= 0 else unit_value * maxi(quantity, 1)
 	# 单值补充；仅普通价值且堆叠数量大于 1 时显示，撤离收费已经包含整组向上取整结果。
 	var unit_value_suffix: String = "（单个 %d）" % unit_value if value_label == "价值" and quantity > 1 else ""
-	detail_lines.append("%s：%d 金币%s" % [value_label, displayed_total_value, unit_value_suffix])
+	detail_lines.append("%s：%d 星穹%s" % [value_label, displayed_total_value, unit_value_suffix])
 	# 物品说明；空说明不生成无意义空行。
 	var description: String = str(item_resource.get("description"))
 	if not description.is_empty():

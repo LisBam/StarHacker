@@ -131,13 +131,29 @@ const MINIMUM_DURATION_VALUE: float = 0.01
 const COMMON_ENHANCEMENT_STATS: Array[String] = ["damage", "cooldown", "energy_consumption", "attack_distance", "recoil_force", "front_recoil_force", "impact_force", "critical_chance", "critical_damage", "max_durability"]
 ## 远程武器专属强化属性；只允许远程武器消费包含这些字段的强化石效果。
 ## 离散机制兼容补充：散射、穿透、弹射和连击保留在有效属性读取目录中，只服务模板数值与旧累计强化，不进入正式强化石生成池。
+## 特化品质补充：四项离散机制可由特化武器强化石新增，但仍不进入普通四品质生成池。
 const RANGED_ENHANCEMENT_STATS: Array[String] = ["projectile_speed", "deviation_degrees", "scatter_count", "piercing_count", "bounce_count", "combo_count"]
 ## 近战武器专属强化属性；只允许近战武器消费包含这些字段的强化石效果。
 const MELEE_ENHANCEMENT_STATS: Array[String] = ["melee_active_duration"]
+## 显式机制开关与离散属性的映射；模板开关或特化累计任一有效时，战斗与详情都视为持有该机制。
+const EFFECTIVE_ATTRIBUTE_STAT_NAMES: Dictionary = {"has_scatter": "scatter_count", "has_piercing": "piercing_count", "has_bounce": "bounce_count", "has_combo": "combo_count"}
 
 
 func is_ranged() -> bool:
 	return weapon_type in ["ranged", "hybrid"]
+
+
+func has_effective_attribute(attribute_property_name: String) -> bool:
+	## 返回武器当前是否持有指定离散机制；模板开关与特化强化累计使用同一判定。
+	if not EFFECTIVE_ATTRIBUTE_STAT_NAMES.has(attribute_property_name):
+		return bool(get(attribute_property_name))
+	# 模板持有状态；保留原有武器的散射、穿透、弹射或连击配置。
+	var template_has_attribute: bool = bool(get(attribute_property_name))
+	# 对应离散属性；由稳定映射提供，避免战斗组件重复维护四组名称。
+	var stat_name: String = str(EFFECTIVE_ATTRIBUTE_STAT_NAMES.get(attribute_property_name, ""))
+	# 特化累计点数；大于 0 表示强化石已为原本未持有的武器新增该机制。
+	var specialization_points: float = get_enhancement_ratio(stat_name)
+	return template_has_attribute or specialization_points > 0.0
 
 
 func is_melee() -> bool:
@@ -358,13 +374,17 @@ func _is_stat_supported(stat_name: String) -> bool:
 		return not is_zero_approx(get_base_stat(canonical_stat_name))
 	if is_ranged():
 		if canonical_stat_name == "scatter_count":
-			return has_scatter
+			# 特化强化允许任意远程通道从默认 1 弹体开始新增散射点数。
+			return true
 		if canonical_stat_name == "piercing_count":
-			return has_piercing
+			# 特化强化允许任意远程通道从 0 次额外穿透开始新增点数。
+			return true
 		if canonical_stat_name == "bounce_count":
-			return has_bounce
+			# 特化强化允许任意远程通道从 0 次弹射开始新增点数。
+			return true
 		if canonical_stat_name == "combo_count":
-			return has_combo
+			# 特化强化允许任意远程通道从默认 1 轮射击开始新增连击点数。
+			return true
 		if canonical_stat_name in RANGED_ENHANCEMENT_STATS:
 			return not is_zero_approx(get_base_stat(canonical_stat_name))
 	if is_melee() and canonical_stat_name in MELEE_ENHANCEMENT_STATS:

@@ -54,6 +54,7 @@ var _custom_stone_toggle_button: Button
 ## 自定义强化石配置容器；默认运行时创建，包含品质、适用对象和三条可选词条，战斗开发者上下文会统一隐藏。
 var _custom_stone_controls_container: VBoxContainer
 ## 自定义强化石品质选项；默认初级，玩家可从初级、中级、高级、极品中选择实际品质。
+## 特化品质补充：下拉菜单同时提供特化，选中后会切换到特化独立属性池。
 var _custom_stone_quality_option: OptionButton
 ## 自定义强化石适用对象选项；默认武器，决定后三个词条只显示武器或装备可用属性。
 var _custom_stone_target_option: OptionButton
@@ -357,6 +358,9 @@ func _build_custom_stone_controls(content: VBoxContainer) -> void:
 	_custom_stone_quality_option.set_item_metadata(2, ENHANCEMENT_RULES_SCRIPT.QUALITY_HIGH)
 	_custom_stone_quality_option.add_item("极品")
 	_custom_stone_quality_option.set_item_metadata(3, ENHANCEMENT_RULES_SCRIPT.QUALITY_SUPREME)
+	_custom_stone_quality_option.add_item("特化")
+	_custom_stone_quality_option.set_item_metadata(4, ENHANCEMENT_RULES_SCRIPT.QUALITY_SPECIALIZED)
+	_custom_stone_quality_option.item_selected.connect(_on_custom_stone_quality_selected)
 	# 适用对象选项；强化石现行协议区分武器与装备，选择后实时缩小可选词条池以避免无效物品。
 	_custom_stone_target_option.add_item("武器")
 	_custom_stone_target_option.set_item_metadata(0, "weapon")
@@ -408,17 +412,28 @@ func _on_custom_stone_target_selected(_selected_index: int) -> void:
 	_refresh_custom_stone_stat_options()
 
 
+func _on_custom_stone_quality_selected(_selected_index: int) -> void:
+	## 切换品质时同步刷新增强与削弱词条池；特化品质不与普通四品质共用属性列表。
+	_refresh_custom_stone_stat_options()
+
+
 func _refresh_custom_stone_stat_options() -> void:
 	## 根据当前适用对象填充词条选项；第一条加强必须选择有效属性，其他两条保留“无”作为可选空值。
 	if _custom_stone_target_option == null or _custom_stone_beneficial_one_option == null or _custom_stone_beneficial_two_option == null or _custom_stone_detrimental_option == null:
 		return
 	# 当前适用对象；默认武器，元数据异常时同样安全回退武器属性池。
 	var target_kind: String = str(_custom_stone_target_option.get_item_metadata(_custom_stone_target_option.selected))
-	# 当前属性池；由正式规则目录提供，新增可强化属性后会自动进入开发者下拉菜单。
-	var supported_stat_names: Array[String] = ENHANCEMENT_RULES_SCRIPT.WEAPON_STAT_KEYS if target_kind == "weapon" else ENHANCEMENT_RULES_SCRIPT.EQUIPMENT_STAT_KEYS
-	_populate_custom_stone_stat_option(_custom_stone_beneficial_one_option, supported_stat_names, "请选择加强词条")
-	_populate_custom_stone_stat_option(_custom_stone_beneficial_two_option, supported_stat_names, "无")
-	_populate_custom_stone_stat_option(_custom_stone_detrimental_option, supported_stat_names, "无")
+	# 当前品质；元数据来自品质下拉菜单，决定是读取普通属性池还是特化独立池。
+	var quality_id: String = str(_custom_stone_quality_option.get_item_metadata(_custom_stone_quality_option.selected))
+	# 当前增强属性池；由正式规则目录提供，新增特化属性后会自动进入开发者下拉菜单。
+	var beneficial_stat_names: Array[String] = ENHANCEMENT_RULES_SCRIPT.get_beneficial_stat_keys_for_quality(quality_id, target_kind)
+	# 第二增强属性池；特化强化石固定只有一条正向机制，因此该品质使用空列表。
+	var second_beneficial_stat_names: Array[String] = [] if quality_id == ENHANCEMENT_RULES_SCRIPT.QUALITY_SPECIALIZED else beneficial_stat_names
+	# 当前削弱属性池；特化武器词条与正向离散机制分开配置。
+	var detrimental_stat_names: Array[String] = ENHANCEMENT_RULES_SCRIPT.get_detrimental_stat_keys_for_quality(quality_id, target_kind)
+	_populate_custom_stone_stat_option(_custom_stone_beneficial_one_option, beneficial_stat_names, "请选择加强词条")
+	_populate_custom_stone_stat_option(_custom_stone_beneficial_two_option, second_beneficial_stat_names, "无")
+	_populate_custom_stone_stat_option(_custom_stone_detrimental_option, detrimental_stat_names, "无")
 
 
 func _populate_custom_stone_stat_option(option_button: OptionButton, supported_stat_names: Array[String], empty_label: String) -> void:

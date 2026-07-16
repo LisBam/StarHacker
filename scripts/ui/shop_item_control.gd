@@ -118,7 +118,7 @@ func _build_stone_attribute_text() -> String:
 	if not _is_enhancement_stone():
 		return ""
 	# 强化石属性；按统一规则目录顺序显示属性名称与正负方向，不提前公开使用时才随机的实际百分比。
-	var modifiers: Dictionary = EnhancementRules.normalize_modifiers(_item_resource.get("modifiers") as Dictionary)
+	var modifiers: Dictionary = _item_resource.call("get_normalized_modifiers") as Dictionary if _item_resource.has_method("get_normalized_modifiers") else EnhancementRules.normalize_modifiers(_item_resource.get("modifiers") as Dictionary, str(_item_resource.get("quality_id")) == EnhancementRules.QUALITY_SPECIALIZED)
 	# 属性文本集合；多个属性以空格分隔，并由通用卡片负责超长文本居中截断。
 	var attribute_tokens: PackedStringArray = PackedStringArray()
 	for stat_name in EnhancementRules.STAT_KEYS:
@@ -129,7 +129,7 @@ func _build_stone_attribute_text() -> String:
 
 func _build_stone_shop_attribute_text() -> String:
 	# 强化石词条；按仓库卡片相同顺序先显示增强、再显示削弱，并按玩法利弊分别着色。
-	var modifiers: Dictionary = EnhancementRules.normalize_modifiers(_item_resource.get("modifiers") as Dictionary)
+	var modifiers: Dictionary = _item_resource.call("get_normalized_modifiers") as Dictionary if _item_resource.has_method("get_normalized_modifiers") else EnhancementRules.normalize_modifiers(_item_resource.get("modifiers") as Dictionary, str(_item_resource.get("quality_id")) == EnhancementRules.QUALITY_SPECIALIZED)
 	# 彩色词条；每项包含独立 BBCode，通用物品卡片直接负责渲染。
 	var colored_tokens: PackedStringArray = PackedStringArray()
 	for beneficial in [true, false]:

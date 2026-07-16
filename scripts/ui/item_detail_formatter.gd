@@ -275,7 +275,7 @@ static func _append_stone_lines(detail_lines: Array[String], item_resource: Reso
 	# 强化词典；值只表示数值增减方向，详情不显示具体百分比。
 	# 品质化显示补充；当前详情保留每条实际百分比，并先显示增强、后显示削弱。
 	# 方向化显示补充；当前详情只显示属性与 +/-，具体百分比仅在强化完成弹窗中公开。
-	var modifiers: Dictionary = EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary)
+	var modifiers: Dictionary = item_resource.call("get_normalized_modifiers") as Dictionary if item_resource.has_method("get_normalized_modifiers") else EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary, str(item_resource.get("quality_id")) == EnhancementRules.QUALITY_SPECIALIZED)
 	_append_stone_lines_by_benefit(detail_lines, modifiers, true)
 	_append_stone_lines_by_benefit(detail_lines, modifiers, false)
 
@@ -341,13 +341,13 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 	if weapon_type in ["ranged", "hybrid"]:
 		_append_weapon_stat_line(detail_lines, item_resource, "projectile_speed", 1)
 		_append_weapon_stat_line(detail_lines, item_resource, "deviation_degrees", 1, "°")
-		if bool(item_resource.get("has_scatter")):
+		if _weapon_has_effective_attribute(item_resource, "has_scatter"):
 			_append_weapon_stat_line(detail_lines, item_resource, "scatter_count", 0)
-		if bool(item_resource.get("has_piercing")):
+		if _weapon_has_effective_attribute(item_resource, "has_piercing"):
 			_append_weapon_stat_line(detail_lines, item_resource, "piercing_count", 0)
-		if bool(item_resource.get("has_bounce")):
+		if _weapon_has_effective_attribute(item_resource, "has_bounce"):
 			_append_weapon_stat_line(detail_lines, item_resource, "bounce_count", 0)
-		if bool(item_resource.get("has_combo")):
+		if _weapon_has_effective_attribute(item_resource, "has_combo"):
 			_append_weapon_stat_line(detail_lines, item_resource, "combo_count", 0)
 	if weapon_type in ["melee", "hybrid"]:
 		_append_weapon_stat_line(detail_lines, item_resource, "melee_active_duration", 2, " 秒")
@@ -360,6 +360,15 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 		_append_weapon_attack_channel_stat_line(detail_lines, item_resource, "近战冲击", "impact_force", "melee", 1)
 	else:
 		_append_weapon_stat_line(detail_lines, item_resource, "impact_force", 1)
+
+
+static func _weapon_has_effective_attribute(item_resource: Resource, attribute_property_name: String) -> bool:
+	## 返回详情面板是否应展示指定武器机制；特化新增机制与模板原生机制使用同一入口。
+	if item_resource == null:
+		return false
+	if item_resource.has_method("has_effective_attribute"):
+		return bool(item_resource.call("has_effective_attribute", attribute_property_name))
+	return bool(item_resource.get(attribute_property_name))
 
 
 static func _append_weapon_attack_channel_stat_line(detail_lines: Array[String], item_resource: Resource, label: String, stat_name: String, attack_mode: String, decimals: int, suffix: String = "") -> void:

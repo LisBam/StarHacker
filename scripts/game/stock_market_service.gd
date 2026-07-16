@@ -499,14 +499,15 @@ func record_resource_obtained(item_resource: Resource, quantity: int = 1) -> voi
 	if item_kind == "enhancement_stone":
 		record_run_metric("enhancement_stones", quantity)
 		# 强化石品质；高级和极品会额外计入高品质强化石指标。
+		# 特化品质补充；特化强化石与高级、极品共用稀有物品的市场行为指标。
 		var quality_id: String = str(item_resource.get("quality_id"))
-		if quality_id in ["high", "supreme"]:
+		if quality_id in ["high", "supreme", "specialized"]:
 			record_run_metric("high_enhancement_stones", quantity)
 	elif not str(item_resource.get("weapon_id")).is_empty():
 		record_run_metric("new_weapons", quantity)
 	# 通用物品品质；高级和极品物品共同影响遗迹勘探开发。
 	var item_quality_id: String = str(item_resource.get("quality_id"))
-	if item_quality_id in ["high", "supreme"]:
+	if item_quality_id in ["high", "supreme", "specialized"]:
 		record_run_metric("high_quality_items", quantity)
 
 

@@ -5,6 +5,7 @@ class_name EnhancementStoneData
 ## 同一属性集合与增减方向完全一致的强化石拥有相同堆叠签名，仓库和背包最多将其合并为 99 个一组。
 ## 品质化强化石使用“品质 + 属性 + 实际百分比”作为堆叠条件，增强词条始终排在削弱词条之前。
 ## 方向化重构后堆叠条件改为“品质 + 属性 + 方向”，同组每颗强化石使用时都会重新随机具体幅度。
+## 特化品质例外：正向离散词条在生成时保存 +1/+2，并作为堆叠签名的一部分；负面词条仍只保存方向。
 
 ## 单词条标准价值；固定 30 金币，生成和升阶都按最终词条数量重新计算总价值。
 const VALUE_PER_MODIFIER: int = 30
@@ -12,7 +13,8 @@ const VALUE_PER_MODIFIER: int = 30
 ## 物品类型；固定为 enhancement_stone，供库存、分类和 UI 与武器资源解耦识别。
 @export var item_kind: String = "enhancement_stone"
 ## 强化石品质标识；取值为 low、medium、high 或 supreme，默认 low 用于旧存档迁移。
-@export_enum("low", "medium", "high", "supreme") var quality_id: String = EnhancementRules.QUALITY_LOW
+## 特化品质补充；specialized 是不参与普通升阶路径的独立品质。
+@export_enum("low", "medium", "high", "supreme", "specialized") var quality_id: String = EnhancementRules.QUALITY_LOW
 ## 强化石适用类型；weapon 只能强化武器，equipment 只能强化装备。
 @export_enum("weapon", "equipment") var target_kind: String = "weapon"
 ## 强化石显示名称；默认“强化石”，随机生成时会按词条数量补充品质描述。
@@ -24,6 +26,7 @@ const VALUE_PER_MODIFIER: int = 30
 ## 单颗基础价值；取值大于等于 0，实际出售整组时会乘以堆叠数量。
 @export_range(0, 999999, 1) var value: int = VALUE_PER_MODIFIER
 ## 强化方向词典；键为统一属性名，值只使用 +1 或 -1，旧存档百分比会按正负号自动归一化。
+## 特化品质补充：弹射、连击、穿透和散射可保存 +2，其他词条仍严格只使用方向。
 @export var modifiers: Dictionary = {}
 
 
@@ -48,7 +51,9 @@ func get_stack_signature() -> String:
 		# 词条百分比；按 0.01 精度序列化，只有品质、属性和数值都一致时才能堆叠。
 		var modifier_ratio: float = float(normalized_modifiers.get(modifier_key, 0.0))
 		# 方向化堆叠签名；同品质、同属性、同方向的强化石合并，使用时再各自随机实际幅度。
-		signature_parts.append("%s=%d" % [modifier_key, EnhancementRules.normalize_direction(modifier_ratio)])
+		# 特化离散签名；+1 与稀有 +2 是生成时已确定的不同物品，必须分组堆叠。
+		var signature_value: int = roundi(modifier_ratio) if get_resolved_quality_id() == EnhancementRules.QUALITY_SPECIALIZED and modifier_key in EnhancementRules.SPECIALIZATION_WEAPON_BENEFICIAL_STAT_KEYS else EnhancementRules.normalize_direction(modifier_ratio)
+		signature_parts.append("%s=%d" % [modifier_key, signature_value])
 	return "|".join(signature_parts)
 
 
@@ -75,6 +80,9 @@ func get_applicable_modifiers_for_target(target_resource: Resource) -> Dictionar
 	var normalized_modifiers: Dictionary = get_normalized_modifiers()
 	if normalized_modifiers.is_empty():
 		return applicable_modifiers
+	# 特化武器目标限制；四项正向机制只能由远程或混合攻击通道执行，纯近战武器不能只消费其负面词条。
+	if get_resolved_quality_id() == EnhancementRules.QUALITY_SPECIALIZED and not target_is_equipment and str(target_resource.get("weapon_type")) not in ["ranged", "hybrid"]:
+		return applicable_modifiers
 	if target_resource.has_method("can_apply_enhancement"):
 		for raw_stat_name in normalized_modifiers.keys():
 			# 单属性候选；逐条查询目标能力，保证部分兼容强化石不会因其他无关词条被整体拒绝。
@@ -91,7 +99,9 @@ func get_applicable_modifiers_for_target(target_resource: Resource) -> Dictionar
 
 
 func get_normalized_modifiers() -> Dictionary:
-	return EnhancementRules.normalize_modifiers(modifiers)
+	# 特化品质允许保留离散 +1/+2；其他品质仍按旧存档迁移规则移除这四类词条。
+	var allow_specialization_stats: bool = get_resolved_quality_id() == EnhancementRules.QUALITY_SPECIALIZED
+	return EnhancementRules.normalize_modifiers(modifiers, allow_specialization_stats)
 
 
 func get_resolved_quality_id() -> String:
@@ -164,7 +174,11 @@ static func create_random(random_source: RandomNumberGenerator, minimum_modifier
 	# 实际词条数；在配置范围内等概率随机。
 	var modifier_count: int = resolved_minimum_count
 	# 随机品质；按 40% 低级、30% 中级、20% 高级、10% 极品的权重抽取。
+	# 特化品质补充；现行完整分布将普通四品质按原比例缩放到 97%，并独立分配 3% 给特化。
 	var generated_quality_id: String = EnhancementRules.roll_quality(random_source)
+	# 特化品质生成；该分支使用独立的增强与削弱属性池，不继承普通品质的额外词条规则。
+	if generated_quality_id == EnhancementRules.QUALITY_SPECIALIZED:
+		return _create_random_specialization(random_source, base_value, requested_target_kind)
 	# 品质配置；包含额外增强概率、削弱概率和两类词条幅度区间。
 	var quality_config: Dictionary = EnhancementRules.get_quality_config(generated_quality_id)
 	# 额外增强抽取结果；每颗石头只抽取一次，中级、高级和极品分别使用 10%、20%、30% 概率。
@@ -217,25 +231,28 @@ static func create_random(random_source: RandomNumberGenerator, minimum_modifier
 static func create_custom(quality: String, requested_target_kind: String, beneficial_stat_name_one: String, beneficial_stat_name_two: String = "", detrimental_stat_name: String = "", base_value: int = VALUE_PER_MODIFIER) -> EnhancementStoneData:
 	## 创建由开发者明确指定品质和词条方向的强化石；空的第二增强或削弱词条会被忽略，重复或不属于目标类型的词条不会写入资源。
 	# 实际品质；仅接受规则目录中的四种稳定标识，异常输入安全回退初级。
+	# 特化品质补充；规则目录现同时接受 specialized，该品质自定义固定为 +1 且只保留第一增强词条。
 	var resolved_quality: String = quality if quality in EnhancementRules.QUALITY_ORDER else EnhancementRules.QUALITY_LOW
 	# 实际适用类型；武器与装备必须使用各自的属性池，异常输入统一回退武器。
 	var resolved_target_kind: String = requested_target_kind if requested_target_kind in ["weapon", "equipment"] else "weapon"
 	# 可选属性池；只允许写入可被目标类型实际应用的属性，避免生成无法使用的开发者物品。
-	var supported_stat_names: Array[String] = EnhancementRules.WEAPON_STAT_KEYS if resolved_target_kind == "weapon" else EnhancementRules.EQUIPMENT_STAT_KEYS
+	var supported_stat_names: Array[String] = EnhancementRules.get_beneficial_stat_keys_for_quality(resolved_quality, resolved_target_kind)
+	# 可选削弱属性池；特化品质使用与增强词条分离的普通武器属性集合。
+	var supported_detrimental_stat_names: Array[String] = EnhancementRules.get_detrimental_stat_keys_for_quality(resolved_quality, resolved_target_kind)
 	# 自定义方向词典；键为属性名，值为与属性收益方向一致或相反的实际方向标识。
 	var custom_modifiers: Dictionary = {}
 	# 第一条加强属性；属于必填项，缺失或不兼容时无法生成强化石。
 	var resolved_beneficial_one: String = EnhancementRules.canonicalize_stat_name(beneficial_stat_name_one)
 	if resolved_beneficial_one.is_empty() or not (resolved_beneficial_one in supported_stat_names):
 		return null
-	custom_modifiers[resolved_beneficial_one] = EnhancementRules.get_beneficial_direction(resolved_beneficial_one)
+	custom_modifiers[resolved_beneficial_one] = 1 if resolved_quality == EnhancementRules.QUALITY_SPECIALIZED else EnhancementRules.get_beneficial_direction(resolved_beneficial_one)
 	# 第二条加强属性；为空、重复或不兼容时直接忽略，保证第一条配置仍可正常生成。
 	var resolved_beneficial_two: String = EnhancementRules.canonicalize_stat_name(beneficial_stat_name_two)
-	if not resolved_beneficial_two.is_empty() and resolved_beneficial_two in supported_stat_names and not custom_modifiers.has(resolved_beneficial_two):
+	if resolved_quality != EnhancementRules.QUALITY_SPECIALIZED and not resolved_beneficial_two.is_empty() and resolved_beneficial_two in supported_stat_names and not custom_modifiers.has(resolved_beneficial_two):
 		custom_modifiers[resolved_beneficial_two] = EnhancementRules.get_beneficial_direction(resolved_beneficial_two)
 	# 削弱属性；使用对应收益方向的反向值，重复或不兼容时忽略，避免同一属性同时出现正负词条。
 	var resolved_detrimental_stat: String = EnhancementRules.canonicalize_stat_name(detrimental_stat_name)
-	if not resolved_detrimental_stat.is_empty() and resolved_detrimental_stat in supported_stat_names and not custom_modifiers.has(resolved_detrimental_stat):
+	if not resolved_detrimental_stat.is_empty() and resolved_detrimental_stat in supported_detrimental_stat_names and not custom_modifiers.has(resolved_detrimental_stat):
 		custom_modifiers[resolved_detrimental_stat] = -EnhancementRules.get_beneficial_direction(resolved_detrimental_stat)
 
 	# 自定义强化石资源；与随机石共用品质、名称、堆叠、价值和使用时幅度规则，避免形成第二套强化结算。
@@ -246,6 +263,40 @@ static func create_custom(quality: String, requested_target_kind: String, benefi
 	enhancement_stone.description = "开发者自定义：用于强化%s，词条方向将按所选品质的正式规则结算。" % ("装备" if resolved_target_kind == "equipment" else "武器")
 	enhancement_stone.value = maxi(base_value, 0) * custom_modifiers.size()
 	enhancement_stone.modifiers = custom_modifiers
+	return enhancement_stone
+
+
+static func _create_random_specialization(random_source: RandomNumberGenerator, base_value: int, requested_target_kind: String) -> EnhancementStoneData:
+	## 创建一颗特化强化石；正向离散机制在生成时确定，负向普通属性只保存方向并在使用时按初级幅度抽取。
+	# 实际目标类型；当前装备特化池为空，普通随机来源固定生成可用的武器特化石，显式请求装备时则拒绝生成空石。
+	var generated_target_kind: String = requested_target_kind if requested_target_kind in ["weapon", "equipment"] else "weapon"
+	# 特化增强属性池；当前武器池含四项，装备池为空时直接返回 null。
+	var beneficial_stats: Array[String] = EnhancementRules.get_beneficial_stat_keys_for_quality(EnhancementRules.QUALITY_SPECIALIZED, generated_target_kind)
+	if beneficial_stats.is_empty():
+		return null
+	# 特化增强属性；四项武器机制等概率抽取，同一颗只会出现一项。
+	var beneficial_stat_name: String = beneficial_stats[random_source.randi_range(0, beneficial_stats.size() - 1)]
+	# 特化增强点数；99.99% 为 +1，0.01% 为 +2，结果写入资源以供显示、堆叠和存档。
+	var beneficial_magnitude: int = EnhancementRules.roll_specialization_beneficial_magnitude(random_source)
+	# 特化词条；正向词条必定存在，负向词条通过同一字典附加。
+	var generated_modifiers: Dictionary = {beneficial_stat_name: beneficial_magnitude}
+	# 是否附带削弱；每颗特化石独立按品质配置的 50% 概率判定一次。
+	var has_detrimental_modifier: bool = random_source.randf() < float(EnhancementRules.get_quality_config(EnhancementRules.QUALITY_SPECIALIZED).get("detrimental_chance", 0.50))
+	# 特化削弱属性池；当前只有武器负面属性，保留空池检查便于未来独立扩展装备特化。
+	var detrimental_stats: Array[String] = EnhancementRules.get_detrimental_stat_keys_for_quality(EnhancementRules.QUALITY_SPECIALIZED, generated_target_kind)
+	if has_detrimental_modifier and not detrimental_stats.is_empty():
+		# 特化削弱属性；属性池内等概率抽取一项，方向固定与该属性的玩法增强相反。
+		var detrimental_stat_name: String = detrimental_stats[random_source.randi_range(0, detrimental_stats.size() - 1)]
+		generated_modifiers[detrimental_stat_name] = -EnhancementRules.get_beneficial_direction(detrimental_stat_name)
+
+	# 特化强化石资源；价值仍按每条 30 金币结算，不因 +2 稀有强度额外增值。
+	var enhancement_stone: EnhancementStoneData = EnhancementStoneData.new()
+	enhancement_stone.quality_id = EnhancementRules.QUALITY_SPECIALIZED
+	enhancement_stone.target_kind = generated_target_kind
+	enhancement_stone.display_name = _build_display_name(EnhancementRules.QUALITY_SPECIALIZED, generated_target_kind)
+	enhancement_stone.description = "用于特化%s，离散强化点数与负面属性会永久累计到对应目标。" % ("装备" if generated_target_kind == "equipment" else "武器")
+	enhancement_stone.value = maxi(base_value * generated_modifiers.size(), 0)
+	enhancement_stone.modifiers = generated_modifiers
 	return enhancement_stone
 
 

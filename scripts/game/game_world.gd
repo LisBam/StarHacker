@@ -1967,14 +1967,16 @@ func _get_random_chest_equipment(high_quality: bool) -> Resource:
 
 func _get_random_chest_stone(high_quality: bool) -> Resource:
 	# 高品质强化石；最多尝试 12 次抽取高级或极品，确保保底物品确实进入高品质池。
+	# 特化品质补充；特化强化石同样属于高品质产出，命中时直接满足宝箱高品质判定。
 	var selected_stone: EnhancementStoneData
 	for _attempt_index in range(12 if high_quality else 1):
 		selected_stone = _create_random_enhancement_stone()
 		if selected_stone == null or not high_quality:
 			break
 		# 当前强化石品质；高级或极品即可满足高品质池要求。
+		# 特化品质补充；特化与高级、极品共同纳入宝箱高品质识别列表。
 		var stone_quality_id: String = selected_stone.get_resolved_quality_id()
-		if stone_quality_id in [EnhancementRules.QUALITY_HIGH, EnhancementRules.QUALITY_SUPREME]:
+		if stone_quality_id in [EnhancementRules.QUALITY_HIGH, EnhancementRules.QUALITY_SUPREME, EnhancementRules.QUALITY_SPECIALIZED]:
 			return selected_stone
 	if high_quality and selected_stone != null:
 		# 极小概率连续未命中时强制提升到高级，保留已生成词条方向并更新统一品质名称。

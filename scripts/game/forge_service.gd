@@ -20,6 +20,7 @@ const STONE_QUALITY_COSTS: Dictionary = {
 	EnhancementRules.QUALITY_MEDIUM: 5,
 	EnhancementRules.QUALITY_HIGH: 10,
 	EnhancementRules.QUALITY_SUPREME: 20,
+	EnhancementRules.QUALITY_SPECIALIZED: 20,
 }
 ## 强化石升阶单槽成功率；默认每颗同品质牺牲石提供 20%，五个槽全部放满时达到 100%。
 const STONE_UPGRADE_SUCCESS_RATE_PER_SACRIFICE: float = 0.20
@@ -55,6 +56,7 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 	# 实际预计恢复耐久；默认 0，按牺牲槽顺序累加并限制到缺失耐久。
 	var durability_restored: float = 0.0
 	# 强化石基础费用；按低级 2、中级 5、高级 10、极品 20 累加。
+	# 特化品质补充：特化强化石按 20 金币基础费用累加。
 	var stone_base_cost: int = 0
 	# 有效强化石数量；只统计至少有一条可用于主武器的强化石。
 	var compatible_stone_count: int = 0

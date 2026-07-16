@@ -151,7 +151,7 @@ static func _matches_stone_attribute(entry: Dictionary, stone_attribute: Variant
 	if item_resource == null or str(item_resource.get("item_kind")) != "enhancement_stone":
 		return false
 	# 归一化强化词典；旧百分比存档也能按属性键正确筛选。
-	var modifiers: Dictionary = EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary)
+	var modifiers: Dictionary = item_resource.call("get_normalized_modifiers") as Dictionary if item_resource.has_method("get_normalized_modifiers") else EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary, str(item_resource.get("quality_id")) == EnhancementRules.QUALITY_SPECIALIZED)
 	for stone_attribute_filter in stone_attribute_filters:
 		# 筛选键分段；新版键为“属性:方向”，旧版纯属性键继续匹配该属性的任意方向。
 		var filter_parts: PackedStringArray = stone_attribute_filter.split(STONE_ATTRIBUTE_DIRECTION_SEPARATOR, false, 1)
@@ -240,7 +240,7 @@ static func _build_search_text(entry: Dictionary) -> String:
 		search_parts.append("资源 强化石" if str(item_resource.get("item_kind")) == "enhancement_stone" else ("资源 道具 修复包" if str(item_resource.get("item_kind")) == "repair_kit" else ("资源 道具 消耗品" if str(item_resource.get("item_kind")) == "consumable" else ("装备 头部 躯干 腿部 脚部" if str(item_resource.get("item_kind")) == "equipment" else "资源"))))
 	if str(item_resource.get("item_kind")) == "enhancement_stone":
 		# 强化词典；将“伤害+”“冷却+”等可见词条加入搜索内容。
-		var modifiers: Dictionary = EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary)
+		var modifiers: Dictionary = item_resource.call("get_normalized_modifiers") as Dictionary if item_resource.has_method("get_normalized_modifiers") else EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary, str(item_resource.get("quality_id")) == EnhancementRules.QUALITY_SPECIALIZED)
 		for stat_name in EnhancementRules.STAT_KEYS:
 			if modifiers.has(stat_name):
 				search_parts.append(EnhancementRules.build_modifier_token(stat_name, modifiers.get(stat_name, 0.0)))

@@ -30,14 +30,19 @@ const QUALITY_MEDIUM: String = "medium"
 const QUALITY_HIGH: String = "high"
 ## 极品强化石稳定标识；用于随机权重、存档和堆叠签名，不应在运行时修改。
 const QUALITY_SUPREME: String = "supreme"
+## 特化强化石稳定标识；该品质使用独立属性池，不参与普通品质升阶路径。
+const QUALITY_SPECIALIZED: String = "specialized"
 ## 品质抽取顺序；与权重表共同构成 40%/30%/20%/10% 的完整分布。
-const QUALITY_ORDER: Array[String] = [QUALITY_LOW, QUALITY_MEDIUM, QUALITY_HIGH, QUALITY_SUPREME]
+## 特化品质补充；普通四品质保留 40:30:20:10 内部比例，特化品质独立占 3%。
+const QUALITY_ORDER: Array[String] = [QUALITY_LOW, QUALITY_MEDIUM, QUALITY_HIGH, QUALITY_SUPREME, QUALITY_SPECIALIZED]
 ## 品质随机权重；总和为 1.0，调整任意值会直接改变怪物掉落品质分布。
+## 特化品质补充；特化占 3%，其余 97% 按原普通品质比例分配。
 const QUALITY_WEIGHTS: Dictionary = {
-	QUALITY_LOW: 0.40,
-	QUALITY_MEDIUM: 0.30,
-	QUALITY_HIGH: 0.20,
-	QUALITY_SUPREME: 0.10,
+	QUALITY_LOW: 0.388,
+	QUALITY_MEDIUM: 0.291,
+	QUALITY_HIGH: 0.194,
+	QUALITY_SUPREME: 0.097,
+	QUALITY_SPECIALIZED: 0.030,
 }
 ## 品质中文名称；用于掉落物、背包、仓库和结算界面的统一显示。
 const QUALITY_DISPLAY_NAMES: Dictionary = {
@@ -45,6 +50,7 @@ const QUALITY_DISPLAY_NAMES: Dictionary = {
 	QUALITY_MEDIUM: "中级强化石",
 	QUALITY_HIGH: "高级强化石",
 	QUALITY_SUPREME: "极品强化石",
+	QUALITY_SPECIALIZED: "特化强化石",
 }
 ## 强化石升阶映射；初级依次升为中级、高级和极品，极品没有下一品质并禁止继续升阶。
 const QUALITY_UPGRADE_PATH: Dictionary = {
@@ -54,11 +60,13 @@ const QUALITY_UPGRADE_PATH: Dictionary = {
 }
 ## 品质数值配置；百分比使用 0 到 1 小数，额外增强和削弱均最多追加一条不重复属性。
 ## 幅度配置补充：本表中的历史 min/max 键仅保留扩展兼容，现行随机幅度读取 MULTIPLICATIVE_MAGNITUDE_RANGES 或 ADDITIVE_POINT_MAGNITUDE_RANGES。
+## 特化品质补充：特化增强点数独立生成并写入资源，本表只提供固定一条增强与 50% 负面词条概率。
 const QUALITY_CONFIGS: Dictionary = {
 	QUALITY_LOW: {"extra_beneficial_chance": 0.0, "detrimental_chance": 0.80, "beneficial_min": 0.10, "beneficial_max": 0.20, "detrimental_min": 0.10, "detrimental_max": 0.20},
 	QUALITY_MEDIUM: {"extra_beneficial_chance": 0.10, "detrimental_chance": 0.40, "beneficial_min": 0.20, "beneficial_max": 0.40, "detrimental_min": 0.05, "detrimental_max": 0.20},
 	QUALITY_HIGH: {"extra_beneficial_chance": 0.20, "detrimental_chance": 0.10, "beneficial_min": 0.30, "beneficial_max": 0.50, "detrimental_min": 0.05, "detrimental_max": 0.10},
 	QUALITY_SUPREME: {"extra_beneficial_chance": 0.30, "detrimental_chance": 0.0, "beneficial_min": 0.40, "beneficial_max": 0.60, "detrimental_min": 0.0, "detrimental_max": 0.0},
+	QUALITY_SPECIALIZED: {"extra_beneficial_chance": 0.0, "detrimental_chance": 0.50, "beneficial_min": 1.0, "beneficial_max": 2.0, "detrimental_min": 0.0, "detrimental_max": 0.0},
 }
 ## 乘算属性的幅度组归属；新增乘算属性时必须在此登记，避免回退到错误的共享品质区间。
 const MULTIPLICATIVE_STAT_GROUPS: Dictionary = {
@@ -99,9 +107,11 @@ const ADDITIVE_VALUE_STATS: Dictionary = {
 const RARE_STAT_RELATIVE_WEIGHT: float = 0.20
 ## 稀有属性目录；强化石、商店历史强化和其他复用随机生成器的系统统一读取该集合。
 ## 武器离散机制不再进入强化石池，因此当前只有移速、视野和能量恢复使用五分之一生成权重。
+## 特化品质补充：四项武器离散机制只进入等概率特化池，不经过普通词条稀有权重。
 const RARE_STAT_KEYS: Array[String] = ["move_speed", "vision_range", "energy_regeneration"]
 ## 加算数值属性独立幅度；能量恢复严格使用品质区间，武器离散计数每次固定改变 1。
 ## 离散计数配置仅保留旧武器累计强化与历史直接调用兼容；正式强化石属性池不会再生成这些词条。
+## 特化品质补充：离散词条通过特化分支直接保存 +1/+2，不使用本表的普通品质幅度。
 const ADDITIVE_VALUE_MAGNITUDE_RANGES: Dictionary = {
 	"scatter_count": {
 		QUALITY_LOW: {"beneficial_min": 1.0, "beneficial_max": 1.0, "detrimental_min": 1.0, "detrimental_max": 1.0},
@@ -284,6 +294,8 @@ const MULTIPLICATIVE_ROLL_STEP: float = 0.001
 const ADDITIVE_POINT_ROLL_STEP: float = 0.001
 ## 能量恢复强化随机步长；固定为 0.1 点，离散武器计数属性仍沿用整数步长。
 const ENERGY_REGENERATION_ROLL_STEP: float = 0.1
+## 特化强化石出现 +2 增强的概率；0.0001 对应每颗特化石独立 0.01% 概率，生成时确定且后续不重抽。
+const SPECIALIZATION_DOUBLE_BENEFICIAL_CHANCE: float = 0.0001
 ## 暴击率最终上限；1.0 表示 100%，武器与装备的有效属性统一应用该限制。
 const CRITICAL_CHANCE_MAXIMUM: float = 1.0
 ## 闪避率最终上限；0.60 表示 60%，单件装备和装备聚合结果均不得超过该值。
@@ -305,6 +317,10 @@ const STAT_KEYS: Array[String] = [
 	"front_recoil_force",
 	"impact_force",
 	"melee_active_duration",
+	"bounce_count",
+	"combo_count",
+	"piercing_count",
+	"scatter_count",
 	"critical_chance",
 	"critical_damage",
 	"max_durability",
@@ -320,9 +336,18 @@ const STAT_KEYS: Array[String] = [
 ]
 ## 武器强化石属性池；只包含武器能够应用的属性。
 ## 散射、穿透、弹射和连击保留为武器基础机制，但不再作为强化石词条生成或出现在开发者自定义列表。
+## 特化品质补充：本常规池仍不包含四项离散机制，特化强化石只读取下方独立属性池。
 const WEAPON_STAT_KEYS: Array[String] = ["damage", "cooldown", "energy_consumption", "attack_distance", "projectile_speed", "deviation_degrees", "recoil_force", "front_recoil_force", "impact_force", "melee_active_duration", "critical_chance", "critical_damage", "max_durability"]
 ## 装备强化石属性池；冷却缩减仅腿部、移速仅脚部、视野仅头部、能量恢复仅躯干可应用。
 const EQUIPMENT_STAT_KEYS: Array[String] = ["max_durability", "attack_power", "defense_power", "max_health", "health_regeneration_per_five_seconds", "dodge_chance", "cooldown_reduction", "move_speed", "vision_range", "energy_regeneration"]
+## 武器特化强化石增强属性池；每颗只从弹射、连击、穿透和散射中等概率抽取一项。
+const SPECIALIZATION_WEAPON_BENEFICIAL_STAT_KEYS: Array[String] = ["bounce_count", "combo_count", "piercing_count", "scatter_count"]
+## 武器特化强化石削弱属性池；每颗最多附带一条，幅度统一复用初级强化石的对应属性区间。
+const SPECIALIZATION_WEAPON_DETRIMENTAL_STAT_KEYS: Array[String] = ["damage", "cooldown", "energy_consumption", "projectile_speed", "attack_distance", "deviation_degrees", "recoil_force", "front_recoil_force", "impact_force", "critical_chance", "critical_damage", "max_durability"]
+## 装备特化强化石增强属性池；当前为空，后续新增装备特化机制时只需在此登记。
+const SPECIALIZATION_EQUIPMENT_BENEFICIAL_STAT_KEYS: Array[String] = []
+## 装备特化强化石削弱属性池；当前为空，因此不会生成无词条的装备特化石。
+const SPECIALIZATION_EQUIPMENT_DETRIMENTAL_STAT_KEYS: Array[String] = []
 ## 属性中文名称；键为统一属性名，值用于强化石、搜索、筛选和武器详情。
 const STAT_LABELS: Dictionary = {
 	"damage": "伤害",
@@ -512,13 +537,22 @@ static func convert_legacy_enhancement_modifiers(modifiers: Dictionary, base_val
 	return converted_modifiers
 
 
-static func normalize_modifiers(modifiers: Dictionary) -> Dictionary:
+static func normalize_modifiers(modifiers: Dictionary, allow_specialization_stats: bool = false) -> Dictionary:
 	# 归一化词典；只保留规则目录已登记属性，并将旧百分比值转换为 +1 或 -1。
+	# 特化品质补充；特化强化石额外保留离散词条的 +1/+2 强度，普通品质仍清理这些历史词条。
 	var normalized_modifiers: Dictionary = {}
 	# 已迁移词典；旧偏移属性键先转换为现行键，保证历史强化石不会丢失词条。
 	var migrated_modifiers: Dictionary = migrate_stat_aliases(modifiers)
 	for stat_name in STAT_KEYS:
 		if migrated_modifiers.has(stat_name):
+			if stat_name in SPECIALIZATION_WEAPON_BENEFICIAL_STAT_KEYS:
+				if not allow_specialization_stats:
+					continue
+				# 特化离散强度；非零值限制到 1 或 2，既能保存稀有 +2，也能拒绝异常超大存档数值。
+				var specialization_magnitude: int = clampi(roundi(absf(float(migrated_modifiers.get(stat_name, 0.0)))), 1, 2)
+				if not is_zero_approx(float(migrated_modifiers.get(stat_name, 0.0))):
+					normalized_modifiers[stat_name] = specialization_magnitude * normalize_direction(migrated_modifiers.get(stat_name, 0.0))
+				continue
 			# 实际词条比例；保留品质随机的幅度，同时忽略无效的 0% 词条。
 			var modifier_ratio: float = normalize_modifier_ratio(migrated_modifiers.get(stat_name, 0.0))
 			if not is_zero_approx(modifier_ratio):
@@ -533,6 +567,9 @@ static func build_modifier_token(stat_name: String, direction: Variant, include_
 	var modifier_ratio: float = normalize_modifier_ratio(direction)
 	# 方向文本；搜索可使用不带百分比版本，物品详情默认展示完整数值。
 	var direction_text: String = "%s%s" % [get_stat_label(stat_name), get_direction_symbol(normalize_direction(modifier_ratio))]
+	if stat_name in SPECIALIZATION_WEAPON_BENEFICIAL_STAT_KEYS:
+		# 特化离散词条在生成时已确定强度，卡片、详情和搜索文本都必须明确显示 +1 或 +2。
+		return "%s%d" % [direction_text, clampi(roundi(absf(float(direction))), 1, 2)]
 	if not include_percentage:
 		return direction_text
 	# 可见幅度；加算属性与乘算属性都保留 0.1 精度，避免一级属性的小数百分比被显示为 0%。
@@ -548,10 +585,19 @@ static func roll_quality_modifier_ratio(random_source: RandomNumberGenerator, qu
 		return 0.0
 	# 方向化词条；资源只保存正负方向，实际强化幅度在每次使用时根据品质重新抽取。
 	var modifier_direction: int = normalize_direction(direction)
-	# 品质配置；增强和削弱分别使用各品质独立区间，保证低级、中级、高级和极品的幅度差异集中维护。
-	var quality_config: Dictionary = get_stat_magnitude_config(stat_name, quality_id)
 	# 是否为玩法增强；冷却、偏移和后坐力的负方向仍属于增强，不按数值正负误判收益。
 	var beneficial: bool = is_direction_beneficial(stat_name, modifier_direction)
+	if quality_id == QUALITY_SPECIALIZED:
+		if beneficial and stat_name in SPECIALIZATION_WEAPON_BENEFICIAL_STAT_KEYS:
+			# 特化增强点数；直接使用资源已保存的 +1/+2，消耗时不再改变稀有结果。
+			return float(clampi(roundi(absf(float(direction))), 1, 2) * modifier_direction)
+		if beneficial or stat_name not in SPECIALIZATION_WEAPON_DETRIMENTAL_STAT_KEYS:
+			return 0.0
+	# 幅度品质；特化削弱明确复用初级区间，其他品质使用自身区间。
+	var magnitude_quality_id: String = QUALITY_LOW if quality_id == QUALITY_SPECIALIZED else quality_id
+	# 品质配置；增强和削弱分别使用各品质独立区间，保证低级、中级、高级和极品的幅度差异集中维护。
+	# 特化品质补充；只有负面词条进入本随机流程，并显式把幅度品质映射为初级。
+	var quality_config: Dictionary = get_stat_magnitude_config(stat_name, magnitude_quality_id)
 	# 最小随机比例；由属性公式与幅度组共同决定，不再读取所有属性共用的品质区间。
 	var minimum_ratio: float = float(quality_config.get("beneficial_min" if beneficial else "detrimental_min", 0.0))
 	# 最大随机比例；与最小值共同形成闭区间抽取范围。
@@ -603,10 +649,32 @@ static func get_quality_config(quality_id: String) -> Dictionary:
 	return quality_config.duplicate(true)
 
 
+static func get_beneficial_stat_keys_for_quality(quality_id: String, target_kind: String) -> Array[String]:
+	## 返回指定品质与目标类型的增强属性池；返回副本保证随机器移除元素时不会改写全局配置。
+	if quality_id == QUALITY_SPECIALIZED:
+		return (SPECIALIZATION_EQUIPMENT_BENEFICIAL_STAT_KEYS if target_kind == "equipment" else SPECIALIZATION_WEAPON_BENEFICIAL_STAT_KEYS).duplicate()
+	return (EQUIPMENT_STAT_KEYS if target_kind == "equipment" else WEAPON_STAT_KEYS).duplicate()
+
+
+static func get_detrimental_stat_keys_for_quality(quality_id: String, target_kind: String) -> Array[String]:
+	## 返回指定品质与目标类型的削弱属性池；特化属性池与增强池独立，普通品质仍复用同一目标属性池。
+	if quality_id == QUALITY_SPECIALIZED:
+		return (SPECIALIZATION_EQUIPMENT_DETRIMENTAL_STAT_KEYS if target_kind == "equipment" else SPECIALIZATION_WEAPON_DETRIMENTAL_STAT_KEYS).duplicate()
+	return (EQUIPMENT_STAT_KEYS if target_kind == "equipment" else WEAPON_STAT_KEYS).duplicate()
+
+
+static func roll_specialization_beneficial_magnitude(random_source: RandomNumberGenerator) -> int:
+	## 生成特化增强点数；默认 +1，仅在独立 0.01% 判定成功时返回 +2。
+	if random_source == null:
+		return 1
+	return 2 if random_source.randf() < SPECIALIZATION_DOUBLE_BENEFICIAL_CHANCE else 1
+
+
 static func roll_quality(random_source: RandomNumberGenerator) -> String:
 	if random_source == null:
 		return QUALITY_LOW
 	# 品质随机值；取值 [0, 1)，依次落入 40%/30%/20%/10% 累计区间。
+	# 特化品质补充；现行权重先将普通四品质缩放到 97%，再把最后 3% 累计区间分配给特化。
 	var quality_roll: float = random_source.randf()
 	# 累计权重；从 0 递增到 1，用于将随机值映射到稳定品质。
 	var cumulative_weight: float = 0.0
@@ -614,4 +682,4 @@ static func roll_quality(random_source: RandomNumberGenerator) -> String:
 		cumulative_weight += float(QUALITY_WEIGHTS.get(quality_id, 0.0))
 		if quality_roll < cumulative_weight:
 			return quality_id
-	return QUALITY_SUPREME
+	return QUALITY_SPECIALIZED

@@ -46,10 +46,8 @@ var _gray_channel_button: Button
 var _coins_label: Label
 ## 自动刷新倒计时标签；每秒显示距离下次十分钟刷新剩余时间。
 var _refresh_countdown_label: Label
-## 手动刷新按钮；固定只显示“刷新”，费用由右侧独立标签展示。
+## 手动刷新按钮；直接显示当前费用，格式固定为“刷新（xx星穹）”。
 var _manual_refresh_button: Button
-## 手动刷新费用标签；固定显示在刷新按钮右侧，并随当前连续刷新费用即时更新。
-var _manual_refresh_cost_label: Label
 ## 状态提示标签；用于显示刷新成功、星穹不足或购买结果。
 var _status_label: Label
 ## 搜索输入框；按商品名称、说明、分类和强化词条实时过滤。
@@ -171,15 +169,10 @@ func _build_interface() -> void:
 	_refresh_countdown_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	refresh_bar.add_child(_refresh_countdown_label)
 	_manual_refresh_button = Button.new()
-	_manual_refresh_button.text = "刷新"
-	_manual_refresh_button.custom_minimum_size = Vector2(112.0, 36.0)
+	_manual_refresh_button.text = "刷新（--星穹）"
+	_manual_refresh_button.custom_minimum_size = Vector2(180.0, 36.0)
 	_manual_refresh_button.pressed.connect(_on_manual_refresh_pressed)
 	refresh_bar.add_child(_manual_refresh_button)
-	_manual_refresh_cost_label = Label.new()
-	_manual_refresh_cost_label.custom_minimum_size = Vector2(100.0, 36.0)
-	_manual_refresh_cost_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_manual_refresh_cost_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.WARNING_COLOR)
-	refresh_bar.add_child(_manual_refresh_cost_label)
 	# 查询栏；关键词和强化属性方向筛选与仓库规则保持一致。
 	var query_bar: HBoxContainer = HBoxContainer.new()
 	query_bar.add_theme_constant_override("separation", 8)
@@ -353,8 +346,7 @@ func _refresh_header() -> void:
 	_coins_label.text = "星穹：%d" % int(_global_inventory.call("get_coins")) if _global_inventory != null else "星穹：不可用"
 	if _shop_service == null:
 		_refresh_countdown_label.text = "自动刷新：不可用"
-		_manual_refresh_button.text = "刷新"
-		_manual_refresh_cost_label.text = "--星穹"
+		_manual_refresh_button.text = "刷新（--星穹）"
 		_manual_refresh_button.disabled = true
 		return
 	# 剩余秒数；格式化为分秒，达到 0 时 ShopService 会立即完成自动刷新。
@@ -366,8 +358,7 @@ func _refresh_header() -> void:
 	_refresh_countdown_label.text = "自动刷新：%02d:%02d" % [remaining_minutes, remaining_minute_seconds]
 	# 手动刷新费用；每次成功刷新后指数增长，自动刷新后恢复 10 星穹。
 	var manual_cost: int = int(_shop_service.call("get_manual_refresh_cost"))
-	_manual_refresh_button.text = "刷新"
-	_manual_refresh_cost_label.text = "%d星穹" % manual_cost
+	_manual_refresh_button.text = "刷新（%d星穹）" % manual_cost
 	_manual_refresh_button.disabled = _current_channel != CHANNEL_NORMAL
 
 

@@ -60,7 +60,7 @@ func _draw() -> void:
 	for price in _history:
 		minimum_price = minf(minimum_price, price)
 		maximum_price = maxf(maximum_price, price)
-	# 可视价格跨度；至少保留最高价 4% 或 1 金币，避免横盘时折线贴满整个高度。
+	# 可视价格跨度；至少保留最高价 4% 或 1 星穹，避免横盘时折线贴满整个高度。
 	var price_span: float = maxf(maximum_price - minimum_price, maxf(maximum_price * 0.04, 1.0))
 	# 价格区间中点；扩展极小跨度时以真实高低价中心保持图形居中。
 	var middle_price: float = (maximum_price + minimum_price) * 0.5

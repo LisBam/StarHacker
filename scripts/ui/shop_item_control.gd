@@ -2,7 +2,7 @@ extends Button
 class_name ShopItemControl
 
 ## 商店商品控件统一展示商品名称、类型、价格倍率、二手状态和完整物品悬停详情。
-## 控件只发出购买请求，不直接访问金币或修改库存，普通商店与灰市可共同复用。
+## 控件只发出购买请求，不直接访问星穹或修改库存，普通商店与灰市可共同复用。
 
 signal purchase_requested(stock_id: String, failure_group_id: String)
 
@@ -13,7 +13,7 @@ const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.g
 ## 武器耐久条组件；商店武器卡片复用仓库同款底部耐久条，直接反映二手武器状态。
 ## 通用耐久补充：当前实际显示由 ItemCardView 内部按耐久属性决定，装备等非武器耐久物品同样适用。
 const WEAPON_DURABILITY_BAR_SCRIPT: Script = preload("res://scripts/ui/weapon_durability_bar.gd")
-## 商店金币黄色；商品价格统一使用明亮金黄色，便于与普通物品摘要区分。
+## 商店星穹黄色；商品价格统一使用明亮金黄色，便于与普通物品摘要区分。
 const COIN_TEXT_COLOR: String = "#ffd45c"
 
 ## 当前商品资源；配置后用于悬停详情和显示名称，空值时禁用按钮。
@@ -38,7 +38,7 @@ func configure(entry: Dictionary, is_gray_market: bool) -> void:
 	_stock_id = str(entry.get("stock_id", ""))
 	_failure_group_id = str(entry.get("failure_group_id", "")) if is_gray_market else ""
 	_quantity = maxi(int(entry.get("quantity", 1)), 1)
-	# 商品价格；刷新时已经固定倍率，卡片只展示最终购买金币。
+	# 商品价格；刷新时已经固定倍率，卡片只展示最终购买星穹。
 	var purchase_price: int = maxi(int(entry.get("price", 0)), 0)
 	_purchase_price = purchase_price
 	# 价格倍率；保留两位小数用于说明普通商店 1.5 至 3 倍或灰市 4 至 8 倍来源。
@@ -53,13 +53,13 @@ func configure(entry: Dictionary, is_gray_market: bool) -> void:
 	var _is_second_hand: bool = bool(entry.get("second_hand", false))
 	if _is_second_hand:
 		item_name = "【二手】%s" % item_name
-	# 价格显示文本；默认仅显示最终金币，开发者开启调试信息后才公开原价倍率。
+	# 价格显示文本；默认仅显示最终星穹，开发者开启调试信息后才公开原价倍率。
 	var price_text: String = _build_price_text(purchase_price, price_multiplier)
 	# 商品顶部摘要；强化石第一行显示资源类型，第二行继续由通用卡片显示名称。
 	var context_text: String = item_type
-	# 商品第三行摘要；强化石只显示彩色属性，普通商品继续显示金币价格。
+	# 商品第三行摘要；强化石只显示彩色属性，普通商品继续显示星穹价格。
 	var detail_text: String = _build_stone_shop_attribute_text() if _is_enhancement_stone() else price_text
-	# 商品第四行摘要；仅强化石显示独立金币价格，形成类型、名称、属性、金币四行排版。
+	# 商品第四行摘要；仅强化石显示独立星穹价格，形成类型、名称、属性、星穹四行排版。
 	var secondary_detail_text: String = price_text if _is_enhancement_stone() else ""
 	text = ""
 	_ensure_item_card_view()
@@ -106,7 +106,7 @@ func _build_price_text(purchase_price: int, price_multiplier: float) -> String:
 	var debug_settings: Node = get_tree().root.get_node_or_null("DebugSettings")
 	# 是否显示调试倍率；默认 false，仅在开发者菜单明确开启后显示原价计算过程。
 	var show_debug_information: bool = debug_settings != null and debug_settings.has_method("is_debug_information_visible") and bool(debug_settings.call("is_debug_information_visible"))
-	var raw_price_text: String = "%d金币（原价×%.2f）" % [purchase_price, price_multiplier] if show_debug_information else "%d金币" % purchase_price
+	var raw_price_text: String = "%d星穹（原价×%.2f）" % [purchase_price, price_multiplier] if show_debug_information else "%d星穹" % purchase_price
 	return "[color=%s]%s[/color]" % [COIN_TEXT_COLOR, raw_price_text]
 
 

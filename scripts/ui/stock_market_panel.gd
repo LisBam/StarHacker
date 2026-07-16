@@ -2,7 +2,7 @@ extends PanelContainer
 class_name StockMarketPanel
 
 ## 股市面板负责行情展示、数量选择、交易确认和持仓摘要。
-## 行情公式、随机事件、金币与持仓持久化分别由 StockMarketService 和 GlobalInventory 处理。
+## 行情公式、随机事件、星穹与持仓持久化分别由 StockMarketService 和 GlobalInventory 处理。
 
 signal closed
 
@@ -14,7 +14,7 @@ const STOCK_CHART_CONTROL_SCRIPT: Script = preload("res://scripts/ui/stock_chart
 const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
 ## 通用确认弹窗脚本；买入和卖出最终确认统一显示数量、单价、手续费和结算金额。
 const COMMON_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/common_confirmation_dialog.gd")
-## 证券币转账弹窗脚本；负责整数金币充值和整数证券币提现的金额输入与结果预览。
+## 证券币转账弹窗脚本；负责整数星穹充值和整数证券币提现的金额输入与结果预览。
 const SECURITIES_TRANSFER_DIALOG_SCRIPT: Script = preload("res://scripts/ui/securities_transfer_dialog.gd")
 ## 全局窗口样式指南；为股市基准界面补充统一按钮、输入、滚动和内部面板主题。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
@@ -29,7 +29,7 @@ const CARD_SIZE: Vector2 = Vector2(160.0, 72.0)
 
 ## 股市服务；提供行情快照、报价和交易请求，缺失时面板保留关闭能力并禁用交易。
 var _stock_market_service: Node
-## 全局库存服务；提供金币余额和持仓快照，缺失时持仓区显示为空。
+## 全局库存服务；提供星穹余额和持仓快照，缺失时持仓区显示为空。
 var _global_inventory: Node
 ## 当前选中股票标识；默认选择目录中的第一只股票。
 var _selected_stock_id: String = "quantum_arms"
@@ -48,11 +48,11 @@ var _selected_title_label: Label
 var _selected_summary_label: RichTextLabel
 ## 行情折线图；显示最近 30 次刷新价格。
 var _chart: Control
-## 金币余额标签；监听 GlobalInventory.coins_changed 后即时刷新。
+## 星穹余额标签；监听 GlobalInventory.coins_changed 后即时刷新。
 var _coins_label: Label
-## 证券币充值按钮；永久金币不足时禁用，点击后打开整数充值输入窗口。
+## 证券币充值按钮；永久星穹不足时禁用，点击后打开整数充值输入窗口。
 var _deposit_button: Button
-## 证券币提现按钮；余额不足以产生至少 1 金币到账时禁用，点击后打开整数提现输入窗口。
+## 证券币提现按钮；余额不足以产生至少 1 星穹到账时禁用，点击后打开整数提现输入窗口。
 var _withdraw_button: Button
 ## 当前持仓摘要；显示股数、成本价和浮动盈亏。
 var _position_label: RichTextLabel
@@ -200,11 +200,11 @@ func _build_interface() -> void:
 	_coins_label = Label.new()
 	_coins_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	trade_content.add_child(_coins_label)
-	# 证券币兑换按钮行；充值把整数金币 1:1 转入，提现把整数证券币扣费后兑换为整数金币。
+	# 证券币兑换按钮行；充值把整数星穹 1:1 转入，提现把整数证券币扣费后兑换为整数星穹。
 	var securities_transfer_row: HBoxContainer = HBoxContainer.new()
 	securities_transfer_row.add_theme_constant_override("separation", 6)
 	trade_content.add_child(securities_transfer_row)
-	# 充值按钮；没有永久金币时禁用，防止打开无有效金额的输入窗口。
+	# 充值按钮；没有永久星穹时禁用，防止打开无有效金额的输入窗口。
 	_deposit_button = Button.new()
 	_deposit_button.name = "DepositButton"
 	_deposit_button.text = "充值"
@@ -409,7 +409,7 @@ func _refresh_selected_stock() -> void:
 	var quantity: int = int(holding.get("quantity", 0))
 	# 加权平均成本；包含历史买入手续费，用于计算真实浮动盈亏。
 	var average_cost: float = float(holding.get("average_cost", 0.0))
-	# 当前显示价格；保留两位小数用于每秒行情，实际成交仍由服务四舍五入为整数金币。
+	# 当前显示价格；保留两位小数用于每秒行情，实际成交仍由服务四舍五入为整数星穹。
 	# 证券币成交规则；旧整数说明仅保留历史注释兼容，当前价和成交均直接使用两位小数证券币。
 	var current_price: float = float(snapshot.get("price", 0.0))
 	# 浮动盈亏金额；当前市值减持仓总成本，未持仓时为 0。
@@ -419,16 +419,16 @@ func _refresh_selected_stock() -> void:
 	# 盈亏颜色；盈利绿色、亏损红色、持平白色。
 	var profit_color: String = "green" if profit > 0.0 else ("red" if profit < 0.0 else "white")
 	_position_label.text = "持仓 %d 股\n成本 %.2f\n[color=%s]浮盈亏 %+.0f (%+.2f%%)[/color]" % [quantity, average_cost, profit_color, profit, profit_ratio * 100.0]
-	# 当前永久金币；仅用于证券币充值，不再直接参与股票买入结算。
+	# 当前永久星穹；仅用于证券币充值，不再直接参与股票买入结算。
 	var permanent_coins: int = int(_global_inventory.call("get_coins")) if _global_inventory != null else 0
 	# 当前证券币余额；支持两位小数，是股票买卖的唯一结算货币。
 	var securities_balance: float = float(_stock_market_service.call("get_securities_balance")) if _stock_market_service.has_method("get_securities_balance") else 0.0
-	_coins_label.text = "金币：%d\n证券币：%.2f" % [permanent_coins, securities_balance]
+	_coins_label.text = "星穹：%d\n证券币：%.2f" % [permanent_coins, securities_balance]
 	# 充值按钮；按名称读取交易区动态控件，缺失时不影响核心行情显示。
 	if _deposit_button != null:
 		_deposit_button.disabled = permanent_coins <= 0
 	# 提现按钮；只允许提现证券币整数部分，余额不足 1 时禁用。
-	# 最小有效提现额；扣除手续费后必须至少产生 1 个整数金币到账。
+	# 最小有效提现额；扣除手续费后必须至少产生 1 个整数星穹到账。
 	var minimum_withdrawal_amount: int = int(_stock_market_service.call("get_minimum_withdrawal_amount"))
 	if _withdraw_button != null:
 		_withdraw_button.disabled = minimum_withdrawal_amount <= 0 or floori(securities_balance) < minimum_withdrawal_amount
@@ -465,7 +465,7 @@ func _refresh_holdings() -> void:
 		var average_cost: float = float(holding.get("average_cost", 0.0))
 		# 当前遍历最新价格；用于计算持仓市值。
 		var current_price: float = float(snapshot.get("price", 0.0))
-		# 当前遍历浮动盈亏金额；展示为取整金币。
+		# 当前遍历浮动盈亏金额；展示为取整星穹。
 		var profit: float = (current_price - average_cost) * quantity
 		# 当前遍历浮动盈亏比例；零成本时保持 0。
 		var profit_ratio: float = current_price / average_cost - 1.0 if average_cost > 0.0 else 0.0
@@ -523,7 +523,7 @@ func _on_holding_card_hovered(button: Button, hovered: bool) -> void:
 
 
 func _on_buy_pressed() -> void:
-	# 最大可买数量；服务已按当前金币、价格和最低手续费精确校验。
+	# 最大可买数量；服务已按当前星穹、价格和最低手续费精确校验。
 	var maximum_quantity: int = int(_stock_market_service.call("get_maximum_buy_quantity", _selected_stock_id))
 	if maximum_quantity <= 0:
 		return
@@ -539,13 +539,13 @@ func _on_sell_pressed() -> void:
 
 
 func _on_securities_deposit_pressed() -> void:
-	## 打开证券币充值输入；最大金额取当前实时永久金币，最终扣款仍由服务再次复核。
+	## 打开证券币充值输入；最大金额取当前实时永久星穹，最终扣款仍由服务再次复核。
 	if _global_inventory == null or not _global_inventory.has_method("get_coins"):
 		return
-	# 当前可充值金币；永久金币只支持整数，因此输入金额天然满足 1:1 整数兑换要求。
+	# 当前可充值星穹；永久星穹只支持整数，因此输入金额天然满足 1:1 整数兑换要求。
 	var maximum_amount: int = int(_global_inventory.call("get_coins"))
 	if maximum_amount <= 0:
-		_show_event_banner("当前没有可充值的金币")
+		_show_event_banner("当前没有可充值的星穹")
 		return
 	_securities_transfer_dialog.present_deposit(maximum_amount)
 
@@ -556,12 +556,12 @@ func _on_securities_withdrawal_pressed() -> void:
 		return
 	# 当前最大提现整数额；向下取整确保任何证券币小数部分都不会被隐式兑换或丢失。
 	var maximum_amount: int = floori(float(_stock_market_service.call("get_securities_balance")))
-	# 最小有效提现额；默认 0.5% 手续费时为 2 证券币，可确保向下取整后至少到账 1 金币。
+	# 最小有效提现额；默认 0.5% 手续费时为 2 证券币，可确保向下取整后至少到账 1 星穹。
 	var minimum_amount: int = int(_stock_market_service.call("get_minimum_withdrawal_amount"))
 	if minimum_amount <= 0 or maximum_amount < minimum_amount:
 		_show_event_banner("证券币整数余额不足，无法提现")
 		return
-	# 当前提现手续费比例；由服务统一配置，输入弹窗只用于预览到账金币。
+	# 当前提现手续费比例；由服务统一配置，输入弹窗只用于预览到账星穹。
 	var withdrawal_fee_ratio: float = float(_stock_market_service.call("get_withdrawal_fee_ratio"))
 	_securities_transfer_dialog.present_withdrawal(maximum_amount, withdrawal_fee_ratio, minimum_amount)
 
@@ -584,8 +584,8 @@ func _begin_quantity_selection(trade_type: String, maximum_quantity: int) -> voi
 	# 实时交易规则；旧冻结说明仅保留历史注释兼容，当前流程会持续刷新整数展示价并在点击确认时重新取价。
 	var snapshot: Dictionary = _stock_market_service.call("get_stock_snapshot", _pending_stock_id) as Dictionary
 	_pending_unit_price = float(_stock_market_service.call("get_current_price", _pending_stock_id))
-	# 当前永久金币；数量弹窗会在买入模式按实时报价复核所选数量是否仍可支付。
-	# 证券币余额规则；旧永久金币说明仅保留历史注释兼容，股票弹窗只校验独立证券币余额。
+	# 当前永久星穹；数量弹窗会在买入模式按实时报价复核所选数量是否仍可支付。
+	# 证券币余额规则；旧永久星穹说明仅保留历史注释兼容，股票弹窗只校验独立证券币余额。
 	var available_coins: float = float(_stock_market_service.call("get_securities_balance"))
 	# 股票手续费比例；由服务配置提供，确保数量弹窗预览与最终结算使用同一数值来源。
 	var fee_ratio: float = float(_stock_market_service.call("get_stock_trade_fee_ratio"))
@@ -639,8 +639,8 @@ func _refresh_pending_trade_dialog() -> void:
 		return
 	# 当前整数单价；每次市场刷新都覆盖最近展示值，不作为最终成交锁价。
 	_pending_unit_price = float(_stock_market_service.call("get_current_price", _pending_stock_id))
-	# 当前永久金币；买入数量上限和二次确认支付状态都按该余额实时复核。
-	# 证券币余额规则；旧永久金币说明仅保留历史注释兼容，交易弹窗只使用证券币余额。
+	# 当前永久星穹；买入数量上限和二次确认支付状态都按该余额实时复核。
+	# 证券币余额规则；旧永久星穹说明仅保留历史注释兼容，交易弹窗只使用证券币余额。
 	var available_coins: float = float(_stock_market_service.call("get_securities_balance"))
 	if _quantity_dialog != null and _quantity_dialog.visible:
 		# 数量弹窗实时上限；买入按当前价和余额计算，卖出按当前持仓计算。

@@ -18,9 +18,9 @@ const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 const TAB_AVAILABLE: String = "available"
 ## 已持有资产页标识；资产按单台产出从高到低展示并提供出售入口。
 const TAB_OWNED: String = "owned"
-## 充值操作标识；数量弹窗输入整数永久金币并按 1:10000 即时兑换。
+## 充值操作标识；数量弹窗输入整数永久星穹并按 1:10000 即时兑换。
 const ACTION_RECHARGE: String = "recharge"
-## 提现操作标识；数量弹窗输入整数到账金币并实时显示算力币成本和手续费。
+## 提现操作标识；数量弹窗输入整数到账星穹并实时显示算力币成本和手续费。
 const ACTION_WITHDRAW: String = "withdraw"
 ## 出售操作标识；数量弹窗输入资产台数并实时显示 60% 折价返还。
 const ACTION_SELL: String = "sell"
@@ -38,7 +38,7 @@ const ACTION_BUY: String = "buy"
 
 ## 矿场服务缓存；默认读取 Autoload，所有交易和收益快照都经由该服务完成。
 var _service: Node
-## 全局库存服务缓存；只读永久金币余额，用于充值上限和状态栏提示。
+## 全局库存服务缓存；只读永久星穹余额，用于充值上限和状态栏提示。
 var _global_inventory: Node
 ## 当前标签页；默认可购买资产页，切换后只重建中部卡片区。
 var _active_tab: String = TAB_AVAILABLE
@@ -65,7 +65,7 @@ var _pending_quantity: int = 0
 var _balance_label: Label
 ## 具体数值显示开关；位于余额右侧，切换后立即重建全部数值文本和资产卡片。
 var _exact_value_check_box: CheckBox
-## 金币折合文本；固定保留四位小数，帮助玩家判断当前可提现进度。
+## 星穹折合文本；固定保留四位小数，帮助玩家判断当前可提现进度。
 var _gold_equivalent_label: Label
 ## 每秒产出文本；绿色高亮并持续播放轻微呼吸效果。
 var _production_label: Label
@@ -169,7 +169,7 @@ func _build_header(root: VBoxContainer) -> void:
 	header.custom_minimum_size = Vector2(0.0, 100.0)
 	header.add_theme_constant_override("separation", 24)
 	root.add_child(header)
-	# 余额区；大字号余额下方显示四位小数金币折合值。
+	# 余额区；大字号余额下方显示四位小数星穹折合值。
 	var balance_box: VBoxContainer = VBoxContainer.new()
 	balance_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(balance_box)
@@ -270,7 +270,7 @@ func _build_footer(root: VBoxContainer) -> void:
 	rule_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	rule_label.add_theme_font_size_override("font_size", 13)
 	rule_label.add_theme_color_override("font_color", Color(0.68, 0.74, 0.80, 1.0))
-	rule_label.text = "1金币 = 10000算力币  |  提现手续费10%"
+	rule_label.text = "1星穹 = 10000算力币  |  提现手续费10%"
 	operations.add_child(rule_label)
 	var withdraw_button: Button = Button.new()
 	withdraw_button.custom_minimum_size = Vector2(180.0, 42.0)
@@ -310,7 +310,7 @@ func _refresh_balance_text() -> void:
 	# 显示整数余额；动画中先把浮点显示值四舍五入为整数，再进行单位缩写。
 	var display_balance: int = maxi(int(round(_displayed_balance)), 0)
 	_balance_label.text = "%s 算力币" % _format_integer_value(display_balance)
-	_gold_equivalent_label.text = "折合金币：%.4f" % (float(display_balance) / 10000.0)
+	_gold_equivalent_label.text = "折合星穹：%.4f" % (float(display_balance) / 10000.0)
 
 
 func _refresh_production(_unused_value: int = 0) -> void:
@@ -475,21 +475,21 @@ func _open_quantity_dialog(action: String, asset_id: String) -> void:
 	_dialog_asset_id = asset_id
 	_pending_quantity = 0
 	if action == ACTION_RECHARGE:
-		# 最大充值金币；至少允许输入 1，最终仍由服务校验真实余额。
+		# 最大充值星穹；至少允许输入 1，最终仍由服务校验真实余额。
 		var coins: int = int(_global_inventory.call("get_coins")) if _global_inventory != null and _global_inventory.has_method("get_coins") else 0
 		if coins <= 0:
-			_show_message("永久金币不足，无法充值")
+			_show_message("星穹不足，无法充值")
 			_clear_pending_transaction()
 			return
 		_quantity_dialog.present_mining_transaction(ACTION_RECHARGE, "算力币充值", coins, 10000, 0.60, 0.10, _show_exact_values)
 	elif action == ACTION_WITHDRAW:
-		# 最大可提现金币；使用服务精确公式，避免按单金币成本近似造成大额提现上限偏差。
+		# 最大可提现星穹；使用服务精确公式，避免按单星穹成本近似造成大额提现上限偏差。
 		var maximum_gold: int = int(_service.call("get_maximum_withdrawable_gold")) if _service != null and _service.has_method("get_maximum_withdrawable_gold") else 0
 		if maximum_gold <= 0:
-			_show_message("算力币余额不足，最低提现 1 金币")
+			_show_message("算力币余额不足，最低提现 1 星穹")
 			_clear_pending_transaction()
 			return
-		_quantity_dialog.present_mining_transaction(ACTION_WITHDRAW, "永久金币提现", maximum_gold, 10000, 0.60, 0.10, _show_exact_values)
+		_quantity_dialog.present_mining_transaction(ACTION_WITHDRAW, "星穹提现", maximum_gold, 10000, 0.60, 0.10, _show_exact_values)
 	else:
 		# 当前资产定义；数量窗口读取官方单价，确认时服务仍按当前定义重新计算。
 		var definition: Dictionary = _get_asset_definition(asset_id)
@@ -542,7 +542,7 @@ func _confirm_quantity_action() -> void:
 			_pending_startup_asset_id = _dialog_asset_id
 			_show_floating_feedback("资产上线 -%s 算力币" % _format_integer_value(int(result.get("cost", 0))))
 		else:
-			_show_floating_feedback("提现到账 +%d 金币" % int(result.get("gold", 0)))
+			_show_floating_feedback("提现到账 +%d 星穹" % int(result.get("gold", 0)))
 	_clear_pending_transaction()
 	_rebuild_assets()
 
@@ -679,10 +679,10 @@ func _build_transaction_confirmation_message() -> String:
 	## 构建股市同款二次确认正文；金额使用矿场服务公开公式，确认后服务仍会最终复核。
 	var quantity: int = maxi(_pending_quantity, 1)
 	if _dialog_action == ACTION_RECHARGE:
-		return "充值 %d 金币\n到账：%s 算力币\n当前永久金币：%d\n确认后立即同步写入两份存档" % [quantity, _format_integer_value(quantity * 10000), int(_global_inventory.call("get_coins"))]
+		return "充值 %d 星穹\n到账：%s 算力币\n当前星穹：%d\n确认后立即同步写入两份存档" % [quantity, _format_integer_value(quantity * 10000), int(_global_inventory.call("get_coins"))]
 	if _dialog_action == ACTION_WITHDRAW:
 		var cost: int = int(_service.call("get_withdrawal_cost", quantity))
-		return "提现到账：%d 金币\n需要：%s 算力币\n手续费：%s 算力币\n当前余额：%s 算力币" % [quantity, _format_integer_value(cost), _format_integer_value(cost - quantity * 10000), _format_integer_value(_get_real_balance())]
+		return "提现到账：%d 星穹\n需要：%s 算力币\n手续费：%s 算力币\n当前余额：%s 算力币" % [quantity, _format_integer_value(cost), _format_integer_value(cost - quantity * 10000), _format_integer_value(_get_real_balance())]
 	var definition: Dictionary = _get_asset_definition(_dialog_asset_id)
 	var asset_name: String = str(definition.get("name", "算力资产"))
 	if _dialog_action == ACTION_SELL:

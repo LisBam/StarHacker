@@ -216,7 +216,7 @@ var _inventory_stone_attribute_clear_button: Button
 var _inventory_stone_attribute_filter: Array[String] = []
 ## 背包当前排序模式；默认 acquired_time，只改变显示顺序。
 var _inventory_sort_mode: String = InventoryQuery.SORT_ACQUIRED_TIME
-## 标准局内物品操作弹窗；点击物品后显示装备、使用与丢弃功能按钮，不在战斗内提供金币出售。
+## 标准局内物品操作弹窗；点击物品后显示装备、使用与丢弃功能按钮，不在战斗内提供星穹出售。
 var _inventory_item_action_menu: ItemActionPopup
 ## 当前局内待使用强化石；非空时下一次点击背包或装备栏武器会尝试强化。
 var _pending_combat_stone_resource: Resource
@@ -276,7 +276,7 @@ var _nearby_drop_signature: Array[String] = []
 var _active_loot_chest: Node2D
 ## 物资撤离全屏遮罩；默认运行时创建并隐藏，打开时阻止其余 HUD 鼠标交互。
 var _supply_extraction_overlay: Control
-## 物资撤离面板实例；默认运行时创建一次并复用，显示背包、装备、金币和剩余送回价值。
+## 物资撤离面板实例；默认运行时创建一次并复用，显示背包、装备、星穹和剩余送回价值。
 var _supply_extraction_panel: Control
 ## 战斗内角色展示界面；默认运行时从角色系统场景创建并隐藏，打开时只显示当前已选角色并暂停游戏。
 var _character_showcase_view: Control
@@ -938,7 +938,7 @@ func _refresh_inventory_armor_slots() -> void:
 
 
 func _on_inventory_armor_slot_pressed(armor_slot: String) -> void:
-	# 全局库存服务；防具槽点击卸回随身背包，所有权和存档由统一接口处理。
+	# 全局库存服务；防具槽点击卸回背包，所有权和存档由统一接口处理。
 	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
 	if global_inventory == null or not global_inventory.has_method("transfer_equipment_to_storage"):
 		return
@@ -1143,7 +1143,7 @@ func _build_supply_extraction_overlay() -> void:
 	panel.connect("closed", Callable(self, "_close_supply_extraction_panel"))
 	overlay.add_child(panel)
 	_supply_extraction_panel = panel
-	# 全局库存服务；送回报价、金币与所有权转移均由该单例处理。
+	# 全局库存服务；送回报价、星穹与所有权转移均由该单例处理。
 	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
 	panel.call("configure", global_inventory)
 
@@ -1185,7 +1185,7 @@ func _build_combat_developer_overlay() -> void:
 	developer_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
 	developer_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	developer_overlay.add_child(developer_dim)
-	# 战斗开发者菜单；复用局外组件，但隐藏金币与仓库操作并显示无限属性和训练工具。
+	# 战斗开发者菜单；复用局外组件，但隐藏星穹与仓库操作并显示无限属性和训练工具。
 	var developer_menu: Control = DEVELOPER_MENU_SCRIPT.new() as Control
 	developer_menu.anchor_left = 0.5
 	developer_menu.anchor_top = 0.5
@@ -3624,7 +3624,7 @@ func _record_stock_extracted_values(global_inventory: Node) -> void:
 		return
 	# 随身价值摘要；成功撤离完成所有权结算前读取，覆盖开局携带与本局获得的全部物品。
 	var value_summary: Dictionary = global_inventory.call("get_combat_carried_value_summary") as Dictionary
-	# 矿场服务；成功撤离价值按每 10 金币增加 0.01% 产出并追加 30 分钟在线持续时间。
+	# 矿场服务；成功撤离价值按每 10 星穹增加 0.01% 产出并追加 30 分钟在线持续时间。
 	var mining_farm_service: Node = get_tree().root.get_node_or_null("MiningFarmService")
 	if mining_farm_service != null and mining_farm_service.has_method("apply_successful_extraction_buff"):
 		mining_farm_service.call("apply_successful_extraction_buff", int(value_summary.get("total_value", 0)))
@@ -3659,7 +3659,7 @@ func _rebuild_settlement_list() -> void:
 	var failure_loss_ratio: float = clampf(float(_settlement_outcome.get("lost_ratio", 0.5)), 0.0, 1.0)
 	# 结算说明；明确列表统计口径，本局获得区不会重复展示本次已经遗失的战利品。
 	var summary_label: Label = Label.new()
-	summary_label.text = "已保留本次撤离携带的全部物品，物品仍在随身背包中，可返回仓库后手动存放。下方仅统计本局首次获得的战利品。" if result_type == "success" else "背包物品按规则随机保留约 %d%%、丢失约 %d%%，已装备物品不参与损失。下方“本局获得”不含本次已丢失物品，“丢失物品”包含全部实际损失。" % [roundi((1.0 - failure_loss_ratio) * 100.0), roundi(failure_loss_ratio * 100.0)]
+	summary_label.text = "已保留本次撤离携带的全部物品，物品仍在背包中，可返回仓库后手动存放。下方仅统计本局首次获得的战利品。" if result_type == "success" else "背包物品按规则随机保留约 %d%%、丢失约 %d%%，已装备物品不参与损失。下方“本局获得”不含本次已丢失物品，“丢失物品”包含全部实际损失。" % [roundi((1.0 - failure_loss_ratio) * 100.0), roundi(failure_loss_ratio * 100.0)]
 	summary_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	summary_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_death_settlement_list.add_child(summary_label)

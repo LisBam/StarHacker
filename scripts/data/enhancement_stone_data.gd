@@ -7,7 +7,7 @@ class_name EnhancementStoneData
 ## 方向化重构后堆叠条件改为“品质 + 属性 + 方向”，同组每颗强化石使用时都会重新随机具体幅度。
 ## 特化品质例外：正向离散词条在生成时保存 +1/+2，并作为堆叠签名的一部分；负面词条仍只保存方向。
 
-## 单词条标准价值；固定 30 金币，生成和升阶都按最终词条数量重新计算总价值。
+## 单词条标准价值；固定 30 星穹，生成和升阶都按最终词条数量重新计算总价值。
 const VALUE_PER_MODIFIER: int = 30
 
 ## 物品类型；固定为 enhancement_stone，供库存、分类和 UI 与武器资源解耦识别。
@@ -289,7 +289,7 @@ static func _create_random_specialization(random_source: RandomNumberGenerator, 
 		var detrimental_stat_name: String = detrimental_stats[random_source.randi_range(0, detrimental_stats.size() - 1)]
 		generated_modifiers[detrimental_stat_name] = -EnhancementRules.get_beneficial_direction(detrimental_stat_name)
 
-	# 特化强化石资源；价值仍按每条 30 金币结算，不因 +2 稀有强度额外增值。
+	# 特化强化石资源；价值仍按每条 30 星穹结算，不因 +2 稀有强度额外增值。
 	var enhancement_stone: EnhancementStoneData = EnhancementStoneData.new()
 	enhancement_stone.quality_id = EnhancementRules.QUALITY_SPECIALIZED
 	enhancement_stone.target_kind = generated_target_kind

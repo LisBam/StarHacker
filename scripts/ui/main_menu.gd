@@ -551,7 +551,7 @@ func _build_developer_overlay() -> void:
 	developer_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
 	developer_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	developer_overlay.add_child(developer_dim)
-	# 开发者菜单面板；居中显示资源与金币快捷操作。
+	# 开发者菜单面板；居中显示资源与星穹快捷操作。
 	var developer_menu: Control = DEVELOPER_MENU_SCRIPT.new() as Control
 	developer_menu.anchor_left = 0.5
 	developer_menu.anchor_top = 0.5

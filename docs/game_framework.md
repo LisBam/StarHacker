@@ -24,7 +24,7 @@
 | `SessionState` | 保存当前游戏模式、已确认角色与永久角色/扩展包解锁状态 | `user://character_unlocks.json`；角色选择和解锁永久保存，模式仅运行期 |
 | `InputBindings` | 管理默认与自定义输入映射 | `user://input_bindings.cfg` |
 | `DebugSettings` | 管理开发者调试选项 | `user://debug_settings.cfg` |
-| `GlobalInventory` | 拥有金币、仓库、随身背包、装备槽、持仓、永久图鉴发现记录和战斗结算数据 | `user://global_inventory.json` |
+| `GlobalInventory` | 拥有星穹、仓库、背包、装备槽、持仓、永久图鉴发现记录和战斗结算数据 | `user://global_inventory.json` |
 | `ShopService` | 生成普通商店与灰市库存，维护刷新状态 | `user://shop_state.json` |
 | `StockMarketService` | 维护行情、事件、证券币和对局行为影响 | `user://stock_market_state.json` |
 | `MiningFarmService` | 维护算力币、矿场资产、在线收益和临时增益 | `user://mining_farm_state.json` |
@@ -61,7 +61,7 @@
 | `MeleeAttackComponent` | 管理近战命中框、命中去重、冲击、敌方弹体清除和不启用碰撞的蓄力范围预览 |
 | `EquipmentComponent` | 代理装备槽并聚合有效战斗属性 |
 | `EquipmentSetComponent` | 按套装稳定 ID 统计未损坏穿戴件、汇总档位属性并结算世界特殊效果 |
-| `InventoryComponent` | 代理随身背包操作；全局服务缺失时才使用本地回退 |
+| `InventoryComponent` | 代理背包操作；全局服务缺失时才使用本地回退 |
 | `DamageReceiverComponent` | 统一可受伤目标的伤害接收入口 |
 | `CombatDamageCalculator` | 统一伤害、攻防和暴击计算 |
 | `CombatHudSlotView` | 统一局内主动技能槽与常驻武器槽的纯展示接口，不拥有技能或装备数据，不承担物品卡牌交互 |
@@ -92,7 +92,7 @@
 - `ItemCardView`、`WeaponDurabilityBar` 和 `ItemDetailFormatter` 统一物品展示，宿主只提供操作协议。
 - `CommonConfirmationDialog`、`SellQuantityDialog`、`SecuritiesTransferDialog`、`EnhancementResultDialog` 和 `ItemActionPopup` 分别承载明确的弹窗交互。
 - `UiStyleGuide`、`DialogOuterFrame`、`ProgressSliderVisual` 和 `CharacterSkillCard` 分别统一窗口、弹窗、滑条与角色技能详情视觉，规则见 `docs/ui_style.md`。
-- 背包、仓库和锻造等库存长列表只在自身可见时消费库存变化信号；隐藏期间仅记录待刷新状态，重新打开后从 `GlobalInventory` 读取一次最新快照。同一帧连续出现库存、装备、仓库或金币信号时，每个可见面板最多重建 1 次列表。
+- 背包、仓库和锻造等库存长列表只在自身可见时消费库存变化信号；隐藏期间仅记录待刷新状态，重新打开后从 `GlobalInventory` 读取一次最新快照。同一帧连续出现库存、装备、仓库或星穹信号时，每个可见面板最多重建 1 次列表。
 - 可见的仓库与共享背包按资源实例身份复用 `StorageItemControl`：容器内移动只更新真实来源下标，数量或状态变化只刷新对应卡片，跨容器移动只创建目标新增卡片并释放来源移出卡片；未变化物品不重新创建视觉节点、详情文本或信号连接。
 
 UI 不得通过字符串 `call()` 猜测已知组件接口，也不得复制服务公式来预判最终结果。操作提交前后的合法性都由数据所有者复核。
@@ -153,9 +153,9 @@ CharacterData 主动/被动资源数组
 ```text
 ContentCatalog 模板
         -> 商店 / 怪物 / 宝箱生成独立实例
-        -> 地面掉落 -> GlobalInventory 随身背包
+        -> 地面掉落 -> GlobalInventory 背包
         -> 装备栏 / 物资撤离 / 战斗结算
-        -> 随身背包或永久仓库
+        -> 背包或仓库
 ```
 
 `GlobalInventory` 是物品所有权的唯一来源。UI 查询结果只附加来源下标，不调整真实数组顺序。所有移动、购买、出售、装备、修复和锻造操作都必须由服务进行原子校验后再通知界面刷新。
@@ -198,7 +198,7 @@ ContentCatalog 模板
 - 新筛选、排序或关键词规则进入 `InventoryQuery`，不得由每个面板单独实现。
 - 新物品展示字段进入 `ItemDetailFormatter`；标准卡片结构进入 `ItemCardView`。
 - 主菜单与战斗背包的共同交互进入 `SharedBackpackPanel`。仅场景特有的所有权结果由宿主通过信号处理。
-- 正式战斗中的普通拾取、丢弃、装备与耐久变化先写入 `GlobalInventory` 内存状态，不为每次操作重复序列化包含永久仓库的完整存档；成功撤离、失败或正常退出结算后统一落盘。物资撤离点已经送回永久仓库的资产使用强制保存路径，不等待本局最终结算。
+- 正式战斗中的普通拾取、丢弃、装备与耐久变化先写入 `GlobalInventory` 内存状态，不为每次操作重复序列化包含仓库的完整存档；成功撤离、失败或正常退出结算后统一落盘。物资撤离点已经送回仓库的资产使用强制保存路径，不等待本局最终结算。
 - `user://global_inventory.json` 只能由 `/root/GlobalInventory` AutoLoad 写入；独立测试实例、临时验证脚本和普通场景节点没有持久化权限。库存服务只维护这一份主存档，不自动生成额外恢复或备份文件。存档版本 11 起额外保存稳定图鉴发现键；版本 12 起载入普通品质旧强化石时移除散射、穿透、弹射和连击词条，只含已移除词条的空强化石直接丢弃，混合词条强化石按剩余有效词条重算价值；只有 `specialized` 特化品质允许持久化这四类词条的 `+1/+2`。旧存档首次读取时以当前仓库、背包与已装备物品补齐发现记录，之后出售、消耗、丢弃或战斗遗失都不会重新锁定条目。
 
 ### 7.3 敌人与环境
@@ -226,7 +226,7 @@ ContentCatalog 模板
 - 一个角色可以同时配置任意数量被动；当前主动输入只装载资源数组前三项，空槽保持可见但不响应释放。
 - 通用索敌目标通过节点组和公开接口声明，技能行为不得按怪物名称、角色 ID 或固定场景路径扫描目标。
 - 方向、位置、锁定与无索敌的输入阶段进入 `ActiveSkillComponent`；具体伤害、移动、增益或地图效果进入独立行为节点。
-- 技能攻防倍率通过 `CombatStatsComponent` 的稳定来源接口写入；同来源覆盖、不同来源连乘，角色面板单独显示技能值。
+- 技能攻防倍率通过 `CombatStatsComponent` 的稳定来源接口写入；同来源覆盖、不同来源连乘，角色面板把技能、装备、套装和临时效果统一合并为基础值之外的“额外值”。
 - 地图情报技能通过 `GameWorld` 的技能标记字典写入，不占用玩家唯一导航点。
 
 ### 7.7 护盾、友方与衍生单位

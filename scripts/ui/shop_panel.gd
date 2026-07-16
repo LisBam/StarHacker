@@ -14,7 +14,7 @@ const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.g
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 套装筛选控件脚本；商店装备分类复用库存统一多选套装筛选。
 const EQUIPMENT_SET_FILTER_CONTROL_SCRIPT: Script = preload("res://scripts/ui/equipment_set_filter_control.gd")
-## 普通商店通道标识；显示随机刷新武器与资源，并允许金币手动刷新。
+## 普通商店通道标识；显示随机刷新武器与资源，并允许星穹手动刷新。
 const CHANNEL_NORMAL: String = "normal"
 ## 灰市通道标识；显示最近五次撤离失败中实际遗失且尚未购回的物品。
 const CHANNEL_GRAY: String = "gray"
@@ -26,7 +26,7 @@ const CHANNEL_GRAY: String = "gray"
 
 ## 商店服务缓存；负责库存、刷新倒计时、灰市批次和购买结算。
 var _shop_service: Node
-## 全局库存服务缓存；只读取金币余额并监听变化，不直接执行购买。
+## 全局库存服务缓存；只读取星穹余额并监听变化，不直接执行购买。
 var _global_inventory: Node
 ## 当前商店通道；默认普通商店，可切换到灰市查看失败遗失物。
 var _current_channel: String = CHANNEL_NORMAL
@@ -42,13 +42,15 @@ var _sort_mode: String = InventoryQuery.SORT_ACQUIRED_TIME
 var _normal_channel_button: Button
 ## 灰市通道按钮；选中时禁用以表示当前页面。
 var _gray_channel_button: Button
-## 金币标签；监听 GlobalInventory 金币变化后即时刷新。
+## 星穹标签；监听 GlobalInventory 星穹变化后即时刷新。
 var _coins_label: Label
 ## 自动刷新倒计时标签；每秒显示距离下次十分钟刷新剩余时间。
 var _refresh_countdown_label: Label
-## 手动刷新按钮；文本包含本次所需金币并随连续刷新次数更新。
+## 手动刷新按钮；固定只显示“刷新”，费用由右侧独立标签展示。
 var _manual_refresh_button: Button
-## 状态提示标签；用于显示刷新成功、金币不足或购买结果。
+## 手动刷新费用标签；固定显示在刷新按钮右侧，并随当前连续刷新费用即时更新。
+var _manual_refresh_cost_label: Label
+## 状态提示标签；用于显示刷新成功、星穹不足或购买结果。
 var _status_label: Label
 ## 搜索输入框；按商品名称、说明、分类和强化词条实时过滤。
 var _search_edit: LineEdit
@@ -68,7 +70,7 @@ var _subcategory_bar: HBoxContainer
 var _item_grid: HFlowContainer
 ## 商品滚动区；商品数量超过当前高度时允许垂直滚动。
 var _item_scroll: ScrollContainer
-## 购买确认弹窗；确认前显示物品名称和金币价格，避免误购。
+## 购买确认弹窗；确认前显示物品名称和星穹价格，避免误购。
 var _purchase_dialog: CommonConfirmationDialog
 ## 待购买商品编号；弹窗确认时交给 ShopService，默认空字符串表示无待处理商品。
 var _pending_stock_id: String = ""
@@ -122,13 +124,13 @@ func _build_interface() -> void:
 	var content: VBoxContainer = VBoxContainer.new()
 	content.add_theme_constant_override("separation", 8)
 	margin.add_child(content)
-	# 标题栏；显示商店标题、金币与关闭按钮。
+	# 标题栏；显示商店标题、星穹与关闭按钮。
 	var header: HBoxContainer = HBoxContainer.new()
 	header.add_theme_constant_override("separation", 10)
 	content.add_child(header)
 	# 标题文本；占据剩余宽度并明确当前为局外商店。
 	var title_label: Label = Label.new()
-	title_label.text = "量子商店"
+	title_label.text = "商店"
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.add_theme_font_size_override("font_size", 26)
 	UI_STYLE_GUIDE.apply_title_label(title_label)
@@ -154,8 +156,8 @@ func _build_interface() -> void:
 	_normal_channel_button.pressed.connect(_on_channel_pressed.bind(CHANNEL_NORMAL))
 	channel_bar.add_child(_normal_channel_button)
 	_gray_channel_button = Button.new()
-	_gray_channel_button.text = "灰市 · 最近5次失败遗失物"
-	_gray_channel_button.custom_minimum_size = Vector2(260.0, 38.0)
+	_gray_channel_button.text = "灰市"
+	_gray_channel_button.custom_minimum_size = Vector2(160.0, 38.0)
 	_gray_channel_button.pressed.connect(_on_channel_pressed.bind(CHANNEL_GRAY))
 	channel_bar.add_child(_gray_channel_button)
 	# 刷新栏；灰市不参与十分钟刷新，切换通道时整体隐藏。
@@ -169,9 +171,15 @@ func _build_interface() -> void:
 	_refresh_countdown_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	refresh_bar.add_child(_refresh_countdown_label)
 	_manual_refresh_button = Button.new()
-	_manual_refresh_button.custom_minimum_size = Vector2(210.0, 36.0)
+	_manual_refresh_button.text = "刷新"
+	_manual_refresh_button.custom_minimum_size = Vector2(112.0, 36.0)
 	_manual_refresh_button.pressed.connect(_on_manual_refresh_pressed)
 	refresh_bar.add_child(_manual_refresh_button)
+	_manual_refresh_cost_label = Label.new()
+	_manual_refresh_cost_label.custom_minimum_size = Vector2(100.0, 36.0)
+	_manual_refresh_cost_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_manual_refresh_cost_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.WARNING_COLOR)
+	refresh_bar.add_child(_manual_refresh_cost_label)
 	# 查询栏；关键词和强化属性方向筛选与仓库规则保持一致。
 	var query_bar: HBoxContainer = HBoxContainer.new()
 	query_bar.add_theme_constant_override("separation", 8)
@@ -324,7 +332,7 @@ func _rebuild_content() -> void:
 		# 空状态；占满双列宽度需要添加两个控件中的第一个提示，当前文本已足够明确通道与分类。
 		# 流式布局补充：空状态由居中容器承载，不再依赖双列占位规则。
 		var empty_label: Label = Label.new()
-		empty_label.text = "当前分类暂无商品" if _current_channel == CHANNEL_NORMAL else "最近五次失败中没有可购回的此类遗失物"
+		empty_label.text = "当前分类暂无商品" if _current_channel == CHANNEL_NORMAL else "当前分类没有可购回的遗失物"
 		empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		empty_label.custom_minimum_size = Vector2(0.0, 70.0)
 		_item_grid.add_child(empty_label)
@@ -342,10 +350,11 @@ func _rebuild_content() -> void:
 
 
 func _refresh_header() -> void:
-	_coins_label.text = "金币：%d" % int(_global_inventory.call("get_coins")) if _global_inventory != null else "金币：不可用"
+	_coins_label.text = "星穹：%d" % int(_global_inventory.call("get_coins")) if _global_inventory != null else "星穹：不可用"
 	if _shop_service == null:
 		_refresh_countdown_label.text = "自动刷新：不可用"
-		_manual_refresh_button.text = "刷新不可用"
+		_manual_refresh_button.text = "刷新"
+		_manual_refresh_cost_label.text = "--星穹"
 		_manual_refresh_button.disabled = true
 		return
 	# 剩余秒数；格式化为分秒，达到 0 时 ShopService 会立即完成自动刷新。
@@ -355,9 +364,10 @@ func _refresh_header() -> void:
 	# 当前分钟内剩余秒数；取值为 0 至 59，与整分钟共同组成 mm:ss。
 	var remaining_minute_seconds: int = remaining_seconds % 60
 	_refresh_countdown_label.text = "自动刷新：%02d:%02d" % [remaining_minutes, remaining_minute_seconds]
-	# 手动刷新费用；每次成功刷新后指数增长，自动刷新后恢复 10 金币。
+	# 手动刷新费用；每次成功刷新后指数增长，自动刷新后恢复 10 星穹。
 	var manual_cost: int = int(_shop_service.call("get_manual_refresh_cost"))
-	_manual_refresh_button.text = "花费 %d 金币刷新" % manual_cost
+	_manual_refresh_button.text = "刷新"
+	_manual_refresh_cost_label.text = "%d星穹" % manual_cost
 	_manual_refresh_button.disabled = _current_channel != CHANNEL_NORMAL
 
 
@@ -436,7 +446,7 @@ func _refresh_stone_attribute_filter_display() -> void:
 func _on_manual_refresh_pressed() -> void:
 	if _shop_service == null:
 		return
-	# 刷新结果；服务先检查金币再扣款和重建库存，失败不会增加连续刷新次数。
+	# 刷新结果；服务先检查星穹再扣款和重建库存，失败不会增加连续刷新次数。
 	var refresh_result: Dictionary = _shop_service.call("request_manual_refresh") as Dictionary
 	_show_status(str(refresh_result.get("message", "刷新失败")))
 	_rebuild_content()
@@ -452,7 +462,7 @@ func _on_purchase_requested(stock_id: String, failure_group_id: String) -> void:
 		var item_resource: Resource = (raw_entry as Dictionary).get("resource") as Resource
 		_pending_stock_id = stock_id
 		_pending_failure_group_id = failure_group_id
-		_purchase_dialog.present_adaptive("确认购买", "确认花费 %d 金币购买“%s”吗？\n购买后物品将直接存入永久仓库。" % [int((raw_entry as Dictionary).get("price", 0)), str(item_resource.get("display_name")) if item_resource != null else "未知物品"], "购买", "取消", true)
+		_purchase_dialog.present_adaptive("确认购买", "确认花费 %d 星穹购买“%s”吗？\n购买后物品将直接存入仓库。" % [int((raw_entry as Dictionary).get("price", 0)), str(item_resource.get("display_name")) if item_resource != null else "未知物品"], "购买", "取消", true)
 		return
 	_show_status("该商品已售出或已经刷新")
 

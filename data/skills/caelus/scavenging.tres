@@ -7,6 +7,6 @@
 script = ExtResource("1_data")
 skill_id = "caelus_scavenging"
 display_name = "拾荒"
-description = "成功撤离时，获得地图上掉落物总价值20%的金币。"
+description = "成功撤离时，获得地图上掉落物总价值20%的星穹。"
 behavior_script = ExtResource("2_behavior")
 world_drop_value_gold_ratio = 0.2

@@ -1,7 +1,7 @@
 extends VBoxContainer
 class_name CharacterStatsPanel
 
-## 角色属性面板统一展示角色基础值、有效装备加成与最终总值。
+## 角色属性面板统一展示角色基础值、全部额外值与最终总值。
 ## 战斗中读取运行时组件快照，主菜单中读取角色档案与全局装备，保证共享背包在两种上下文下均可复用。
 
 ## 装备套装组件脚本；局外属性页调用其纯统计接口，确保套装属性与战斗组件使用同一触发规则。
@@ -32,7 +32,7 @@ var _global_inventory: Node
 var _session_state: Node
 ## 属性行标签表；键为稳定属性名，值为运行时标签，刷新时只更新文本而不重建控件。
 var _attribute_labels: Dictionary = {}
-## 生命属性标签；单独显示“当前生命 / 总上限（基础上限+装备上限）”。
+## 生命上限标签；只显示总上限及基础值与全部额外值，不显示当前生命。
 var _health_label: Label
 ## 角色名称标签；显示当前选中角色，帮助玩家确认属性归属。
 var _character_name_label: Label
@@ -71,15 +71,9 @@ func refresh() -> void:
 	# 角色档案；仅用于显示当前角色名称，缺失时安全回退为“当前角色”。
 	var character_profile: Dictionary = _get_character_profile()
 	_character_name_label.text = str(character_profile.get("display_name", "当前角色"))
-	# 生命结构；基础上限与装备加成均来自统一快照，当前生命在局外按满生命显示。
+	# 生命结构；总上限包含装备、套装、技能和临时来源，界面统一把基础值之外的部分归入额外值。
 	var health_values: Dictionary = snapshot.get("max_health", {"total": 0.0, "base": 0.0, "equipment": 0.0})
-	var current_health: float = float(snapshot.get("current_health", health_values.get("total", 0.0)))
-	_health_label.text = "生命值 / 生命上限：%s / %s（%s+%s）" % [
-		_format_number(current_health),
-		_format_number(float(health_values.get("total", 0.0))),
-		_format_number(float(health_values.get("base", 0.0))),
-		_format_number(float(health_values.get("equipment", 0.0)))
-	]
+	_health_label.text = "生命上限：%s" % _format_attribute_breakdown(health_values, false)
 	for row_definition in ATTRIBUTE_ROWS:
 		# 属性键；用于从快照和标签表读取同一属性。
 		var attribute_key: String = str(row_definition.get("key", ""))
@@ -92,22 +86,7 @@ func refresh() -> void:
 		# 是否使用百分比；视野和闪避率将内部比例转换为玩家易读的百分点。
 		# 冷却缩减同样使用内部比例；新属性沿用既有百分比格式，确保 0.05 在角色面板显示为 5%。
 		var is_percent: bool = bool(row_definition.get("percent", false))
-		# 套装、技能与临时额外值；非零来源分别标注，避免百分比套装或消耗品被误归入装备点数。
-		var set_value: float = float(attribute_values.get("set", 0.0))
-		var skill_value: float = float(attribute_values.get("skill", 0.0))
-		var temporary_value: float = float(attribute_values.get("temporary", 0.0))
-		# 分项文本；基础与装备始终显示，其他运行时来源仅在非零时追加。
-		var value_parts: PackedStringArray = PackedStringArray([
-			_format_attribute_value(float(attribute_values.get("base", 0.0)), is_percent),
-			_format_attribute_value(float(attribute_values.get("equipment", 0.0)), is_percent),
-		])
-		if not is_zero_approx(set_value):
-			value_parts.append("套装%s" % _format_attribute_value(set_value, is_percent))
-		if not is_zero_approx(skill_value):
-			value_parts.append("技能%s" % _format_attribute_value(skill_value, is_percent))
-		if not is_zero_approx(temporary_value):
-			value_parts.append("临时%s" % _format_attribute_value(temporary_value, is_percent))
-		value_label.text = "%s：%s（%s）" % [str(row_definition.get("label", attribute_key)), _format_attribute_value(float(attribute_values.get("total", 0.0)), is_percent), "+".join(value_parts)]
+		value_label.text = "%s：%s" % [str(row_definition.get("label", attribute_key)), _format_attribute_breakdown(attribute_values, is_percent)]
 
 
 func _build_interface() -> void:
@@ -246,6 +225,19 @@ func _build_value_snapshot(base_value: float, equipment_value: float) -> Diction
 func _format_attribute_value(value: float, is_percent: bool) -> String:
 	## 格式化普通数值或比例；比例统一乘以 100 并附加百分号。
 	return "%s%%" % _format_number(value * 100.0) if is_percent else _format_number(value)
+
+
+func _format_attribute_breakdown(attribute_values: Dictionary, is_percent: bool) -> String:
+	## 把任意来源的属性快照统一格式化为“总值（基础值+额外值）”；额外值等于最终总值减基础值。
+	# 属性总值；包含装备、套装、技能、消耗品与后续新增的所有非基础来源。
+	var total_value: float = float(attribute_values.get("total", 0.0))
+	# 属性基础值；只来自当前角色档案或本局基础属性分配，不含任何外部加成。
+	var base_value: float = float(attribute_values.get("base", 0.0))
+	# 属性额外值；统一通过总值减基础值计算，避免 UI 依赖具体来源键并遗漏未来扩展。
+	var extra_value: float = total_value - base_value
+	# 额外值运算符；非负值显示加号，负值自身已包含减号，避免出现“+-”组合。
+	var extra_operator: String = "+" if extra_value >= 0.0 else ""
+	return "%s（%s%s%s）" % [_format_attribute_value(total_value, is_percent), _format_attribute_value(base_value, is_percent), extra_operator, _format_attribute_value(extra_value, is_percent)]
 
 
 func _format_number(value: float) -> String:

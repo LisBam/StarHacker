@@ -1,7 +1,7 @@
 extends Node
 
 ## 商店服务独立维护普通商店库存、自动刷新时间、手动刷新费用和灰市失败批次。
-## UI 只通过公开查询与购买接口交互，金币和物品所有权仍由 GlobalInventory 统一结算与持久化。
+## UI 只通过公开查询与购买接口交互，星穹和物品所有权仍由 GlobalInventory 统一结算与持久化。
 
 signal shop_stock_changed
 signal gray_market_changed
@@ -16,7 +16,7 @@ const SAVE_PATH: String = "user://shop_state.json"
 ## 装备扩容补充：版本 6 重建普通商品池，使旧存档立即使用每轮 10 件装备的新数量。
 ## 强化石词条池补充：版本 7 重建普通商品池，确保缓存商品不再包含散射、穿透、弹射或连击词条。
 const SAVE_VERSION: int = 7
-## 强化石随机生成的单词条基础价值；默认 30 金币，与战斗掉落规则一致。
+## 强化石随机生成的单词条基础价值；默认 30 星穹，与战斗掉落规则一致。
 const STONE_BASE_SELL_PRICE: int = 30
 ## 强化石随机生成兼容最少词条数；实际词条数由品质规则决定，该值用于保持统一调用签名。
 const STONE_MINIMUM_MODIFIER_COUNT: int = 1
@@ -53,11 +53,11 @@ const STONE_DETRIMENTAL_CHANCE: float = 0.28
 @export var second_hand_enhancement_cumulative_chances: PackedFloat32Array = PackedFloat32Array([0.90, 0.80, 0.65, 0.56, 0.47, 0.38, 0.28, 0.19, 0.10, 0.01])
 ## 单颗二手强化石寻找兼容词条的最大尝试次数；默认 8 次，避免纯远程词条被用于近战等无效情况。
 @export_range(1, 50, 1) var second_hand_stone_compatibility_attempts: int = 8
-## 首次手动刷新金币费用；默认 10 金币，每次自动刷新后恢复该数值。
+## 首次手动刷新星穹费用；默认 10 星穹，每次自动刷新后恢复该数值。
 @export_range(0, 999999, 1) var manual_refresh_base_cost: int = 10
 ## 连续手动刷新费用倍率；默认每次乘 1.5，直到下一次自动刷新重置。
 @export_range(1.0, 10.0, 0.05) var manual_refresh_cost_growth: float = 1.5
-## 手动刷新金币费用上限；默认 100 金币，指数费用达到该值后保持不变，自动刷新仍会把费用恢复为基础值。
+## 手动刷新星穹费用上限；默认 100 星穹，指数费用达到该值后保持不变，自动刷新仍会把费用恢复为基础值。
 @export_range(0, 999999, 1) var manual_refresh_maximum_cost: int = 100
 ## 灰市最低满耐久价值倍率；默认 4 倍，用于最近失败遗失物的回购价格。
 @export_range(1.0, 50.0, 0.05) var gray_market_price_multiplier_minimum: float = 4.0
@@ -85,7 +85,7 @@ const STONE_DETRIMENTAL_CHANCE: float = 0.28
 	"res://data/items/repair_kit_advanced.tres",
 ])
 
-## 全局库存服务缓存；负责金币扣除、商品入仓库和资源快照序列化。
+## 全局库存服务缓存；负责星穹扣除、商品入仓库和资源快照序列化。
 var _global_inventory: Node
 ## 普通商店运行时商品；每项包含唯一编号、资源、数量、价格、倍率和二手说明。
 var _shop_stock: Array[Dictionary] = []
@@ -216,7 +216,7 @@ func request_manual_refresh() -> Dictionary:
 	# 本次刷新费用；成功扣款前固定，避免刷新次数变化后 UI 与实际扣款不同。
 	var refresh_cost: int = get_manual_refresh_cost()
 	if _global_inventory == null or int(_global_inventory.call("get_coins")) < refresh_cost:
-		return {"success": false, "cost": refresh_cost, "message": "金币不足，无法刷新商店"}
+		return {"success": false, "cost": refresh_cost, "message": "星穹不足，无法刷新商店"}
 	_global_inventory.call("adjust_coins", -refresh_cost)
 	_manual_refresh_count += 1
 	_refresh_normal_stock(false)
@@ -258,19 +258,19 @@ func _purchase_entry_from_array(entries: Array[Dictionary], stock_id: String, ch
 		var entry: Dictionary = entries[entry_index]
 		if str(entry.get("stock_id", "")) != stock_id:
 			continue
-		# 商品资源；购买后转交永久仓库，空资源商品视为失效并拒绝扣款。
+		# 商品资源；购买后转交仓库，空资源商品视为失效并拒绝扣款。
 		var item_resource: Resource = entry.get("resource") as Resource
 		# 商品数量；当前武器为一件，资源条目保留扩展堆叠能力。
 		var quantity: int = maxi(int(entry.get("quantity", 1)), 1)
 		# 商品价格；由刷新或失败记录时固定，购买时不重新抽取倍率。
 		var purchase_price: int = maxi(int(entry.get("price", 0)), 0)
 		if item_resource == null or not bool(_global_inventory.call("purchase_resource_to_warehouse", item_resource, purchase_price, quantity)):
-			return {"success": false, "message": "金币不足，无法购买该物品"}
+			return {"success": false, "message": "星穹不足，无法购买该物品"}
 		entries.remove_at(entry_index)
 		_save_state()
 		if channel_name == "普通商店":
 			shop_stock_changed.emit()
-		return {"success": true, "message": "%s购买成功，物品已存入永久仓库" % channel_name, "price": purchase_price}
+		return {"success": true, "message": "%s购买成功，物品已存入仓库" % channel_name, "price": purchase_price}
 	return {"success": false, "message": "该商品已售出或已经刷新"}
 
 

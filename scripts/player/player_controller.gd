@@ -11,7 +11,7 @@ signal weapon_attack_succeeded(source_kind: String, source_index: int, weapon_da
 signal weapon_attack_committing(source_kind: String, source_index: int, weapon_data: Resource)
 ## 玩家实际受到一次未闪避攻击后派发；技能可据此缩短持续时间，但不得从信号回调重复扣除生命或防具耐久。
 signal damage_received(final_damage: float, source: Node)
-## 玩家固定移速技能来源变化后派发；角色面板据此即时刷新“技能”移速分项，不参与实际移动结算。
+## 玩家固定移速技能来源变化后派发；角色面板据此即时刷新统一“额外值”，不参与实际移动结算。
 signal movement_speed_attribute_bonus_changed
 ## 玩家技能命中合法目标后派发；限时状态可按技能 ID 追加效果，不需要依赖具体行为节点实例。
 signal skill_target_hit(skill_id: String, target: Node)
@@ -628,7 +628,7 @@ func _get_movement_speed_attribute_bonus() -> float:
 
 
 func get_movement_speed_attribute_bonus() -> float:
-	## 返回全部技能提供的固定移速属性点；角色面板使用该公开入口显示“技能”分项。
+	## 返回全部技能提供的固定移速属性点；角色面板使用该公开入口合并到“额外值”。
 	return _get_movement_speed_attribute_bonus()
 
 

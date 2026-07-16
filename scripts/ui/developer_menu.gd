@@ -427,8 +427,11 @@ func _refresh_custom_stone_stat_options() -> void:
 	var quality_id: String = str(_custom_stone_quality_option.get_item_metadata(_custom_stone_quality_option.selected))
 	# 当前增强属性池；由正式规则目录提供，新增特化属性后会自动进入开发者下拉菜单。
 	var beneficial_stat_names: Array[String] = ENHANCEMENT_RULES_SCRIPT.get_beneficial_stat_keys_for_quality(quality_id, target_kind)
-	# 第二增强属性池；特化强化石固定只有一条正向机制，因此该品质使用空列表。
-	var second_beneficial_stat_names: Array[String] = [] if quality_id == ENHANCEMENT_RULES_SCRIPT.QUALITY_SPECIALIZED else beneficial_stat_names
+	# 第二增强属性池；先复制为强类型字符串数组，避免特化品质的空数组分支退化为未类型化 Array。
+	var second_beneficial_stat_names: Array[String] = beneficial_stat_names.duplicate()
+	# 特化第二增强限制；特化强化石固定只有一条正向机制，因此清空候选池并只保留下拉框的“无”。
+	if quality_id == ENHANCEMENT_RULES_SCRIPT.QUALITY_SPECIALIZED:
+		second_beneficial_stat_names.clear()
 	# 当前削弱属性池；特化武器词条与正向离散机制分开配置。
 	var detrimental_stat_names: Array[String] = ENHANCEMENT_RULES_SCRIPT.get_detrimental_stat_keys_for_quality(quality_id, target_kind)
 	_populate_custom_stone_stat_option(_custom_stone_beneficial_one_option, beneficial_stat_names, "请选择加强词条")

@@ -56,9 +56,9 @@ const FIXED_DURABILITY_COST_PER_USE: float = 1.0
 @export var has_piercing: bool = true
 ## 每颗弹体可额外穿过的目标数量；默认 0 表示命中首个目标后销毁，只有 has_piercing 为 true 时参与战斗与强化结算。
 @export_range(0, 100, 1, "or_greater") var piercing_count: int = 0
-## 是否具有弹射属性；默认 false，只有显式启用的远程武器才能在碰撞后改变弹道并接受弹射强化。
-## 强化石规则补充：弹射只由武器模板配置；旧存档已写入的累计数值仍通过有效属性接口保留。
-@export var has_bounce: bool = false
+## 是否具有弹射属性；远程攻击通道默认持有该属性，默认 true 使所有远程与混合武器都显示并可从 0 点接受弹射强化。
+## 零值行为补充：默认持有不会改变弹体碰撞结果，只有 bounce_count 的有效值大于 0 时才会实际弹射。
+@export var has_bounce: bool = true
 ## 每颗弹体最多可执行的弹射次数；默认 0 表示不弹射，只有 has_bounce 为 true 时参与战斗、展示与强化结算。
 @export_range(0, 100, 1, "or_greater") var bounce_count: int = 0
 ## 是否具有连击属性；默认 false，只有显式启用的远程武器才能连续发射多轮并接受连击强化。

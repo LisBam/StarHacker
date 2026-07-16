@@ -59,6 +59,7 @@ var _completion_cooldown_multipliers: Array[float] = []
 ## 每个技能槽的冷却暂停来源表；键为稳定来源 ID、值为 true，任一来源存在时该槽剩余冷却保持不变。
 var _cooldown_pause_sources: Array[Dictionary] = []
 ## 当前装备提供的主动技能冷却缩减；使用 0 到 1 小数，默认 0，不影响武器冷却或后续段释放窗口。
+## 当前上限补充：公开设置入口会把该缓存限制为 0 至 0.40，超过部分不进入主动技能冷却公式。
 var _equipment_cooldown_reduction: float = 0.0
 ## 是否由训练场设置禁用主动技能冷却；默认 false，开启时所有技能立即可用且后续释放不会写入冷却，不会保存到角色或装备数据。
 var _cooldown_disabled: bool = false
@@ -597,7 +598,8 @@ func set_cooldown_paused_source(slot_index: int, source_id: String, paused: bool
 func set_equipment_cooldown_reduction(reduction_ratio: float) -> void:
 	## 设置腿部装备提供的主动技能冷却缩减；换装或装备损坏时保留当前 CD 百分比并用新的缩减结果重算剩余秒数。
 	# 有效缩减比例；范围限制为 0 至 1，默认 0 表示玩家不穿腿部装备时的基础状态。
-	var resolved_reduction: float = clampf(reduction_ratio, 0.0, 1.0)
+	# 当前上限补充：最终范围限制为 0 至 40%，超过部分不参与当前和后续主动技能冷却计算。
+	var resolved_reduction: float = clampf(reduction_ratio, 0.0, EnhancementRules.COOLDOWN_REDUCTION_MAXIMUM)
 	if is_equal_approx(_equipment_cooldown_reduction, resolved_reduction):
 		return
 	_equipment_cooldown_reduction = resolved_reduction
@@ -616,7 +618,7 @@ func set_equipment_cooldown_reduction(reduction_ratio: float) -> void:
 
 func get_equipment_cooldown_reduction() -> float:
 	## 返回当前由装备聚合后的冷却缩减比例；供角色面板、测试或未来效果查询，默认值为 0。
-	return clampf(_equipment_cooldown_reduction, 0.0, 1.0)
+	return clampf(_equipment_cooldown_reduction, 0.0, EnhancementRules.COOLDOWN_REDUCTION_MAXIMUM)
 
 
 func set_cooldown_disabled(enabled: bool) -> void:
@@ -638,7 +640,8 @@ func is_cooldown_disabled() -> bool:
 
 func _get_effective_cooldown_duration(base_cooldown_duration: float) -> float:
 	## 计算装备缩减后的技能总冷却；100% 冷却缩减允许结果为 0，主动技能组件会把它视为立即可用。
-	return maxf(base_cooldown_duration, 0.0) * (1.0 - clampf(_equipment_cooldown_reduction, 0.0, 1.0))
+	## 当前上限补充：装备冷却缩减最多为 40%，因此正常结算后的技能冷却至少保留基础冷却与技能专属倍率结果的 60%。
+	return maxf(base_cooldown_duration, 0.0) * (1.0 - clampf(_equipment_cooldown_reduction, 0.0, EnhancementRules.COOLDOWN_REDUCTION_MAXIMUM))
 
 
 func execute_pending_stage_immediately(slot_index: int, context_overrides: Dictionary = {}) -> bool:

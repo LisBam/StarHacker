@@ -51,7 +51,7 @@ var _current_critical_damage: float = 1.5
 var _hitbox_near_distance: float = 0.0
 ## 命中框垂直高度；默认 1，ready 时从矩形碰撞形状读取，攻击距离变化时保持不变。
 ## 等比缩放补充：该值作为场景原始高度缓存，实际攻击时会随有效攻击距离同步缩放。
-## 固定高度补充：现行攻击距离只改变沿攻击方向的长度，该缓存会直接作为每次判定高度。
+## 固定近端等比缩放补充：现行规则以动态宽度相对原始宽度的倍率缩放高度，使范围扩大时横纵尺寸同步增长。
 var _hitbox_height: float = 1.0
 ## 命中框原始宽度；默认 1，ready 时从矩形碰撞形状读取，运行时用于按攻击距离倍率等比缩放整个判定区域。
 ## 固定近端补充：现行规则保留该缓存用于计算场景原始最远端，不再直接按倍率生成动态宽度。
@@ -189,7 +189,7 @@ func _cache_hitbox_geometry() -> void:
 func _apply_attack_distance(resolved_attack_distance: float) -> void:
 	## 按“最远端到玩家本体的距离”重算近战判定框，保持场景定义的近端和高度不变。
 	## 等比缩放补充：现行规则以场景原始最远端为基准，同步缩放近端、宽度和高度，使攻击范围整体保持原始比例。
-	## 固定起点补充：当前几何规则由有效距离直接决定远端，场景近端与高度始终保持不变。
+	## 固定起点补充：当前几何规则由有效距离直接决定远端，近端保持不变，宽度与高度按同一倍率缩放。
 	if _collision_shape == null or not (_collision_shape.shape is RectangleShape2D):
 		return
 	# 请求攻击远端；正常使用武器有效距离，异常非正数则回退到场景原始最远端。
@@ -198,14 +198,16 @@ func _apply_attack_distance(resolved_attack_distance: float) -> void:
 	var safe_attack_distance: float = maxf(requested_attack_distance, _hitbox_near_distance + 1.0)
 	# 动态碰撞宽度；只改变固定近端到有效远端之间的长度，使射程强化不会在玩家身边产生判定空洞。
 	var hitbox_width: float = safe_attack_distance - _hitbox_near_distance
-	# 动态碰撞高度；始终保持场景原值，攻击距离只控制沿攻击方向的覆盖长度。
-	var hitbox_height: float = _hitbox_height
+	# 范围等比倍率；以动态宽度除以场景原始宽度，使任意攻击距离下横向长度与纵向高度保持原始比例。
+	var range_scale: float = hitbox_width / maxf(_hitbox_width, 1.0)
+	# 动态碰撞高度；与宽度使用同一倍率缩放，使攻击距离增大时整个攻击范围同步等比扩大。
+	var hitbox_height: float = maxf(_hitbox_height * range_scale, 1.0)
 	# 动态碰撞形状；中心随宽度移动，但近端始终固定在场景配置位置。
 	var rectangle_shape: RectangleShape2D = _collision_shape.shape as RectangleShape2D
 	rectangle_shape.size = Vector2(hitbox_width, hitbox_height)
 	_collision_shape.position.x = _hitbox_near_distance + hitbox_width * 0.5
 	if _visual is Polygon2D:
-		# 动态视觉区域；与碰撞框共享固定近端、有效远端和原始高度，确保调试显示与真实判定完全一致。
+		# 动态视觉区域；与碰撞框共享固定近端、有效远端和等比缩放后的高度，确保调试显示与真实判定完全一致。
 		var half_height: float = hitbox_height * 0.5
 		(_visual as Polygon2D).polygon = PackedVector2Array([
 			Vector2(_hitbox_near_distance, -half_height),

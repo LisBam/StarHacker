@@ -1128,8 +1128,9 @@ func use_enhancement_stone_with_result(stone_resource: Resource, source_location
 	# 武器强化结果；新资源返回完整变化明细，旧扩展资源仍可通过 bool 接口完成强化。
 	var enhancement_result: Dictionary = failed_result.duplicate(true)
 	if weapon_resource.has_method("apply_enhancement_with_result"):
-		enhancement_result = weapon_resource.call("apply_enhancement_with_result", rolled_modifiers) as Dictionary
+		enhancement_result = weapon_resource.call("apply_enhancement_with_result", rolled_modifiers, stone_quality_id) as Dictionary
 	else:
+		# 旧扩展资源兼容；缺少结构化结果接口时继续使用原单参数方法，但无法记录品质固定价值。
 		enhancement_result["success"] = bool(weapon_resource.call("apply_enhancement", rolled_modifiers))
 	if not bool(enhancement_result.get("success", false)):
 		return failed_result
@@ -2537,6 +2538,8 @@ func _serialize_record(record: Dictionary) -> Dictionary:
 		serialized_record["enhancement_formula_version"] = ENHANCEMENT_FORMULA_VERSION
 		serialized_record["enhancement_modifiers"] = (item_resource.get("enhancement_modifiers") as Dictionary).duplicate(true)
 		serialized_record["enhancement_count"] = clampi(int(item_resource.get("enhancement_count")), 0, EquipmentData.MAX_ENHANCEMENT_COUNT)
+		# 装备强化品质计数；用于按每颗品质固定增加价值，旧存档缺失时恢复为空记录。
+		serialized_record["enhancement_quality_counts"] = EnhancementRules.normalize_enhancement_quality_counts(item_resource.get("enhancement_quality_counts"))
 		serialized_record["is_second_hand"] = bool(item_resource.get("is_second_hand"))
 		serialized_record["current_durability"] = maxf(float(item_resource.get("current_durability")), 0.0)
 		serialized_record["max_durability"] = _get_resource_maximum_durability(item_resource)
@@ -2545,6 +2548,8 @@ func _serialize_record(record: Dictionary) -> Dictionary:
 		serialized_record["enhancement_formula_version"] = ENHANCEMENT_FORMULA_VERSION
 		serialized_record["enhancement_modifiers"] = EnhancementRules.migrate_stat_aliases(item_resource.get("enhancement_modifiers") as Dictionary)
 		serialized_record["enhancement_count"] = clampi(int(item_resource.get("enhancement_count")), 0, WeaponData.MAX_ENHANCEMENT_COUNT)
+		# 武器强化品质计数；与装备使用同一稳定结构，确保锻造、商店和结算读取一致价值。
+		serialized_record["enhancement_quality_counts"] = EnhancementRules.normalize_enhancement_quality_counts(item_resource.get("enhancement_quality_counts"))
 		serialized_record["is_second_hand"] = bool(item_resource.get("is_second_hand"))
 		serialized_record["current_durability"] = maxf(float(item_resource.get("current_durability")), 0.0)
 		serialized_record["max_durability"] = _get_resource_maximum_durability(item_resource)
@@ -2620,11 +2625,15 @@ func _deserialize_record(serialized_record: Dictionary, register_encyclopedia_di
 	if _is_weapon_resource(item_resource):
 		# 武器强化次数；旧存档缺失时回退 0，异常值限制到单把武器 20 颗上限。
 		item_resource.set("enhancement_count", clampi(int(serialized_record.get("enhancement_count", 0)), 0, WeaponData.MAX_ENHANCEMENT_COUNT))
+		# 武器强化品质计数；旧存档没有该字段时保持空记录，不根据无法追溯的累计属性反推品质。
+		item_resource.set("enhancement_quality_counts", EnhancementRules.normalize_enhancement_quality_counts(serialized_record.get("enhancement_quality_counts", {})))
 		# 武器二手状态；旧存档缺失时视为全新，现行掉落与商店物品会永久保存该标记。
 		item_resource.set("is_second_hand", bool(serialized_record.get("is_second_hand", false)))
 	if _is_equipment_resource(item_resource):
 		# 装备强化次数；旧存档缺失时回退 0，历史超过上限的异常值限制到统一 20 次。
 		item_resource.set("enhancement_count", clampi(int(serialized_record.get("enhancement_count", 0)), 0, EquipmentData.MAX_ENHANCEMENT_COUNT))
+		# 装备强化品质计数；只恢复正式品质与最多 20 颗记录，异常键不会参与固定价值加成。
+		item_resource.set("enhancement_quality_counts", EnhancementRules.normalize_enhancement_quality_counts(serialized_record.get("enhancement_quality_counts", {})))
 		# 装备二手状态；与武器使用同一持久化字段和名称前缀规则。
 		item_resource.set("is_second_hand", bool(serialized_record.get("is_second_hand", false)))
 	if _is_weapon_resource(item_resource):

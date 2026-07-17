@@ -210,12 +210,16 @@ var _inventory_filter_equipment_feet_button: Button
 var _inventory_search_edit: LineEdit
 ## 背包排序下拉框；默认获得时间，可切换物品价值降序。
 var _inventory_sort_option: OptionButton
+## 背包强化石品质筛选框；只在资源主分类显示，选项与锻造系统使用同一品质顺序和短名称。
+var _inventory_stone_quality_option: OptionButton
 ## 背包强化属性筛选框；默认全部属性，只在资源主分类显示。
 var _inventory_stone_attribute_option: OptionButton
 ## 背包清空强化属性筛选按钮；默认只在资源主分类显示，用于移除全部多选条件。
 var _inventory_stone_attribute_clear_button: Button
 ## 背包当前强化属性筛选键集合；默认空数组表示不过滤具体属性，多项条件按并集展示。
 var _inventory_stone_attribute_filter: Array[String] = []
+## 背包当前强化石品质筛选；默认空字符串表示全部品质，其他值使用 EnhancementRules 的稳定品质标识。
+var _inventory_stone_quality_filter: String = ""
 ## 背包当前排序模式；默认 acquired_time，只改变显示顺序。
 var _inventory_sort_mode: String = InventoryQuery.SORT_ACQUIRED_TIME
 ## 标准局内物品操作弹窗；点击物品后显示装备、使用与丢弃功能按钮，不在战斗内提供星穹出售。
@@ -248,6 +252,8 @@ var _combat_stone_return_filter: String = INVENTORY_FILTER_STONES
 var _combat_stone_return_search_text: String = ""
 ## 强化选择前属性筛选集合；默认空数组表示全部属性，成功使用道具后恢复原多选组合。
 var _combat_stone_return_attribute_filter: Array[String] = []
+## 强化选择前品质筛选；默认空字符串表示全部品质，目标选择结束后恢复原背包查询条件。
+var _combat_stone_return_quality_filter: String = ""
 ## 是否存在待恢复的强化石页面；默认 false，只有点击“使用”触发页面跳转后才恢复，拖拽强化不会改变当前页面。
 var _combat_stone_return_view_pending: bool = false
 ## Master 音频总线索引；取值为 -1 或有效总线下标，默认 -1 表示尚未解析，修改会影响暂停设置音量应用目标。
@@ -813,7 +819,9 @@ func _rebuild_inventory_slots() -> void:
 		_inventory_filter,
 		_inventory_search_edit.text,
 		_inventory_stone_attribute_filter,
-		_inventory_sort_mode
+		_inventory_sort_mode,
+		[],
+		_inventory_stone_quality_filter
 	)
 	# 当前筛选页可见物品数量；取值从 0 到背包物品总数，默认逐项统计，修改会影响标题数量显示。
 	var visible_item_count: int = 0
@@ -1764,6 +1772,17 @@ func _bind_inventory_filter_buttons() -> void:
 			_inventory_sort_option.set_item_metadata(2, InventoryQuery.SORT_DURABILITY)
 			_inventory_sort_option.item_selected.connect(_on_inventory_sort_selected)
 			query_bar.add_child(_inventory_sort_option)
+			_inventory_stone_quality_option = OptionButton.new()
+			_inventory_stone_quality_option.custom_minimum_size = Vector2(88.0, 34.0)
+			_inventory_stone_quality_option.add_item("全部")
+			_inventory_stone_quality_option.set_item_metadata(0, "")
+			for quality_id in EnhancementRules.QUALITY_ORDER:
+				# 品质短名；移除“强化石”后缀，使局内背包与锻造系统的列表文本保持一致。
+				var quality_label: String = EnhancementRules.get_quality_display_name(quality_id).trim_suffix("强化石")
+				_inventory_stone_quality_option.add_item(quality_label)
+				_inventory_stone_quality_option.set_item_metadata(_inventory_stone_quality_option.item_count - 1, quality_id)
+			_inventory_stone_quality_option.item_selected.connect(_on_inventory_stone_quality_selected)
+			query_bar.add_child(_inventory_stone_quality_option)
 			_inventory_stone_attribute_option = OptionButton.new()
 			_inventory_stone_attribute_option.custom_minimum_size = Vector2(112.0, 34.0)
 			_inventory_stone_attribute_option.add_item("强化筛选（0）")
@@ -2060,6 +2079,8 @@ func _refresh_inventory_filter_buttons() -> void:
 		_inventory_filter_equipment_feet_button.visible = equipment_category_visible
 	if _inventory_stone_attribute_option != null:
 		_inventory_stone_attribute_option.visible = resource_category_visible
+	if _inventory_stone_quality_option != null:
+		_inventory_stone_quality_option.visible = resource_category_visible
 	if _inventory_stone_attribute_clear_button != null:
 		_inventory_stone_attribute_clear_button.visible = resource_category_visible
 		_inventory_stone_attribute_clear_button.disabled = _inventory_stone_attribute_filter.is_empty()
@@ -2885,6 +2906,7 @@ func _on_inventory_primary_category_pressed(category_name: String) -> void:
 	_inventory_primary_category = category_name
 	_inventory_filter = INVENTORY_FILTER_ALL
 	_clear_inventory_stone_attribute_filter()
+	_clear_inventory_stone_quality_filter()
 	_refresh_inventory_filter_buttons()
 	if _inventory_panel.visible:
 		_rebuild_inventory_slots()
@@ -2901,6 +2923,21 @@ func _on_inventory_sort_selected(item_index: int) -> void:
 	_inventory_sort_mode = selected_sort_mode if selected_sort_mode in [InventoryQuery.SORT_ACQUIRED_TIME, InventoryQuery.SORT_ITEM_VALUE, InventoryQuery.SORT_DURABILITY] else InventoryQuery.SORT_ACQUIRED_TIME
 	if _inventory_panel.visible:
 		_rebuild_inventory_slots()
+
+
+func _on_inventory_stone_quality_selected(item_index: int) -> void:
+	## 应用局内背包强化石品质条件；非法选项回退全部品质，真实背包顺序与所有权保持不变。
+	var selected_quality_id: String = str(_inventory_stone_quality_option.get_item_metadata(item_index)) if item_index >= 0 and item_index < _inventory_stone_quality_option.item_count else ""
+	_inventory_stone_quality_filter = selected_quality_id if selected_quality_id in EnhancementRules.QUALITY_ORDER else ""
+	if _inventory_panel.visible:
+		_rebuild_inventory_slots()
+
+
+func _clear_inventory_stone_quality_filter() -> void:
+	## 清空局内背包强化石品质条件并恢复“全部”；切换主分类和目标选择页时统一调用。
+	_inventory_stone_quality_filter = ""
+	if _inventory_stone_quality_option != null:
+		_inventory_stone_quality_option.select(0)
 
 
 func _on_inventory_stone_attribute_selected(item_index: int) -> void:
@@ -3002,6 +3039,7 @@ func _on_inventory_item_action_menu_id_pressed(action_id: int) -> void:
 		_inventory_primary_category = InventoryQuery.PRIMARY_WEAPONS
 		_inventory_filter = INVENTORY_FILTER_ALL
 		_clear_inventory_stone_attribute_filter()
+		_clear_inventory_stone_quality_filter()
 		if _inventory_search_edit != null:
 			_inventory_search_edit.clear()
 		_refresh_inventory_filter_buttons()
@@ -3190,6 +3228,7 @@ func _capture_combat_stone_return_view() -> void:
 	_combat_stone_return_filter = _inventory_filter
 	_combat_stone_return_search_text = _inventory_search_edit.text if _inventory_search_edit != null else ""
 	_combat_stone_return_attribute_filter = _inventory_stone_attribute_filter.duplicate()
+	_combat_stone_return_quality_filter = _inventory_stone_quality_filter
 
 
 func _restore_combat_stone_return_view() -> void:
@@ -3197,6 +3236,7 @@ func _restore_combat_stone_return_view() -> void:
 	_inventory_primary_category = _combat_stone_return_primary_category
 	_inventory_filter = _combat_stone_return_filter
 	_inventory_stone_attribute_filter = _combat_stone_return_attribute_filter.duplicate()
+	_inventory_stone_quality_filter = _combat_stone_return_quality_filter
 	if _inventory_search_edit != null:
 		_inventory_search_edit.text = _combat_stone_return_search_text
 	if _inventory_stone_attribute_option != null:
@@ -3206,6 +3246,14 @@ func _restore_combat_stone_return_view() -> void:
 			if not filter_key.is_empty():
 				_inventory_stone_attribute_option.get_popup().set_item_checked(option_index, filter_key in _inventory_stone_attribute_filter)
 		_refresh_inventory_stone_attribute_filter_display()
+	if _inventory_stone_quality_option != null:
+		# 品质选项恢复；根据稳定元数据查找原选择，找不到时回退“全部”。
+		var restored_quality_index: int = 0
+		for option_index in range(_inventory_stone_quality_option.item_count):
+			if str(_inventory_stone_quality_option.get_item_metadata(option_index)) == _inventory_stone_quality_filter:
+				restored_quality_index = option_index
+				break
+		_inventory_stone_quality_option.select(restored_quality_index)
 	_refresh_inventory_filter_buttons()
 
 

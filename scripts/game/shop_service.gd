@@ -442,7 +442,7 @@ func _apply_random_compatible_enhancement(weapon_resource: Resource) -> bool:
 		for stat_name in EnhancementRules.STAT_KEYS:
 			if applicable_modifiers.has(stat_name):
 				rolled_modifiers[stat_name] = EnhancementRules.roll_quality_modifier_ratio(_random, enhancement_stone.quality_id, stat_name, applicable_modifiers.get(stat_name, 1))
-		if bool(weapon_resource.call("apply_enhancement", rolled_modifiers)):
+		if bool(weapon_resource.call("apply_enhancement", rolled_modifiers, enhancement_stone.get_resolved_quality_id())):
 			return true
 	return false
 

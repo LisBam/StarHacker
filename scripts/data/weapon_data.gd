@@ -31,6 +31,8 @@ class_name WeaponData
 @export var is_second_hand: bool = false
 ## 已使用强化石次数；取值为 0 至 20，默认 0，玩家锻造和二手历史强化成功后各增加 1，达到上限后拒绝继续赋予强化石。
 @export_range(0, 20, 1) var enhancement_count: int = 0
+## 已使用强化石品质计数；键为 low、medium、high、supreme、specialized，值为对应成功强化颗数，用于固定价值加成并随物品存档永久保存。
+@export var enhancement_quality_counts: Dictionary = {}
 ## 每次成功使用消耗的耐久；取值大于等于 0，默认 1，远程射击和近战挥击成功后各扣除一次。
 ## 独立消耗配置补充：默认参考值为 1.0，每把武器资源可覆盖为不同浮点消耗。
 ## 固定消耗规则补充：武器不再暴露独立耐久消耗属性；普通武器成功使用扣除 1 点，混合武器完整攻击由控制器传入 2 点且运行时不可按武器修改。
@@ -197,6 +199,28 @@ func get_enhancement_count() -> int:
 	return clampi(enhancement_count, 0, MAX_ENHANCEMENT_COUNT)
 
 
+func get_enhancement_quality_counts() -> Dictionary:
+	## 返回归一化的强化品质计数副本；旧存档缺失该字段时为空，不根据属性幅度猜测历史品质。
+	return EnhancementRules.normalize_enhancement_quality_counts(enhancement_quality_counts)
+
+
+func get_enhancement_value_bonus() -> int:
+	## 返回全部已记录强化石提供的固定满耐久价值增量；词条正负、数量和实际幅度不会改变该结果。
+	return EnhancementRules.calculate_enhancement_quality_value_bonus(get_enhancement_quality_counts())
+
+
+func _record_enhancement_quality(quality_id: String) -> void:
+	## 在一次强化成功后记录对应正式品质；空值与非法品质用于旧扩展接口兼容，不产生固定价值加成。
+	if quality_id not in EnhancementRules.QUALITY_ORDER:
+		return
+	# 当前正式计数；先归一化旧数据，避免未知键或超限值继续进入存档与价值计算。
+	var normalized_counts: Dictionary = get_enhancement_quality_counts()
+	# 当前品质新数量；每次成功应用一颗强化石固定增加 1，且总强化次数已由调用流程限制在 20。
+	var updated_quality_count: int = int(normalized_counts.get(quality_id, 0)) + 1
+	normalized_counts[quality_id] = updated_quality_count
+	enhancement_quality_counts = EnhancementRules.normalize_enhancement_quality_counts(normalized_counts)
+
+
 func get_remaining_enhancement_count() -> int:
 	## 返回仍可使用的强化石数量；达到上限后固定为 0，供锻造和悬停详情显示。
 	return maxi(MAX_ENHANCEMENT_COUNT - get_enhancement_count(), 0)
@@ -280,13 +304,13 @@ func can_apply_enhancement(modifiers: Dictionary) -> bool:
 	return false
 
 
-func apply_enhancement(modifiers: Dictionary) -> bool:
+func apply_enhancement(modifiers: Dictionary, quality_id: String = "") -> bool:
 	# 是否实际应用词条；只有与当前武器兼容的字段会写入，避免远程专属属性污染近战武器。
-	var applied_any_modifier: bool = bool(apply_enhancement_with_result(modifiers).get("success", false))
+	var applied_any_modifier: bool = bool(apply_enhancement_with_result(modifiers, quality_id).get("success", false))
 	return applied_any_modifier
 
 
-func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
+func apply_enhancement_with_result(modifiers: Dictionary, quality_id: String = "") -> Dictionary:
 	# 强化结果；分开保存提升和削弱明细，UI 可直接展示百分比、基础值、变化值和强化后数值。
 	var result: Dictionary = {
 		"success": false,
@@ -346,30 +370,23 @@ func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
 	if applied_any_modifier:
 		# 强化次数；一次 apply 调用代表消费一颗强化石，不按该石包含的词条数量重复累计。
 		enhancement_count = clampi(get_enhancement_count() + 1, 0, MAX_ENHANCEMENT_COUNT)
+		# 强化品质记录；正式调用传入消耗石品质，用于按每颗固定数值计算武器价值。
+		_record_enhancement_quality(quality_id)
 	result["success"] = applied_any_modifier
 	return result
 
 
 func get_effective_value() -> int:
-	# 价值调整比例；按玩法利弊判断累计强化，增强提高价值、削弱降低价值。
-	var value_ratio: float = 0.0
-	# 已迁移累计词典；历史字段先合并到现行键，价值与实际有效属性读取同一份数据。
-	var migrated_modifiers: Dictionary = EnhancementRules.migrate_stat_aliases(enhancement_modifiers)
-	for raw_stat_name in migrated_modifiers.keys():
-		if _is_stat_supported(str(raw_stat_name)):
-			# 累计比例；正负号表示当前属性最终变化方向，具体价值由统一强化收益模型换算。
-			var accumulated_ratio: float = float(migrated_modifiers.get(raw_stat_name, 0.0))
-			if not is_zero_approx(accumulated_ratio):
-				# 等效价值影响；按实际生效属性变化与强化石平衡系数计算，策划调整词条幅度后会自动同步影响武器价值。
-				value_ratio += EnhancementRules.calculate_value_impact_ratio(get_base_stat(str(raw_stat_name)), str(raw_stat_name), accumulated_ratio)
-	# 强化后基础价值；先应用强化利弊，保证耐久折损与强化变化可以稳定组合。
-	var enhanced_value: float = float(value) * maxf(1.0 + value_ratio, MINIMUM_VALUE_MULTIPLIER)
+	# 强化固定价值；每颗已记录强化石只按品质增加固定数值，不再读取词条方向、幅度或最终属性变化。
+	var enhancement_value_bonus: int = get_enhancement_value_bonus()
+	# 满耐久有效价值；基础价值与强化品质固定加值直接相加，再统一进入当前耐久折价。
+	var enhanced_value: float = float(maxi(value, 0) + enhancement_value_bonus)
 	# 耐久价值倍率；从零耐久的 10% 线性增长到满耐久的 100%，确保损坏武器仍保留回收价值。
 	var durability_value_multiplier: float = lerpf(MINIMUM_DURABILITY_VALUE_MULTIPLIER, 1.0, get_durability_ratio())
 	# 四舍五入价值；强化变化和耐久折损依次组合，零耐久时为强化后满耐久价值的 10%。
 	var calculated_value: int = roundi(enhanced_value * durability_value_multiplier)
-	# 最终价值；原始价值大于 0 的武器至少可出售 1 星穹，避免低价值损坏武器因整数舍入变为不可出售。
-	return maxi(calculated_value, 1) if value > 0 else 0
+	# 最终价值；基础价值或强化加值任一为正时至少保留 1 星穹，避免低耐久与整数舍入变为不可出售。
+	return maxi(calculated_value, 1) if enhanced_value > 0.0 else 0
 
 
 func _resolve_base_property_name(stat_name: String) -> String:

@@ -14,6 +14,8 @@ const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.g
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 套装筛选控件脚本；商店装备分类复用库存统一多选套装筛选。
 const EQUIPMENT_SET_FILTER_CONTROL_SCRIPT: Script = preload("res://scripts/ui/equipment_set_filter_control.gd")
+## 通用渐进物品加载器；商品首批立即显示，剩余卡片按帧补齐。
+const PROGRESSIVE_ITEM_LOADER_SCRIPT: Script = preload("res://scripts/ui/progressive_item_loader.gd")
 ## 普通商店通道标识；显示随机刷新武器与资源，并允许星穹手动刷新。
 const CHANNEL_NORMAL: String = "normal"
 ## 灰市通道标识；显示最近五次撤离失败中实际遗失且尚未购回的物品。
@@ -23,6 +25,10 @@ const CHANNEL_GRAY: String = "gray"
 @export var panel_minimum_size: Vector2 = Vector2(960.0, 620.0)
 ## 底部状态提示淡出时长；默认 3 秒，商店刷新和购买结果会在该时间内线性淡出后清空。
 @export_range(0.5, 10.0, 0.1) var status_fade_duration_seconds: float = 3.0
+## 商品首次同步显示数量；默认 12，足以填充初始可视区域且不会一次创建完整长列表。
+@export_range(1, 100, 1) var progressive_initial_item_count: int = 12
+## 商品后续每帧创建数量；默认 8，刷新或切换筛选会自动取消旧任务。
+@export_range(1, 100, 1) var progressive_item_batch_count: int = 8
 
 ## 商店服务缓存；负责库存、刷新倒计时、灰市批次和购买结算。
 var _shop_service: Node
@@ -78,6 +84,8 @@ var _pending_failure_group_id: String = ""
 var _countdown_update_accumulator: float = 0.0
 ## 当前状态提示已显示时长；默认 -1 表示没有待淡出的提示，非负值用于计算透明度。
 var _status_fade_elapsed_seconds: float = -1.0
+## 商品渐进加载器；每次重建先取消旧代数，防止快速切换频道或筛选时混入旧商品。
+var _item_loader: ProgressiveItemLoader
 
 
 func _ready() -> void:
@@ -87,6 +95,8 @@ func _ready() -> void:
 	UI_STYLE_GUIDE.apply_window_panel(self)
 	_shop_service = get_tree().root.get_node_or_null("ShopService")
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
+	_item_loader = PROGRESSIVE_ITEM_LOADER_SCRIPT.new() as ProgressiveItemLoader
+	add_child(_item_loader)
 	_build_interface()
 	_connect_services()
 	_rebuild_content()
@@ -312,6 +322,8 @@ func _refresh_category_buttons() -> void:
 
 
 func _rebuild_content() -> void:
+	if _item_loader != null:
+		_item_loader.cancel()
 	_clear_container(_item_grid)
 	if _shop_service == null:
 		_show_status("商店服务不可用")
@@ -330,16 +342,20 @@ func _rebuild_content() -> void:
 		empty_label.custom_minimum_size = Vector2(0.0, 70.0)
 		_item_grid.add_child(empty_label)
 	else:
-		for entry in visible_entries:
-			# 商品卡片；来源下标只用于查询稳定排序，购买使用 stock_id 和灰市批次编号。
-			var item_control: Button = SHOP_ITEM_CONTROL_SCRIPT.new() as Button
-			item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			# 先加入场景树；商品配置需要读取全局调试设置，挂载后才能安全访问 get_tree()。
-			_item_grid.add_child(item_control)
-			item_control.call("configure", entry, _current_channel == CHANNEL_GRAY)
-			item_control.connect("purchase_requested", Callable(self, "_on_purchase_requested"))
+		_item_loader.start(visible_entries, Callable(self, "_create_progressive_shop_item"), progressive_initial_item_count, progressive_item_batch_count)
 	_refresh_category_buttons()
 	_refresh_header()
+
+
+func _create_progressive_shop_item(entry: Dictionary, _entry_index: int) -> void:
+	## 创建一张商品卡片；加载器保证旧频道与旧筛选任务不会继续调用本回调。
+	# 商品卡片；购买使用 stock_id 和灰市批次编号，不依赖渐进加载下标。
+	var item_control: Button = SHOP_ITEM_CONTROL_SCRIPT.new() as Button
+	item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# 先加入场景树；商品配置需要读取全局调试设置，挂载后才能安全访问 get_tree()。
+	_item_grid.add_child(item_control)
+	item_control.call("configure", entry, _current_channel == CHANNEL_GRAY)
+	item_control.connect("purchase_requested", Callable(self, "_on_purchase_requested"))
 
 
 func _refresh_header() -> void:

@@ -16,6 +16,8 @@ const ITEM_ACTION_POPUP_SCRIPT: Script = preload("res://scripts/ui/item_action_p
 const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
 ## 全局窗口样式指南；统一物资撤离窗口、规则说明、分区和操作控件视觉。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+## 通用渐进物品加载器；物资撤离背包首批立即显示，剩余卡片逐帧补齐。
+const PROGRESSIVE_ITEM_LOADER_SCRIPT: Script = preload("res://scripts/ui/progressive_item_loader.gd")
 ## 全部送回操作编号；单件物品和整组堆叠共同使用。
 const ACTION_SEND_ALL: int = 1
 ## 部分送回操作编号；只在堆叠数量大于 1 时显示。
@@ -29,6 +31,10 @@ const SOURCE_RANGED_PREFIX: String = "ranged_"
 
 ## 面板最小尺寸；默认 920×620，暂停时居中显示并保留屏幕边缘空间。
 @export var panel_minimum_size: Vector2 = Vector2(920.0, 620.0)
+## 撤离背包首次同步显示数量；默认 12，装备栏仍固定同步创建。
+@export_range(1, 100, 1) var progressive_initial_item_count: int = 12
+## 撤离背包后续每帧创建数量；默认 8，送回物品刷新时旧任务自动取消。
+@export_range(1, 100, 1) var progressive_item_batch_count: int = 8
 
 ## 全局库存服务；负责报价、星穹、额度、背包、装备和仓库所有权转移。
 var _global_inventory: Node
@@ -54,6 +60,8 @@ var _action_quantity: int = 1
 var _pending_partial_resource: Resource
 ## 当前等待部分送回确认的来源；默认空字符串，与待确认资源共同定位所有权。
 var _pending_partial_source_location: String = ""
+## 撤离背包渐进加载器；只处理可变长度背包列表，三个装备槽保持立即显示。
+var _item_loader: ProgressiveItemLoader
 
 
 func _ready() -> void:
@@ -61,6 +69,8 @@ func _ready() -> void:
 	custom_minimum_size = panel_minimum_size
 	UI_STYLE_GUIDE.apply_screen_theme(self)
 	UI_STYLE_GUIDE.apply_window_panel(self)
+	_item_loader = PROGRESSIVE_ITEM_LOADER_SCRIPT.new() as ProgressiveItemLoader
+	add_child(_item_loader)
 	_build_interface()
 	visible = false
 
@@ -218,6 +228,8 @@ func _rebuild_equipment_items() -> void:
 
 
 func _rebuild_backpack_items() -> void:
+	if _item_loader != null:
+		_item_loader.cancel()
 	_clear_container(_backpack_grid)
 	if _global_inventory == null:
 		return
@@ -233,12 +245,16 @@ func _rebuild_backpack_items() -> void:
 		empty_label.custom_minimum_size = Vector2(0.0, 54.0)
 		_backpack_grid.add_child(empty_label)
 		return
-	for raw_entry in backpack_entries:
-		if not (raw_entry is Dictionary):
-			continue
-		# 当前背包条目；用于提取资源和堆叠数量。
-		var entry: Dictionary = raw_entry as Dictionary
-		_add_item_card(_backpack_grid, entry.get("resource") as Resource, SOURCE_BACKPACK, maxi(int(entry.get("quantity", 1)), 1), "")
+	_item_loader.start(backpack_entries, Callable(self, "_create_progressive_extraction_item"), progressive_initial_item_count, progressive_item_batch_count)
+
+
+func _create_progressive_extraction_item(raw_entry: Variant, _entry_index: int) -> void:
+	## 创建一张撤离背包卡片；送回操作引发刷新后，旧加载代数不会继续写入列表。
+	if not (raw_entry is Dictionary):
+		return
+	# 当前背包条目；用于提取资源和堆叠数量。
+	var entry: Dictionary = raw_entry as Dictionary
+	_add_item_card(_backpack_grid, entry.get("resource") as Resource, SOURCE_BACKPACK, maxi(int(entry.get("quantity", 1)), 1), "")
 
 
 func _add_item_card(parent_grid: GridContainer, item_resource: Resource, source_location: String, quantity: int, empty_text: String) -> void:

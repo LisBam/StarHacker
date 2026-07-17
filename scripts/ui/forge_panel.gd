@@ -20,6 +20,8 @@ const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.g
 const EQUIPMENT_SET_FILTER_CONTROL_SCRIPT: Script = preload("res://scripts/ui/equipment_set_filter_control.gd")
 ## 锻造结果弹窗脚本；展示强化前后属性、价格与额外耐久恢复。
 const ENHANCEMENT_RESULT_DIALOG_SCRIPT: Script = preload("res://scripts/ui/enhancement_result_dialog.gd")
+## 通用渐进物品加载器；锻造候选首批立即显示，剩余候选按帧补齐。
+const PROGRESSIVE_ITEM_LOADER_SCRIPT: Script = preload("res://scripts/ui/progressive_item_loader.gd")
 ## 背包来源标识；与 GlobalInventory 公开接口保持一致。
 const SOURCE_BACKPACK: String = "backpack"
 ## 仓库来源标识；与 GlobalInventory 公开接口保持一致。
@@ -39,6 +41,10 @@ const FORGE_ANIMATION_ROTATIONS: float = 1.5
 @export_range(0.0, 64.0, 1.0) var top_sacrifice_slot_upward_offset: float = 16.0
 ## 下方两个牺牲槽额外下移距离；默认 24 像素，用于避免固定宽卡片与主道具槽发生重叠，运行时无需动态修改。
 @export_range(0.0, 64.0, 1.0) var bottom_sacrifice_slot_downward_offset: float = 24.0
+## 锻造候选首次同步显示数量；默认 12，保证界面打开后立即可选择常用物品。
+@export_range(1, 100, 1) var progressive_initial_item_count: int = 12
+## 锻造候选后续每帧创建数量；默认 8，槽位或筛选变化会取消旧加载任务。
+@export_range(1, 100, 1) var progressive_item_batch_count: int = 8
 
 ## 全局库存服务缓存；提供背包/仓库条目、星穹、材料数量与强化应用。
 var _global_inventory: Node
@@ -120,6 +126,8 @@ var _animation_start_offsets: Array[Vector2] = []
 var _refresh_queued: bool = false
 ## 隐藏期间锻造库存是否发生变化；默认 false，面板关闭时不维护不可见候选卡片，重新打开后统一校验。
 var _refresh_pending: bool = false
+## 锻造候选渐进加载器；只负责下半区普通背包或仓库列表，固定装备槽继续同步显示。
+var _item_loader: ProgressiveItemLoader
 
 
 func _ready() -> void:
@@ -128,6 +136,8 @@ func _ready() -> void:
 	UI_STYLE_GUIDE.apply_window_panel(self)
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
 	_forge_service = ForgeService.new(_global_inventory)
+	_item_loader = PROGRESSIVE_ITEM_LOADER_SCRIPT.new() as ProgressiveItemLoader
+	add_child(_item_loader)
 	_initialize_sacrifice_entries()
 	_build_interface()
 	_connect_inventory_signals()
@@ -535,6 +545,8 @@ func _refresh_preview() -> void:
 
 
 func _rebuild_inventory_items() -> void:
+	if _item_loader != null:
+		_item_loader.cancel()
 	_clear_container(_item_grid)
 	_rebuild_equipment_items()
 	if _global_inventory == null:
@@ -554,25 +566,27 @@ func _rebuild_inventory_items() -> void:
 		empty_label.custom_minimum_size = Vector2(0.0, 54.0)
 		_item_grid.add_child(empty_label)
 		return
-	for entry in visible_entries:
-		# 物品资源；空条目不创建控件。
-		var item_resource: Resource = entry.get("resource") as Resource
-		if item_resource == null:
-			continue
-		# 锻造候选卡片；单击发出放入请求，拖拽数据可投放到指定主锻造槽或牺牲槽。
-		var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
-		item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		item_control.call("configure", item_resource, _current_source, int(entry.get("source_index", -1)), false, "", int(entry.get("quantity", 1)), "价值", -1, true)
-		# 武器与装备统一使用深色宽卡排版和底部耐久条。
-		# 通用模板补充：当前所有锻造来源物品均复用固定尺寸卡片，不再按物品类型切换视觉风格。
-		item_control.call("set_weapon_slot_visual_style", true)
-		# 候选可选状态；主锻造槽为空时只允许合法主物品，主锻造槽已有物品时只允许符合其牺牲规则的候选物品。
-		var main_resource: Resource = _main_entry.get("resource") as Resource
-		# 当前卡片是否可选；不可选物品显示灰色滤镜并阻止点击与拖拽。
-		var item_selectable: bool = _forge_service.can_use_as_main(item_resource) if main_resource == null else _forge_service.can_use_as_sacrifice(main_resource, item_resource)
-		item_control.call("set_item_selection_state", true, item_selectable, false)
-		item_control.connect("item_action_requested", Callable(self, "_on_inventory_item_pressed").bind(_current_source))
-		_item_grid.add_child(item_control)
+	_item_loader.start(visible_entries, Callable(self, "_create_progressive_forge_item"), progressive_initial_item_count, progressive_item_batch_count)
+
+
+func _create_progressive_forge_item(entry: Dictionary, _entry_index: int) -> void:
+	## 创建一张锻造候选卡片；来源和主物品状态取当前刷新快照，旧任务会在状态变化时被取消。
+	# 物品资源；空条目不创建控件。
+	var item_resource: Resource = entry.get("resource") as Resource
+	if item_resource == null:
+		return
+	# 锻造候选卡片；单击发出放入请求，拖拽数据可投放到指定主锻造槽或牺牲槽。
+	var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
+	item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	item_control.call("configure", item_resource, _current_source, int(entry.get("source_index", -1)), false, "", int(entry.get("quantity", 1)), "价值", -1, true)
+	item_control.call("set_weapon_slot_visual_style", true)
+	# 当前主物品；刷新任务有效期间保持与候选资格一致，变化时会触发重建并取消本任务。
+	var main_resource: Resource = _main_entry.get("resource") as Resource
+	# 当前卡片是否可选；不可选物品显示灰色滤镜并阻止点击与拖拽。
+	var item_selectable: bool = _forge_service.can_use_as_main(item_resource) if main_resource == null else _forge_service.can_use_as_sacrifice(main_resource, item_resource)
+	item_control.call("set_item_selection_state", true, item_selectable, false)
+	item_control.connect("item_action_requested", Callable(self, "_on_inventory_item_pressed").bind(_current_source))
+	_item_grid.add_child(item_control)
 
 
 func _rebuild_equipment_items() -> void:

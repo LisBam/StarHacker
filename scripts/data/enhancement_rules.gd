@@ -13,13 +13,15 @@ const ENHANCEMENT_STEP_RATIO: float = 0.10
 const MAX_TARGET_ENHANCEMENT_COUNT: int = 20
 ## 乘算百分比公式标识；对应“基础值 × (1 + 累计比例)”，用于普通数值属性的统一结算。
 const CALCULATION_MULTIPLICATIVE_RATIO: String = "multiplicative_ratio"
-## 加算百分点公式标识；对应“基础值 + 累计百分点”，用于暴击率、暴击伤害与闪避率。
+## 加算百分点公式标识；对应“基础值 + 累计百分点”，用于暴击率、暴击伤害、闪避率、冷却缩减、移速与视野。
 const CALCULATION_ADDITIVE_POINTS: String = "additive_points"
 ## 加算数值公式标识；对应“基础值 + 累计数值”，用于能量恢复和武器离散计数属性。
 const CALCULATION_ADDITIVE_VALUE: String = "additive_value"
 ## 一级乘算属性组标识；用于伤害、攻击力、防御力、最大生命值、视野和冷却的独立幅度配置。
+## 现行分类补充：视野已转为加算百分点，本组当前不再包含视野。
 const MAGNITUDE_GROUP_PRIMARY: String = "primary"
 ## 二级乘算属性组标识；用于移速、能耗、偏移、坐力、冲击力和回血的独立幅度配置。
+## 现行分类补充：移速已转为加算百分点，本组当前不再包含移速。
 const MAGNITUDE_GROUP_SECONDARY: String = "secondary"
 ## 三级乘算属性组标识；用于弹体速度、攻击距离、判定时长和耐久值的独立幅度配置。
 ## 属性名称补充：max_durability 的现行玩家可见名称统一为“耐久”，含义是改变武器或装备耐久上限。
@@ -75,7 +77,6 @@ const MULTIPLICATIVE_STAT_GROUPS: Dictionary = {
 	"damage": MAGNITUDE_GROUP_PRIMARY,
 	"attack_power": MAGNITUDE_GROUP_PRIMARY,
 	"max_health": MAGNITUDE_GROUP_PRIMARY,
-	"vision_range": MAGNITUDE_GROUP_PRIMARY,
 	"cooldown": MAGNITUDE_GROUP_PRIMARY,
 	"defense_power": MAGNITUDE_GROUP_PRIMARY,
 	"energy_consumption": MAGNITUDE_GROUP_SECONDARY,
@@ -84,18 +85,20 @@ const MULTIPLICATIVE_STAT_GROUPS: Dictionary = {
 	"front_recoil_force": MAGNITUDE_GROUP_SECONDARY,
 	"impact_force": MAGNITUDE_GROUP_SECONDARY,
 	"health_regeneration_per_five_seconds": MAGNITUDE_GROUP_SECONDARY,
-	"move_speed": MAGNITUDE_GROUP_SECONDARY,
 	"projectile_speed": MAGNITUDE_GROUP_TERTIARY,
 	"attack_distance": MAGNITUDE_GROUP_TERTIARY,
 	"melee_active_duration": MAGNITUDE_GROUP_TERTIARY,
 	"max_durability": MAGNITUDE_GROUP_TERTIARY,
 }
 ## 加算百分点属性目录；字典值固定为公式标识，供数据资源、结果 UI 和存档迁移共用同一分类。
+## 现行分类补充：该目录同时是战斗结算、强化价值与 0 基础装备属性应用的统一依据，当前不再执行存档公式迁移。
 const ADDITIVE_POINT_STATS: Dictionary = {
 	"critical_chance": CALCULATION_ADDITIVE_POINTS,
 	"critical_damage": CALCULATION_ADDITIVE_POINTS,
 	"dodge_chance": CALCULATION_ADDITIVE_POINTS,
 	"cooldown_reduction": CALCULATION_ADDITIVE_POINTS,
+	"move_speed": CALCULATION_ADDITIVE_POINTS,
+	"vision_range": CALCULATION_ADDITIVE_POINTS,
 }
 ## 加算数值属性目录；这些属性直接累加实际点数，不按基础值百分比换算。
 const ADDITIVE_VALUE_STATS: Dictionary = {
@@ -256,8 +259,6 @@ const MULTIPLICATIVE_STAT_MAGNITUDE_RANGES: Dictionary = {
 	"defense_power": BALANCED_DEFENSE_POWER_MAGNITUDE_RANGES,
 	"max_health": BALANCED_REACH_MAGNITUDE_RANGES,
 	"health_regeneration_per_five_seconds": BALANCED_SUSTAIN_MAGNITUDE_RANGES,
-	"move_speed": BALANCED_MOVE_SPEED_MAGNITUDE_RANGES,
-	"vision_range": BALANCED_VISION_RANGE_MAGNITUDE_RANGES,
 }
 ## 加算属性独立幅度；数值仍以 0 到 1 小数保存，0.005 表示直接增加 0.5 个百分点。
 const ADDITIVE_POINT_MAGNITUDE_RANGES: Dictionary = {
@@ -287,6 +288,10 @@ const ADDITIVE_POINT_MAGNITUDE_RANGES: Dictionary = {
 		QUALITY_HIGH: {"beneficial_min": 0.018, "beneficial_max": 0.029, "detrimental_min": 0.003, "detrimental_max": 0.008},
 		QUALITY_SUPREME: {"beneficial_min": 0.024, "beneficial_max": 0.039, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	},
+	# 移速幅度；装备移速本身是加算百分比，即使脚部模板为 0% 也能直接获得强化百分点。
+	"move_speed": BALANCED_MOVE_SPEED_MAGNITUDE_RANGES,
+	# 视野幅度；装备视野本身是加算百分比，即使头部模板为 0% 也能直接获得强化百分点。
+	"vision_range": BALANCED_VISION_RANGE_MAGNITUDE_RANGES,
 }
 ## 强化数值保存精度；0.001 对应 0.1 个百分点，可完整保存闪避率等小数区间。
 const MODIFIER_VALUE_PRECISION: float = 0.001
@@ -307,6 +312,18 @@ const DODGE_CHANCE_MAXIMUM: float = 0.80
 const COOLDOWN_REDUCTION_MAXIMUM: float = 0.40
 ## 冷却和判定时长最终下限；0.01 秒可防止零时长导致无限触发或除零。
 const MINIMUM_DURATION_VALUE: float = 0.01
+## 特化离散机制单点价值比例；默认 0.20 表示每点弹射、连击、穿透或散射使满耐久基础价值提高 20%。
+const SPECIALIZATION_VALUE_RATIO_PER_POINT: float = 0.20
+## 强化价值换算中的标准暴击率；默认 0.20，与强化石平衡文档的暴击率词条基准一致。
+const VALUE_REFERENCE_CRITICAL_CHANCE: float = 0.20
+## 强化价值换算中的标准暴击伤害；默认 2.00，与强化石平衡文档的暴击率词条基准一致。
+const VALUE_REFERENCE_CRITICAL_DAMAGE_FOR_CHANCE: float = 2.00
+## 强化价值换算中的暴击伤害词条参考暴击率；默认 0.80，与强化石平衡文档的暴击伤害基准一致。
+const VALUE_REFERENCE_CRITICAL_CHANCE_FOR_DAMAGE: float = 0.80
+## 强化价值换算中的暴击伤害词条参考倍率；默认 1.50，与强化石平衡文档的暴击伤害基准一致。
+const VALUE_REFERENCE_CRITICAL_DAMAGE: float = 1.50
+## 强化价值换算中的标准闪避率；默认 0.10，与强化石平衡文档的闪避收益基准一致。
+const VALUE_REFERENCE_DODGE_CHANCE: float = 0.10
 ## 全部可随机生成的强化属性；顺序同时用于属性筛选下拉框和随机词条池。
 const STAT_KEYS: Array[String] = [
 	"damage",
@@ -511,6 +528,70 @@ static func calculate_effective_stat(base_value: float, stat_name: String, accum
 	if stat_name in ["piercing_count", "bounce_count"]:
 		return maxf(roundf(calculated_value), 0.0)
 	return maxf(calculated_value, 0.0)
+
+
+static func calculate_value_impact_ratio(base_value: float, stat_name: String, accumulated_modifier: float) -> float:
+	## 把目标当前累计强化换算为相对基础价值的等效收益比例；正数提高价值，负数降低价值，属性幅度调整后会自动重新计算。
+	stat_name = canonicalize_stat_name(stat_name)
+	# 强化后有效值；复用战斗结算的边界与取整，超过上限或被下限截断的无效部分不会虚增或虚减价值。
+	var effective_value: float = calculate_effective_stat(base_value, stat_name, accumulated_modifier)
+	# 实际属性变化；加算属性可在基础值为 0 时产生有效差值，乘算属性则按真实基础值结算。
+	var effective_change: float = effective_value - base_value
+	if is_zero_approx(effective_change):
+		return 0.0
+	# 实际变化方向；通过统一利弊表判断该变化对玩家是增强还是削弱，冷却、能耗等反向属性不会按正负号误判。
+	var beneficial: bool = is_direction_beneficial(stat_name, effective_change)
+	# 变化符号；增强固定为正、削弱固定为负，便于武器与装备直接累计净价值影响。
+	var value_direction: float = 1.0 if beneficial else -1.0
+	# 实际变化幅度；使用已应用上限、下限和整数取整后的差值，保证价值只反映真正生效的属性变化。
+	var absolute_change: float = absf(effective_change)
+	if stat_name in SPECIALIZATION_WEAPON_BENEFICIAL_STAT_KEYS:
+		return value_direction * absolute_change * SPECIALIZATION_VALUE_RATIO_PER_POINT
+	if stat_name == "energy_regeneration":
+		return value_direction * absolute_change / 80.0
+	if stat_name == "critical_chance":
+		# 标准暴击期望倍率；20% 暴击率与 200% 暴击伤害下为 1.20，用于把百分点变化换算为等效伤害比例。
+		var critical_expectation: float = 1.0 + VALUE_REFERENCE_CRITICAL_CHANCE * (VALUE_REFERENCE_CRITICAL_DAMAGE_FOR_CHANCE - 1.0)
+		return value_direction * absolute_change * (VALUE_REFERENCE_CRITICAL_DAMAGE_FOR_CHANCE - 1.0) / critical_expectation
+	if stat_name == "critical_damage":
+		# 标准暴击伤害期望倍率；80% 暴击率与 150% 暴击伤害下为 1.40，用于换算暴击伤害百分点价值。
+		var critical_damage_expectation: float = 1.0 + VALUE_REFERENCE_CRITICAL_CHANCE_FOR_DAMAGE * (VALUE_REFERENCE_CRITICAL_DAMAGE - 1.0)
+		return value_direction * absolute_change * VALUE_REFERENCE_CRITICAL_CHANCE_FOR_DAMAGE / critical_damage_expectation
+	if stat_name == "dodge_chance":
+		# 标准未闪避概率；默认 0.90，增强和削弱分别按有效承伤能力的非线性变化换算。
+		var remaining_hit_chance: float = 1.0 - VALUE_REFERENCE_DODGE_CHANCE
+		# 闪避等效收益；增强按有效承伤能力提升计算，削弱按有效承伤能力损失计算。
+		var dodge_utility: float = remaining_hit_chance / maxf(remaining_hit_chance - absolute_change, 0.001) - 1.0 if beneficial else 1.0 - remaining_hit_chance / (remaining_hit_chance + absolute_change)
+		return value_direction * maxf(dodge_utility, 0.0)
+	if stat_name in ["cooldown", "cooldown_reduction"]:
+		# 冷却相对变化；武器冷却读取基础时长比例，冷却缩减直接使用加算百分点差值。
+		var cooldown_change_ratio: float = absolute_change / maxf(base_value, MINIMUM_DURATION_VALUE) if stat_name == "cooldown" else absolute_change
+		# 冷却安全变化；最高限制在 95%，避免异常存档或极端累计导致价值换算出现无穷值。
+		var safe_cooldown_change: float = clampf(cooldown_change_ratio, 0.0, 0.95)
+		# 冷却等效收益；缩短按攻击频率倒数增长，延长按频率损失计算。
+		var cooldown_utility: float = 1.0 / (1.0 - safe_cooldown_change) - 1.0 if beneficial else 1.0 - 1.0 / (1.0 + safe_cooldown_change)
+		return value_direction * maxf(cooldown_utility, 0.0)
+	if stat_name == "vision_range":
+		# 视野现为加算百分点；独立幅度约为伤害收益锚点的 1.5 倍，因此按 1.5 还原等效价值。
+		return value_direction * absolute_change / 1.5
+	if stat_name == "move_speed":
+		# 移速现为加算百分点；独立幅度与伤害收益锚点近似一致，直接按实际百分点计入价值。
+		return value_direction * absolute_change
+	# 乘算属性实际相对变化；基础值为 0 时前面已经因无实际变化返回，非零时可安全换算。
+	var relative_change: float = absolute_change / maxf(absf(base_value), 0.001)
+	# 平衡换算系数；数值来自强化石统一收益模型，较大的属性幅度会还原为可比较的等效战斗收益。
+	var conversion_coefficient: float = 1.0
+	if stat_name == "energy_consumption" or stat_name in ["deviation_degrees", "recoil_force", "front_recoil_force", "impact_force"]:
+		conversion_coefficient = 4.0
+	elif stat_name in ["projectile_speed", "attack_distance", "melee_active_duration", "max_durability", "max_health"]:
+		conversion_coefficient = 8.0
+	elif stat_name == "health_regeneration_per_five_seconds":
+		conversion_coefficient = 6.0
+	elif stat_name == "attack_power":
+		conversion_coefficient = 14.0
+	elif stat_name == "defense_power":
+		conversion_coefficient = 12.0
+	return value_direction * relative_change / conversion_coefficient
 
 
 static func get_effect_value(stat_name: String, raw_value: Variant) -> float:

@@ -357,12 +357,11 @@ func get_effective_value() -> int:
 	var migrated_modifiers: Dictionary = EnhancementRules.migrate_stat_aliases(enhancement_modifiers)
 	for raw_stat_name in migrated_modifiers.keys():
 		if _is_stat_supported(str(raw_stat_name)):
-			# 累计比例；正负号表示当前属性最终变化方向，绝对值表示累计强化幅度。
+			# 累计比例；正负号表示当前属性最终变化方向，具体价值由统一强化收益模型换算。
 			var accumulated_ratio: float = float(migrated_modifiers.get(raw_stat_name, 0.0))
 			if not is_zero_approx(accumulated_ratio):
-				# 累计方向；用于判断该属性最终变化对武器是增强还是削弱。
-				var accumulated_direction: int = EnhancementRules.normalize_direction(accumulated_ratio)
-				value_ratio += absf(accumulated_ratio) if EnhancementRules.is_direction_beneficial(str(raw_stat_name), accumulated_direction) else -absf(accumulated_ratio)
+				# 等效价值影响；按实际生效属性变化与强化石平衡系数计算，策划调整词条幅度后会自动同步影响武器价值。
+				value_ratio += EnhancementRules.calculate_value_impact_ratio(get_base_stat(str(raw_stat_name)), str(raw_stat_name), accumulated_ratio)
 	# 强化后基础价值；先应用强化利弊，保证耐久折损与强化变化可以稳定组合。
 	var enhanced_value: float = float(value) * maxf(1.0 + value_ratio, MINIMUM_VALUE_MULTIPLIER)
 	# 耐久价值倍率；从零耐久的 10% 线性增长到满耐久的 100%，确保损坏武器仍保留回收价值。

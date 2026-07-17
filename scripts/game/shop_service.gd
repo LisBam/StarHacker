@@ -570,8 +570,8 @@ func _load_state() -> bool:
 		return false
 	# 商店存档字典；当前版本只读取已知字段，新增字段可向后兼容。
 	var save_data: Dictionary = parsed_data as Dictionary
-	# 已保存版本；版本 1 的普通库存创建于新稀有词条加入前，需要在完成灰市恢复后触发一次正常库存重建。
-	var saved_version: int = maxi(int(save_data.get("version", 1)), 1)
+	# 存档版本迁移停用；项目尚未发布正式版本，当前读档不再因历史版本号自动重建普通商品池。
+	# var saved_version: int = maxi(int(save_data.get("version", 1)), 1)
 	_next_automatic_refresh_unix = int(save_data.get("next_automatic_refresh_unix", 0))
 	_manual_refresh_count = maxi(int(save_data.get("manual_refresh_count", 0)), 0)
 	_entry_sequence = maxi(int(save_data.get("entry_sequence", 0)), 0)
@@ -594,7 +594,7 @@ func _load_state() -> bool:
 					restored_group_entries.append(restored_entry)
 		if not restored_group_entries.is_empty():
 			_gray_market_failure_groups.append({"group_id": str((raw_group as Dictionary).get("group_id", _create_unique_id("failure"))), "entries": restored_group_entries})
-	return not _shop_stock.is_empty() and saved_version >= SAVE_VERSION
+	return not _shop_stock.is_empty()
 
 
 func _is_normal_stock_entry_currently_available(entry: Dictionary) -> bool:

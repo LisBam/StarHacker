@@ -23,7 +23,9 @@ const PERSISTENT_FILE_NAMES: Array[String] = [
 
 func _enter_tree() -> void:
 	## 在后续 AutoLoad 读取业务存档前完成目录迁移；失败时不写标记，下次启动会再次尝试。
-	_migrate_legacy_save_directory()
+	# 存档迁移停用；项目尚未发布正式版本，不再自动复制任何历史项目目录中的存档文件。
+	# _migrate_legacy_save_directory()
+	pass
 
 
 func _migrate_legacy_save_directory() -> void:

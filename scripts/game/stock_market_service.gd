@@ -62,7 +62,10 @@ const EVENT_DEFINITIONS: Array[Dictionary] = [
 ## 面板微行情刷新间隔；默认 1 秒，股市界面打开期间玩家每秒都能看到价格与折线变化。
 @export_range(0.2, 10.0, 0.1) var display_refresh_interval_seconds: float = 1.0
 ## 面板微行情波动尺度；默认使用标准波动的 18%，让两位小数价格持续变化且不破坏长期经济平衡。
-@export_range(0.01, 0.50, 0.01) var display_fluctuation_scale: float = 0.18
+## 波动增强补充：现行默认值为 0.22，使面板每秒微行情比原 0.18 尺度提高约 22%。
+@export_range(0.01, 0.50, 0.01) var display_fluctuation_scale: float = 0.22
+## 全局行情波动倍率；默认 1.25，使正式结算、局外刷新与面板微行情的随机情绪幅度统一提高 25%，运行时通常不动态修改。
+@export_range(0.50, 3.00, 0.05) var market_volatility_multiplier: float = 1.25
 ## 大盘正式结算切换周期；默认 8 局，低于 5 会明显削弱趋势感。
 @export_range(5, 30, 1) var market_cycle_settlement_count: int = 8
 ## 大盘在线时长切换周期；默认 480 秒即 8 分钟，与 8 局正式结算并行且任一先达到即触发。
@@ -568,7 +571,7 @@ func _refresh_stock(stock_id: String, refresh_source: String, player_impact: flo
 	# 本次均值回归变化量；局外刷新按 0.5 尺度减半。
 	var reversion: float = _calculate_mean_reversion(deviation_ratio) * scale
 	# 本次情绪基础波动率；来自股票类型并受刷新源、大盘和事件倍率调整。
-	var volatility: float = float(definition.get("volatility", 0.03)) * scale
+	var volatility: float = float(definition.get("volatility", 0.03)) * scale * maxf(market_volatility_multiplier, 0.0)
 	if pricing_market_state == MARKET_SIDEWAYS:
 		volatility *= 1.2
 	if not is_display_refresh:
@@ -943,8 +946,8 @@ func _load_state() -> bool:
 		return false
 	# 股市存档字典；包含大盘、周期、事件、运行累计和单股状态。
 	var save_data: Dictionary = parsed as Dictionary
-	# 已保存股市版本；版本 3 之前使用原在线阈值，读取后需要按 3 倍比例迁移。
-	var saved_version: int = maxi(int(save_data.get("version", 1)), 1)
+	# 股市存档版本迁移停用；项目尚未发布正式版本，当前读档不再按历史版本缩放累计进度。
+	# var saved_version: int = maxi(int(save_data.get("version", 1)), 1)
 	# 证券币余额；版本 3 及更旧存档没有该字段，升级时从 0.00 开始且不自动搬运永久星穹。
 	_securities_balance = _normalize_securities_amount(float(save_data.get("securities_balance", 0.0)))
 	_market_state = str(save_data.get("market_state", MARKET_SIDEWAYS))
@@ -958,12 +961,9 @@ func _load_state() -> bool:
 	_settlements_until_event = maxi(int(save_data.get("settlements_until_event", 0)), 0)
 	_event_online_accumulated_seconds = maxf(float(save_data.get("event_online_accumulated_seconds", 0.0)), 0.0)
 	_event_online_target_seconds = maxf(float(save_data.get("event_online_target_seconds", 0.0)), 0.0)
-	if saved_version < 3:
-		_market_cycle_online_accumulated_seconds = minf(_market_cycle_online_accumulated_seconds * 3.0, maxf(market_cycle_online_seconds, 1.0))
-		_price_limit_cycle_online_accumulated_seconds = minf(_price_limit_cycle_online_accumulated_seconds * 3.0, maxf(price_limit_cycle_online_seconds, 1.0))
-		_event_online_accumulated_seconds *= 3.0
-		if _event_online_target_seconds > 0.0:
-			_event_online_target_seconds *= 3.0
+	# 历史在线进度迁移停用；旧版本累计时长和事件目标不再自动乘以 3。
+	# if saved_version < 3:
+	# 	...
 	_runtime_accumulated_seconds = clampf(float(save_data.get("runtime_accumulated_seconds", 0.0)), 0.0, maxf(runtime_refresh_interval_seconds, 1.0))
 	# 原始事件字段；合法字典会恢复剩余次数，其他类型视为无事件。
 	var raw_event: Variant = save_data.get("active_event", {})

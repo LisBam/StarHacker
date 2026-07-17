@@ -52,6 +52,8 @@ var _primary_category: String = InventoryQuery.PRIMARY_ALL
 var _subcategory: String = InventoryQuery.SUBCATEGORY_ALL
 ## 当前强化石属性筛选键集合；默认空数组表示全部属性与方向，多项条件按并集展示。
 var _stone_attribute_filter: Array[String] = []
+## 当前强化石品质筛选；默认空字符串表示显示全部品质，其他值使用 EnhancementRules 的稳定品质标识。
+var _stone_quality_filter: String = ""
 ## 当前排序模式；默认获得时间从新到旧，与背包仓库一致。
 var _sort_mode: String = InventoryQuery.SORT_ACQUIRED_TIME
 ## 主锻造条目；包含资源与原来源，空字典表示主锻造槽未放入物品。
@@ -84,6 +86,8 @@ var _search_edit: LineEdit
 var _sort_option: OptionButton
 ## 强化属性筛选框；只在资源分类显示并按正负方向精确筛选。
 var _stone_attribute_option: OptionButton
+## 强化石品质筛选框；只在资源分类显示，可选择全部、初级、中级、高级、极品或特化品质。
+var _stone_quality_option: OptionButton
 ## 清空强化属性筛选按钮；默认只在资源分类显示，点击后一次移除全部勾选条件。
 var _stone_attribute_clear_button: Button
 ## 套装多选筛选控件；按当前背包或仓库可用条目动态列出套装。
@@ -269,6 +273,18 @@ func _build_interface() -> void:
 	_sort_option.set_item_metadata(2, InventoryQuery.SORT_DURABILITY)
 	_sort_option.item_selected.connect(_on_sort_selected)
 	query_bar.add_child(_sort_option)
+	_stone_quality_option = OptionButton.new()
+	_stone_quality_option.custom_minimum_size = Vector2(126.0, 34.0)
+	_stone_quality_option.add_item("品质：全部")
+	_stone_quality_option.set_item_metadata(0, "")
+	# 品质标识遍历；固定使用规则目录顺序，保证筛选选项与掉落、图鉴及升阶使用相同品质排列。
+	for quality_id in EnhancementRules.QUALITY_ORDER:
+		# 品质显示短名；规则目录返回完整强化石名称，筛选按钮只保留初级、中级、高级、极品或特化前缀。
+		var quality_label: String = EnhancementRules.get_quality_display_name(quality_id).trim_suffix("强化石")
+		_stone_quality_option.add_item("品质：%s" % quality_label)
+		_stone_quality_option.set_item_metadata(_stone_quality_option.item_count - 1, quality_id)
+	_stone_quality_option.item_selected.connect(_on_stone_quality_selected)
+	query_bar.add_child(_stone_quality_option)
 	_stone_attribute_option = OptionButton.new()
 	_stone_attribute_option.custom_minimum_size = Vector2(150.0, 34.0)
 	_stone_attribute_option.add_item("强化筛选（0）")
@@ -529,8 +545,8 @@ func _rebuild_inventory_items() -> void:
 	# 可选择条目；移除已选武器并扣减同堆强化石已占用数量，防止一个物品被重复放入超过库存。
 	var available_entries: Array[Dictionary] = _build_available_entries(source_entries)
 	_equipment_set_filter_control.configure_entries(available_entries)
-	# 可见条目；分类、搜索、属性方向和排序与背包仓库完全一致。
-	var visible_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(available_entries, _primary_category, _subcategory, _search_edit.text, _stone_attribute_filter, _sort_mode, _equipment_set_filter_control.get_selected_set_ids())
+	# 可见条目；分类、搜索、属性方向、强化石品质和排序全部交给统一查询器处理。
+	var visible_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(available_entries, _primary_category, _subcategory, _search_edit.text, _stone_attribute_filter, _sort_mode, _equipment_set_filter_control.get_selected_set_ids(), _stone_quality_filter)
 	if visible_entries.is_empty():
 		var empty_label: Label = Label.new()
 		empty_label.text = "当前来源与分类没有可放入的物品"
@@ -879,6 +895,7 @@ func _refresh_source_and_category_buttons() -> void:
 	for category_name in _subcategory_buttons.keys():
 		(_subcategory_buttons[category_name] as Button).disabled = str(category_name) == _subcategory
 	_stone_attribute_option.visible = _primary_category == InventoryQuery.PRIMARY_RESOURCES
+	_stone_quality_option.visible = _primary_category == InventoryQuery.PRIMARY_RESOURCES
 	_stone_attribute_clear_button.visible = _primary_category == InventoryQuery.PRIMARY_RESOURCES
 	_equipment_set_filter_control.visible = _primary_category == InventoryQuery.PRIMARY_EQUIPMENT
 	_stone_attribute_clear_button.disabled = _stone_attribute_filter.is_empty()
@@ -896,6 +913,7 @@ func _on_primary_category_pressed(category_name: String) -> void:
 	_primary_category = category_name
 	_subcategory = InventoryQuery.SUBCATEGORY_ALL
 	_clear_stone_attribute_filter()
+	_clear_stone_quality_filter()
 	_equipment_set_filter_control.clear_filters(false)
 	_rebuild_subcategory_buttons()
 	_rebuild_inventory_items()
@@ -937,6 +955,14 @@ func _on_stone_attribute_selected(item_index: int) -> void:
 	_rebuild_inventory_items()
 
 
+func _on_stone_quality_selected(item_index: int) -> void:
+	## 切换锻造候选强化石品质；选中“全部”时清空条件，其他选项读取稳定品质标识。
+	# 品质元数据；异常下标或未知品质回退空字符串，避免筛选后永久隐藏全部物品。
+	var selected_quality_id: String = str(_stone_quality_option.get_item_metadata(item_index)) if item_index >= 0 and item_index < _stone_quality_option.item_count else ""
+	_stone_quality_filter = selected_quality_id if selected_quality_id in EnhancementRules.QUALITY_ORDER else ""
+	_rebuild_inventory_items()
+
+
 func _on_clear_stone_attribute_filter_pressed() -> void:
 	_clear_stone_attribute_filter()
 	_rebuild_inventory_items()
@@ -949,6 +975,13 @@ func _clear_stone_attribute_filter() -> void:
 		if not str(_stone_attribute_option.get_item_metadata(item_index)).is_empty():
 			_stone_attribute_option.get_popup().set_item_checked(item_index, false)
 	_refresh_stone_attribute_filter_display()
+
+
+func _clear_stone_quality_filter() -> void:
+	## 清空强化石品质条件并恢复“品质：全部”选项；切换一级分类时调用，避免隐藏筛选跨分类残留。
+	_stone_quality_filter = ""
+	if _stone_quality_option != null:
+		_stone_quality_option.select(0)
 
 
 func _on_equipment_set_filters_changed(_selected_set_ids: Array[String]) -> void:

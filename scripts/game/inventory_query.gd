@@ -1,7 +1,7 @@
 extends RefCounted
 class_name InventoryQuery
 
-## 库存查询器为局外仓库和局内背包提供统一的多层分类、关键词、强化属性筛选和展示排序。
+## 库存查询器为局外仓库和局内背包提供统一的多层分类、关键词、强化属性、强化品质筛选和展示排序。
 ## 查询只返回带原始 source_index 的条目副本，不修改 GlobalInventory 的真实顺序和所有权记录。
 
 ## 全部主分类；同时包含武器和资源，用于所有一级分类栏的首个聚合入口。
@@ -58,7 +58,7 @@ static func get_stone_attribute_direction_group_label(direction: int) -> String:
 	return "增强" if direction > 0 else "削弱"
 
 
-static func filter_and_sort_entries(entries: Array, primary_category: String, subcategory: String, search_keyword: String, stone_attribute: Variant, sort_mode: String, equipment_set_filter: Variant = []) -> Array[Dictionary]:
+static func filter_and_sort_entries(entries: Array, primary_category: String, subcategory: String, search_keyword: String, stone_attribute: Variant, sort_mode: String, equipment_set_filter: Variant = [], stone_quality_filter: String = "") -> Array[Dictionary]:
 	# 标准化搜索词；忽略首尾空格和英文大小写，中文关键词保持原样。
 	var normalized_keyword: String = search_keyword.strip_edges().to_lower()
 	# 查询结果；每项复制展示字段并附加真实 source_index，供排序视图中的拖拽仍能操作正确记录。
@@ -74,6 +74,8 @@ static func filter_and_sort_entries(entries: Array, primary_category: String, su
 		if not _matches_category(entry, primary_category, subcategory):
 			continue
 		if not _matches_stone_attribute(entry, stone_attribute):
+			continue
+		if not _matches_stone_quality(entry, stone_quality_filter):
 			continue
 		if not _matches_equipment_set(entry, equipment_set_filter):
 			continue
@@ -168,6 +170,21 @@ static func _matches_stone_attribute(entry: Dictionary, stone_attribute: Variant
 		if modifier_direction == filter_direction:
 			return true
 	return false
+
+
+static func _matches_stone_quality(entry: Dictionary, stone_quality_filter: String) -> bool:
+	## 判断条目是否命中强化石品质筛选；空条件不过滤，选中品质后只保留对应强化石并隐藏其他资源。
+	# 标准品质条件；只接受规则目录稳定标识，异常字符串按空条件处理，避免调用方误传后隐藏全部物品。
+	var normalized_quality_filter: String = stone_quality_filter if stone_quality_filter in EnhancementRules.QUALITY_ORDER else ""
+	if normalized_quality_filter.is_empty():
+		return true
+	# 条目资源；品质条件启用后非强化石资源不参与结果。
+	var item_resource: Resource = entry.get("resource") as Resource
+	if item_resource == null or str(item_resource.get("item_kind")) != "enhancement_stone":
+		return false
+	# 实际品质；优先读取强化石公开归一化接口，异常扩展资源回退原始 quality_id 字段。
+	var actual_quality_id: String = str(item_resource.call("get_resolved_quality_id")) if item_resource.has_method("get_resolved_quality_id") else str(item_resource.get("quality_id"))
+	return actual_quality_id == normalized_quality_filter
 
 
 static func _matches_equipment_set(entry: Dictionary, equipment_set_filter: Variant) -> bool:

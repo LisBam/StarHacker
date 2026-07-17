@@ -26,6 +26,8 @@ const ENHANCEMENT_RESULT_DIALOG_SCRIPT: Script = preload("res://scripts/ui/enhan
 const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
 ## 仓库与背包垂直分隔拖条脚本；默认只计算布局占比，不访问库存数据。
 const VERTICAL_SPLIT_HANDLE_SCRIPT: Script = preload("res://scripts/ui/vertical_split_handle.gd")
+## 通用渐进物品加载器；仓库与背包分别维护任务，首批立即显示后逐帧创建剩余新卡片。
+const PROGRESSIVE_ITEM_LOADER_SCRIPT: Script = preload("res://scripts/ui/progressive_item_loader.gd")
 ## 库存限制配置；仓库与展开背包的卡片数量统一使用单组 10 件上限。
 const INVENTORY_LIMITS: Script = preload("res://scripts/data/inventory_limits.gd")
 ## 操作菜单出售项编号；固定为 1，选择后出售当前仓库或背包整条记录。
@@ -60,6 +62,10 @@ const QUANTITY_OPERATION_TRANSFER: String = "transfer"
 ## 展开背包时仓库占可分配高度的比例；默认 0.38，可通过界面拖条在 0.20 至 0.75 间动态调整。
 ## 比例范围补充：当前可调范围已扩展为 0.10 至 0.90，并由背包滚动容器保证极限比例下仍可访问内容。
 @export_range(0.10, 0.90, 0.01) var warehouse_split_ratio: float = 0.38
+## 仓库或背包列表首次同步显示的卡片数量；默认 12，运行时通常不动态修改。
+@export_range(1, 100, 1) var progressive_initial_item_count: int = 12
+## 仓库或背包列表后续每帧创建的卡片数量；默认 8，在加载速度与交互流畅度之间平衡。
+@export_range(1, 100, 1) var progressive_item_batch_count: int = 8
 
 ## 全局背包服务；默认从自动加载 GlobalInventory 获取，缺失时面板显示不可用提示。
 var _global_inventory: Node
@@ -166,6 +172,10 @@ var _pending_repair_kit_location: String = ""
 var _refresh_queued: bool = false
 ## 隐藏期间仓库数据是否发生变化；默认 false，后台不创建仓库卡片，下一次打开时由公开刷新入口读取最新库存。
 var _refresh_pending: bool = false
+## 仓库新卡片渐进加载器；刷新查询时会取消旧任务，现有资源卡片仍按实例复用。
+var _warehouse_item_loader: ProgressiveItemLoader
+## 背包新卡片渐进加载器；与仓库任务独立，展开模式下可同时逐帧补齐上下两个区域。
+var _backpack_item_loader: ProgressiveItemLoader
 
 
 func _ready() -> void:
@@ -174,6 +184,10 @@ func _ready() -> void:
 	UI_STYLE_GUIDE.apply_screen_theme(self)
 	UI_STYLE_GUIDE.apply_window_panel(self)
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
+	_warehouse_item_loader = PROGRESSIVE_ITEM_LOADER_SCRIPT.new() as ProgressiveItemLoader
+	add_child(_warehouse_item_loader)
+	_backpack_item_loader = PROGRESSIVE_ITEM_LOADER_SCRIPT.new() as ProgressiveItemLoader
+	add_child(_backpack_item_loader)
 	_build_storage_interface()
 	if _global_inventory != null:
 		if _global_inventory.has_signal("inventory_changed"):
@@ -481,6 +495,10 @@ func _sync_storage_entries(entries: Array, location: String, target_container: C
 	## 按资源实例复用仓库或背包卡片；移动、转移和堆叠变化只更新必要节点，筛选与排序后的显示顺序仍以 entries 为准。
 	if target_container == null:
 		return
+	# 当前区域加载器；仓库与背包使用独立代数，任一区域刷新都不会中断另一区域的有效任务。
+	var item_loader: ProgressiveItemLoader = _warehouse_item_loader if location == "warehouse" else _backpack_item_loader
+	if item_loader != null:
+		item_loader.cancel()
 	# 现有卡片表；键为资源实例编号，值为仍可复用的 StorageItemControl，空状态文本和异常节点不进入复用表。
 	var existing_controls: Dictionary = {}
 	for child in target_container.get_children():
@@ -507,8 +525,10 @@ func _sync_storage_entries(entries: Array, location: String, target_container: C
 		return
 
 		return
-	# 本轮保留控件集合；键为控件实例编号，用于移除筛选后不可见或已经转出当前容器的旧卡片。
-	var retained_control_ids: Dictionary = {}
+	# 本轮目标资源集合；用于立即移除筛选后不可见或已经转出当前容器的旧卡片。
+	var desired_resource_ids: Dictionary = {}
+	# 待创建条目；只包含当前没有可复用控件的资源，后续交由渐进加载器分批实例化。
+	var pending_entries: Array[Dictionary] = []
 	# 展示条目索引；取值为列表所有有效下标，用于同步筛选排序后的视觉顺序和真实来源下标。
 	for visible_index in range(entries.size()):
 		# 展示条目原始值；取值应为 Dictionary，异常数据不会生成可操作控件。
@@ -520,20 +540,39 @@ func _sync_storage_entries(entries: Array, location: String, target_container: C
 			var item_resource: Resource = (raw_entry as Dictionary).get("resource") as Resource
 			if item_resource == null:
 				continue
+			desired_resource_ids[item_resource.get_instance_id()] = true
 			# 复用控件；同一资源仍位于当前容器时直接更新上下文，否则只为新进入当前容器的物品创建一张卡片。
 			var item_control: Button = existing_controls.get(item_resource.get_instance_id()) as Button
 			if item_control == null:
-				item_control = _create_storage_entry_control(raw_entry as Dictionary, location, source_index)
-				target_container.add_child(item_control)
+				pending_entries.append({"entry": raw_entry, "source_index": source_index, "visible_index": visible_index})
 			else:
 				_update_storage_entry_control(item_control, raw_entry as Dictionary, location, source_index)
-			retained_control_ids[item_control.get_instance_id()] = true
-			target_container.move_child(item_control, mini(visible_index, target_container.get_child_count() - 1))
+				target_container.move_child(item_control, mini(visible_index, target_container.get_child_count() - 1))
 	# 过期子节点；移除未被本轮条目复用的卡片与旧空状态文本，避免隐藏筛选项继续参与布局。
 	for child in target_container.get_children():
-		if child != null and not retained_control_ids.has(child.get_instance_id()):
+		if child == null:
+			continue
+		# 子节点资源；空状态标签或不在目标集合中的旧卡片立即移除，避免渐进加载期间显示过期内容。
+		var child_resource: Resource = child.call("get_item_resource") as Resource if child.has_method("get_item_resource") else null
+		if child_resource == null or not desired_resource_ids.has(child_resource.get_instance_id()):
 			target_container.remove_child(child)
 			child.queue_free()
+	if item_loader != null and not pending_entries.is_empty():
+		item_loader.start(pending_entries, Callable(self, "_create_progressive_storage_entry").bind(location, target_container), progressive_initial_item_count, progressive_item_batch_count)
+
+
+func _create_progressive_storage_entry(pending_entry: Dictionary, _batch_index: int, location: String, target_container: Container) -> void:
+	## 创建一张渐进列表卡片；回调执行前复核容器仍有效，防止关闭或刷新后的旧批次写入当前页面。
+	if target_container == null or not is_instance_valid(target_container):
+		return
+	# 条目数据；包含查询结果、真实来源下标与最终视觉顺序。
+	var entry: Dictionary = pending_entry.get("entry", {}) as Dictionary
+	# 新物品卡片；沿用仓库原创建协议并只连接一次信号。
+	var item_control: Button = _create_storage_entry_control(entry, location, int(pending_entry.get("source_index", -1)))
+	if item_control == null:
+		return
+	target_container.add_child(item_control)
+	target_container.move_child(item_control, mini(int(pending_entry.get("visible_index", target_container.get_child_count() - 1)), target_container.get_child_count() - 1))
 
 
 func _create_storage_entry_control(entry: Dictionary, location: String, entry_index: int) -> Button:

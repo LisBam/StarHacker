@@ -189,10 +189,10 @@ func _build_interface() -> void:
 	for direction in InventoryQuery.STONE_FILTER_DIRECTIONS:
 		_stone_attribute_option.add_separator(InventoryQuery.get_stone_attribute_direction_group_label(direction))
 		for stat_name in EnhancementRules.STAT_KEYS:
-			_stone_attribute_option.add_item(InventoryQuery.get_stone_attribute_filter_label(stat_name, direction))
+			_stone_attribute_option.add_item(InventoryQuery.get_stone_attribute_filter_label(stat_name, (1 if EnhancementRules.is_direction_beneficial(stat_name, 1) == (direction > 0) else -1)))
 			# 当前筛选项下标；用于写入稳定筛选键并启用可保持弹窗打开的多选勾选状态。
 			var filter_item_index: int = _stone_attribute_option.item_count - 1
-			_stone_attribute_option.set_item_metadata(filter_item_index, InventoryQuery.build_stone_attribute_filter_key(stat_name, direction))
+			_stone_attribute_option.set_item_metadata(filter_item_index, InventoryQuery.build_stone_attribute_filter_key(stat_name, (1 if EnhancementRules.is_direction_beneficial(stat_name, 1) == (direction > 0) else -1)))
 			_stone_attribute_option.get_popup().set_item_as_checkable(filter_item_index, true)
 	_stone_attribute_option.get_popup().hide_on_checkable_item_selection = false
 	_stone_attribute_option.item_selected.connect(_on_stone_attribute_selected)

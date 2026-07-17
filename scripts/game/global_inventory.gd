@@ -923,6 +923,17 @@ func transfer_backpack_to_warehouse(item_resource: Resource, target_index: int =
 	return true
 
 
+func transfer_all_backpack_to_warehouse() -> int:
+	## 将当前背包全部物品原子式转入仓库；使用记录快照避免移动过程中下标变化导致跳项。
+	var resources_to_transfer: Array[Resource] = get_backpack_resources()
+	# 成功转移组数；仓库没有容量限制，异常失效资源会被跳过且不会阻断其余物品。
+	var transferred_group_count: int = 0
+	for item_resource in resources_to_transfer:
+		if transfer_backpack_to_warehouse(item_resource):
+			transferred_group_count += 1
+	return transferred_group_count
+
+
 func transfer_storage_resource_quantity(item_resource: Resource, source_location: String, target_location: String, requested_quantity: int, target_index: int = -1) -> bool:
 	if item_resource == null or requested_quantity <= 0 or source_location == target_location:
 		return false

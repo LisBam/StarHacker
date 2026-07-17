@@ -1,6 +1,6 @@
-[gd_resource type="Resource" script_class="WeaponData" load_steps=3 format=3]
+[gd_resource type="Resource" script_class="WeaponData" format=3 uid="uid://ewx6alnfgms"]
 
-[ext_resource type="Script" path="res://scripts/data/weapon_data.gd" id="1_weapon"]
+[ext_resource type="Script" uid="uid://bnwiep4d7h6jo" path="res://scripts/data/weapon_data.gd" id="1_weapon"]
 [ext_resource type="PackedScene" path="res://scenes/projectiles/player_projectile.tscn" id="2_projectile"]
 
 [resource]
@@ -9,15 +9,12 @@ weapon_id = "formation_breaker"
 display_name = "陷阵"
 icon_text = "阵"
 value = 50
-max_durability = 500.0
-current_durability = 500.0
-energy_consumption = 5
+energy_consumption = 12
 projectile_scene = ExtResource("2_projectile")
-projectile_speed = 900.0
 attack_distance = 260.0
 ranged_damage = 5.0
-cooldown = 0.2
-deviation_degrees = 5.0
+cooldown = 0.3
+deviation_degrees = 10.0
 has_combo = true
 combo_count = 3
 has_recoil = true

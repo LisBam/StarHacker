@@ -1768,10 +1768,10 @@ func _bind_inventory_filter_buttons() -> void:
 				_inventory_stone_attribute_option.add_separator(InventoryQuery.get_stone_attribute_direction_group_label(direction))
 				# 可筛选属性；每个属性分别建立精确方向选项，例如“伤害+”和“伤害-”。
 				for stat_name in EnhancementRules.STAT_KEYS:
-					_inventory_stone_attribute_option.add_item(InventoryQuery.get_stone_attribute_filter_label(stat_name, direction))
+					_inventory_stone_attribute_option.add_item(InventoryQuery.get_stone_attribute_filter_label(stat_name, (1 if EnhancementRules.is_direction_beneficial(stat_name, 1) == (direction > 0) else -1)))
 					# 当前属性选项下标；用于绑定稳定筛选键并启用复选状态。
 					var attribute_item_index: int = _inventory_stone_attribute_option.item_count - 1
-					_inventory_stone_attribute_option.set_item_metadata(attribute_item_index, InventoryQuery.build_stone_attribute_filter_key(stat_name, direction))
+					_inventory_stone_attribute_option.set_item_metadata(attribute_item_index, InventoryQuery.build_stone_attribute_filter_key(stat_name, (1 if EnhancementRules.is_direction_beneficial(stat_name, 1) == (direction > 0) else -1)))
 					_inventory_stone_attribute_option.get_popup().set_item_as_checkable(attribute_item_index, true)
 			_inventory_stone_attribute_option.get_popup().hide_on_checkable_item_selection = false
 			_inventory_stone_attribute_option.item_selected.connect(_on_inventory_stone_attribute_selected)
@@ -2270,10 +2270,15 @@ func _pickup_drop(drop_node: Node) -> void:
 	if not _is_drop_in_pickup_range(drop_node_2d):
 		return
 
+	if _is_training_mode and drop_node.has_method("consume_for_training") and bool(drop_node.call("consume_for_training")):
+		_refresh_nearby_drop_panel()
+		return
 	if drop_node.has_method("pickup_to_inventory") and bool(drop_node.call("pickup_to_inventory", _inventory_component)):
 		_refresh_nearby_drop_panel()
 		if _inventory_panel.visible:
 			_rebuild_inventory_slots()
+	elif drop_node.has_method("show_pickup_status"):
+		drop_node.call("show_pickup_status", "背包已满！")
 
 
 func _drop_weapon_to_world(drop_data: Dictionary) -> void:

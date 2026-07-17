@@ -198,6 +198,14 @@ func _rebuild_equipment_items() -> void:
 	_clear_container(_equipment_grid)
 	if _global_inventory == null:
 		return
+	# 动态列数；只按当前非空装备槽数量收缩布局，避免装备较少时固定三列留下大块空白。
+	var occupied_slot_count: int = 0
+	for slot_index in range(int(_global_inventory.call("get_ranged_slot_count"))):
+		if _global_inventory.call("get_ranged_equipment_resource", slot_index) != null:
+			occupied_slot_count += 1
+	if _global_inventory.call("get_melee_equipment_resource") != null:
+		occupied_slot_count += 1
+	_equipment_grid.columns = clampi(occupied_slot_count, 1, 3)
 	# 远程装备槽；空槽显示占位文本，非空武器按其稳定装备位置建立可送回卡片。
 	var ranged_slot_count: int = int(_global_inventory.call("get_ranged_slot_count"))
 	for slot_index in range(ranged_slot_count):
@@ -215,6 +223,8 @@ func _rebuild_backpack_items() -> void:
 		return
 	# 背包条目；每项包含资源和真实堆叠数量，界面不直接修改字典。
 	var backpack_entries: Array = _global_inventory.call("get_backpack_entries")
+	# 动态列数；按当前条目数量在 1 至 4 列间调整，避免撤离点只有少量物品时出现固定网格空白。
+	_backpack_grid.columns = clampi(backpack_entries.size(), 1, 4)
 	if backpack_entries.is_empty():
 		# 空背包提示；占据一行并保持居中，避免网格完全无内容。
 		var empty_label: Label = Label.new()

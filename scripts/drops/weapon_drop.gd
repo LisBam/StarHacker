@@ -147,7 +147,6 @@ func pickup_to_inventory(inventory_component: Node) -> bool:
 	var pickup_succeeded: bool = bool(inventory_component.call("add_item_quantity", current_item_data, pickup_quantity)) if inventory_component.has_method("add_item_quantity") else pickup_quantity == 1 and bool(inventory_component.call("add_item", current_item_data))
 	if not pickup_succeeded:
 		return false
-
 	remove_from_group("item_drops")
 	remove_from_group("weapon_drops")
 	weapon_data = null
@@ -156,6 +155,28 @@ func pickup_to_inventory(inventory_component: Node) -> bool:
 	visible = false
 	queue_free()
 	return true
+
+
+func consume_for_training() -> bool:
+	## 训练场拾取只消费地面掉落，不写入全局背包或存档，保证训练奖励不会污染正式库存。
+	if _launching or _get_item_data() == null:
+		return false
+	queue_free()
+	return true
+
+
+func show_pickup_status(message: String = "背包已满！") -> void:
+	## 在掉落物上方显示短暂拾取状态；默认用于背包满时反馈，不改变掉落物所有权。
+	var status_label: Label = Label.new()
+	status_label.text = message
+	status_label.position = Vector2(-70.0, -46.0)
+	status_label.add_theme_color_override("font_color", Color(1.0, 0.45, 0.35, 1.0))
+	status_label.add_theme_font_size_override("font_size", 18)
+	add_child(status_label)
+	var tween: Tween = create_tween()
+	tween.tween_property(status_label, "position", status_label.position + Vector2(0.0, -22.0), 0.65)
+	tween.parallel().tween_property(status_label, "modulate:a", 0.0, 0.65)
+	tween.tween_callback(status_label.queue_free)
 
 
 func _refresh_visual() -> void:

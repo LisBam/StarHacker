@@ -76,6 +76,8 @@ var _selected_entry_key: String = ""
 var _detail_label: RichTextLabel
 ## 返回按钮缓存；点击后仅派发 closed 信号，由主菜单遮罩负责隐藏和恢复焦点。
 var _close_button: Button
+## 装备套装展开状态；默认收起，点击套装标题右侧箭头后展开该套装的四件装备。
+var _expanded_equipment_sets: Dictionary = {}
 
 
 func _ready() -> void:
@@ -107,6 +109,7 @@ func refresh() -> void:
 	_current_entries = _filter_catalog_entries(all_entries)
 	# 上一个已显示条目的扩展包标识；空字符串保证第一个可见条目总会先插入对应内容组标题。
 	var previous_content_pack_id: String = "__no_previous_content_pack__"
+	var previous_equipment_set_id: String = "__no_previous_equipment_set__"
 	for entry_index in range(_current_entries.size()):
 		# 当前条目是否已解锁；没有库存服务时安全回退为 false，避免目录数据直接泄露。
 		var entry: Dictionary = _current_entries[entry_index]
@@ -116,6 +119,12 @@ func refresh() -> void:
 		if content_pack_id != previous_content_pack_id:
 			_entry_grid.add_child(_build_content_pack_divider(entry))
 			previous_content_pack_id = content_pack_id
+		var equipment_set_id: String = str(entry.get("equipment_set_id", "")) if _active_tab == TAB_EQUIPMENT else ""
+		if _active_tab == TAB_EQUIPMENT and not equipment_set_id.is_empty() and equipment_set_id != previous_equipment_set_id:
+			_entry_grid.add_child(_build_equipment_set_header(entry))
+			previous_equipment_set_id = equipment_set_id
+		if _active_tab == TAB_EQUIPMENT and not equipment_set_id.is_empty() and not bool(_expanded_equipment_sets.get(equipment_set_id, false)):
+			continue
 		# 当前列表条目按钮；点击后仅更新右侧详情，不会改变图鉴解锁或库存状态。
 		var entry_button: Button = _build_entry_card(entry, is_discovered, entry_index) as Button
 		_entry_grid.add_child(entry_button)
@@ -405,6 +414,8 @@ func _build_resource_entry(item_resource: Resource) -> Dictionary:
 		"content_pack_title": content_pack_title,
 		"content_pack_order": content_pack_order,
 		"equipment_set_sort_key": equipment_set_sort_key,
+		"equipment_set_id": equipment_set_sort_key if str(item_resource.get("item_kind")) == "equipment" else "",
+		"equipment_set_title": str((item_resource.get("equipment_set") as Resource).get("display_name")) if item_resource.get("equipment_set") is Resource else "",
 		"equipment_slot_sort_order": equipment_slot_sort_order,
 		"resource_quality_sort_order": resource_quality_sort_order,
 		"resource": item_resource,
@@ -541,6 +552,27 @@ func _build_content_pack_divider(entry: Dictionary) -> Control:
 	UI_STYLE_GUIDE.apply_title_label(divider_label, 14)
 	divider_panel.add_child(divider_label)
 	return divider_panel
+
+
+func _build_equipment_set_header(entry: Dictionary) -> Control:
+	## 套装折叠标题；每个套装只创建一个按钮，右侧箭头明确当前展开状态。
+	var header_button: Button = Button.new()
+	var set_id: String = str(entry.get("equipment_set_id", ""))
+	var set_title: String = str(entry.get("equipment_set_title", "套装"))
+	var is_expanded: bool = bool(_expanded_equipment_sets.get(set_id, false))
+	header_button.text = "%s %s" % [set_title if not set_title.is_empty() else "套装", "▲" if is_expanded else "▼"]
+	header_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	header_button.custom_minimum_size = Vector2(0.0, 36.0)
+	header_button.pressed.connect(_toggle_equipment_set.bind(set_id))
+	return header_button
+
+
+func _toggle_equipment_set(set_id: String) -> void:
+	## 切换套装展开状态；状态只属于当前图鉴界面，不写入存档或库存。
+	if set_id.is_empty():
+		return
+	_expanded_equipment_sets[set_id] = not bool(_expanded_equipment_sets.get(set_id, false))
+	refresh()
 
 
 func _build_entry_card(entry: Dictionary, is_discovered: bool, entry_index: int) -> Control:

@@ -74,7 +74,7 @@ const BODY_ENHANCEMENT_STATS: Array[String] = ["energy_regeneration"]
 ## 仅基础装备可提供的属性；暴击率与暴击伤害可以保留资源基础配置，但装备强化石不会生成或应用对应词条。
 const BASE_ONLY_STATS: Array[String] = ["critical_chance", "critical_damage"]
 ## 允许从零基础强化的属性；这些能力由部位资格定义而不是模板初始值决定，默认 0 仍能消费对应强化石。
-const ZERO_BASE_ENHANCEMENT_STATS: Array[String] = ["cooldown_reduction"]
+const ZERO_BASE_ENHANCEMENT_STATS: Array[String] = ["cooldown_reduction", "move_speed", "vision_range", "energy_regeneration"]
 
 
 func get_base_stat(stat_name: String) -> float:
@@ -134,11 +134,13 @@ func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
 		# 强化前后数值；始终以基础属性为百分比换算基准。
 		var base_value: float = get_base_stat(stat_name)
 		var before_value: float = get_effective_stat(stat_name)
+		# 强化前耐久比例；耐久容量变化时保持现有损耗进度，避免上限增强后当前耐久异常偏低。
+		var durability_ratio_before: float = get_durability_ratio() if stat_name == "max_durability" else 0.0
 		# 累计精度；0.001 可准确保存 0.3 至 0.5 个百分点等加算词条端点。
 		enhancement_modifiers[stat_name] = snappedf(float(enhancement_modifiers.get(stat_name, 0.0)) + modifier_ratio, EnhancementRules.MODIFIER_VALUE_PRECISION)
 		if stat_name == "max_durability":
-			# 当前耐久同步；耐久上限降低时立即限制现值，上限提高时不免费补充新增耐久。
-			set_current_durability(current_durability)
+			# 当前耐久同步；增强与削弱均按强化前比例换算到新的耐久上限。
+			set_current_durability(get_maximum_durability() * durability_ratio_before)
 		var after_value: float = get_effective_stat(stat_name)
 		var change_entry: Dictionary = {"stat_name": stat_name, "modifier_ratio": modifier_ratio, "calculation_mode": EnhancementRules.get_calculation_mode(stat_name), "base_value": base_value, "before_value": before_value, "change_value": after_value - before_value, "after_value": after_value}
 		if EnhancementRules.is_direction_beneficial(stat_name, modifier_ratio):

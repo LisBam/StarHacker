@@ -31,8 +31,8 @@ const SOURCE_RANGED_PREFIX: String = "ranged_"
 
 ## 面板最小尺寸；默认 920×620，暂停时居中显示并保留屏幕边缘空间。
 @export var panel_minimum_size: Vector2 = Vector2(920.0, 620.0)
-## 撤离背包首次同步显示数量；默认 12，装备栏仍固定同步创建。
-@export_range(1, 100, 1) var progressive_initial_item_count: int = 12
+## 撤离背包首次同步显示数量；默认 50，与背包容量上限一致，装备栏仍固定同步创建。
+@export_range(1, 200, 1) var progressive_initial_item_count: int = 50
 ## 撤离背包后续每帧创建数量；默认 8，送回物品刷新时旧任务自动取消。
 @export_range(1, 100, 1) var progressive_item_batch_count: int = 8
 

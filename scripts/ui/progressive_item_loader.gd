@@ -39,10 +39,6 @@ func _continue_loading(entries: Array, create_callback: Callable, start_index: i
 		await Engine.get_main_loop().process_frame
 		if generation != _generation or not is_inside_tree():
 			return
-		# 宿主可见性；窗口关闭后停止后台创建卡片，下一次打开由宿主公开刷新入口读取最新快照。
-		var host_canvas_item: CanvasItem = get_parent() as CanvasItem
-		if host_canvas_item != null and not host_canvas_item.is_visible_in_tree():
-			return
 		# 当前批次结束下标；使用半开区间，最后一批自动收缩到实际条目数量。
 		var batch_end: int = mini(entry_index + batch_count, entries.size())
 		while entry_index < batch_end:

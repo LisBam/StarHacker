@@ -62,8 +62,8 @@ const QUANTITY_OPERATION_TRANSFER: String = "transfer"
 ## 展开背包时仓库占可分配高度的比例；默认 0.38，可通过界面拖条在 0.20 至 0.75 间动态调整。
 ## 比例范围补充：当前可调范围已扩展为 0.10 至 0.90，并由背包滚动容器保证极限比例下仍可访问内容。
 @export_range(0.10, 0.90, 0.01) var warehouse_split_ratio: float = 0.38
-## 仓库或背包列表首次同步显示的卡片数量；默认 12，运行时通常不动态修改。
-@export_range(1, 100, 1) var progressive_initial_item_count: int = 12
+## 仓库或背包列表首次同步显示的卡片数量；默认 50，覆盖常规可视内容并减少等待补齐的时间。
+@export_range(1, 200, 1) var progressive_initial_item_count: int = 50
 ## 仓库或背包列表后续每帧创建的卡片数量；默认 8，在加载速度与交互流畅度之间平衡。
 @export_range(1, 100, 1) var progressive_item_batch_count: int = 8
 

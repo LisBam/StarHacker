@@ -186,11 +186,18 @@ func apply_enhancement(modifiers: Dictionary, quality_id: String = "") -> bool:
 	return bool(apply_enhancement_with_result(modifiers, quality_id).get("success", false))
 
 
-func get_effective_value() -> int:
+func get_full_durability_value() -> int:
+	## 返回忽略当前耐久折价的装备价值；基础价值与全部强化石品质固定加值相加，供锻造和满耐久估值统一读取。
 	# 强化固定价值；每颗已记录强化石只按品质增加固定数值，不再读取词条方向、幅度或最终属性变化。
 	var enhancement_value_bonus: int = get_enhancement_value_bonus()
 	# 满耐久有效价值；装备基础价值与强化品质固定加值直接相加，再统一进入耐久折价。
-	var enhanced_value: float = float(maxi(value, 0) + enhancement_value_bonus)
+	var full_durability_value: int = maxi(value, 0) + enhancement_value_bonus
+	return maxi(full_durability_value, 1) if full_durability_value > 0 else 0
+
+
+func get_effective_value() -> int:
+	# 满耐久有效价值；通过公开接口读取，当前装备价值只在此基础上应用耐久倍率。
+	var enhanced_value: float = float(get_full_durability_value())
 	# 耐久价值倍率；零耐久保留满耐久有效价值的 10%。
 	var durability_ratio: float = clampf(current_durability / get_maximum_durability(), 0.0, 1.0)
 	# 最终装备价值；基础价值或强化加值任一为正时最低保留 1 星穹。

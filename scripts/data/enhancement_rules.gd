@@ -319,9 +319,11 @@ const ADDITIVE_POINT_ROLL_STEP: float = 0.001
 const ENERGY_REGENERATION_ROLL_STEP: float = 0.1
 ## 特化强化石出现 +2 增强的概率；0.0001 对应每颗特化石独立 0.01% 概率，生成时确定且后续不重抽。
 const SPECIALIZATION_DOUBLE_BENEFICIAL_CHANCE: float = 0.0001
-## 普通强化石幅度倍率；默认 1.5，使普通四品质除攻击距离外的每个原始合法档位精确放大到原值的 1.5 倍。
+## 普通强化石幅度倍率；默认 1.5，使普通四品质非例外属性的每个原始合法档位精确放大到原值的 1.5 倍。
 ## 该倍率不作用于特化强化石及其负面词条，运行时不应动态修改，调整后必须同步强化石平衡文档与玩法数值快照。
 const STANDARD_STONE_MAGNITUDE_MULTIPLIER: float = 1.5
+## 普通强化石幅度倍率例外属性；这些属性保留独立平衡区间，不参与全局 1.5 倍调整。
+const STANDARD_STONE_MAGNITUDE_MULTIPLIER_EXCLUDED_STATS: Array[String] = ["attack_distance", "energy_regeneration", "cooldown_reduction", "move_speed", "vision_range"]
 ## 暴击率最终上限；1.0 表示 100%，武器与装备的有效属性统一应用该限制。
 const CRITICAL_CHANCE_MAXIMUM: float = 1.0
 ## 闪避率最终上限；0.60 表示 60%，单件装备和装备聚合结果均不得超过该值。
@@ -676,7 +678,7 @@ static func build_modifier_token(stat_name: String, direction: Variant, include_
 		return "%s%d" % [direction_text, clampi(roundi(absf(float(direction))), 1, 2)]
 	if not include_percentage:
 		return direction_text
-	# 可见幅度；最多保留两位小数，使 1.5 倍倍率产生的 0.05% 或 0.05 点半步结果不会在界面中丢失精度。
+	# 可见幅度；最多保留两位小数，使 1.5 倍倍率产生的 0.05% 半步结果不会在界面中丢失精度。
 	if is_additive_value_stat(stat_name):
 		# 加算数值文本；能量恢复保留最多两位小数，离散机制仍显示整数点数。
 		var additive_value_text: String = String.num(absf(float(direction)), 2) if stat_name == "energy_regeneration" else str(roundi(absf(float(direction))))
@@ -719,8 +721,8 @@ static func roll_quality_modifier_ratio(random_source: RandomNumberGenerator, qu
 	var maximum_step: int = roundi(maxf(minimum_ratio, maximum_ratio) / roll_step)
 	# 原始随机幅度；先按旧有离散步长抽取，确保倍率调整不会改变各档位的相对概率分布。
 	var rolled_modifier: float = float(random_source.randi_range(minimum_step, maximum_step)) * roll_step * float(modifier_direction)
-	# 普通石倍率；攻击距离保持独立触达区间，特化石及其初级负面区间均保持原幅度。
-	if quality_id != QUALITY_SPECIALIZED and stat_name != "attack_distance":
+	# 普通石倍率；例外属性保持独立区间，特化石及其初级负面区间均保持原幅度。
+	if quality_id != QUALITY_SPECIALIZED and stat_name not in STANDARD_STONE_MAGNITUDE_MULTIPLIER_EXCLUDED_STATS:
 		rolled_modifier *= STANDARD_STONE_MAGNITUDE_MULTIPLIER
 	return snappedf(rolled_modifier, MODIFIER_VALUE_PRECISION)
 

@@ -2340,7 +2340,8 @@ func _load_inventory() -> bool:
 	# 存档字典；包含背包、装备和排序元数据。
 	var save_data: Dictionary = parsed_data
 	# 存档版本；取值为非负整数，版本 10 之前需要清理已删除内容造成的空装备并补齐星扩展包初始装备。
-	var saved_version: int = maxi(int(save_data.get("version", 0)), 0)
+	# 存档版本迁移停用；项目尚未发布正式版本，当前读档不再根据历史版本号补发或替换物品。
+	# var saved_version: int = maxi(int(save_data.get("version", 0)), 0)
 	_initialize_equipment_slots()
 	_warehouse_records.clear()
 	_backpack_records.clear()
@@ -2354,8 +2355,8 @@ func _load_inventory() -> bool:
 	_current_ranged_slot = clampi(int(save_data.get("current_ranged_slot", 0)), 0, DEFAULT_RANGED_SLOT_COUNT - 1)
 	_coins = maxi(int(save_data.get("coins", DEFAULT_STARTING_COINS)), 0)
 	_stock_holdings.clear()
-	# 图鉴发现记录是否存在；版本 11 前的存档没有历史账本，会按本次恢复的当前持有和装备物品生成并在加载后回写。
-	var has_encyclopedia_discoveries: bool = save_data.has("encyclopedia_discovered_entries")
+	# 图鉴发现迁移停用；当前版本只恢复显式保存的发现记录，不再根据现有持有物品补建旧账本。
+	# var has_encyclopedia_discoveries: bool = save_data.has("encyclopedia_discovered_entries")
 	# 图鉴发现记录原始数组；只接受非空字符串，旧档或损坏项不会阻断后续库存恢复。
 	var raw_encyclopedia_discoveries: Variant = save_data.get("encyclopedia_discovered_entries", [])
 	if raw_encyclopedia_discoveries is Array:
@@ -2364,8 +2365,8 @@ func _load_inventory() -> bool:
 			var discovery_key: String = str(raw_discovery_key).strip_edges()
 			if not discovery_key.is_empty():
 				_discovered_encyclopedia_entries[discovery_key] = true
-	if not has_encyclopedia_discoveries:
-		_loaded_inventory_requires_resave = true
+	# if not has_encyclopedia_discoveries:
+	# 	_loaded_inventory_requires_resave = true
 	# 股票持仓存档；版本 9 起逐项恢复数量与成本，旧版存档自然保持空持仓。
 	var raw_stock_holdings: Variant = save_data.get("stock_holdings", {})
 	if raw_stock_holdings is Dictionary:
@@ -2383,8 +2384,8 @@ func _load_inventory() -> bool:
 			if quantity > 0:
 				_stock_holdings[stock_id] = {"quantity": quantity, "average_cost": average_cost}
 
-	# 存档是否包含独立仓库；旧版存档没有该字段，原“全局背包”物品会安全迁移到仓库。
-	var has_separate_warehouse: bool = save_data.has("warehouse")
+	# 独立仓库迁移停用；当前版本始终按 warehouse 与 backpack 两个明确字段分别恢复。
+	# var has_separate_warehouse: bool = save_data.has("warehouse")
 	# 存档仓库原始数组；新版本按安全存储恢复，异常值会被忽略。
 	var raw_warehouse: Variant = save_data.get("warehouse", [])
 	if raw_warehouse is Array:
@@ -2392,7 +2393,7 @@ func _load_inventory() -> bool:
 		for raw_record in raw_warehouse:
 			if raw_record is Dictionary:
 				# 恢复仓库记录；空字典表示资源无法加载，不会生成损坏物品。
-				var restored_record: Dictionary = _deserialize_record(raw_record as Dictionary)
+				var restored_record: Dictionary = _deserialize_record(raw_record as Dictionary, false)
 				if not restored_record.is_empty():
 					if int(restored_record.get("quantity", 1)) > MAX_STACK_QUANTITY:
 						_loaded_inventory_requires_resave = true
@@ -2405,12 +2406,9 @@ func _load_inventory() -> bool:
 		for raw_record in raw_backpack:
 			if raw_record is Dictionary:
 				# 恢复背包记录；空字典表示武器资源无法加载，直接跳过。
-				var restored_record: Dictionary = _deserialize_record(raw_record as Dictionary)
+				var restored_record: Dictionary = _deserialize_record(raw_record as Dictionary, false)
 				if not restored_record.is_empty():
-					if has_separate_warehouse:
-						_insert_loaded_backpack_record(restored_record)
-					else:
-						_insert_record_with_stack_merge(_warehouse_records, restored_record)
+					_insert_loaded_backpack_record(restored_record)
 
 	# 存档远程槽原始数组；取值为 Array，按槽位下标恢复并限制到当前双远程槽数量。
 	var raw_ranged_equipment: Variant = save_data.get("ranged_equipment", [])
@@ -2421,48 +2419,48 @@ func _load_inventory() -> bool:
 			var raw_record: Variant = raw_ranged_equipment[slot_index]
 			if raw_record is Dictionary:
 				# 恢复远程记录；空字典保持空槽。
-				var restored_record: Dictionary = _deserialize_record(raw_record as Dictionary)
+				var restored_record: Dictionary = _deserialize_record(raw_record as Dictionary, false)
 				if not restored_record.is_empty():
 					_ranged_equipment_records[slot_index] = restored_record
 
 	# 存档近战记录原始值；取值为 Dictionary 或 null，合法时恢复近战槽。
 	var raw_melee_equipment: Variant = save_data.get("melee_equipment")
 	if raw_melee_equipment is Dictionary:
-		_melee_equipment_record = _deserialize_record(raw_melee_equipment as Dictionary)
+		_melee_equipment_record = _deserialize_record(raw_melee_equipment as Dictionary, false)
 	# 存档防具记录；版本 8 之前缺失时保持四个空槽。
 	var raw_armor_equipment: Variant = save_data.get("armor_equipment", {})
 	if raw_armor_equipment is Dictionary:
 		for armor_slot in ARMOR_SLOT_IDS:
 			var raw_armor_record: Variant = (raw_armor_equipment as Dictionary).get(armor_slot)
 			if raw_armor_record is Dictionary:
-				var restored_armor_record: Dictionary = _deserialize_record(raw_armor_record as Dictionary)
+				var restored_armor_record: Dictionary = _deserialize_record(raw_armor_record as Dictionary, false)
 				if not restored_armor_record.is_empty() and _does_resource_match_equipment_location(restored_armor_record.get("resource") as Resource, EQUIPMENT_LOCATION_ARMOR_PREFIX + armor_slot):
 					_armor_equipment_records[armor_slot] = restored_armor_record
 	# 旧存档迁移；版本 8 之前没有防具槽，为四个空部位发放并装备基础防具。
 	# 星内容精简补充：版本 10 之前的已删除基础防具会恢复为空，因此所有空部位改为补齐对应开拓者套装部件。
-	if saved_version < SAVE_VERSION:
-		for equipment_id in EQUIPMENT_RESOURCE_PATHS.keys():
-			var migrated_equipment: Resource = _load_equipment_resource(str(equipment_id))
-			if migrated_equipment == null:
-				continue
-			var migrated_slot: String = str(migrated_equipment.get("equipment_slot"))
-			if migrated_slot in ARMOR_SLOT_IDS and (_armor_equipment_records.get(migrated_slot, {}) as Dictionary).is_empty():
-				_armor_equipment_records[migrated_slot] = _create_record(migrated_equipment)
-		# 迁移远程武器；旧远程模板删除后若全部槽位为空，只补入一把如我所书并保留第二槽为空。
-		if _find_first_equipped_ranged_slot() < 0 and not DEFAULT_RANGED_WEAPON_IDS.is_empty():
-			# 迁移远程资源；加载失败时保持空槽，避免损坏清单阻断其余存档恢复。
-			var migrated_ranged_weapon: Resource = _load_weapon_resource(DEFAULT_RANGED_WEAPON_IDS[0])
-			if migrated_ranged_weapon != null:
-				_ranged_equipment_records[0] = _create_record(migrated_ranged_weapon)
-		# 迁移近战武器；只有旧资源已失效并留下空槽时才补入银河球棒，不覆盖仍可恢复的专属内容。
-		if _melee_equipment_record.is_empty():
-			# 迁移近战资源；加载失败时保持空槽并允许玩家之后从商店或掉落重新获得。
-			var migrated_melee_weapon: Resource = _load_weapon_resource(DEFAULT_MELEE_WEAPON_ID)
-			if migrated_melee_weapon != null:
-				_melee_equipment_record = _create_record(migrated_melee_weapon)
-		_loaded_inventory_requires_resave = true
-	if not has_separate_warehouse:
-		_sort_warehouse_default()
+	# if saved_version < SAVE_VERSION:
+	# 	for equipment_id in EQUIPMENT_RESOURCE_PATHS.keys():
+	# 		var migrated_equipment: Resource = _load_equipment_resource(str(equipment_id))
+	# 		if migrated_equipment == null:
+	# 			continue
+	# 		var migrated_slot: String = str(migrated_equipment.get("equipment_slot"))
+	# 		if migrated_slot in ARMOR_SLOT_IDS and (_armor_equipment_records.get(migrated_slot, {}) as Dictionary).is_empty():
+	# 			_armor_equipment_records[migrated_slot] = _create_record(migrated_equipment)
+	# 	# 迁移远程武器；旧远程模板删除后若全部槽位为空，只补入一把如我所书并保留第二槽为空。
+	# 	if _find_first_equipped_ranged_slot() < 0 and not DEFAULT_RANGED_WEAPON_IDS.is_empty():
+	# 		# 迁移远程资源；加载失败时保持空槽，避免损坏清单阻断其余存档恢复。
+	# 		var migrated_ranged_weapon: Resource = _load_weapon_resource(DEFAULT_RANGED_WEAPON_IDS[0])
+	# 		if migrated_ranged_weapon != null:
+	# 			_ranged_equipment_records[0] = _create_record(migrated_ranged_weapon)
+	# 	# 迁移近战武器；只有旧资源已失效并留下空槽时才补入银河球棒，不覆盖仍可恢复的专属内容。
+	# 	if _melee_equipment_record.is_empty():
+	# 		# 迁移近战资源；加载失败时保持空槽并允许玩家之后从商店或掉落重新获得。
+	# 		var migrated_melee_weapon: Resource = _load_weapon_resource(DEFAULT_MELEE_WEAPON_ID)
+	# 		if migrated_melee_weapon != null:
+	# 			_melee_equipment_record = _create_record(migrated_melee_weapon)
+	# 	_loaded_inventory_requires_resave = true
+	# if not has_separate_warehouse:
+	# 	_sort_warehouse_default()
 	return true
 
 
@@ -2654,7 +2652,7 @@ func _deserialize_record(serialized_record: Dictionary, register_encyclopedia_di
 	record["acquisition_sequence"] = int(serialized_record.get("acquisition_sequence", record.get("acquisition_sequence", 0)))
 	record["last_extraction_epoch"] = int(serialized_record.get("last_extraction_epoch", 0))
 	# 恢复数量；旧存档最多保留 99 件原始数量，随后由容器插入器拆分为现行每组 10 件且不丢失单位。
-	record["quantity"] = clampi(int(serialized_record.get("quantity", 1)), 1, INVENTORY_LIMITS.LEGACY_MAX_STACK_QUANTITY) if _is_stackable_resource(item_resource) else 1
+	record["quantity"] = clampi(int(serialized_record.get("quantity", 1)), 1, MAX_STACK_QUANTITY) if _is_stackable_resource(item_resource) else 1
 	_acquisition_sequence = maxi(_acquisition_sequence, int(record["acquisition_sequence"]))
 	return record
 
@@ -2665,15 +2663,16 @@ func _restore_enhancement_modifiers(item_resource: Resource, serialized_record: 
 	# 存档强化词典；新版本直接恢复，旧版本会先把加算属性从基础值比例转换为等效百分点。
 	var restored_modifiers: Dictionary = EnhancementRules.migrate_stat_aliases(serialized_record.get("enhancement_modifiers") as Dictionary)
 	# 存档公式版本；缺失视为旧乘算版本，商店快照和库存记录都可使用同一迁移入口。
-	var formula_version: int = int(serialized_record.get("enhancement_formula_version", 1))
-	if formula_version < ENHANCEMENT_FORMULA_VERSION:
-		# 加算属性基础值；只读取迁移所需字段，避免存档服务了解武器或装备的其他内部属性。
-		var additive_base_values: Dictionary = {}
-		for raw_stat_name in EnhancementRules.ADDITIVE_POINT_STATS.keys():
-			# 加算属性名；固定来自规则目录，转换为 String 后用于调用资源统一基础属性接口。
-			var stat_name: String = str(raw_stat_name)
-			additive_base_values[stat_name] = float(item_resource.call("get_base_stat", stat_name)) if item_resource.has_method("get_base_stat") else float(item_resource.get(stat_name))
-		restored_modifiers = EnhancementRules.convert_legacy_enhancement_modifiers(restored_modifiers, additive_base_values)
+	# 强化公式迁移停用；当前版本直接恢复已保存累计值，不再转换历史乘算格式。
+	# var formula_version: int = int(serialized_record.get("enhancement_formula_version", 1))
+	# if formula_version < ENHANCEMENT_FORMULA_VERSION:
+	# 	# 加算属性基础值；只读取迁移所需字段，避免存档服务了解武器或装备的其他内部属性。
+	# 	var additive_base_values: Dictionary = {}
+	# 	for raw_stat_name in EnhancementRules.ADDITIVE_POINT_STATS.keys():
+	# 		# 加算属性名；固定来自规则目录，转换为 String 后用于调用资源统一基础属性接口。
+	# 		var stat_name: String = str(raw_stat_name)
+	# 		additive_base_values[stat_name] = float(item_resource.call("get_base_stat", stat_name)) if item_resource.has_method("get_base_stat") else float(item_resource.get(stat_name))
+	# 	restored_modifiers = EnhancementRules.convert_legacy_enhancement_modifiers(restored_modifiers, additive_base_values)
 	item_resource.set("enhancement_modifiers", restored_modifiers)
 
 

@@ -5,6 +5,7 @@ class_name EquipmentData
 ## 所有数值通过统一有效属性接口读取，强化只累计百分比而不修改基础字段。
 ## 公式分类补充：暴击率、暴击伤害和闪避率累计直接百分点，其余属性累计乘算比例，基础字段仍保持不变。
 ## 装备强化范围补充：暴击率与暴击伤害不再接受装备强化词条，仅保留旧资源基础字段读取兼容；闪避率继续使用加算百分点。
+## 现行加算补充：冷却缩减、移速与视野同样按百分点直接累计，能量恢复按实际点数累计；这些部位属性均允许从 0 基础值开始强化。
 
 ## 物品类型；固定为 equipment，供库存、装备槽和存档识别。
 @export var item_kind: String = "equipment"
@@ -56,6 +57,7 @@ class_name EquipmentData
 @export_range(0.0, 9.0, 0.01, "or_greater") var critical_damage: float = 0.0
 ## 累计强化百分比；键为统一属性名，值为相对基础值的小数比例。
 ## 加算属性补充：暴击率、暴击伤害、闪避率和冷却缩减的值表示直接百分点偏移，例如 0.015 表示 1.5 个百分点。
+## 现行加算补充：移速与视野也保存直接百分点偏移，能量恢复保存直接点数，其他装备属性继续保存乘算比例。
 @export var enhancement_modifiers: Dictionary = {}
 
 ## 单件装备强化石使用上限；与武器共用强化规则目录中的固定 20 颗限制。
@@ -163,7 +165,8 @@ func get_effective_value() -> int:
 	var modifier_total: float = 0.0
 	for raw_stat_name in enhancement_modifiers.keys():
 		if _is_stat_supported(str(raw_stat_name)):
-			modifier_total += float(enhancement_modifiers.get(raw_stat_name, 0.0))
+			# 等效价值影响；与武器共用强化收益模型，使不同数值尺度的装备词条按实际收益公平计价。
+			modifier_total += EnhancementRules.calculate_value_impact_ratio(get_base_stat(str(raw_stat_name)), str(raw_stat_name), float(enhancement_modifiers.get(raw_stat_name, 0.0)))
 	# 耐久价值倍率；零耐久保留满耐久有效价值的 10%。
 	var durability_ratio: float = clampf(current_durability / get_maximum_durability(), 0.0, 1.0)
 	return maxi(roundi(float(value) * maxf(1.0 + modifier_total, 0.1) * lerpf(0.1, 1.0, durability_ratio)), 1) if value > 0 else 0

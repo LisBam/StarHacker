@@ -16,11 +16,11 @@ const SACRIFICE_WEAPON_DURABILITY_RATIO: float = 0.10
 const COST_PER_RESTORED_DURABILITY: float = 2.0
 ## 强化石品质基础费用；每颗按品质累加后统一乘主武器价值倍率。
 const STONE_QUALITY_COSTS: Dictionary = {
-	EnhancementRules.QUALITY_LOW: 2,
-	EnhancementRules.QUALITY_MEDIUM: 5,
-	EnhancementRules.QUALITY_HIGH: 10,
-	EnhancementRules.QUALITY_SUPREME: 20,
-	EnhancementRules.QUALITY_SPECIALIZED: 20,
+	EnhancementRules.QUALITY_LOW: 10,
+	EnhancementRules.QUALITY_MEDIUM: 20,
+	EnhancementRules.QUALITY_HIGH: 50,
+	EnhancementRules.QUALITY_SUPREME: 100,
+	EnhancementRules.QUALITY_SPECIALIZED: 200,
 }
 ## 强化石升阶单槽成功率；默认每颗同品质牺牲石提供 20%，五个槽全部放满时达到 100%。
 const STONE_UPGRADE_SUCCESS_RATE_PER_SACRIFICE: float = 0.20
@@ -63,6 +63,7 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 	var durability_restored: float = 0.0
 	# 强化石基础费用；按低级 2、中级 5、高级 10、极品 20 累加。
 	# 特化品质补充：特化强化石按 20 星穹基础费用累加。
+	# 现行费用补充：初级、中级、高级、极品、特化实际基础费用依次为 10、20、50、100、200 星穹。
 	var stone_base_cost: int = 0
 	# 有效强化石数量；只统计至少有一条可用于主武器的强化石。
 	var compatible_stone_count: int = 0

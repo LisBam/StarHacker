@@ -116,10 +116,14 @@ var _subcategory: String = InventoryQuery.SUBCATEGORY_ALL
 var _sort_mode: String = InventoryQuery.SORT_ACQUIRED_TIME
 ## 当前强化石属性方向筛选集合；默认空数组表示不过滤词条，多项条件按并集匹配。
 var _stone_attribute_filter: Array[String] = []
+## 当前强化石品质筛选；默认空字符串表示显示全部品质，其他值使用 EnhancementRules 的稳定品质标识。
+var _stone_quality_filter: String = ""
 ## 关键词搜索框；按名称、说明、分类和强化词条实时过滤右侧背包物品。
 var _search_edit: LineEdit
 ## 排序下拉框；提供获得时间、物品价值和耐久三种统一排序。
 var _sort_option: OptionButton
+## 强化石品质筛选框；只在资源分类显示，选项与锻造系统保持全部、初级、中级、高级、极品、特化一致。
+var _stone_quality_option: OptionButton
 ## 强化词条筛选下拉框；只在资源分类显示并支持多项属性方向勾选。
 var _stone_attribute_option: OptionButton
 ## 清空强化筛选按钮；当前没有筛选条件时禁用。
@@ -231,6 +235,17 @@ func _build_interface() -> void:
 	_sort_option.set_item_metadata(2, InventoryQuery.SORT_DURABILITY)
 	_sort_option.item_selected.connect(_on_sort_selected)
 	query_bar.add_child(_sort_option)
+	_stone_quality_option = OptionButton.new()
+	_stone_quality_option.custom_minimum_size = Vector2(104.0, 34.0)
+	_stone_quality_option.add_item("全部")
+	_stone_quality_option.set_item_metadata(0, "")
+	for quality_id in EnhancementRules.QUALITY_ORDER:
+		# 品质短名；移除统一“强化石”后缀，使背包下拉列表与锻造系统显示完全一致。
+		var quality_label: String = EnhancementRules.get_quality_display_name(quality_id).trim_suffix("强化石")
+		_stone_quality_option.add_item(quality_label)
+		_stone_quality_option.set_item_metadata(_stone_quality_option.item_count - 1, quality_id)
+	_stone_quality_option.item_selected.connect(_on_stone_quality_selected)
+	query_bar.add_child(_stone_quality_option)
 	_stone_attribute_option = OptionButton.new()
 	_stone_attribute_option.custom_minimum_size = Vector2(148.0, 34.0)
 	_stone_attribute_option.add_item("强化筛选（0）")
@@ -454,7 +469,7 @@ func _rebuild_items() -> void:
 	var entries: Array = _global_inventory.call("get_backpack_entries")
 	_equipment_set_filter_control.configure_entries(entries)
 	# 可见条目；统一查询器保留每项原始 source_index，排序和筛选后拖拽仍操作正确背包记录。
-	var visible_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(entries, _primary_category, _subcategory, _search_edit.text, _stone_attribute_filter, _sort_mode, _equipment_set_filter_control.get_selected_set_ids())
+	var visible_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(entries, _primary_category, _subcategory, _search_edit.text, _stone_attribute_filter, _sort_mode, _equipment_set_filter_control.get_selected_set_ids(), _stone_quality_filter)
 	# 现有卡片表；键为资源实例编号，值为可复用背包卡片，空状态文本和异常节点不参与复用。
 	var existing_controls: Dictionary = {}
 	for child in _item_grid.get_children():
@@ -556,6 +571,7 @@ func _on_primary_category_pressed(category_name: String) -> void:
 	_primary_category = category_name
 	_subcategory = InventoryQuery.SUBCATEGORY_ALL
 	_clear_stone_attribute_filter(false)
+	_clear_stone_quality_filter(false)
 	_equipment_set_filter_control.clear_filters(false)
 	_rebuild_subcategory_buttons()
 	_rebuild_items()
@@ -571,6 +587,22 @@ func _on_sort_selected(item_index: int) -> void:
 	var selected_mode: String = str(_sort_option.get_item_metadata(item_index))
 	_sort_mode = selected_mode if selected_mode in [InventoryQuery.SORT_ACQUIRED_TIME, InventoryQuery.SORT_ITEM_VALUE, InventoryQuery.SORT_DURABILITY] else InventoryQuery.SORT_ACQUIRED_TIME
 	_rebuild_items()
+
+
+func _on_stone_quality_selected(item_index: int) -> void:
+	## 应用背包强化石品质条件；非法元数据回退全部品质，筛选只改变显示结果。
+	var selected_quality_id: String = str(_stone_quality_option.get_item_metadata(item_index)) if item_index >= 0 and item_index < _stone_quality_option.item_count else ""
+	_stone_quality_filter = selected_quality_id if selected_quality_id in EnhancementRules.QUALITY_ORDER else ""
+	_rebuild_items()
+
+
+func _clear_stone_quality_filter(rebuild_items: bool = true) -> void:
+	## 清空背包强化石品质条件并恢复“全部”；切换一级分类时避免隐藏品质条件跨分类残留。
+	_stone_quality_filter = ""
+	if _stone_quality_option != null:
+		_stone_quality_option.select(0)
+	if rebuild_items:
+		_rebuild_items()
 
 
 func _on_stone_attribute_selected(item_index: int) -> void:
@@ -621,6 +653,7 @@ func _refresh_query_controls() -> void:
 	for category_name in _subcategory_buttons.keys():
 		(_subcategory_buttons[category_name] as Button).disabled = str(category_name) == _subcategory
 	var resource_category_active: bool = _primary_category == InventoryQuery.PRIMARY_RESOURCES
+	_stone_quality_option.visible = resource_category_active
 	_stone_attribute_option.visible = resource_category_active
 	_stone_attribute_clear_button.visible = resource_category_active
 	_equipment_set_filter_control.visible = _primary_category == InventoryQuery.PRIMARY_EQUIPMENT

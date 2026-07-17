@@ -73,6 +73,14 @@ const QUALITY_CONFIGS: Dictionary = {
 	QUALITY_SUPREME: {"extra_beneficial_chance": 0.30, "detrimental_chance": 0.0, "beneficial_min": 0.40, "beneficial_max": 0.60, "detrimental_min": 0.0, "detrimental_max": 0.0},
 	QUALITY_SPECIALIZED: {"extra_beneficial_chance": 0.0, "detrimental_chance": 0.80, "beneficial_min": 1.0, "beneficial_max": 2.0, "detrimental_min": 0.0, "detrimental_max": 0.0},
 }
+## 已使用强化石的固定价值加成；每颗成功应用到武器或装备后按品质增加对应满耐久价值，与词条数量、方向和实际幅度无关。
+const APPLIED_STONE_VALUE_BONUSES: Dictionary = {
+	QUALITY_LOW: 5,
+	QUALITY_MEDIUM: 10,
+	QUALITY_HIGH: 25,
+	QUALITY_SUPREME: 50,
+	QUALITY_SPECIALIZED: 100,
+}
 ## 乘算属性的幅度组归属；新增乘算属性时必须在此登记，避免回退到错误的共享品质区间。
 const MULTIPLICATIVE_STAT_GROUPS: Dictionary = {
 	"damage": MAGNITUDE_GROUP_PRIMARY,
@@ -740,6 +748,41 @@ static func get_quality_config(quality_id: String) -> Dictionary:
 	# 品质配置副本；调用方可以读取但不会意外修改全局常量。
 	var quality_config: Dictionary = QUALITY_CONFIGS.get(quality_id, QUALITY_CONFIGS[QUALITY_LOW]) as Dictionary
 	return quality_config.duplicate(true)
+
+
+static func get_applied_stone_value_bonus(quality_id: String) -> int:
+	## 返回一颗指定品质强化石成功应用后的固定价值增量；非法品质返回 0，不影响目标原始价值。
+	return maxi(int(APPLIED_STONE_VALUE_BONUSES.get(quality_id, 0)), 0)
+
+
+static func normalize_enhancement_quality_counts(raw_counts: Variant) -> Dictionary:
+	## 归一化武器或装备记录的强化品质数量；只保留正式品质，并限制总数不超过单件 20 颗上限。
+	# 原始品质计数；非字典数据按空记录处理，兼容尚未保存品质历史的旧存档。
+	var source_counts: Dictionary = raw_counts as Dictionary if raw_counts is Dictionary else {}
+	# 归一化结果；只写入数量大于 0 的正式品质，减少存档冗余并避免未知键参与价值。
+	var normalized_counts: Dictionary = {}
+	# 剩余可记录数量；按稳定品质顺序消耗，异常存档即使各项总和超限也最多计入 20 颗。
+	var remaining_count: int = MAX_TARGET_ENHANCEMENT_COUNT
+	for quality_id in QUALITY_ORDER:
+		# 当前品质数量；最低为 0，最高不能超过剩余单件强化上限。
+		var quality_count: int = clampi(int(source_counts.get(quality_id, 0)), 0, remaining_count)
+		if quality_count > 0:
+			normalized_counts[quality_id] = quality_count
+		remaining_count -= quality_count
+		if remaining_count <= 0:
+			break
+	return normalized_counts
+
+
+static func calculate_enhancement_quality_value_bonus(raw_counts: Variant) -> int:
+	## 汇总已使用强化石品质记录对应的固定价值增量；结果用于武器与装备的满耐久价值计算。
+	# 正式品质计数；先归一化总数与键，保证异常或旧存档不会产生不可控价值。
+	var normalized_counts: Dictionary = normalize_enhancement_quality_counts(raw_counts)
+	# 固定价值总增量；默认 0，每种品质按“数量 × 单颗价值”独立累加。
+	var total_bonus: int = 0
+	for quality_id in QUALITY_ORDER:
+		total_bonus += int(normalized_counts.get(quality_id, 0)) * get_applied_stone_value_bonus(quality_id)
+	return maxi(total_bonus, 0)
 
 
 static func get_beneficial_stat_keys_for_quality(quality_id: String, target_kind: String) -> Array[String]:

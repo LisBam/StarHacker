@@ -82,9 +82,11 @@ func refresh(entry: Dictionary) -> void:
 		text = ""
 		tooltip_text = ITEM_DETAIL_FORMATTER.call("build_plain_text", item_resource, 1)
 		self_modulate = Color.WHITE
-		# 锻造槽摘要；只提供物品类型，名称、固定尺寸和耐久条继续由通用模板处理。
+		# 锻造槽摘要；强化石第三行显示彩色属性方向，其他物品继续显示类型，名称和耐久条仍由通用模板处理。
 		var item_type: String = str(ITEM_DETAIL_FORMATTER.call("get_item_type_label", item_resource))
-		_item_card_view.call("configure", item_resource, maxi(int(_entry.get("quantity", 1)), 1), "主锻造槽" if _is_main_slot else "牺牲槽 %d" % (_slot_index + 1), item_type, "空", "")
+		# 第三行摘要；强化石复用统一属性富文本，避免放入槽位后退化为通用“资源 · 强化石”分类文本。
+		var detail_text: String = str(ITEM_DETAIL_FORMATTER.call("build_stone_attribute_bbcode", item_resource)) if str(item_resource.get("item_kind")) == "enhancement_stone" else item_type
+		_item_card_view.call("configure", item_resource, maxi(int(_entry.get("quantity", 1)), 1), "主锻造槽" if _is_main_slot else "牺牲槽 %d" % (_slot_index + 1), detail_text, "空", "")
 	_item_card_view.call("set_visual_state", _is_main_slot and item_resource != null, false)
 	_item_card_view.call("set_disabled_state", _is_invalid and item_resource != null)
 	if _is_invalid:

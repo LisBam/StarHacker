@@ -85,6 +85,19 @@ static func get_item_type_label(item_resource: Resource) -> String:
 	return "武器 · 远程" if weapon_type == "ranged" else ("武器 · 近战" if weapon_type == "melee" else ("武器 · 远程+近战" if weapon_type == "hybrid" else "未知"))
 
 
+static func build_stone_attribute_bbcode(item_resource: Resource) -> String:
+	## 生成强化石卡片使用的单行彩色属性摘要；增强排在削弱之前，只显示属性名称与正负方向。
+	if not is_enhancement_stone(item_resource):
+		return ""
+	# 归一化强化词典；特化品质保留离散机制点数，普通品质保持方向化属性协议。
+	var modifiers: Dictionary = item_resource.call("get_normalized_modifiers") as Dictionary if item_resource.has_method("get_normalized_modifiers") else EnhancementRules.normalize_modifiers(item_resource.get("modifiers") as Dictionary, str(item_resource.get("quality_id")) == EnhancementRules.QUALITY_SPECIALIZED)
+	# 彩色属性片段；复用悬停详情的利弊判断和颜色，避免锻造槽产生另一套方向解释。
+	var attribute_tokens: Array[String] = []
+	_append_stone_lines_by_benefit(attribute_tokens, modifiers, true)
+	_append_stone_lines_by_benefit(attribute_tokens, modifiers, false)
+	return " ".join(attribute_tokens) if not attribute_tokens.is_empty() else "无词条"
+
+
 static func get_item_value(item_resource: Resource) -> int:
 	if item_resource == null:
 		return 0

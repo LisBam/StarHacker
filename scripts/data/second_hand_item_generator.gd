@@ -85,7 +85,7 @@ static func _apply_random_compatible_enhancement(item_resource: Resource, random
 			continue
 		if item_resource.has_method("apply_enhancement_with_result"):
 			# 强化结果；数据资源会在成功时同步累计强化次数，失败时不会占用次数。
-			var enhancement_result: Dictionary = item_resource.call("apply_enhancement_with_result", rolled_modifiers) as Dictionary
+			var enhancement_result: Dictionary = item_resource.call("apply_enhancement_with_result", rolled_modifiers, enhancement_stone.get_resolved_quality_id()) as Dictionary
 			if bool(enhancement_result.get("success", false)):
 				return true
 		elif item_resource.has_method("apply_enhancement") and bool(item_resource.call("apply_enhancement", rolled_modifiers)):

@@ -376,11 +376,18 @@ func apply_enhancement_with_result(modifiers: Dictionary, quality_id: String = "
 	return result
 
 
-func get_effective_value() -> int:
+func get_full_durability_value() -> int:
+	## 返回忽略当前耐久折价的武器价值；基础价值与全部强化石品质固定加值相加，供锻造和满耐久估值统一读取。
 	# 强化固定价值；每颗已记录强化石只按品质增加固定数值，不再读取词条方向、幅度或最终属性变化。
 	var enhancement_value_bonus: int = get_enhancement_value_bonus()
 	# 满耐久有效价值；基础价值与强化品质固定加值直接相加，再统一进入当前耐久折价。
-	var enhanced_value: float = float(maxi(value, 0) + enhancement_value_bonus)
+	var full_durability_value: int = maxi(value, 0) + enhancement_value_bonus
+	return maxi(full_durability_value, 1) if full_durability_value > 0 else 0
+
+
+func get_effective_value() -> int:
+	# 满耐久有效价值；通过公开接口读取，保证锻造费用与当前出售价值使用同一基础估值。
+	var enhanced_value: float = float(get_full_durability_value())
 	# 耐久价值倍率；从零耐久的 10% 线性增长到满耐久的 100%，确保损坏武器仍保留回收价值。
 	var durability_value_multiplier: float = lerpf(MINIMUM_DURABILITY_VALUE_MULTIPLIER, 1.0, get_durability_ratio())
 	# 四舍五入价值；强化变化和耐久折损依次组合，零耐久时为强化后满耐久价值的 10%。

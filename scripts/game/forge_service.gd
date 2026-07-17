@@ -110,8 +110,8 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 		return _build_invalid_preview("牺牲槽中存在无法用于当前主物品的材料", invalid_sacrifice_entries)
 	if effective_material_count <= 0:
 		return _build_invalid_preview("当前材料无法为主物品提供有效锻造效果")
-	# 主武器当前价值；强化与耐久共同影响有效价值，价值越高最终锻造倍率越高。
-	var main_weapon_value: int = int(main_weapon.call("get_effective_value")) if main_weapon.has_method("get_effective_value") else maxi(int(main_weapon.get("value")), 0)
+	# 主物品满耐久价值；锻造费用忽略当前耐久折价，只读取基础价值与历史强化石品质固定加值。
+	var main_weapon_value: int = _get_full_durability_value(main_weapon)
 	# 主武器价值倍率；连续按价值比例计算，例如价值 250 星穹时倍率为 1 + 2.5×0.4 = 2.0。
 	var cost_multiplier: float = BASE_COST_MULTIPLIER + float(main_weapon_value) / MAIN_WEAPON_VALUE_STEP * MAIN_WEAPON_MULTIPLIER_PER_STEP
 	# 耐久基础费用；只对实际能恢复的耐久收费，超过最大耐久的材料部分不产生费用。
@@ -385,3 +385,12 @@ func _get_maximum_durability(item_resource: Resource) -> float:
 		return 1.0
 	# 有效耐久上限；装备读取强化后的耐久值，旧资源和武器回退导出字段。
 	return maxf(float(item_resource.call("get_maximum_durability")), 1.0) if item_resource.has_method("get_maximum_durability") else maxf(float(item_resource.get("max_durability")), 1.0)
+
+
+func _get_full_durability_value(item_resource: Resource) -> int:
+	## 返回锻造费用使用的满耐久价值；正式武器装备读取公开接口，旧扩展资源回退基础 value 字段。
+	if item_resource == null:
+		return 0
+	if item_resource.has_method("get_full_durability_value"):
+		return maxi(int(item_resource.call("get_full_durability_value")), 0)
+	return maxi(int(item_resource.get("value")), 0)

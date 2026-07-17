@@ -54,8 +54,8 @@ static func get_stone_attribute_filter_label(stat_name: String, direction: int) 
 
 
 static func get_stone_attribute_direction_group_label(direction: int) -> String:
-	# 分组标题；只负责说明数值方向，不把“+”或“-”错误等同于增益或减益。
-	return "“%s”属性" % EnhancementRules.get_direction_symbol(direction)
+	# 分组标题；按词条对目标的玩法影响展示，玩家无需再从正负号反推冷却、后坐力等反向收益属性。
+	return "增强" if direction > 0 else "削弱"
 
 
 static func filter_and_sort_entries(entries: Array, primary_category: String, subcategory: String, search_keyword: String, stone_attribute: Variant, sort_mode: String, equipment_set_filter: Variant = []) -> Array[Dictionary]:

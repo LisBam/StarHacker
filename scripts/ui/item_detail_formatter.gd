@@ -165,8 +165,10 @@ static func _append_equipment_lines(detail_lines: Array[String], item_resource: 
 		var suffix: String = str(stat_spec[2])
 		# 显示倍率；底层百分比小数乘 100 后再进入统一文本格式化流程。
 		var display_multiplier: float = float(stat_spec[3])
-		# 零值显示规则；腿部的冷却缩减即使基础为 0% 也需要显示，便于玩家识别该部位可被对应强化石提升。
-		var skip_zero_unmodified: bool = not (stat_name == "cooldown_reduction" and str(item_resource.get("equipment_slot")) == "legs")
+		# 部位固定属性显示规则；对应部位即使基础为 0 也显示，明确告知玩家该属性能够接受强化石。
+		var equipment_slot: String = str(item_resource.get("equipment_slot"))
+		var is_fixed_slot_stat: bool = (stat_name == "vision_range" and equipment_slot == "head") or (stat_name == "energy_regeneration" and equipment_slot == "body") or (stat_name == "cooldown_reduction" and equipment_slot == "legs") or (stat_name == "move_speed" and equipment_slot == "feet")
+		var skip_zero_unmodified: bool = not is_fixed_slot_stat
 		_append_weapon_stat_line(detail_lines, item_resource, stat_name, decimals, suffix, display_multiplier, skip_zero_unmodified)
 
 

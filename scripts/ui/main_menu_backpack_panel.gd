@@ -20,6 +20,8 @@ const CONTEXT_COMBAT: String = "combat"
 
 ## 仓库物品卡片脚本；随身物品复用完整详情、耐久条、点击和悬停交互。
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
+## 物品详情格式化器；局外出售数量弹窗读取统一物品单价，避免不同面板计算不一致。
+const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
 ## 通用物品卡片视图；左侧装备栏读取其悬浮安全留白，避免放大后的装备卡牌被滚动区裁剪。
 const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
 ## 装备槽控件脚本；远程、近战和四部位装备复用游戏内背包左侧卡片布局。
@@ -236,9 +238,9 @@ func _build_interface() -> void:
 	for direction in InventoryQuery.STONE_FILTER_DIRECTIONS:
 		_stone_attribute_option.add_separator(InventoryQuery.get_stone_attribute_direction_group_label(direction))
 		for stat_name in EnhancementRules.STAT_KEYS:
-			_stone_attribute_option.add_item(InventoryQuery.get_stone_attribute_filter_label(stat_name, direction))
+			_stone_attribute_option.add_item(InventoryQuery.get_stone_attribute_filter_label(stat_name, (1 if EnhancementRules.is_direction_beneficial(stat_name, 1) == (direction > 0) else -1)))
 			var filter_index: int = _stone_attribute_option.item_count - 1
-			_stone_attribute_option.set_item_metadata(filter_index, InventoryQuery.build_stone_attribute_filter_key(stat_name, direction))
+			_stone_attribute_option.set_item_metadata(filter_index, InventoryQuery.build_stone_attribute_filter_key(stat_name, (1 if EnhancementRules.is_direction_beneficial(stat_name, 1) == (direction > 0) else -1)))
 			_stone_attribute_option.get_popup().set_item_as_checkable(filter_index, true)
 	_stone_attribute_option.get_popup().hide_on_checkable_item_selection = false
 	_stone_attribute_option.item_selected.connect(_on_stone_attribute_selected)
@@ -477,15 +479,16 @@ func _rebuild_items() -> void:
 		var item_control: Button = existing_controls.get(item_resource.get_instance_id()) as Button
 		if item_control == null:
 			item_control = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
-			item_control.call("configure", item_resource, "backpack", entry_index, false, "", int(entry.get("quantity", 1)))
+			item_control.call("configure", item_resource, "backpack", entry_index, true, "", int(entry.get("quantity", 1)))
 			item_control.call("set_stone_value_on_fourth_line", true)
 			item_control.call("set_weapon_slot_visual_style", true)
 			item_control.connect("item_action_requested", Callable(self, "_on_item_pressed"))
+			item_control.connect("quick_action_requested", Callable(self, "_on_quick_equip_requested"))
 			item_control.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
 			item_control.connect("repair_kit_drop_requested", Callable(self, "_on_repair_kit_drop_requested"))
 			_item_grid.add_child(item_control)
 		else:
-			item_control.call("update_storage_context", item_resource, "backpack", entry_index, false, "", int(entry.get("quantity", 1)))
+			item_control.call("update_storage_context", item_resource, "backpack", entry_index, true, "", int(entry.get("quantity", 1)))
 			item_control.call("set_stone_value_on_fourth_line", true)
 		# 修复目标选择；背包武器与装备使用和左侧装备栏相同的可选与灰显规则。
 		var is_durable_item: bool = str(item_resource.get("weapon_type")) in ["ranged", "melee", "hybrid"] or str(item_resource.get("item_kind")) == "equipment"
@@ -643,11 +646,33 @@ func _on_item_pressed(item_resource: Resource) -> void:
 	elif _context_mode == CONTEXT_COMBAT and str(item_resource.get("item_kind")) == "consumable":
 		_action_popup.add_action("使用", ACTION_USE_CONSUMABLE)
 	if _action_quantity > 1:
-		_action_popup.add_action("全部丢弃", ACTION_DISCARD_ALL, false, true)
-		_action_popup.add_action("部分丢弃", ACTION_DISCARD_PARTIAL, false, true)
+		_action_popup.add_action("全部出售" if _context_mode == CONTEXT_MAIN_MENU else "全部丢弃", ACTION_DISCARD_ALL, false, true)
+		_action_popup.add_action("部分出售" if _context_mode == CONTEXT_MAIN_MENU else "部分丢弃", ACTION_DISCARD_PARTIAL, false, true)
 	else:
-		_action_popup.add_action("丢弃", ACTION_DISCARD_ALL, false, true)
+		_action_popup.add_action("出售" if _context_mode == CONTEXT_MAIN_MENU else "丢弃", ACTION_DISCARD_ALL, false, true)
 	_action_popup.present_at(get_viewport().get_mouse_position())
+
+
+func _on_quick_equip_requested(item_resource: Resource) -> void:
+	## Shift+点击仅在共享背包中尝试装备到兼容空槽；仓库展开背包使用自己的快捷转移处理，不会连接本回调。
+	if _global_inventory == null or item_resource == null or _pending_repair_kit_resource != null:
+		return
+	# 防具目标；每个部位只有一个固定槽，已有装备时不执行替换。
+	if str(item_resource.get("item_kind")) == "equipment":
+		var armor_location: String = "armor_" + str(item_resource.get("equipment_slot"))
+		if _global_inventory.call("get_equipment_location_resource", armor_location) == null:
+			_global_inventory.call("transfer_storage_to_equipment", item_resource, "backpack", armor_location)
+		return
+	# 武器目标；远程优先第一个空远程槽，近战使用唯一空近战槽，混合武器在远程已满时回退近战槽。
+	var weapon_type: String = str(item_resource.get("weapon_type"))
+	if weapon_type in ["ranged", "hybrid"]:
+		var ranged_slot_count: int = int(_global_inventory.call("get_ranged_slot_count"))
+		for slot_index in range(ranged_slot_count):
+			if _global_inventory.call("get_ranged_equipment_resource", slot_index) == null:
+				_global_inventory.call("transfer_storage_to_equipment", item_resource, "backpack", "ranged_%d" % slot_index)
+				return
+	if weapon_type in ["melee", "hybrid"] and _global_inventory.call("get_melee_equipment_resource") == null:
+		_global_inventory.call("transfer_storage_to_equipment", item_resource, "backpack", "melee")
 
 
 func _on_action_pressed(action_id: int) -> void:
@@ -666,7 +691,11 @@ func _on_action_pressed(action_id: int) -> void:
 		_execute_discard(_action_resource, maxi(_action_quantity, 1))
 	elif action_id == ACTION_DISCARD_PARTIAL:
 		_pending_partial_resource = _action_resource
-		_quantity_dialog.present_discard(str(_action_resource.get("display_name")), maxi(_action_quantity, 1))
+		if _context_mode == CONTEXT_MAIN_MENU:
+			var unit_value: int = int(ITEM_DETAIL_FORMATTER.call("get_item_value", _action_resource))
+			_quantity_dialog.present(str(_action_resource.get("display_name")), maxi(_action_quantity, 1), unit_value)
+		else:
+			_quantity_dialog.present_discard(str(_action_resource.get("display_name")), maxi(_action_quantity, 1))
 	elif action_id == ACTION_UNEQUIP and not _action_equipment_location.is_empty():
 		_global_inventory.call("transfer_equipment_to_storage", _action_equipment_location, "backpack")
 	elif action_id == ACTION_USE_REPAIR_KIT and str(_action_resource.get("item_kind")) == "repair_kit":
@@ -765,7 +794,10 @@ func _on_quantity_confirmed(quantity: int) -> void:
 		return
 	var item_resource: Resource = _pending_partial_resource
 	_pending_partial_resource = null
-	_execute_discard(item_resource, quantity)
+	if _context_mode == CONTEXT_MAIN_MENU:
+		_global_inventory.call("sell_storage_resource_quantity", item_resource, "backpack", maxi(quantity, 1))
+	else:
+		_execute_discard(item_resource, quantity)
 
 
 func _execute_discard(item_resource: Resource, quantity: int) -> void:
@@ -775,7 +807,10 @@ func _execute_discard(item_resource: Resource, quantity: int) -> void:
 		return
 	# 局外丢弃；没有地面容器，直接从全局背包永久消费指定数量。
 	if _global_inventory != null:
-		_global_inventory.call("consume_storage_resource_quantity", item_resource, "backpack", maxi(quantity, 1))
+		if _context_mode == CONTEXT_MAIN_MENU:
+			_global_inventory.call("sell_storage_resource_quantity", item_resource, "backpack", maxi(quantity, 1))
+		else:
+			_global_inventory.call("consume_storage_resource_quantity", item_resource, "backpack", maxi(quantity, 1))
 
 
 func _clear_container(container: Node) -> void:

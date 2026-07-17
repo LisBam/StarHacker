@@ -144,6 +144,8 @@ const RANGED_ENHANCEMENT_STATS: Array[String] = ["projectile_speed", "deviation_
 const MELEE_ENHANCEMENT_STATS: Array[String] = ["melee_active_duration"]
 ## 显式机制开关与离散属性的映射；模板开关或特化累计任一有效时，战斗与详情都视为持有该机制。
 const EFFECTIVE_ATTRIBUTE_STAT_NAMES: Dictionary = {"has_scatter": "scatter_count", "has_piercing": "piercing_count", "has_bounce": "bounce_count", "has_combo": "combo_count"}
+## 允许从零基础值开始强化的武器属性；暴击率使用加算百分点，因此 0% 武器仍应接受暴击率强化石。
+const ZERO_BASE_ENHANCEMENT_STATS: Array[String] = ["critical_chance"]
 
 
 func is_ranged() -> bool:
@@ -313,6 +315,8 @@ func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
 		var base_value: float = get_base_stat(stat_name)
 		# 强化前数值；包含历史累计强化，用于计算本次实际变化量。
 		var before_value: float = get_effective_stat(stat_name)
+		# 强化前耐久比例；耐久上限变化后按原比例同步当前耐久，避免增强上限反而造成耐久缺口或削弱时额外损失。
+		var durability_ratio_before: float = get_durability_ratio() if stat_name == "max_durability" else 0.0
 		# 新累计比例；每条词条按固定 10% 步长累计，强化允许正负相抵且基础属性始终保持不变。
 		# 品质随机补充：正常强化流程传入使用瞬间生成的 5% 至 60% 实际比例，固定 10% 仅保留给旧方向值直接调用兼容。
 		# 独立区间补充：现行乘算幅度最高 55%，加算幅度最高 9.0 个百分点，具体范围由属性和品质共同决定。
@@ -320,8 +324,8 @@ func apply_enhancement_with_result(modifiers: Dictionary) -> Dictionary:
 		# 累计精度补充；0.001 可保存加算属性的 0.1 个百分点，同时兼容乘算属性的 0.1% 幅度。
 		enhancement_modifiers[stat_name] = snappedf(accumulated_ratio, EnhancementRules.MODIFIER_VALUE_PRECISION)
 		if stat_name == "max_durability":
-			# 当前耐久同步；耐久上限降低时限制现值，上限提高时不免费补充新增耐久。
-			set_current_durability(current_durability)
+			# 当前耐久同步；保持强化前比例，使增强与削弱都只改变耐久容量而不额外改变损耗进度。
+			set_current_durability(get_maximum_durability() * durability_ratio_before)
 		# 强化后数值；已应用属性下限保护，可以直接交给弹窗和战斗组件使用。
 		var after_value: float = get_effective_stat(stat_name)
 		# 单条变化明细；保留属性名、百分比和基础/前后数值，避免 UI 重新计算造成误差。
@@ -398,7 +402,7 @@ func _is_stat_supported(stat_name: String) -> bool:
 	if canonical_stat_name == "front_recoil_force":
 		return has_front_recoil and not is_zero_approx(front_recoil_force)
 	if canonical_stat_name in COMMON_ENHANCEMENT_STATS:
-		return not is_zero_approx(get_base_stat(canonical_stat_name))
+		return not is_zero_approx(get_base_stat(canonical_stat_name)) or canonical_stat_name in ZERO_BASE_ENHANCEMENT_STATS
 	if is_ranged():
 		if canonical_stat_name == "scatter_count":
 			# 特化强化允许任意远程通道从默认 1 弹体开始新增散射点数。

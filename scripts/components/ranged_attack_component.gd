@@ -41,7 +41,7 @@ var _combo_interval_remaining: float = 0.0
 var _active_combo_interval: float = 0.08
 ## 当前连击结束后的武器冷却；默认使用组件冷却，只有末轮成功执行后才写入正式冷却计时。
 var _active_combo_cooldown: float = 0.0
-## 当前连击固定攻击方向；默认向右，整次连击沿首次攻击请求方向执行。
+## 当前连击攻击方向；默认向右，每轮发射前从持有者读取最新瞄准方向，使连击持续跟随鼠标。
 var _active_combo_direction: Vector2 = Vector2.RIGHT
 ## 当前连击武器资源；默认 null，连击结束后清空，保证中途切换装备不会改变已经开始的攻击参数。
 var _active_combo_weapon: Resource
@@ -65,6 +65,9 @@ func _process(delta: float) -> void:
 	_combo_interval_remaining = maxf(_combo_interval_remaining - delta, 0.0)
 	if _combo_interval_remaining > 0.0:
 		return
+	# 最新瞄准方向；玩家控制器公开当前鼠标瞄准方向时逐轮刷新，独立测试场景则安全沿用首发方向。
+	var latest_combo_direction: Vector2 = _get_latest_combo_direction()
+	_active_combo_direction = latest_combo_direction if not latest_combo_direction.is_zero_approx() else _active_combo_direction
 	_fire_round(_active_combo_direction, _active_combo_weapon)
 	_combo_rounds_remaining -= 1
 	if _combo_rounds_remaining > 0:
@@ -72,6 +75,14 @@ func _process(delta: float) -> void:
 		return
 	_start_cooldown(_active_combo_cooldown)
 	_active_combo_weapon = null
+
+
+func _get_latest_combo_direction() -> Vector2:
+	## 返回连击当前轮次的瞄准方向；组件保持独立，只依赖父节点可选的公开接口，不硬编码玩家脚本类型。
+	var owner_node: Node = get_parent()
+	if owner_node != null and owner_node.has_method("get_last_aim_direction"):
+		return owner_node.call("get_last_aim_direction") as Vector2
+	return _active_combo_direction
 
 
 func try_attack(direction: Vector2, weapon_data: Resource = null, attack_modifiers: Dictionary = {}) -> bool:

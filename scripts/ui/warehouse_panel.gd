@@ -85,6 +85,8 @@ var _warehouse_scroll: ScrollContainer
 var _storage_split_handle: Control
 ## 新版模式切换按钮；默认显示“展开背包”，点击后在纯仓库和仓库背包联合模式间切换。
 var _mode_toggle_button: Button
+## 一键存入仓库按钮；仅展开背包时显示，把背包内全部物品立即移动到安全仓库。
+var _store_all_button: Button
 ## 新版星穹标签；默认显示局外星穹余额，出售仓库物品后即时刷新。
 var _coins_label: Label
 ## 新版仓库摘要标签；默认显示仓库与背包数量，并明确安全和死亡损失边界。
@@ -262,6 +264,12 @@ func _build_storage_interface() -> void:
 	_mode_toggle_button.custom_minimum_size = Vector2(128.0, 38.0)
 	_mode_toggle_button.pressed.connect(_on_mode_toggle_pressed)
 	header.add_child(_mode_toggle_button)
+	_store_all_button = Button.new()
+	_store_all_button.text = "一键存入仓库"
+	_store_all_button.custom_minimum_size = Vector2(144.0, 38.0)
+	_store_all_button.visible = false
+	_store_all_button.pressed.connect(_on_store_all_backpack_pressed)
+	header.add_child(_store_all_button)
 	_cancel_stone_use_button = Button.new()
 	_cancel_stone_use_button.custom_minimum_size = Vector2(112.0, 38.0)
 	_cancel_stone_use_button.text = "取消使用"
@@ -309,10 +317,10 @@ func _build_storage_interface() -> void:
 		_stone_attribute_option.add_separator(InventoryQuery.get_stone_attribute_direction_group_label(direction))
 		# 可筛选属性；每个属性分别建立精确方向选项，例如“伤害+”和“伤害-”。
 		for stat_name in EnhancementRules.STAT_KEYS:
-			_stone_attribute_option.add_item(InventoryQuery.get_stone_attribute_filter_label(stat_name, direction))
+			_stone_attribute_option.add_item(InventoryQuery.get_stone_attribute_filter_label(stat_name, (1 if EnhancementRules.is_direction_beneficial(stat_name, 1) == (direction > 0) else -1)))
 			# 当前属性选项下标；用于绑定筛选键并开启复选状态。
 			var attribute_item_index: int = _stone_attribute_option.item_count - 1
-			_stone_attribute_option.set_item_metadata(attribute_item_index, InventoryQuery.build_stone_attribute_filter_key(stat_name, direction))
+			_stone_attribute_option.set_item_metadata(attribute_item_index, InventoryQuery.build_stone_attribute_filter_key(stat_name, (1 if EnhancementRules.is_direction_beneficial(stat_name, 1) == (direction > 0) else -1)))
 			_stone_attribute_option.get_popup().set_item_as_checkable(attribute_item_index, true)
 	_stone_attribute_option.get_popup().hide_on_checkable_item_selection = false
 	_stone_attribute_option.item_selected.connect(_on_stone_attribute_selected)
@@ -486,7 +494,13 @@ func _sync_storage_entries(entries: Array, location: String, target_container: C
 		_clear_container(target_container)
 		# 空容器提示；根据所在区域明确物品安全属性和快捷转移方向。
 		var empty_state_label: Label = Label.new()
-		empty_state_label.text = "当前分类没有仓库物品" if location == "warehouse" else "当前分类没有背包物品，可用 Shift+点击或拖入上方仓库物品"
+		if location == "warehouse":
+			empty_state_label.text = "当前分类没有仓库物品"
+		elif _global_inventory != null and int(_global_inventory.call("get_backpack_count")) > 0:
+			empty_state_label.text = "当前分类没有背包物品，可用 Shift+点击或拖入上方仓库物品"
+		else:
+			empty_state_label.text = ""
+		empty_state_label.visible = not empty_state_label.text.is_empty()
 		empty_state_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		empty_state_label.custom_minimum_size = Vector2(0.0, 52.0)
 		target_container.add_child(empty_state_label)
@@ -797,6 +811,9 @@ func _apply_storage_display_mode() -> void:
 	if _storage_split_handle != null:
 		_storage_split_handle.visible = _backpack_expanded
 	_mode_toggle_button.text = "收起背包 E" if _backpack_expanded else "展开背包 E"
+	if _store_all_button != null:
+		_store_all_button.visible = _backpack_expanded
+		_store_all_button.disabled = _global_inventory == null or int(_global_inventory.call("get_backpack_count")) <= 0
 	_warehouse_scroll.custom_minimum_size = Vector2(0.0, 80.0 if _backpack_expanded else 386.0)
 	if _carried_drop_area != null:
 		_carried_drop_area.custom_minimum_size = Vector2(0.0, 100.0 if _backpack_expanded else 215.0)
@@ -810,6 +827,14 @@ func _apply_storage_display_mode() -> void:
 func _on_mode_toggle_pressed() -> void:
 	_backpack_expanded = not _backpack_expanded
 	_apply_storage_display_mode()
+	_rebuild_storage_content()
+
+
+func _on_store_all_backpack_pressed() -> void:
+	## 一键存入当前背包全部物品；装备栏不属于背包，不会被此操作卸下或移动。
+	if _global_inventory == null or not _global_inventory.has_method("transfer_all_backpack_to_warehouse"):
+		return
+	_global_inventory.call("transfer_all_backpack_to_warehouse")
 	_rebuild_storage_content()
 
 

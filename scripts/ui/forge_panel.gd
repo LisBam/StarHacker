@@ -276,10 +276,10 @@ func _build_interface() -> void:
 	for direction in InventoryQuery.STONE_FILTER_DIRECTIONS:
 		_stone_attribute_option.add_separator(InventoryQuery.get_stone_attribute_direction_group_label(direction))
 		for stat_name in EnhancementRules.STAT_KEYS:
-			_stone_attribute_option.add_item(InventoryQuery.get_stone_attribute_filter_label(stat_name, direction))
+			_stone_attribute_option.add_item(InventoryQuery.get_stone_attribute_filter_label(stat_name, (1 if EnhancementRules.is_direction_beneficial(stat_name, 1) == (direction > 0) else -1)))
 			# 当前属性选项下标；用于写入筛选键并开启复选状态。
 			var attribute_item_index: int = _stone_attribute_option.item_count - 1
-			_stone_attribute_option.set_item_metadata(attribute_item_index, InventoryQuery.build_stone_attribute_filter_key(stat_name, direction))
+			_stone_attribute_option.set_item_metadata(attribute_item_index, InventoryQuery.build_stone_attribute_filter_key(stat_name, (1 if EnhancementRules.is_direction_beneficial(stat_name, 1) == (direction > 0) else -1)))
 			_stone_attribute_option.get_popup().set_item_as_checkable(attribute_item_index, true)
 	# 多选弹窗；勾选单项后保持展开，便于连续组合“伤害+”“伤害-”等并集条件。
 	_stone_attribute_option.get_popup().hide_on_checkable_item_selection = false

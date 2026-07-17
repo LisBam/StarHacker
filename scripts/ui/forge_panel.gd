@@ -41,8 +41,8 @@ const FORGE_ANIMATION_ROTATIONS: float = 1.5
 @export_range(0.0, 64.0, 1.0) var top_sacrifice_slot_upward_offset: float = 16.0
 ## 下方两个牺牲槽额外下移距离；默认 24 像素，用于避免固定宽卡片与主道具槽发生重叠，运行时无需动态修改。
 @export_range(0.0, 64.0, 1.0) var bottom_sacrifice_slot_downward_offset: float = 24.0
-## 锻造候选首次同步显示数量；默认 12，保证界面打开后立即可选择常用物品。
-@export_range(1, 100, 1) var progressive_initial_item_count: int = 12
+## 锻造候选首次同步显示数量；默认 50，常规背包容量下立即显示全部候选物品。
+@export_range(1, 200, 1) var progressive_initial_item_count: int = 50
 ## 锻造候选后续每帧创建数量；默认 8，槽位或筛选变化会取消旧加载任务。
 @export_range(1, 100, 1) var progressive_item_batch_count: int = 8
 

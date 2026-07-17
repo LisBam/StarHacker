@@ -59,8 +59,8 @@ const ACTION_USE_CONSUMABLE: int = 8
 
 ## 面板最小尺寸；与战斗背包接近，确保左侧七个装备槽和右侧物品网格可读。
 @export var panel_minimum_size: Vector2 = Vector2(960.0, 620.0)
-## 背包首次同步显示数量；默认 12，保证打开界面时立即填充主要可视区域。
-@export_range(1, 100, 1) var progressive_initial_item_count: int = 12
+## 背包首次同步显示数量；默认 50，常规容量下打开界面即可立即显示完整背包。
+@export_range(1, 200, 1) var progressive_initial_item_count: int = 50
 ## 背包后续每帧创建数量；默认 8，筛选、排序或库存变化会取消旧任务。
 @export_range(1, 100, 1) var progressive_item_batch_count: int = 8
 

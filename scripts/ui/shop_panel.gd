@@ -25,8 +25,8 @@ const CHANNEL_GRAY: String = "gray"
 @export var panel_minimum_size: Vector2 = Vector2(960.0, 620.0)
 ## 底部状态提示淡出时长；默认 3 秒，商店刷新和购买结果会在该时间内线性淡出后清空。
 @export_range(0.5, 10.0, 0.1) var status_fade_duration_seconds: float = 3.0
-## 商品首次同步显示数量；默认 12，足以填充初始可视区域且不会一次创建完整长列表。
-@export_range(1, 100, 1) var progressive_initial_item_count: int = 12
+## 商品首次同步显示数量；默认 50，常规商店与灰市列表会在打开时立即完整显示。
+@export_range(1, 200, 1) var progressive_initial_item_count: int = 50
 ## 商品后续每帧创建数量；默认 8，刷新或切换筛选会自动取消旧任务。
 @export_range(1, 100, 1) var progressive_item_batch_count: int = 8
 

@@ -1035,6 +1035,19 @@ func _decay_knockback(delta: float) -> void:
 	_knockback_velocity = _knockback_velocity.move_toward(Vector2.ZERO, maxf(knockback_decay, 1.0) * delta)
 
 
+func get_current_aim_direction() -> Vector2:
+	## 返回鼠标相对玩家的实时瞄准方向，并同步武器旋转；连击每轮调用后与快速连续点击射击使用相同朝向来源。
+	if _input_component == null:
+		return _last_aim_direction
+	# 实时鼠标方向；越过瞄准死区时更新缓存与武器视觉，死区内继续沿用上一合法方向。
+	var current_aim_direction: Vector2 = _input_component.get_aim_direction(global_position)
+	if not current_aim_direction.is_zero_approx():
+		_last_aim_direction = current_aim_direction.normalized()
+		if _aim_pivot != null:
+			_aim_pivot.rotation = _last_aim_direction.angle()
+	return _last_aim_direction
+
+
 func _cancel_blocked_knockback_components() -> void:
 	if _knockback_velocity.is_zero_approx():
 		return

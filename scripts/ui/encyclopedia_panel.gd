@@ -560,9 +560,22 @@ func _build_equipment_set_header(entry: Dictionary) -> Control:
 	var set_id: String = str(entry.get("equipment_set_id", ""))
 	var set_title: String = str(entry.get("equipment_set_title", "套装"))
 	var is_expanded: bool = bool(_expanded_equipment_sets.get(set_id, false))
-	header_button.text = "%s %s" % [set_title if not set_title.is_empty() else "套装", "▲" if is_expanded else "▼"]
+	header_button.text = set_title if not set_title.is_empty() else "套装"
 	header_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	header_button.custom_minimum_size = Vector2(0.0, 36.0)
+	header_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# 展开提示；独立锚定在按钮最右侧，不跟随套装名称长度移动。
+	var expansion_hint: Label = Label.new()
+	expansion_hint.text = "▲" if is_expanded else "▼"
+	expansion_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	expansion_hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	expansion_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	expansion_hint.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+	expansion_hint.offset_left = -34.0
+	expansion_hint.offset_top = -18.0
+	expansion_hint.offset_right = -6.0
+	expansion_hint.offset_bottom = 18.0
+	header_button.add_child(expansion_hint)
 	header_button.pressed.connect(_toggle_equipment_set.bind(set_id))
 	return header_button
 

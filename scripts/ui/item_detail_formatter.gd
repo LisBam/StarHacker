@@ -152,7 +152,7 @@ static func _append_equipment_lines(detail_lines: Array[String], item_resource: 
 		["cooldown_reduction", 1, "%", 100.0],
 		["move_speed", 0, "%", 100.0],
 		["vision_range", 0, "%", 100.0],
-		["critical_chance", 0, "%", 100.0],
+		["critical_chance", 1, "%", 100.0],
 		["critical_damage", 0, "%", 100.0],
 	]
 	detail_lines.append("[b]装备属性[/b]")
@@ -344,7 +344,7 @@ static func _append_weapon_lines(detail_lines: Array[String], item_resource: Res
 	else:
 		_append_weapon_stat_line(detail_lines, item_resource, "attack_distance", 1)
 	# 暴击属性；与其他武器、装备属性共用统一颜色和括号变化明细，底层小数乘 100 后显示百分比。
-	_append_weapon_stat_line(detail_lines, item_resource, "critical_chance", 0, "%", 100.0)
+	_append_weapon_stat_line(detail_lines, item_resource, "critical_chance", 1, "%", 100.0)
 	_append_weapon_stat_line(detail_lines, item_resource, "critical_damage", 0, "%", 100.0)
 	if weapon_type in ["ranged", "hybrid"]:
 		_append_weapon_stat_line(detail_lines, item_resource, "projectile_speed", 1)

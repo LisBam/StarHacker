@@ -80,8 +80,8 @@ func _process(delta: float) -> void:
 func _get_latest_combo_direction() -> Vector2:
 	## 返回连击当前轮次的瞄准方向；组件保持独立，只依赖父节点可选的公开接口，不硬编码玩家脚本类型。
 	var owner_node: Node = get_parent()
-	if owner_node != null and owner_node.has_method("get_last_aim_direction"):
-		return owner_node.call("get_last_aim_direction") as Vector2
+	if owner_node != null and owner_node.has_method("get_current_aim_direction"):
+		return owner_node.call("get_current_aim_direction") as Vector2
 	return _active_combo_direction
 
 

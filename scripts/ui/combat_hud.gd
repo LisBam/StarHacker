@@ -401,6 +401,8 @@ var _settlement_subcategory: String = InventoryQuery.SUBCATEGORY_ALL
 @onready var _active_skill_no_cooldown_check_button: CheckButton = %ActiveSkillNoCooldownCheckButton
 ## 训练场设置返回按钮缓存；默认绑定 TestSettingsBackButton，点击后返回暂停主菜单。
 @onready var _test_settings_back_button: Button = %TestSettingsBackButton
+## 获取地图视野按钮；位于训练场设置中，点击后立即把完整战斗地图标记为已探索。
+@onready var _unlock_map_vision_button: Button = %UnlockMapVisionButton
 ## 训练场角色切换面板缓存；默认绑定 CharacterSwitchPanel，只在训练场设置中打开。
 @onready var _character_switch_panel: Control = %CharacterSwitchPanel
 ## 训练场星角色按钮缓存；默认绑定 SwitchCharacterStelleButton，点击后切换为星并刷新占位属性。
@@ -1203,7 +1205,6 @@ func _build_combat_developer_overlay() -> void:
 	developer_menu.connect("infinite_energy_toggled", Callable(self, "_on_developer_infinite_energy_toggled"))
 	developer_menu.connect("weapon_durability_consumption_toggled", Callable(self, "_on_developer_weapon_durability_consumption_toggled"))
 	developer_menu.connect("training_settings_requested", Callable(self, "_on_developer_training_settings_requested"))
-	developer_menu.connect("map_vision_requested", Callable(self, "_on_developer_map_vision_requested"))
 	developer_overlay.add_child(developer_menu)
 	_combat_developer_menu = developer_menu
 	developer_menu.call("configure_combat_context", _is_infinite_health_enabled(), _is_infinite_energy_enabled(), _is_weapon_durability_consumption_disabled_by_debug())
@@ -1473,6 +1474,10 @@ func _set_inventory_visible(visible: bool) -> void:
 		if _inventory_cancel_stone_use_button != null:
 			_inventory_cancel_stone_use_button.visible = false
 		_refresh_equipment()
+
+	# 背包暂停规则；打开时立即暂停战斗，关闭时只有其他暂停型界面仍显示才继续保持暂停。
+	var should_keep_paused: bool = visible or _pause_overlay.visible or _is_character_showcase_visible() or (_supply_extraction_overlay != null and _supply_extraction_overlay.visible)
+	get_tree().paused = should_keep_paused
 
 	_refresh_combat_input_state()
 
@@ -1870,6 +1875,7 @@ func _bind_pause_menu() -> void:
 	_respawn_monsters_button.pressed.connect(_on_respawn_monsters_button_pressed)
 	_switch_character_button.pressed.connect(_on_switch_character_button_pressed)
 	_add_game_time_button.pressed.connect(_on_add_game_time_button_pressed)
+	_unlock_map_vision_button.pressed.connect(_on_unlock_map_vision_button_pressed)
 	_switch_character_stelle_button.pressed.connect(_on_switch_character_stelle_button_pressed)
 	_switch_character_caelus_button.pressed.connect(_on_switch_character_caelus_button_pressed)
 	_switch_character_silver_wolf_button.pressed.connect(_on_switch_character_silver_wolf_button_pressed)
@@ -3380,7 +3386,8 @@ func _on_developer_training_settings_requested() -> void:
 	_refresh_combat_input_state()
 
 
-func _on_developer_map_vision_requested() -> void:
+func _on_unlock_map_vision_button_pressed() -> void:
+	## 训练场设置中的地图视野操作；只改变本局探索状态，不修改地图尺寸、标点或存档。
 	if _game_world != null and _game_world.has_method("unlock_full_map_vision"):
 		_game_world.call("unlock_full_map_vision")
 

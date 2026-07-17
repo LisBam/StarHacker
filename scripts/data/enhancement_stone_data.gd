@@ -329,7 +329,8 @@ static func _create_random_specialization(random_source: RandomNumberGenerator, 
 	# 特化词条；正向词条必定存在，负向词条通过同一字典附加。
 	var generated_modifiers: Dictionary = {beneficial_stat_name: beneficial_magnitude}
 	# 是否附带削弱；每颗特化石独立按品质配置的 50% 概率判定一次。
-	var has_detrimental_modifier: bool = random_source.randf() < float(EnhancementRules.get_quality_config(EnhancementRules.QUALITY_SPECIALIZED).get("detrimental_chance", 0.50))
+	# 特化负面概率补充；现行品质配置为 80%，默认回退值同步为 0.80，避免配置缺失时恢复旧概率。
+	var has_detrimental_modifier: bool = random_source.randf() < float(EnhancementRules.get_quality_config(EnhancementRules.QUALITY_SPECIALIZED).get("detrimental_chance", 0.80))
 	# 特化削弱属性池；当前只有武器负面属性，保留空池检查便于未来独立扩展装备特化。
 	var detrimental_stats: Array[String] = EnhancementRules.get_detrimental_stat_keys_for_quality(EnhancementRules.QUALITY_SPECIALIZED, generated_target_kind)
 	if has_detrimental_modifier and not detrimental_stats.is_empty():

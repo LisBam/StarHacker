@@ -275,13 +275,13 @@ func _build_interface() -> void:
 	query_bar.add_child(_sort_option)
 	_stone_quality_option = OptionButton.new()
 	_stone_quality_option.custom_minimum_size = Vector2(126.0, 34.0)
-	_stone_quality_option.add_item("品质：全部")
+	_stone_quality_option.add_item("全部")
 	_stone_quality_option.set_item_metadata(0, "")
 	# 品质标识遍历；固定使用规则目录顺序，保证筛选选项与掉落、图鉴及升阶使用相同品质排列。
 	for quality_id in EnhancementRules.QUALITY_ORDER:
 		# 品质显示短名；规则目录返回完整强化石名称，筛选按钮只保留初级、中级、高级、极品或特化前缀。
 		var quality_label: String = EnhancementRules.get_quality_display_name(quality_id).trim_suffix("强化石")
-		_stone_quality_option.add_item("品质：%s" % quality_label)
+		_stone_quality_option.add_item(quality_label)
 		_stone_quality_option.set_item_metadata(_stone_quality_option.item_count - 1, quality_id)
 	_stone_quality_option.item_selected.connect(_on_stone_quality_selected)
 	query_bar.add_child(_stone_quality_option)
@@ -979,6 +979,7 @@ func _clear_stone_attribute_filter() -> void:
 
 func _clear_stone_quality_filter() -> void:
 	## 清空强化石品质条件并恢复“品质：全部”选项；切换一级分类时调用，避免隐藏筛选跨分类残留。
+	## 现行显示补充：选项文本只显示“全部”，不再添加“品质：”前缀，筛选重置语义保持不变。
 	_stone_quality_filter = ""
 	if _stone_quality_option != null:
 		_stone_quality_option.select(0)

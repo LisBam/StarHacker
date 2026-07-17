@@ -48,6 +48,8 @@ var _grant_weapons_button: Button
 var _grant_equipment_button: Button
 ## 随机强化石按钮；默认运行时创建，点击后向仓库发放 10 颗随机强化石。
 var _grant_stones_button: Button
+## 全属性极品强化石按钮；点击后为武器与装备普通属性池中的每种单属性各发放 20 颗极品强化石。
+var _grant_all_supreme_stones_button: Button
 ## 自定义强化石展开按钮；默认运行时创建，点击后显示或收起详细配置，避免主菜单初始展示过长设置表单。
 var _custom_stone_toggle_button: Button
 ## 自定义强化石配置容器；默认运行时创建，包含品质、适用对象和三条可选词条，战斗开发者上下文会统一隐藏。
@@ -208,6 +210,12 @@ func _build_interface() -> void:
 	_grant_stones_button.pressed.connect(_on_grant_stones_pressed)
 	content.add_child(_grant_stones_button)
 	_economy_controls.append(_grant_stones_button)
+	_grant_all_supreme_stones_button = Button.new()
+	_grant_all_supreme_stones_button.custom_minimum_size = Vector2(0.0, 46.0)
+	_grant_all_supreme_stones_button.text = "一键获取所有极品强化石"
+	_grant_all_supreme_stones_button.pressed.connect(_on_grant_all_supreme_stones_pressed)
+	content.add_child(_grant_all_supreme_stones_button)
+	_economy_controls.append(_grant_all_supreme_stones_button)
 	_build_custom_stone_controls(content)
 	_grant_all_items_button = Button.new()
 	_grant_all_items_button.custom_minimum_size = Vector2(0.0, 46.0)
@@ -459,6 +467,7 @@ func _refresh_availability() -> void:
 	_grant_weapons_button.disabled = not service_available
 	_grant_equipment_button.disabled = not service_available
 	_grant_stones_button.disabled = not service_available
+	_grant_all_supreme_stones_button.disabled = not service_available
 	if _custom_stone_toggle_button != null:
 		_custom_stone_toggle_button.disabled = not service_available
 	if _grant_custom_stone_button != null:
@@ -540,6 +549,15 @@ func _on_grant_stones_pressed() -> void:
 		return
 	_pending_developer_value_action = "stones"
 	_developer_value_dialog.present_developer_value("获取强化石", "选择要生成并存入仓库的随机强化石数量", 1, maxi(enhancement_stone_grant_maximum, 1), clampi(enhancement_stone_grant_count, 1, maxi(enhancement_stone_grant_maximum, 1)), "获取")
+
+
+func _on_grant_all_supreme_stones_pressed() -> void:
+	## 一键发放全部普通属性的极品单属性强化石；固定数量由库存服务维护，菜单只负责调用和结果反馈。
+	if _global_inventory == null or not _global_inventory.has_method("grant_all_supreme_single_stat_enhancement_stones_to_warehouse"):
+		return
+	# 发放颗数；默认等于武器属性种类与装备属性种类之和乘以每属性 20 颗。
+	var granted_count: int = int(_global_inventory.call("grant_all_supreme_single_stat_enhancement_stones_to_warehouse"))
+	_status_label.text = "已向仓库发放 %d 颗极品单属性强化石" % granted_count
 
 
 func _on_grant_custom_stone_pressed() -> void:

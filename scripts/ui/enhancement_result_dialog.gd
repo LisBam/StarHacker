@@ -122,7 +122,10 @@ func _format_change_line(change: Dictionary) -> String:
 	# 玩法收益；冷却、能耗、偏移和后坐力降低等负方向收益同样使用绿色。
 	var is_beneficial: bool = EnhancementRules.is_direction_beneficial(stat_name, modifier_ratio)
 	# 词条描述；乘算属性保留 0.1% 精度，避免缩放后的一级属性被四舍五入为 0%，加算属性直接显示带符号百分点。
-	var percentage_text: String = "%s%d 点" % ["+" if modifier_ratio >= 0.0 else "-", roundi(absf(modifier_ratio))] if calculation_mode == EnhancementRules.CALCULATION_ADDITIVE_VALUE else (("%s%.1f%%" % ["+" if modifier_ratio >= 0.0 else "-", absf(modifier_ratio) * 100.0]) if calculation_mode == EnhancementRules.CALCULATION_ADDITIVE_POINTS else ("%s%.1f%%" % ["提升" if is_beneficial else "削弱", absf(modifier_ratio) * 100.0]))
+	# 幅度数值文本；最多保留两位小数，完整显示普通强化石 1.5 倍后可能出现的 0.05 半步结果。
+	var magnitude_text: String = String.num(absf(modifier_ratio) if calculation_mode == EnhancementRules.CALCULATION_ADDITIVE_VALUE else absf(modifier_ratio) * 100.0, 2)
+	# 幅度结果文本；加算数值使用点数，其余属性继续按百分点或相对百分比展示原有利弊语义。
+	var percentage_text: String = "%s%s 点" % ["+" if modifier_ratio >= 0.0 else "-", magnitude_text] if calculation_mode == EnhancementRules.CALCULATION_ADDITIVE_VALUE else (("%s%s%%" % ["+" if modifier_ratio >= 0.0 else "-", magnitude_text]) if calculation_mode == EnhancementRules.CALCULATION_ADDITIVE_POINTS else ("%s%s%%" % ["提升" if is_beneficial else "削弱", magnitude_text]))
 	# 带符号变化值；百分比属性转换为玩家阅读单位，普通数值保留原始单位。
 	var change_text: String = _format_stat_value(stat_name, change_value, true)
 	# 词条颜色；严格按玩法收益而不是数值正负选择。

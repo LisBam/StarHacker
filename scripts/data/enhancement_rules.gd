@@ -309,8 +309,8 @@ const ADDITIVE_POINT_MAGNITUDE_RANGES: Dictionary = {
 	# 视野幅度；装备视野本身是加算百分比，即使头部模板为 0% 也能直接获得强化百分点。
 	"vision_range": BALANCED_VISION_RANGE_MAGNITUDE_RANGES,
 }
-## 强化数值保存精度；0.001 对应 0.1 个百分点，可完整保存闪避率等小数区间。
-const MODIFIER_VALUE_PRECISION: float = 0.001
+## 强化数值保存精度；0.0005 对应 0.05 个百分点，可无损保存原 0.1% 档位放大 1.5 倍后的半步数值。
+const MODIFIER_VALUE_PRECISION: float = 0.0005
 ## 乘算幅度随机步长；0.001 对应 0.1%，保证缩放后的一级、二级和三级区间端点均可准确抽取。
 const MULTIPLICATIVE_ROLL_STEP: float = 0.001
 ## 加算幅度随机步长；0.001 对应 0.1 个百分点，覆盖 0.3%、0.5% 等区间端点。
@@ -319,6 +319,9 @@ const ADDITIVE_POINT_ROLL_STEP: float = 0.001
 const ENERGY_REGENERATION_ROLL_STEP: float = 0.1
 ## 特化强化石出现 +2 增强的概率；0.0001 对应每颗特化石独立 0.01% 概率，生成时确定且后续不重抽。
 const SPECIALIZATION_DOUBLE_BENEFICIAL_CHANCE: float = 0.0001
+## 普通强化石幅度倍率；默认 1.5，使普通四品质除攻击距离外的每个原始合法档位精确放大到原值的 1.5 倍。
+## 该倍率不作用于特化强化石及其负面词条，运行时不应动态修改，调整后必须同步强化石平衡文档与玩法数值快照。
+const STANDARD_STONE_MAGNITUDE_MULTIPLIER: float = 1.5
 ## 暴击率最终上限；1.0 表示 100%，武器与装备的有效属性统一应用该限制。
 const CRITICAL_CHANCE_MAXIMUM: float = 1.0
 ## 闪避率最终上限；0.60 表示 60%，单件装备和装备聚合结果均不得超过该值。
@@ -673,11 +676,14 @@ static func build_modifier_token(stat_name: String, direction: Variant, include_
 		return "%s%d" % [direction_text, clampi(roundi(absf(float(direction))), 1, 2)]
 	if not include_percentage:
 		return direction_text
-	# 可见幅度；加算属性与乘算属性都保留 0.1 精度，避免一级属性的小数百分比被显示为 0%。
+	# 可见幅度；最多保留两位小数，使 1.5 倍倍率产生的 0.05% 或 0.05 点半步结果不会在界面中丢失精度。
 	if is_additive_value_stat(stat_name):
-		var additive_value_format: String = "%.1f" if stat_name == "energy_regeneration" else "%d"
-		return "%s%s" % [direction_text, additive_value_format % (absf(float(direction)) if stat_name == "energy_regeneration" else roundi(absf(float(direction))))]
-	return "%s%.1f 个百分点" % [direction_text, absf(modifier_ratio) * 100.0] if is_additive_point_stat(stat_name) else "%s%.1f%%" % [direction_text, absf(modifier_ratio) * 100.0]
+		# 加算数值文本；能量恢复保留最多两位小数，离散机制仍显示整数点数。
+		var additive_value_text: String = String.num(absf(float(direction)), 2) if stat_name == "energy_regeneration" else str(roundi(absf(float(direction))))
+		return "%s%s" % [direction_text, additive_value_text]
+	# 百分比文本；乘算比例与加算百分点共用最多两位小数的永久显示协议。
+	var percentage_text: String = String.num(absf(modifier_ratio) * 100.0, 2)
+	return "%s%s 个百分点" % [direction_text, percentage_text] if is_additive_point_stat(stat_name) else "%s%s%%" % [direction_text, percentage_text]
 
 
 static func roll_quality_modifier_ratio(random_source: RandomNumberGenerator, quality_id: String, stat_name: String, direction: Variant) -> float:
@@ -711,7 +717,12 @@ static func roll_quality_modifier_ratio(random_source: RandomNumberGenerator, qu
 	var minimum_step: int = roundi(minf(minimum_ratio, maximum_ratio) / roll_step)
 	# 最大随机单位；与最小单位组成包含端点的闭区间。
 	var maximum_step: int = roundi(maxf(minimum_ratio, maximum_ratio) / roll_step)
-	return snappedf(float(random_source.randi_range(minimum_step, maximum_step)) * roll_step * float(modifier_direction), MODIFIER_VALUE_PRECISION)
+	# 原始随机幅度；先按旧有离散步长抽取，确保倍率调整不会改变各档位的相对概率分布。
+	var rolled_modifier: float = float(random_source.randi_range(minimum_step, maximum_step)) * roll_step * float(modifier_direction)
+	# 普通石倍率；攻击距离保持独立触达区间，特化石及其初级负面区间均保持原幅度。
+	if quality_id != QUALITY_SPECIALIZED and stat_name != "attack_distance":
+		rolled_modifier *= STANDARD_STONE_MAGNITUDE_MULTIPLIER
+	return snappedf(rolled_modifier, MODIFIER_VALUE_PRECISION)
 
 
 static func get_stat_magnitude_config(stat_name: String, quality_id: String) -> Dictionary:

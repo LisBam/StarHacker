@@ -98,6 +98,8 @@ const DEVELOPER_STONE_MAX_MODIFIER_COUNT: int = 3
 const DEVELOPER_STONE_DETRIMENTAL_CHANCE: float = 0.28
 ## 开发者强化石单词条基础价值；默认 30 星穹，与战斗掉落默认配置保持一致。
 const DEVELOPER_STONE_BASE_SELL_PRICE: int = 30
+## 开发者全属性极品强化石的单属性发放数量；默认每种武器与装备属性各 20 颗，不应在运行时动态修改。
+const DEVELOPER_SUPREME_STONES_PER_STAT: int = 20
 ## 开发者强化石兼容说明；词条数和削弱概率已由品质规则接管，上述三项随机常量仅用于保持旧调用签名稳定。
 
 ## 仓库记录数组；每项包含唯一记录编号、武器资源、获得时间与撤离优先级，战斗失败不会修改该数组。
@@ -836,6 +838,39 @@ func grant_custom_enhancement_stone_to_warehouse(quality_id: String, target_kind
 	_queue_save_inventory()
 	warehouse_changed.emit()
 	return true
+
+
+func grant_all_supreme_single_stat_enhancement_stones_to_warehouse(stones_per_stat: int = DEVELOPER_SUPREME_STONES_PER_STAT) -> int:
+	## 向仓库发放全部普通属性的极品单属性强化石；武器与装备属性池分别遍历，共用属性会按适用对象生成独立石头。
+	# 每种属性请求数量；负数按 0 处理，默认 20 颗，修改会线性增加仓库堆叠和存档体积。
+	var resolved_stones_per_stat: int = maxi(stones_per_stat, 0)
+	if resolved_stones_per_stat <= 0:
+		return 0
+	# 实际发放数量；只统计成功创建并写入仓库的单属性极品强化石。
+	var granted_count: int = 0
+	# 目标属性池；武器与装备分别生成，确保耐久等共有属性不会丢失任一适用类型。
+	var target_stat_pools: Dictionary = {
+		"weapon": EnhancementRules.WEAPON_STAT_KEYS,
+		"equipment": EnhancementRules.EQUIPMENT_STAT_KEYS,
+	}
+	for target_kind in target_stat_pools.keys():
+		# 当前目标属性池；每项只作为唯一增强词条，不附加第二增强或削弱词条。
+		var stat_keys: Array = target_stat_pools.get(target_kind, []) as Array
+		for stat_name_variant in stat_keys:
+			# 当前属性名；来自正式普通强化石池，保证开发者入口自动覆盖后续新增的合法属性。
+			var stat_name: String = str(stat_name_variant)
+			for _stone_index in range(resolved_stones_per_stat):
+				# 单属性极品强化石；复用正式自定义生成器，使品质、价值、堆叠和存档协议保持一致。
+				var enhancement_stone: EnhancementStoneData = EnhancementStoneData.create_custom(EnhancementRules.QUALITY_SUPREME, str(target_kind), stat_name, "", "", DEVELOPER_STONE_BASE_SELL_PRICE)
+				if enhancement_stone == null:
+					continue
+				_insert_record_with_stack_merge(_warehouse_records, _create_record(enhancement_stone))
+				granted_count += 1
+	if granted_count <= 0:
+		return 0
+	_queue_save_inventory()
+	warehouse_changed.emit()
+	return granted_count
 
 
 func grant_random_enhancement_stones_to_warehouse_gradually(stone_count: int, batch_size: int = 25) -> int:

@@ -47,13 +47,17 @@ var _current_critical_chance: float = 0.0
 var _current_critical_damage: float = 1.5
 ## 命中框沿攻击方向的固定近端距离；默认 0，ready 时由场景碰撞框位置和宽度自动计算，强化不会改变近端。
 ## 等比缩放补充：该值作为场景原始近端距离缓存，实际攻击时会与宽度、高度一起按有效攻击距离倍率缩放。
+## 固定近端补充：现行攻击距离结算始终直接复用该缓存，不再按距离倍率移动近端。
 var _hitbox_near_distance: float = 0.0
 ## 命中框垂直高度；默认 1，ready 时从矩形碰撞形状读取，攻击距离变化时保持不变。
 ## 等比缩放补充：该值作为场景原始高度缓存，实际攻击时会随有效攻击距离同步缩放。
+## 固定高度补充：现行攻击距离只改变沿攻击方向的长度，该缓存会直接作为每次判定高度。
 var _hitbox_height: float = 1.0
 ## 命中框原始宽度；默认 1，ready 时从矩形碰撞形状读取，运行时用于按攻击距离倍率等比缩放整个判定区域。
+## 固定近端补充：现行规则保留该缓存用于计算场景原始最远端，不再直接按倍率生成动态宽度。
 var _hitbox_width: float = 1.0
 ## 命中框原始最远端距离；默认 1，ready 时由近端与宽度计算，作为武器有效攻击距离的缩放基准。
+## 安全回退补充：现行规则在输入距离非正时使用该值恢复场景基础范围。
 var _hitbox_far_distance: float = 1.0
 ## 是否正在显示蓄力攻击范围预览；默认 false，只控制视觉显隐，不启用碰撞或命中监听。
 var _range_preview_visible: bool = false
@@ -185,30 +189,29 @@ func _cache_hitbox_geometry() -> void:
 func _apply_attack_distance(resolved_attack_distance: float) -> void:
 	## 按“最远端到玩家本体的距离”重算近战判定框，保持场景定义的近端和高度不变。
 	## 等比缩放补充：现行规则以场景原始最远端为基准，同步缩放近端、宽度和高度，使攻击范围整体保持原始比例。
+	## 固定起点补充：当前几何规则由有效距离直接决定远端，场景近端与高度始终保持不变。
 	if _collision_shape == null or not (_collision_shape.shape is RectangleShape2D):
 		return
-	# 安全攻击距离；最低为 1 像素，保证极端削弱后仍存在有效判定区域。
-	var safe_attack_distance: float = maxf(resolved_attack_distance, 1.0)
-	# 整体缩放倍率；有效攻击距离与场景原始最远端之比决定矩形所有几何尺寸的同步变化。
-	var range_scale: float = safe_attack_distance / maxf(_hitbox_far_distance, 1.0)
-	# 本次近端距离；按原始近端等比缩放，避免强化只延长命中框远端而改变整体形状比例。
-	var resolved_near_distance: float = _hitbox_near_distance * range_scale
-	# 动态碰撞宽度；按原始宽度等比缩放，使最远端始终精确落在有效攻击距离处。
-	var hitbox_width: float = maxf(_hitbox_width * range_scale, 1.0)
-	# 动态碰撞高度；与宽度使用相同倍率，保证整个攻击范围在两个轴向保持原始比例。
-	var hitbox_height: float = maxf(_hitbox_height * range_scale, 1.0)
-	# 动态碰撞形状；高度保持场景原值，只沿攻击方向伸缩。
+	# 请求攻击远端；正常使用武器有效距离，异常非正数则回退到场景原始最远端。
+	var requested_attack_distance: float = resolved_attack_distance if resolved_attack_distance > 0.0 else _hitbox_far_distance
+	# 安全攻击远端；至少比固定近端远 1 像素，保证极端削弱后仍存在有效矩形判定区域。
+	var safe_attack_distance: float = maxf(requested_attack_distance, _hitbox_near_distance + 1.0)
+	# 动态碰撞宽度；只改变固定近端到有效远端之间的长度，使射程强化不会在玩家身边产生判定空洞。
+	var hitbox_width: float = safe_attack_distance - _hitbox_near_distance
+	# 动态碰撞高度；始终保持场景原值，攻击距离只控制沿攻击方向的覆盖长度。
+	var hitbox_height: float = _hitbox_height
+	# 动态碰撞形状；中心随宽度移动，但近端始终固定在场景配置位置。
 	var rectangle_shape: RectangleShape2D = _collision_shape.shape as RectangleShape2D
 	rectangle_shape.size = Vector2(hitbox_width, hitbox_height)
-	_collision_shape.position.x = resolved_near_distance + hitbox_width * 0.5
+	_collision_shape.position.x = _hitbox_near_distance + hitbox_width * 0.5
 	if _visual is Polygon2D:
-		# 动态视觉区域；与碰撞框共享近端、最远端和高度，确保调试显示与真实判定完全一致。
+		# 动态视觉区域；与碰撞框共享固定近端、有效远端和原始高度，确保调试显示与真实判定完全一致。
 		var half_height: float = hitbox_height * 0.5
 		(_visual as Polygon2D).polygon = PackedVector2Array([
-			Vector2(resolved_near_distance, -half_height),
+			Vector2(_hitbox_near_distance, -half_height),
 			Vector2(safe_attack_distance, -half_height),
 			Vector2(safe_attack_distance, half_height),
-			Vector2(resolved_near_distance, half_height),
+			Vector2(_hitbox_near_distance, half_height),
 		])
 
 

@@ -65,12 +65,13 @@ const QUALITY_UPGRADE_PATH: Dictionary = {
 ## 品质数值配置；百分比使用 0 到 1 小数，额外增强和削弱均最多追加一条不重复属性。
 ## 幅度配置补充：本表中的历史 min/max 键仅保留扩展兼容，现行随机幅度读取 MULTIPLICATIVE_MAGNITUDE_RANGES 或 ADDITIVE_POINT_MAGNITUDE_RANGES。
 ## 特化品质补充：特化增强点数独立生成并写入资源，本表只提供固定一条增强与 50% 负面词条概率。
+## 特化负面概率补充：现行配置提高为 80%，所有随机生成入口统一读取 detrimental_chance。
 const QUALITY_CONFIGS: Dictionary = {
 	QUALITY_LOW: {"extra_beneficial_chance": 0.0, "detrimental_chance": 0.80, "beneficial_min": 0.10, "beneficial_max": 0.20, "detrimental_min": 0.10, "detrimental_max": 0.20},
 	QUALITY_MEDIUM: {"extra_beneficial_chance": 0.10, "detrimental_chance": 0.40, "beneficial_min": 0.20, "beneficial_max": 0.40, "detrimental_min": 0.05, "detrimental_max": 0.20},
 	QUALITY_HIGH: {"extra_beneficial_chance": 0.20, "detrimental_chance": 0.10, "beneficial_min": 0.30, "beneficial_max": 0.50, "detrimental_min": 0.05, "detrimental_max": 0.10},
 	QUALITY_SUPREME: {"extra_beneficial_chance": 0.30, "detrimental_chance": 0.0, "beneficial_min": 0.40, "beneficial_max": 0.60, "detrimental_min": 0.0, "detrimental_max": 0.0},
-	QUALITY_SPECIALIZED: {"extra_beneficial_chance": 0.0, "detrimental_chance": 0.50, "beneficial_min": 1.0, "beneficial_max": 2.0, "detrimental_min": 0.0, "detrimental_max": 0.0},
+	QUALITY_SPECIALIZED: {"extra_beneficial_chance": 0.0, "detrimental_chance": 0.80, "beneficial_min": 1.0, "beneficial_max": 2.0, "detrimental_min": 0.0, "detrimental_max": 0.0},
 }
 ## 乘算属性的幅度组归属；新增乘算属性时必须在此登记，避免回退到错误的共享品质区间。
 const MULTIPLICATIVE_STAT_GROUPS: Dictionary = {
@@ -213,6 +214,13 @@ const BALANCED_REACH_MAGNITUDE_RANGES: Dictionary = {
 	QUALITY_HIGH: {"beneficial_min": 0.144, "beneficial_max": 0.240, "detrimental_min": 0.024, "detrimental_max": 0.064},
 	QUALITY_SUPREME: {"beneficial_min": 0.200, "beneficial_max": 0.320, "detrimental_min": 0.0, "detrimental_max": 0.0},
 }
+## 攻击距离独立幅度；增强与削弱均为原触达等价区间的五分之一，并按 0.1% 精度取最近合法端点。
+const BALANCED_ATTACK_DISTANCE_MAGNITUDE_RANGES: Dictionary = {
+	QUALITY_LOW: {"beneficial_min": 0.008, "beneficial_max": 0.019, "detrimental_min": 0.008, "detrimental_max": 0.019},
+	QUALITY_MEDIUM: {"beneficial_min": 0.016, "beneficial_max": 0.032, "detrimental_min": 0.005, "detrimental_max": 0.016},
+	QUALITY_HIGH: {"beneficial_min": 0.029, "beneficial_max": 0.048, "detrimental_min": 0.005, "detrimental_max": 0.013},
+	QUALITY_SUPREME: {"beneficial_min": 0.040, "beneficial_max": 0.064, "detrimental_min": 0.0, "detrimental_max": 0.0},
+}
 ## 恢复与视野等价幅度；用于周期治疗和视野这两类持续但不直接转化为单次伤害的属性。
 ## 视野平衡补充：视野已改用独立区间，本表继续服务周期治疗，不再决定视野词条幅度。
 const BALANCED_SUSTAIN_MAGNITUDE_RANGES: Dictionary = {
@@ -248,7 +256,7 @@ const MULTIPLICATIVE_STAT_MAGNITUDE_RANGES: Dictionary = {
 	"cooldown": BALANCED_COOLDOWN_MAGNITUDE_RANGES,
 	"energy_consumption": BALANCED_ENERGY_CONSUMPTION_MAGNITUDE_RANGES,
 	"projectile_speed": BALANCED_REACH_MAGNITUDE_RANGES,
-	"attack_distance": BALANCED_REACH_MAGNITUDE_RANGES,
+	"attack_distance": BALANCED_ATTACK_DISTANCE_MAGNITUDE_RANGES,
 	"deviation_degrees": BALANCED_CONTROL_MAGNITUDE_RANGES,
 	"recoil_force": BALANCED_CONTROL_MAGNITUDE_RANGES,
 	"front_recoil_force": BALANCED_CONTROL_MAGNITUDE_RANGES,

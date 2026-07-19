@@ -141,7 +141,14 @@ const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
 ## 短时逃跑判定时长；默认 30.0 秒，玩家在该时间内主动逃跑时应用较低损失比例，运行时通常不动态修改。
 @export_range(0.0, 600.0, 0.1) var early_escape_duration_seconds: float = 30.0
 ## 短时逃跑物品损失比例；默认 0.20 表示背包每个物品单位独立保留 80%，只影响主动逃跑且不影响死亡结算。
-@export_range(0.0, 1.0, 0.01) var early_escape_loss_ratio: float = 0.20
+## 现行短时逃跑规则补充：默认值为 0.30，对应死亡时背包 60% 丢失概率减半。
+@export_range(0.0, 1.0, 0.01) var early_escape_loss_ratio: float = 0.30
+## 正常失败背包损失比例；默认 0.60，死亡与超过短时保护期的主动逃跑都会让背包每个物品单位独立判定，运行时通常不动态修改。
+@export_range(0.0, 1.0, 0.01) var failure_backpack_loss_ratio: float = 0.60
+## 正常失败装备栏损失比例；默认 0.20，武器栏和四个防具槽中的每件物品独立判定，运行时通常不动态修改。
+@export_range(0.0, 1.0, 0.01) var failure_equipment_loss_ratio: float = 0.20
+## 短时逃跑装备栏损失比例；默认 0.10，对应正常失败时装备栏 20% 丢失概率减半，运行时通常不动态修改。
+@export_range(0.0, 1.0, 0.01) var early_escape_equipment_loss_ratio: float = 0.10
 ## 远程冷却遮罩最短显示时长；默认 0.12 秒，更短或相等的高射速冷却不显示遮罩以避免持续闪烁。
 @export_range(0.0, 1.0, 0.01) var cooldown_overlay_minimum_duration: float = 0.12
 
@@ -2870,7 +2877,7 @@ func _on_player_died() -> void:
 		# 训练场不进入正式结算；下一空闲帧恢复玩家生命并重新开放输入，避免死亡标记永久锁死 HUD。
 		call_deferred("_revive_training_player")
 		return
-	_show_failure_settlement("角色死亡")
+	_show_failure_settlement("角色死亡", 1.0 - clampf(failure_backpack_loss_ratio, 0.0, 1.0), 1.0 - clampf(failure_equipment_loss_ratio, 0.0, 1.0))
 
 
 func _revive_training_player() -> void:
@@ -3467,22 +3474,32 @@ func _on_return_main_menu_button_pressed() -> void:
 	if _escape_confirmation_dialog == null:
 		return
 	# 当前逃跑损失比例；进入游戏 30 秒内为 20%，超过该时长后恢复默认 50%。
+	# 现行规则补充：该变量只表示背包概率，30 秒内为 30%、超过后为 60%；装备栏概率由独立变量计算。
 	var loss_ratio: float = _get_current_escape_loss_ratio()
+	# 当前逃跑装备栏损失比例；与背包使用同一短时保护边界，但按独立概率展示和结算。
+	var equipment_loss_ratio: float = _get_current_escape_equipment_loss_ratio()
 	# 逃跑警告；根据当前存活时间显示本次实际概率，训练场已在入口处直接离开而不会打开二次确认。
-	_escape_confirmation_dialog.present_adaptive("确认逃跑", "确认逃跑并返回主菜单吗？\n正式战斗中，背包物品约 %d%% 会被保留、约 %d%% 会丢失；已装备物品不参与损失。" % [roundi((1.0 - loss_ratio) * 100.0), roundi(loss_ratio * 100.0)], "确认逃跑", "取消", true)
+	_escape_confirmation_dialog.present_adaptive("确认逃跑", "确认逃跑并返回主菜单吗？\n背包物品：约 %d%% 保留、约 %d%% 丢失。\n武器栏与装备栏：约 %d%% 保留、约 %d%% 丢失。" % [roundi((1.0 - loss_ratio) * 100.0), roundi(loss_ratio * 100.0), roundi((1.0 - equipment_loss_ratio) * 100.0), roundi(equipment_loss_ratio * 100.0)], "确认逃跑", "取消", true)
 
 
 func _on_escape_confirmed() -> void:
 	if _is_training_mode:
 		_return_to_main_menu()
 		return
-	_show_failure_settlement("逃跑", 1.0 - _get_current_escape_loss_ratio())
+	_show_failure_settlement("逃跑", 1.0 - _get_current_escape_loss_ratio(), 1.0 - _get_current_escape_equipment_loss_ratio())
 
 
 func _get_current_escape_loss_ratio() -> float:
 	# 是否处于短时保护期；边界包含第 30 秒，超过后由失败结算默认规则丢失 50%。
+	# 现行规则补充：超过保护期后背包改为 60% 丢失，原注释中的 50% 仅保留用于说明历史规则。
 	var is_early_escape: bool = _get_survival_time_seconds() <= maxf(early_escape_duration_seconds, 0.0)
-	return clampf(early_escape_loss_ratio, 0.0, 1.0) if is_early_escape else 0.5
+	return clampf(early_escape_loss_ratio, 0.0, 1.0) if is_early_escape else clampf(failure_backpack_loss_ratio, 0.0, 1.0)
+
+
+func _get_current_escape_equipment_loss_ratio() -> float:
+	# 是否处于短时保护期；与背包共用含第 30 秒的边界，避免同一次逃跑对两类物品采用不同阶段。
+	var is_early_escape: bool = _get_survival_time_seconds() <= maxf(early_escape_duration_seconds, 0.0)
+	return clampf(early_escape_equipment_loss_ratio, 0.0, 1.0) if is_early_escape else clampf(failure_equipment_loss_ratio, 0.0, 1.0)
 
 
 func _on_death_return_main_menu_button_pressed() -> void:
@@ -3660,7 +3677,7 @@ func _show_success_settlement() -> void:
 	_present_run_outcome(outcome)
 
 
-func _show_failure_settlement(reason: String, retained_ratio: float = -1.0) -> void:
+func _show_failure_settlement(reason: String, retained_ratio: float = -1.0, equipment_retained_ratio: float = -1.0) -> void:
 	if _run_outcome_resolved:
 		_set_death_overlay_visible(true)
 		return
@@ -3674,8 +3691,10 @@ func _show_failure_settlement(reason: String, retained_ratio: float = -1.0) -> v
 
 	_run_outcome_resolved = true
 	# 失败结算；主动逃跑可传入短时保护保留率，死亡等默认路径继续使用全局库存的 50% 规则。
+	# 现行规则补充：死亡与主动逃跑都传入背包、装备栏两类保留率，默认分别为 40% 与 80%。
 	_record_stock_survival_time()
-	var outcome: Dictionary = global_inventory.call("complete_combat_run_failure", reason, retained_ratio) if retained_ratio >= 0.0 else global_inventory.call("complete_combat_run_failure", reason)
+	# 失败结算结果；两个保留率都有效时使用完整规则，缺省调用保留全局库存的默认失败概率作为兼容兜底。
+	var outcome: Dictionary = global_inventory.call("complete_combat_run_failure", reason, retained_ratio, equipment_retained_ratio) if retained_ratio >= 0.0 and equipment_retained_ratio >= 0.0 else global_inventory.call("complete_combat_run_failure", reason)
 	_present_run_outcome(outcome)
 
 
@@ -3737,10 +3756,11 @@ func _rebuild_settlement_list() -> void:
 		InventoryQuery.SORT_ACQUIRED_TIME
 	)
 	# 实际丢失条目；失败结算展示按本次概率从背包移除的全部物品，成功结算保持空数组。
+	# 现行规则补充：数组同时包含从武器栏与防具装备栏实际移除的物品。
 	var lost_entries: Array = _settlement_outcome.get("lost_entries", [])
 	_build_settlement_section("本局获得", filtered_gained_entries, "当前分类没有获得物品", Color(0.35, 1.0, 0.72, 1.0))
 	if result_type != "success":
-		_build_settlement_section("丢失物品", lost_entries, "本次没有丢失背包物品", Color(1.0, 0.46, 0.52, 1.0))
+		_build_settlement_section("丢失物品", lost_entries, "本次没有丢失物品", Color(1.0, 0.46, 0.52, 1.0))
 
 
 func _build_settlement_category_controls() -> void:

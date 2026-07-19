@@ -72,7 +72,10 @@ const DEFAULT_ARMOR_EQUIPMENT_IDS: Array[String] = []
 ## 默认局外星穹数量；首次建立存档时为 0，星穹只能通过出售仓库物品增加且不会进入战斗。
 const DEFAULT_STARTING_COINS: int = 0
 ## 战斗失败默认保留比例；默认 0.5，使背包内每件武器和每颗资源长期平均各保留 50%。
-const DEFAULT_FAILURE_RETENTION_RATIO: float = 0.5
+## 现行背包损失规则补充：默认保留比例为 0.4，对应背包内每个物品单位独立以 60% 概率丢失。
+const DEFAULT_FAILURE_RETENTION_RATIO: float = 0.4
+## 战斗失败装备栏默认保留比例；默认 0.8，使武器栏与防具装备栏中的每件物品独立以 20% 概率丢失。
+const DEFAULT_FAILURE_EQUIPMENT_RETENTION_RATIO: float = 0.8
 ## 单局物资送回价值上限；默认 1000 星穹，背包与装备栏送回价值共同累计且不会因关闭面板重置。
 const COMBAT_SHIPPING_VALUE_LIMIT: int = 1000
 ## 物资送回运费比例；默认按物品价值的 20% 向上取整扣除局外星穹。
@@ -151,6 +154,7 @@ var _durability_save_queued: bool = false
 ## 是否已有股票交易存档等待执行；默认 false，用于限制高频连续交易的磁盘写入次数。
 var _stock_trade_save_queued: bool = false
 ## 服务随机数生成器；默认启动时随机化，用于失败结算随机保留 50% 背包物品。
+## 现行失败结算补充：同一随机源分别按背包 40% 与装备栏 80% 默认保留率逐件判定，堆叠资源继续逐个单位判定。
 var _random: RandomNumberGenerator = RandomNumberGenerator.new()
 ## 局外星穹余额；取值大于等于 0，默认 0，只在主菜单仓库出售永久物品时增加。
 var _coins: int = DEFAULT_STARTING_COINS
@@ -233,12 +237,15 @@ func complete_combat_run_success() -> Dictionary:
 	return _last_run_outcome.duplicate(true)
 
 
-func complete_combat_run_failure(reason: String = "战斗失败", retained_ratio: float = DEFAULT_FAILURE_RETENTION_RATIO) -> Dictionary:
+func complete_combat_run_failure(reason: String = "战斗失败", retained_ratio: float = DEFAULT_FAILURE_RETENTION_RATIO, equipment_retained_ratio: float = DEFAULT_FAILURE_EQUIPMENT_RETENTION_RATIO) -> Dictionary:
 	if not _run_active:
 		return _last_run_outcome.duplicate(true)
 
 	# 标准化保留概率；每件武器或每颗堆叠资源独立判定，默认长期平均保留约 50%。
+	# 现行背包规则补充：默认保留 40%、丢失 60%；主动提前逃跑可由调用方传入 70% 保留率。
 	var resolved_retained_ratio: float = clampf(retained_ratio, 0.0, 1.0)
+	# 标准化装备栏保留概率；武器栏与四个防具槽中的每件物品独立判定，默认保留 80%、丢失 20%。
+	var resolved_equipment_retained_ratio: float = clampf(equipment_retained_ratio, 0.0, 1.0)
 	# 结算后背包记录；武器整件保留或丢失，强化石堆叠按单颗随机后保留剩余数量。
 	var retained_records: Array[Dictionary] = []
 	# 丢失物品条目；每项携带 Resource 与显示名，结算列表可直接复用仓库物品详情。
@@ -272,6 +279,35 @@ func complete_combat_run_failure(reason: String = "战斗失败", retained_ratio
 			lost_items.append("%s x%d" % [_get_record_display_name(record), lost_quantity] if lost_quantity > 1 else _get_record_display_name(record))
 
 	_backpack_records = retained_records
+	# 远程武器槽；每个非空槽独立抽取一次，丢失时清空原槽并把实际遗失资源加入结算与灰市快照。
+	for slot_index in range(_ranged_equipment_records.size()):
+		# 远程槽原始记录；取值为 Dictionary 或 null，空槽不会参与失败概率判定。
+		var raw_ranged_record: Variant = _ranged_equipment_records[slot_index]
+		if not (raw_ranged_record is Dictionary) or (raw_ranged_record as Dictionary).is_empty():
+			continue
+		if _random.randf() < resolved_equipment_retained_ratio:
+			continue
+		# 丢失的远程武器记录；资源保持失败瞬间的强化、二手状态与实际耐久，供结算和灰市展示。
+		var lost_ranged_record: Dictionary = raw_ranged_record as Dictionary
+		lost_entries.append(_build_outcome_entry(lost_ranged_record.get("resource") as Resource))
+		lost_items.append(_get_record_display_name(lost_ranged_record))
+		_ranged_equipment_records[slot_index] = null
+	# 近战武器槽；唯一近战槽与远程槽使用相同的装备栏保留概率，空槽直接跳过。
+	if not _melee_equipment_record.is_empty() and _random.randf() >= resolved_equipment_retained_ratio:
+		lost_entries.append(_build_outcome_entry(_melee_equipment_record.get("resource") as Resource))
+		lost_items.append(_get_record_display_name(_melee_equipment_record))
+		_melee_equipment_record = {}
+	# 防具部位；头部、躯干、腿部与脚部各自独立抽取，单件丢失不会改变其他装备槽的判定结果。
+	for armor_slot in ARMOR_SLOT_IDS:
+		# 防具槽记录；空字典表示对应部位没有装备，不消耗随机判定也不生成遗失条目。
+		var armor_record: Dictionary = _armor_equipment_records.get(armor_slot, {}) as Dictionary
+		if armor_record.is_empty() or _random.randf() < resolved_equipment_retained_ratio:
+			continue
+		lost_entries.append(_build_outcome_entry(armor_record.get("resource") as Resource))
+		lost_items.append(_get_record_display_name(armor_record))
+		_armor_equipment_records[armor_slot] = {}
+	# 当前远程槽校正；当前槽武器丢失后切换到第一个仍有武器的槽，全部丢失时回退到槽位 0。
+	_refresh_current_ranged_slot_after_equipment_change()
 	_detached_records.clear()
 	# 本局获得物品条目；只读取结算后仍由玩家持有的本局来源数量，因此本局获得后又丢失的单位不会重复出现在收益区。
 	var gained_entries: Array[Dictionary] = _build_retained_run_gained_entries()
@@ -289,11 +325,16 @@ func complete_combat_run_failure(reason: String = "战斗失败", retained_ratio
 		"lost_items": lost_items,
 		"retained_ratio": resolved_retained_ratio,
 		"lost_ratio": 1.0 - resolved_retained_ratio,
+		"backpack_retained_ratio": resolved_retained_ratio,
+		"backpack_lost_ratio": 1.0 - resolved_retained_ratio,
+		"equipment_retained_ratio": resolved_equipment_retained_ratio,
+		"equipment_lost_ratio": 1.0 - resolved_equipment_retained_ratio,
 	}
 	# 灰市遗失快照；在背包所有权完成结算后发送，监听方只能读取资源与数量，不会重新取得库存记录。
 	combat_failure_losses_recorded.emit(lost_entries.duplicate(true))
 	_queue_save_inventory()
 	inventory_changed.emit()
+	equipment_changed.emit()
 	run_state_changed.emit()
 	return _last_run_outcome.duplicate(true)
 

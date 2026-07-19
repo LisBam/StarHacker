@@ -35,6 +35,8 @@ const LEGACY_DURABILITY_MAX: float = 100.0
 const DEFAULT_RANGED_SLOT_COUNT: int = 2
 ## 默认武器资源路径表；键为稳定 weapon_id，值为可重新加载的项目资源路径。
 const WEAPON_RESOURCE_PATHS: Dictionary = {
+	"dagger": "res://data/weapons/basic/dagger.tres",
+	"future": "res://data/weapons/basic/future.tres",
 	"as_ive_written": "res://data/weapons/stelle/as_ive_written.tres",
 	"galactic_baseball_bat": "res://data/weapons/stelle/galactic_baseball_bat.tres",
 }
@@ -57,10 +59,16 @@ const EQUIPMENT_RESOURCE_PATHS: Dictionary = {
 const DEFAULT_BACKPACK_WEAPON_IDS: Array[String] = []
 ## 默认远程装备标识；首次建立存档时依次装入两个远程槽。
 ## 星内容精简补充：当前只装备一把“如我所书”，第二个远程槽保持为空且不会复制同一模板。
-const DEFAULT_RANGED_WEAPON_IDS: Array[String] = ["as_ive_written"]
+## 当前默认远程武器；新建存档仅在第一个远程槽装备基础武器“未来”，第二个远程槽保持为空，运行时不应修改。
+## 兼容说明：旧注释保留以说明历史配置；实际发放始终以本常量的当前值为准。
+const DEFAULT_RANGED_WEAPON_IDS: Array[String] = ["future"]
 ## 默认近战装备标识；首次建立存档时装入近战槽。
 ## 星内容精简补充：当前近战初始武器为“银河球棒”。
-const DEFAULT_MELEE_WEAPON_ID: String = "galactic_baseball_bat"
+## 当前默认近战武器；新建存档在唯一近战槽装备基础武器“匕首”，运行时不应修改。
+## 兼容说明：旧注释保留以说明历史配置；实际发放始终以本常量的当前值为准。
+const DEFAULT_MELEE_WEAPON_ID: String = "dagger"
+## 默认防具标识；新建存档只按此数组发放防具，默认空数组表示头部、躯干、腿部和脚部装备槽都为空，运行时不应修改。
+const DEFAULT_ARMOR_EQUIPMENT_IDS: Array[String] = []
 ## 默认局外星穹数量；首次建立存档时为 0，星穹只能通过出售仓库物品增加且不会进入战斗。
 const DEFAULT_STARTING_COINS: int = 0
 ## 战斗失败默认保留比例；默认 0.5，使背包内每件武器和每颗资源长期平均各保留 50%。
@@ -1666,12 +1674,14 @@ func _initialize_default_inventory() -> void:
 
 	# 默认近战资源；取值为相位刃模板深拷贝，加载失败时保持空槽。
 	# 星内容精简补充：当前默认标识指向银河球棒，仍保持相同的深拷贝与空槽容错规则。
+	# 当前近战配置；实际读取 DEFAULT_MELEE_WEAPON_ID，默认加载“匕首”，缺失时仍保留空槽以避免中断存档创建。
 	var melee_resource: Resource = _load_weapon_resource(DEFAULT_MELEE_WEAPON_ID)
 	if melee_resource != null:
 		_melee_equipment_record = _create_record(melee_resource)
 	# 默认防具；首次存档为四个部位各装备一件基础装备，便于直接体验完整属性链路。
 	# 星内容精简补充：当前装备路径表只包含四件开拓者套装，因此新存档会直接装备完整套装。
-	for equipment_id in EQUIPMENT_RESOURCE_PATHS.keys():
+	# 当前默认防具清单；为空时保持四个防具槽为空，填入合法 equipment_id 后才会在新存档中创建对应装备记录。
+	for equipment_id in DEFAULT_ARMOR_EQUIPMENT_IDS:
 		var equipment_resource: Resource = _load_equipment_resource(str(equipment_id))
 		if equipment_resource == null:
 			continue

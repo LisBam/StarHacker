@@ -9,8 +9,8 @@
 [ext_resource type="Script" uid="uid://c4nua6h4h6v0j" path="res://scripts/components/combat_stats_component.gd" id="7_stats"]
 [ext_resource type="Script" uid="uid://bnptom72jfqpo" path="res://scripts/components/inventory_component.gd" id="8_inventory"]
 [ext_resource type="Script" uid="uid://xouhfg5s44n0" path="res://scripts/components/equipment_component.gd" id="9_equipment"]
-[ext_resource type="Resource" uid="uid://ctsdbcjoa81nr" path="res://data/weapons/stelle/as_ive_written.tres" id="10_as_ive_written"]
-[ext_resource type="Resource" path="res://data/weapons/stelle/galactic_baseball_bat.tres" id="12_galactic_baseball_bat"]
+[ext_resource type="Resource" path="res://data/weapons/basic/future.tres" id="10_future"]
+[ext_resource type="Resource" path="res://data/weapons/basic/dagger.tres" id="12_dagger"]
 [ext_resource type="Script" uid="uid://pujjmsdixv2m" path="res://scripts/camera/combat_camera.gd" id="17_combat_camera"]
 [ext_resource type="Script" uid="uid://bkn4ecftio0so" path="res://scripts/components/equipment_set_component.gd" id="21_equipment_set"]
 [ext_resource type="Script" uid="uid://dfoha1yjp2fe0" path="res://scripts/components/active_skill_component.gd" id="22_active_skill"]
@@ -63,15 +63,15 @@ script = ExtResource("29_shield")
 
 [node name="InventoryComponent" type="Node" parent="." unique_id=990293600]
 script = ExtResource("8_inventory")
-initial_items = Array[Resource]([ExtResource("10_as_ive_written"), ExtResource("12_galactic_baseball_bat")])
+initial_items = Array[Resource]([ExtResource("10_future"), ExtResource("12_dagger")])
 
 [node name="EquipmentSetComponent" type="Node" parent="." unique_id=419476065]
 script = ExtResource("21_equipment_set")
 
 [node name="EquipmentComponent" type="Node" parent="." unique_id=1247807795]
 script = ExtResource("9_equipment")
-starting_ranged_weapons = Array[Resource]([ExtResource("10_as_ive_written")])
-starting_melee_weapon = ExtResource("12_galactic_baseball_bat")
+starting_ranged_weapons = Array[Resource]([ExtResource("10_future")])
+starting_melee_weapon = ExtResource("12_dagger")
 
 [node name="RangedAttackComponent" type="Node2D" parent="." unique_id=948818008]
 script = ExtResource("4_ranged_attack")

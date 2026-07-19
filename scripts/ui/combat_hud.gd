@@ -10,6 +10,7 @@ const WEAPON_SLOT_CONTROL_SCRIPT: Script = preload("res://scripts/ui/weapon_slot
 ## 按键绑定面板脚本；默认用于暂停设置中动态创建可重绑定操作列表。
 const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_panel.gd")
 ## 存档传输控件脚本；默认用于暂停设置复用导出、导入文件选择和安全重启流程。
+## 删除功能补充：同一复用控件内部提供输入“确认删除”的危险删除入口。
 const SAVE_TRANSFER_CONTROL_SCRIPT: Script = preload("res://scripts/ui/save_transfer_control.gd")
 ## 结算物品控件脚本；默认复用仓库的标准物品摘要与完整悬停详情，但结算列表不启用点击和拖拽。
 const STORAGE_ITEM_CONTROL_SCRIPT: Script = preload("res://scripts/ui/storage_item_control.gd")
@@ -319,6 +320,7 @@ var _pause_key_binding_back_button: Button
 ## 暂停设置首页控件列表；元素为 Control，默认用于在设置首页和按键绑定页之间切换可见性。
 var _pause_settings_home_controls: Array[Control] = []
 ## 暂停设置存档传输控件；默认运行时创建，导出仅包含各服务已经落盘的持久化状态。
+## 删除功能补充：删除会丢弃本局未落盘内存变化，并通过重启恢复到首次启动默认状态。
 var _pause_save_transfer_control: Control
 ## 战斗开发者全屏遮罩；默认运行时创建并隐藏，暂停界面完成 LISBAM 序列后显示。
 var _combat_developer_overlay: Control
@@ -1937,6 +1939,7 @@ func _build_pause_key_binding_navigation() -> void:
 	_pause_settings_content.move_child(key_binding_button, maxi(_pause_settings_content.get_child_count() - 3, 0))
 	_pause_key_binding_button = key_binding_button
 	# 存档传输控件；战斗中不强制保存本局临时所有权，继续遵守结算后统一落盘的框架规则。
+	# 删除功能补充；玩家确认删除时不执行战斗结算，复用控件会直接清理活动存档并重启。
 	var save_transfer_control: Control = SAVE_TRANSFER_CONTROL_SCRIPT.new() as Control
 	if save_transfer_control != null:
 		save_transfer_control.name = "PauseSaveTransferControl"

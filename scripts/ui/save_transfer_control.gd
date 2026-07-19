@@ -3,11 +3,16 @@ class_name SaveTransferControl
 
 ## 存档传输控件为主菜单与暂停设置提供统一的导出、导入文件选择和结果提示。
 ## 控件只调用 SaveArchiveService 的公开接口，不读取任何业务存档文件，也不持有游戏数据副本。
+## 删除功能补充：控件提供危险入口并挂载专用输入确认弹窗，最终文件边界仍由服务统一决定。
 
 ## 存档文件类型说明；固定同时展示中文名与英文名，供系统原生文件对话框识别本游戏归档。
 const SAVE_ARCHIVE_TYPE_DESCRIPTION: String = "星穹骇客（Star Hacker）存档"
 ## 默认导出文件名前缀；使用英文名避免跨平台文件系统或外部备份工具处理中文路径时出现兼容问题。
 const DEFAULT_EXPORT_FILE_PREFIX: String = "Star_Hacker_save_"
+## 存档删除确认弹窗脚本；使用专用输入组件校验“确认删除”，不把危险操作逻辑写入通用文件选择控件。
+const SAVE_DELETION_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/save_deletion_confirmation_dialog.gd")
+## 全局窗口样式指南；仅用于把删除入口标记为危险操作，不读取任何业务存档状态。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 
 ## 操作按钮最小高度；默认 42 像素，与设置页按键绑定及返回按钮保持一致，运行时无需动态修改。
 @export_range(24.0, 96.0, 1.0) var button_minimum_height: float = 42.0
@@ -24,6 +29,10 @@ var _status_label: Label
 var _export_dialog: FileDialog
 ## 导入文件对话框；默认允许访问系统文件，只选择单个 lisbamsave 归档。
 var _import_dialog: FileDialog
+## 删除存档按钮；默认运行时创建，点击后只打开输入确认弹窗，不直接触碰任何文件。
+var _delete_button: Button
+## 删除存档确认弹窗；默认运行时创建，只有精确输入固定短语后才发出最终删除请求。
+var _delete_confirmation_dialog: SaveDeletionConfirmationDialog
 ## 状态提示剩余时间；取值大于等于 0，默认 0 表示不自动倒计时。
 var _status_time_remaining: float = 0.0
 
@@ -44,6 +53,7 @@ func _process(delta: float) -> void:
 
 func _build_controls() -> void:
 	## 创建一行双按钮、状态标签和两个系统文件对话框；重复进入场景不会重复构建。
+	## 删除功能补充：双按钮行下方额外创建独占一行的危险删除入口与专用确认弹窗。
 	if _export_button != null:
 		return
 	# 按钮行；两个操作等宽显示，避免设置首页因文本长度产生不对称布局。
@@ -66,6 +76,14 @@ func _build_controls() -> void:
 	import_button.pressed.connect(_on_import_button_pressed)
 	button_row.add_child(import_button)
 	_import_button = import_button
+	# 删除按钮；独占一行并使用危险语义样式，避免与可恢复的导出、导入操作混淆。
+	var delete_button: Button = Button.new()
+	delete_button.text = "删除存档"
+	delete_button.custom_minimum_size.y = button_minimum_height
+	delete_button.pressed.connect(_on_delete_button_pressed)
+	add_child(delete_button)
+	UI_STYLE_GUIDE.apply_danger_button(delete_button)
+	_delete_button = delete_button
 	# 状态标签；自动换行并居中显示，不拦截鼠标输入。
 	var status_label: Label = Label.new()
 	status_label.visible = false
@@ -92,6 +110,13 @@ func _build_controls() -> void:
 	import_dialog.file_selected.connect(_on_import_file_selected)
 	add_child(import_dialog)
 	_import_dialog = import_dialog
+	# 删除确认弹窗；输入组件只负责校验短语，最终文件删除仍统一交给 SaveArchiveService。
+	var delete_confirmation_dialog: SaveDeletionConfirmationDialog = SAVE_DELETION_CONFIRMATION_DIALOG_SCRIPT.new() as SaveDeletionConfirmationDialog
+	if delete_confirmation_dialog != null:
+		delete_confirmation_dialog.name = "SaveDeletionConfirmationDialog"
+		delete_confirmation_dialog.delete_confirmed.connect(_on_delete_confirmed)
+		add_child(delete_confirmation_dialog)
+		_delete_confirmation_dialog = delete_confirmation_dialog
 
 
 func _on_export_button_pressed() -> void:
@@ -106,6 +131,12 @@ func _on_export_button_pressed() -> void:
 func _on_import_button_pressed() -> void:
 	if _import_dialog != null:
 		_import_dialog.popup_centered_ratio(0.72)
+
+
+func _on_delete_button_pressed() -> void:
+	## 打开二次确认弹窗；删除按钮本身永远不直接执行不可逆文件操作。
+	if _delete_confirmation_dialog != null:
+		_delete_confirmation_dialog.present()
 
 
 func _on_export_file_selected(path: String) -> void:
@@ -131,6 +162,22 @@ func _on_import_file_selected(path: String) -> void:
 	_show_status(str(result.get("message", "导入失败。")), not succeeded)
 	if succeeded and archive_service.has_method("restart_game"):
 		archive_service.call_deferred("restart_game")
+
+
+func _on_delete_confirmed() -> void:
+	## 提交已通过短语校验的删除请求；成功后立即退出并重启，阻止旧运行时状态再次落盘。
+	# 存档归档服务；缺失或接口不可用时保留当前文件并显示明确错误。
+	var archive_service: Node = get_tree().root.get_node_or_null("SaveArchiveService")
+	if archive_service == null or not archive_service.has_method("delete_save_data"):
+		_show_status("存档服务不可用。", true)
+		return
+	# 删除结果；服务负责白名单文件的完整移除，UI 不依赖具体路径或文件系统错误码。
+	var result: Dictionary = archive_service.call("delete_save_data") as Dictionary
+	# 删除是否成功；只有全部活动存档都已经退出正式路径时才允许重启进入首次启动状态。
+	var succeeded: bool = bool(result.get("success", false))
+	_show_status(str(result.get("message", "删除存档失败。")), not succeeded)
+	if succeeded and archive_service.has_method("restart_game"):
+		archive_service.call("restart_game")
 
 
 func _show_status(message: String, is_error: bool) -> void:

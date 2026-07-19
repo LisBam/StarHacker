@@ -18,7 +18,7 @@ config/name_en="Star Hacker"
 
 [autoload]
 
-; SaveLocationMigration="*res://scripts/game/save_location_migration.gd"
+SaveArchiveService="*res://scripts/game/save_archive_service.gd"
 ContentCatalog="*res://scripts/game/content_catalog.gd"
 SessionState="*res://scripts/game/session_state.gd"
 InputBindings="*res://scripts/game/input_bindings.gd"
@@ -27,7 +27,6 @@ GlobalInventory="*res://scripts/game/global_inventory.gd"
 ShopService="*res://scripts/game/shop_service.gd"
 StockMarketService="*res://scripts/game/stock_market_service.gd"
 MiningFarmService="*res://scripts/game/mining_farm_service.gd"
-SaveArchiveService="*res://scripts/game/save_archive_service.gd"
 SceneTransition="*res://scripts/game/scene_transition.gd"
 
 [display]

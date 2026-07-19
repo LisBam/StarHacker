@@ -157,7 +157,7 @@ func _ready() -> void:
 	if _global_inventory != null and _global_inventory.has_signal("run_state_changed"):
 		_global_inventory.connect("run_state_changed", Callable(self, "_on_run_state_changed"))
 	_previous_run_active = _is_combat_run_active()
-	set_process(true)
+	set_process(not _previous_run_active)
 
 
 func _process(delta: float) -> void:
@@ -810,6 +810,8 @@ func _on_run_state_changed() -> void:
 		_collect_outcome_metrics()
 		refresh_market(REFRESH_SETTLEMENT)
 	_previous_run_active = is_active
+	# 正式战斗期间在线行情本就停止推进；关闭 process 可避免每帧重复查询同一战斗状态，结算信号仍会负责恢复局外计时。
+	set_process(not is_active)
 
 
 func _collect_outcome_metrics() -> void:

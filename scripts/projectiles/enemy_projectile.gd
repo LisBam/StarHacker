@@ -27,10 +27,16 @@ var _start_position: Vector2
 var _has_hit: bool = false
 ## 弹体携带的敌方攻击力；默认 100，命中玩家时参与统一攻防公式。
 var _attack_power: float = 100.0
+## 扫掠射线排除表；固定保存弹体自身 RID，避免每个物理帧重新创建单元素数组。
+var _swept_collision_exclusion_rids: Array[RID] = []
+## 最大飞行距离平方；默认由 max_distance 在 ready 与配置入口同步，用于高频回收判断避免逐帧开方。
+var _max_distance_squared: float = 0.0
 
 
 func _ready() -> void:
 	_start_position = global_position
+	_max_distance_squared = maxf(max_distance, 1.0) * maxf(max_distance, 1.0)
+	_swept_collision_exclusion_rids = [get_rid()]
 	body_entered.connect(_on_body_entered)
 
 
@@ -46,7 +52,7 @@ func _physics_process(delta: float) -> void:
 	global_position = target_position
 	_age += delta
 
-	if _age >= lifetime or global_position.distance_to(_start_position) >= max_distance:
+	if _age >= lifetime or global_position.distance_squared_to(_start_position) >= _max_distance_squared:
 		queue_free()
 
 
@@ -64,6 +70,7 @@ func configure_projectile(new_damage: float, new_impact_force: float, new_max_di
 	damage = maxf(new_damage, 0.0)
 	impact_force = maxf(new_impact_force, 0.0)
 	max_distance = maxf(new_max_distance, 1.0)
+	_max_distance_squared = max_distance * max_distance
 
 
 func set_attack_power(value: float) -> void:
@@ -114,7 +121,7 @@ func _handle_swept_collision(target_position: Vector2) -> bool:
 		return true
 
 	# 射线查询参数；取值为当前位置到目标位置，默认使用弹体碰撞掩码检测玩家和环境。
-	var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(global_position, target_position, collision_mask, [get_rid()])
+	var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(global_position, target_position, collision_mask, _swept_collision_exclusion_rids)
 	query.collide_with_areas = false
 	query.collide_with_bodies = true
 	# 射线命中结果；取值为空字典或包含 collider/position，默认用于提前处理高速碰撞。

@@ -132,6 +132,8 @@ const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
 @export_range(1, 12, 1) var max_nearby_drop_buttons: int = 5
 ## 附近掉落物列表刷新间隔；取值建议 0.05 到 0.5 秒，默认 0.12 秒，修改会影响列表响应速度和 UI 重建频率。
 @export_range(0.01, 2.0, 0.01) var nearby_drop_refresh_interval: float = 0.12
+## 战斗状态文本刷新间隔；默认 0.1 秒，生命与能量仍由信号即时刷新，本参数只限制计时、人口和撤离提示的只读轮询频率。
+@export_range(0.02, 2.0, 0.01) var combat_status_refresh_interval: float = 0.1
 ## 附近掉落物展开高度；默认 220 像素，显示标题和完整拾取按钮列表。
 @export_range(80.0, 600.0, 1.0) var nearby_drop_expanded_height: float = 220.0
 ## 附近掉落物收起高度；默认 42 像素，只保留标题和紧贴标题的背景板。
@@ -286,10 +288,18 @@ var _nearby_drop_list: VBoxContainer
 var _nearby_drop_buttons: Array[Button] = []
 ## 附近掉落物刷新剩余时间；取值大于等于 0，默认 0 表示下一帧可刷新列表。
 var _nearby_drop_refresh_remaining: float = 0.0
+## 战斗状态刷新剩余时间；取值大于等于 0，默认 0 表示下一帧立即同步计时、人口和撤离提示。
+var _combat_status_refresh_remaining: float = 0.0
 ## 当前掉落物列表签名；元素为实例、名称和位置组成的字符串，默认用于判断列表内容是否需要重建。
 var _nearby_drop_signature: Array[String] = []
+## 最近一次附近掉落物刷新结果；元素按距离从近到远排列，仅在同一批 UI 与宝箱优先级检查中复用，不作为物品所有权来源。
+var _nearby_drop_cache: Array[Node2D] = []
 ## 当前正在长按开启的宝箱；默认 null，周围存在掉落物、松开 F、离开范围或打开其他面板时会立即取消并重置进度。
 var _active_loot_chest: Node2D
+## 当前宝箱是否已收到持续开启请求；默认 false，只在按键状态变化时写入宝箱，避免同一目标每帧重复启停处理。
+var _active_loot_chest_opening: bool = false
+## 当前宝箱开启请求是否已经完成首次同步；默认 false，新目标即使处于未按住状态也必须先显示交互提示。
+var _has_active_loot_chest_opening_state: bool = false
 ## 物资撤离全屏遮罩；默认运行时创建并隐藏，打开时阻止其余 HUD 鼠标交互。
 var _supply_extraction_overlay: Control
 ## 物资撤离面板实例；默认运行时创建一次并复用，显示背包、装备、星穹和剩余送回价值。
@@ -494,13 +504,27 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_refresh_cooldown_overlays()
-	_refresh_combat_status()
+	_combat_status_refresh_remaining = maxf(_combat_status_refresh_remaining - delta, 0.0)
+	if _combat_status_refresh_remaining <= 0.0:
+		_combat_status_refresh_remaining = maxf(combat_status_refresh_interval, 0.02)
+		_refresh_combat_status()
 	_drop_list_combat_suppression_remaining = maxf(_drop_list_combat_suppression_remaining - delta, 0.0)
 	_nearby_drop_refresh_remaining = maxf(_nearby_drop_refresh_remaining - delta, 0.0)
 	if _nearby_drop_refresh_remaining <= 0.0:
 		_nearby_drop_refresh_remaining = maxf(nearby_drop_refresh_interval, 0.01)
 		_refresh_nearby_drop_panel()
-	_update_loot_chest_interaction()
+		# 宝箱目标选择与掉落物优先级共用同一次分批刷新，长按开始后宝箱自身仍按帧推进精确开启进度。
+		_update_loot_chest_interaction(true)
+	elif _active_loot_chest != null and is_instance_valid(_active_loot_chest):
+		if _is_pickup_action_held():
+			# 长按期间继续逐帧复核新出现的地面掉落物，保证掉落物优先级不会因批量刷新而延迟。
+			_update_loot_chest_interaction()
+		else:
+			# 松开按键会在当前帧停止进度，未按住期间不重复扫描节点组。
+			_refresh_active_loot_chest_state(false)
+	elif _is_pickup_action_held():
+		# 玩家在两次批量刷新之间按下拾取键时立即补做一次目标选择，避免交互开始产生可感知延迟。
+		_update_loot_chest_interaction()
 
 	_refresh_combat_input_state()
 
@@ -1228,6 +1252,7 @@ func _build_combat_developer_overlay() -> void:
 
 
 func _refresh_nearby_drop_panel() -> void:
+	_nearby_drop_cache.clear()
 	if _nearby_drop_panel == null or _nearby_drop_list == null:
 		return
 
@@ -1237,6 +1262,7 @@ func _refresh_nearby_drop_panel() -> void:
 
 	# 附近掉落物列表；元素为 WeaponDrop Node2D，默认按距离从近到远排序。
 	var nearby_drops: Array[Node2D] = _get_nearby_weapon_drops()
+	_nearby_drop_cache = nearby_drops
 	if nearby_drops.is_empty():
 		_hide_nearby_drop_panel()
 		return
@@ -1320,12 +1346,15 @@ func _get_nearby_weapon_drops() -> Array[Node2D]:
 	return sorted_drops
 
 
-func _update_loot_chest_interaction() -> void:
+func _update_loot_chest_interaction(use_refreshed_drop_cache: bool = false) -> void:
+	## 更新宝箱交互目标；批量 HUD 刷新可复用刚计算的掉落物列表，输入即时补查则重新读取场景组。
 	if not _can_pickup_nearby_drops():
 		_set_active_loot_chest(null, false)
 		return
 	# 拾取优先级；只要周围存在可拾取掉落物，长按 F 不会同时推进宝箱开启进度。
-	if not _get_nearby_weapon_drops().is_empty():
+	# 本次附近掉落物；批量刷新路径读取同批缓存，输入即时路径重新查询场景组。
+	var nearby_drops: Array[Node2D] = _nearby_drop_cache if use_refreshed_drop_cache else _get_nearby_weapon_drops()
+	if not nearby_drops.is_empty():
 		_set_active_loot_chest(null, false)
 		return
 	# 最近宝箱；进入范围后立即显示提示，只有实际按住拾取键时才切换为进度条并推进开启。
@@ -1339,7 +1368,8 @@ func _get_nearest_interactable_loot_chest() -> Node2D:
 	# 最近宝箱；从 loot_chests 组读取，按宝箱自身交互半径和玩家距离共同筛选。
 	var nearest_chest: Node2D
 	# 最近宝箱距离；默认无穷大，遇到更近合法目标时持续缩小。
-	var nearest_distance: float = INF
+	# 最近宝箱距离平方；默认无穷大，排序结果与真实距离一致且避免候选遍历开方。
+	var nearest_distance_squared: float = INF
 	for raw_chest in get_tree().get_nodes_in_group("loot_chests"):
 		if not (raw_chest is Node2D) or not is_instance_valid(raw_chest):
 			continue
@@ -1348,9 +1378,10 @@ func _get_nearest_interactable_loot_chest() -> Node2D:
 		# 当前交互半径；优先读取宝箱配置，接口缺失时回退 HUD 拾取距离。
 		var interaction_distance: float = float(chest_node.call("get_interaction_radius")) if chest_node.has_method("get_interaction_radius") else nearby_drop_pickup_range
 		# 玩家到当前宝箱距离；用于范围校验和最近目标排序。
-		var chest_distance: float = chest_node.global_position.distance_to((_player as Node2D).global_position)
-		if chest_distance <= interaction_distance and chest_distance < nearest_distance:
-			nearest_distance = chest_distance
+		# 玩家到当前宝箱距离平方；用于范围校验和最近目标排序。
+		var chest_distance_squared: float = chest_node.global_position.distance_squared_to((_player as Node2D).global_position)
+		if chest_distance_squared <= interaction_distance * interaction_distance and chest_distance_squared < nearest_distance_squared:
+			nearest_distance_squared = chest_distance_squared
 			nearest_chest = chest_node
 	return nearest_chest
 
@@ -1365,12 +1396,20 @@ func _set_active_loot_chest(chest_node: Node2D, opening: bool) -> void:
 		if _active_loot_chest.has_method("set_interaction_prompt_visible"):
 			_active_loot_chest.call("set_interaction_prompt_visible", false)
 	_active_loot_chest = chest_node
+	_active_loot_chest_opening = false
+	_has_active_loot_chest_opening_state = false
 	_refresh_active_loot_chest_state(opening)
 
 
 func _refresh_active_loot_chest_state(opening: bool) -> void:
 	if _active_loot_chest == null or not is_instance_valid(_active_loot_chest):
+		_active_loot_chest_opening = false
+		_has_active_loot_chest_opening_state = false
 		return
+	if _has_active_loot_chest_opening_state and _active_loot_chest_opening == opening:
+		return
+	_active_loot_chest_opening = opening
+	_has_active_loot_chest_opening_state = true
 	if _active_loot_chest.has_method("set_open_interaction_active"):
 		_active_loot_chest.call("set_open_interaction_active", opening, _player as Node2D if opening else null)
 	if _active_loot_chest.has_method("set_interaction_prompt_visible"):
@@ -1388,13 +1427,15 @@ func _find_nearest_drop_index(drop_nodes: Array[Node2D]) -> int:
 	# 最近索引；取值为 drop_nodes 的有效下标，默认 0 用于初始化比较。
 	var nearest_index: int = 0
 	# 最近距离；取值为玩家到当前最近掉落物的距离，默认用于排序比较。
-	var nearest_distance: float = _get_drop_distance(drop_nodes[0])
+	# 最近距离平方；取值为玩家到当前最近掉落物的平方距离，排序结果与真实距离一致且避免候选遍历开方。
+	var nearest_distance_squared: float = _get_drop_distance_squared(drop_nodes[0])
 	# 掉落物索引；取值从 1 到数组末尾，默认跳过已经作为初始值的第一个元素。
 	for drop_index in range(1, drop_nodes.size()):
 		# 当前距离；取值为玩家到当前掉落物距离，默认用于更新最近索引。
-		var current_distance: float = _get_drop_distance(drop_nodes[drop_index])
-		if current_distance < nearest_distance:
-			nearest_distance = current_distance
+		# 当前距离平方；只用于大小比较，不改变最终按距离从近到远的顺序。
+		var current_distance_squared: float = _get_drop_distance_squared(drop_nodes[drop_index])
+		if current_distance_squared < nearest_distance_squared:
+			nearest_distance_squared = current_distance_squared
 			nearest_index = drop_index
 
 	return nearest_index
@@ -1409,14 +1450,15 @@ func _is_drop_in_pickup_range(drop_node: Node2D) -> bool:
 	if drop_node.has_method("get_pickup_radius"):
 		drop_pickup_radius = minf(drop_pickup_radius, maxf(float(drop_node.call("get_pickup_radius")), 1.0))
 
-	return _get_drop_distance(drop_node) <= drop_pickup_radius
+	return _get_drop_distance_squared(drop_node) <= drop_pickup_radius * drop_pickup_radius
 
 
-func _get_drop_distance(drop_node: Node2D) -> float:
+func _get_drop_distance_squared(drop_node: Node2D) -> float:
+	## 返回玩家到掉落物的平方距离；附近筛选与排序只比较大小，不需要为每个候选执行平方根计算。
 	if _player == null or drop_node == null:
 		return INF
 
-	return (_player as Node2D).global_position.distance_to(drop_node.global_position)
+	return (_player as Node2D).global_position.distance_squared_to(drop_node.global_position)
 
 
 func _get_drop_button_text(drop_node: Node2D) -> String:

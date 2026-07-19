@@ -14,8 +14,14 @@ var _active_effects: Dictionary = {}
 @onready var _stats_component: Node = get_node_or_null(stats_component_path)
 
 
+func _ready() -> void:
+	## 没有活动效果时关闭逐帧回调；首次成功使用消耗品后再启用，避免空组件长期参与场景树处理。
+	set_process(not _active_effects.is_empty())
+
+
 func _process(delta: float) -> void:
 	if _active_effects.is_empty():
+		set_process(false)
 		return
 	# 是否有任一效果到期；只有到期时才重新汇总属性，普通倒计时帧不重复派发属性变化信号。
 	var effects_changed: bool = false
@@ -32,6 +38,9 @@ func _process(delta: float) -> void:
 			_active_effects[effect_id] = effect
 	if effects_changed:
 		_refresh_stats_component()
+	if _active_effects.is_empty():
+		# 全部效果已经到期；下一次成功应用消耗品会重新启用处理。
+		set_process(false)
 
 
 func apply_consumable(consumable_data: Resource) -> bool:
@@ -50,6 +59,8 @@ func apply_consumable(consumable_data: Resource) -> bool:
 		return false
 	_active_effects[effect_id] = {"stat": effect_stat, "amount": effect_amount, "remaining_seconds": duration_seconds}
 	_refresh_stats_component()
+	# 只有成功进入活动效果表后才启用倒计时，非法消耗品不会产生空闲回调。
+	set_process(true)
 	return true
 
 

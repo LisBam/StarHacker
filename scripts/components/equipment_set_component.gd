@@ -16,15 +16,35 @@ var _equipment_component: Node
 var _recent_kill_dodge_remaining: float = 0.0
 ## 本场战斗是否已经消耗任意套装提供的首次致命恢复；默认 false，成功拦截一次致命伤害后永久变为 true，组件重新进入战斗场景时重置。
 var _first_lethal_recovery_consumed: bool = false
+## 当前有效套装状态缓存；键为稳定 set_id，值包含套装资源与未损坏穿戴件数，只在装备变化时重建以避免高频战斗查询重复创建字典。
+var _active_set_states_cache: Dictionary = {}
+## 当前已达到门槛的附近掉落物效果缓存；每项保存半径与攻防比例，装备变化时重建，空数组可让无对应套装的玩家直接跳过掉落物组扫描。
+var _nearby_drop_effects_cache: Array[Dictionary] = []
 
 
 func _ready() -> void:
 	_equipment_component = get_node_or_null(equipment_component_path)
+	# 装备变化信号源；正式玩家优先监听装备组件，隔离场景缺少该组件时回退全局库存服务。
+	var equipment_changed_source: Node = _equipment_component
+	if equipment_changed_source == null:
+		equipment_changed_source = get_tree().root.get_node_or_null("GlobalInventory")
+	if equipment_changed_source != null and equipment_changed_source.has_signal("equipment_changed"):
+		# 装备变化驱动缓存失效；换装、耐久损坏与已装备物品修复都会通过同一入口刷新。
+		var refresh_callable: Callable = Callable(self, "_refresh_active_set_cache")
+		if not equipment_changed_source.is_connected("equipment_changed", refresh_callable):
+			equipment_changed_source.connect("equipment_changed", refresh_callable)
+	# 同级 EquipmentComponent 的初始化顺序可能晚于本节点，延迟到全部 _ready 完成后读取首份权威装备快照。
+	call_deferred("_refresh_active_set_cache")
+	# 套装常驻查询不需要逐帧处理，只有击杀闪避存在持续时间时才启用计时。
+	set_process(false)
 
 
 func _process(delta: float) -> void:
 	## 只维护击杀增益计时；套装在持续期间失效时查询接口会立即返回 0，无需等待计时归零。
 	_recent_kill_dodge_remaining = maxf(_recent_kill_dodge_remaining - maxf(delta, 0.0), 0.0)
+	if _recent_kill_dodge_remaining <= 0.0:
+		# 当前没有需要推进的套装计时；下一次合法击杀通知会重新启用处理。
+		set_process(false)
 
 
 static func collect_active_set_states(armor_equipment: Dictionary) -> Dictionary:
@@ -116,11 +136,11 @@ func get_active_attribute_multipliers(armor_equipment: Dictionary) -> Dictionary
 func roll_manual_chest_extra_drop_count(random_source: RandomNumberGenerator) -> int:
 	## 为一次主动长按宝箱结算全部已触发套装特殊效果；不同套装的额外数量允许累计。
 	# 当前防具；统一从装备组件或全局库存读取，保证世界行为与角色属性使用同一装备快照。
-	var armor_equipment: Dictionary = _get_armor_equipment_resources()
+	# 该权威快照已在装备变化时写入套装状态缓存，此入口直接消费缓存以避免宝箱结算再次聚合相同防具。
 	# 额外掉落总数；初始为 0，未达到任何特殊效果门槛时保持不变。
 	var extra_drop_count: int = 0
 	# 套装状态遍历项；每个已触发四件档位的套装独立执行自身概率判定。
-	for raw_set_state in collect_active_set_states(armor_equipment).values():
+	for raw_set_state in _active_set_states_cache.values():
 		# 当前套装状态；包含套装资源与有效件数。
 		var set_state: Dictionary = raw_set_state as Dictionary
 		# 套装数据；没有宝箱结算接口的兼容资源不会影响其他套装。
@@ -136,10 +156,10 @@ func try_consume_first_lethal_recovery() -> float:
 	if _first_lethal_recovery_consumed:
 		return 0.0
 	# 当前防具；只统计致命伤害发生瞬间仍穿戴且未损坏的套装部件，背包与仓库装备不会参与。
-	var armor_equipment: Dictionary = _get_armor_equipment_resources()
+	# 装备变化信号会在换装、损坏与修复时同步重建缓存，因此致命伤害入口读取的仍是当前有效状态。
 	# 最终恢复比例；多个套装同时提供效果时取最高值，确保一次致命伤害只消费一次且不会叠加超过设计值。
 	var recovery_health_ratio: float = 0.0
-	for raw_set_state in collect_active_set_states(armor_equipment).values():
+	for raw_set_state in _active_set_states_cache.values():
 		# 当前套装状态；包含共享套装资源与当前有效件数，异常资源会被安全跳过。
 		var set_state: Dictionary = raw_set_state as Dictionary
 		# 套装数据；只有实现统一致命恢复查询接口的资源才参与，组件不依赖具体 set_id。
@@ -181,7 +201,7 @@ func notify_enemy_killed() -> void:
 	## 通知套装组件玩家完成一次击杀；所有达到两件门槛的套装分别读取自身持续时间，最终使用最长值刷新公共计时。
 	# 本次刷新持续时间；多个合法套装同时触发时取最长值，避免短效果覆盖长效果。
 	var refreshed_duration: float = 0.0
-	for raw_set_state in collect_active_set_states(_get_armor_equipment_resources()).values():
+	for raw_set_state in _active_set_states_cache.values():
 		# 当前套装状态；资源没有击杀效果接口时保持兼容并跳过。
 		var set_state: Dictionary = raw_set_state as Dictionary
 		# 当前套装资源；提供门槛和击杀闪避参数查询接口。
@@ -193,6 +213,8 @@ func notify_enemy_killed() -> void:
 		refreshed_duration = maxf(refreshed_duration, float(effect.get("duration", 0.0)))
 	if refreshed_duration > 0.0:
 		_recent_kill_dodge_remaining = refreshed_duration
+		# 仅在确实存在正持续时间时启用计时，重复击杀继续刷新同一个公共倒计时。
+		set_process(true)
 
 
 func get_recent_kill_dodge_chance_bonus() -> float:
@@ -201,7 +223,7 @@ func get_recent_kill_dodge_chance_bonus() -> float:
 		return 0.0
 	# 综合额外闪避率；不同套装直接加算，最终由玩家闪避上限统一限制。
 	var combined_bonus: float = 0.0
-	for raw_set_state in collect_active_set_states(_get_armor_equipment_resources()).values():
+	for raw_set_state in _active_set_states_cache.values():
 		# 当前套装状态；包含资源与有效部件数量。
 		var set_state: Dictionary = raw_set_state as Dictionary
 		# 当前套装资源；缺少击杀接口时不参与本次聚合。
@@ -235,7 +257,7 @@ func _get_move_speed_combat_effects(move_speed_attribute: float) -> Array[Dictio
 	## 收集全部已激活套装的移速战斗效果；资源负责门槛和档数公式，组件只聚合结果。
 	# 已触发效果列表；每个套装最多追加一项结构化结果。
 	var effects: Array[Dictionary] = []
-	for raw_set_state in collect_active_set_states(_get_armor_equipment_resources()).values():
+	for raw_set_state in _active_set_states_cache.values():
 		# 当前套装状态；包含资源与有效部件数量。
 		var set_state: Dictionary = raw_set_state as Dictionary
 		# 当前套装资源；缺少移速战斗接口时安全跳过。
@@ -253,23 +275,17 @@ func _get_triggered_nearby_drop_effects(player_position: Vector2, movement_direc
 	## 收集当前方向确实指向至少一个附近掉落物的四件套效果；掉落物必须仍在 item_drops 组且位于配置半径内。
 	# 触发效果结果；每个套装最多追加一次，即使范围内存在多个掉落物也不会重复叠加自身效果。
 	var triggered_effects: Array[Dictionary] = []
+	if _nearby_drop_effects_cache.is_empty():
+		return triggered_effects
 	# 标准移动方向；零向量已由调用方过滤，归一化后只比较朝向点积是否大于零。
 	var normalized_movement_direction: Vector2 = movement_direction.normalized()
 	# 当前防具套装状态；统一排除损坏部件并按稳定 set_id 聚合。
-	var active_set_states: Dictionary = collect_active_set_states(_get_armor_equipment_resources())
-	for raw_set_state in active_set_states.values():
-		# 当前套装状态；提供套装资源与有效件数，异常资源安全跳过。
-		var set_state: Dictionary = raw_set_state as Dictionary
-		# 套装数据；只有实现通用附近掉落物效果查询接口的资源才参与方向判定。
-		var equipment_set: Resource = set_state.get("set_data") as Resource
-		if equipment_set == null or not equipment_set.has_method("get_nearby_drop_effect"):
-			continue
+	# 聚合结果已在装备变化时转换为附近掉落物效果缓存，当前帧只执行必要的空间与朝向判断。
+	for effect in _nearby_drop_effects_cache:
 		# 当前效果参数；未达到四件门槛时资源返回空词典。
-		var effect: Dictionary = equipment_set.call("get_nearby_drop_effect", int(set_state.get("piece_count", 0))) as Dictionary
-		if effect.is_empty():
-			continue
+		# 缓存只保留非空效果，因此这里无需再次调用套装资源或重复检查档位门槛。
 		# 检测半径平方；平方距离比较避免每个掉落物重复开方。
-		var detection_radius_squared: float = pow(maxf(float(effect.get("detection_radius", 0.0)), 0.0), 2.0)
+		var detection_radius_squared: float = maxf(float(effect.get("detection_radius_squared", 0.0)), 0.0)
 		for raw_drop in get_tree().get_nodes_in_group("item_drops"):
 			# 掉落物节点；必须为有效 Node2D 且尚未排队删除，飞出动画期间不在组内因此不会触发。
 			var drop_node: Node2D = raw_drop as Node2D
@@ -279,10 +295,35 @@ func _get_triggered_nearby_drop_effects(player_position: Vector2, movement_direc
 			var drop_offset: Vector2 = drop_node.global_position - player_position
 			if drop_offset.is_zero_approx() or drop_offset.length_squared() > detection_radius_squared:
 				continue
-			if normalized_movement_direction.dot(drop_offset.normalized()) > 0.0:
+			# 只判断点积正负无需归一化掉落物偏移，避免为每个候选目标执行平方根计算。
+			if normalized_movement_direction.dot(drop_offset) > 0.0:
 				triggered_effects.append(effect)
 				break
 	return triggered_effects
+
+
+func _refresh_active_set_cache() -> void:
+	## 从当前权威防具快照重建运行时套装缓存；只由初始化与装备变化信号调用，不参与逐帧查询。
+	# 当前防具快照；统一排除空槽与损坏装备，保证缓存结果与静态 UI 统计规则一致。
+	var armor_equipment: Dictionary = _get_armor_equipment_resources()
+	_active_set_states_cache = collect_active_set_states(armor_equipment)
+	_nearby_drop_effects_cache.clear()
+	for raw_set_state in _active_set_states_cache.values():
+		# 当前套装状态；提供套装资源与有效件数，异常资源安全跳过。
+		# 当前套装状态；包含权威套装资源和有效穿戴件数，异常类型安全跳过。
+		var set_state: Dictionary = raw_set_state as Dictionary
+		# 套装数据；只有实现通用附近掉落物效果查询接口的资源才参与方向判定。
+		# 套装数据；只有实现通用附近掉落物查询接口的资源才需要预计算该类高频效果。
+		var equipment_set: Resource = set_state.get("set_data") as Resource
+		if equipment_set == null or not equipment_set.has_method("get_nearby_drop_effect"):
+			continue
+		# 附近掉落物效果；空词典表示当前件数未达到门槛或该套装没有配置该机制。
+		var effect: Dictionary = equipment_set.call("get_nearby_drop_effect", int(set_state.get("piece_count", 0))) as Dictionary
+		if not effect.is_empty():
+			# 检测半径；取值至少为 0，只在缓存重建时读取一次并转换为平方距离供高频查询复用。
+			var detection_radius: float = maxf(float(effect.get("detection_radius", 0.0)), 0.0)
+			effect["detection_radius_squared"] = detection_radius * detection_radius
+			_nearby_drop_effects_cache.append(effect)
 
 
 func _get_armor_equipment_resources() -> Dictionary:

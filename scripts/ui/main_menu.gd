@@ -65,6 +65,7 @@ const DEVELOPER_UNLOCK_SEQUENCE: String = "LISBAM"
 ## 矿场按钮缓存；默认位于炒股按钮右侧，点击后打开常驻算力资产经营界面。
 @onready var _mining_farm_button: Button = %MiningFarmButton
 ## 图鉴按钮缓存；默认位于主菜单底部功能栏末位，点击后查看武器、装备与资源的永久收集状态。
+## 怪物图鉴补充；同一入口还会展示按基础内容和扩展包分组的永久怪物遇敌收集状态。
 @onready var _encyclopedia_button: Button = %EncyclopediaButton
 ## 设置面板缓存；默认绑定唯一名 SettingsPanel，控制主菜单设置界面的显示和隐藏。
 @onready var _settings_panel: Control = %SettingsPanel

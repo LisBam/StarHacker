@@ -99,6 +99,8 @@ const MAX_STACK_QUANTITY: int = INVENTORY_LIMITS.MAX_STACK_QUANTITY
 const BACKPACK_MAX_GROUPS: int = INVENTORY_LIMITS.BACKPACK_MAX_GROUPS
 ## 强化石图鉴稳定发现键；随机生成的强化石没有固定模板，任意一颗首次获得后统一解锁该资源类别条目。
 const ENHANCEMENT_STONE_DISCOVERY_KEY: String = "enhancement_stone:any"
+## 怪物图鉴稳定发现键前缀；与怪物唯一 monster_id 组合，避免同名怪物或物品条目发生冲突。
+const MONSTER_DISCOVERY_KEY_PREFIX: String = "monster:"
 ## 开发者单次发放强化石数量；默认 10，对应隐藏开发者菜单的固定调试功能。
 const DEVELOPER_STONE_GRANT_COUNT: int = 10
 ## 开发者强化石最少词条数；默认 1，与战斗掉落默认配置保持一致。
@@ -392,6 +394,28 @@ func is_resource_discovered(item_resource: Resource) -> bool:
 func is_enhancement_stone_discovered() -> bool:
 	## 查询随机强化石类别是否已发现；任意实际获得的强化石都会永久解锁同一个通用资源条目。
 	return _discovered_encyclopedia_entries.has(ENHANCEMENT_STONE_DISCOVERY_KEY)
+
+
+func is_monster_discovered(monster_id: String) -> bool:
+	## 查询怪物是否已经被玩家遇到；只读取稳定 monster_id，不依赖某次生成节点或场景路径。
+	# 标准怪物标识；空值不构成合法图鉴键，避免异常场景错误解锁所有怪物。
+	var normalized_monster_id: String = monster_id.strip_edges()
+	return not normalized_monster_id.is_empty() and _discovered_encyclopedia_entries.has(MONSTER_DISCOVERY_KEY_PREFIX + normalized_monster_id)
+
+
+func register_monster_encounter(monster_id: String) -> void:
+	## 登记玩家首次遇到的怪物；发现状态永久保存，重复物化、休眠或再次遇到同类怪物不会重复写盘。
+	# 标准怪物标识；只接受场景作者声明的稳定 ID，名称变更和场景移动不影响既有发现记录。
+	var normalized_monster_id: String = monster_id.strip_edges()
+	if normalized_monster_id.is_empty():
+		return
+	# 怪物图鉴键；独立命名空间与物品发现键共用同一持久化集合但不会互相覆盖。
+	var discovery_key: String = MONSTER_DISCOVERY_KEY_PREFIX + normalized_monster_id
+	if _discovered_encyclopedia_entries.has(discovery_key):
+		return
+	_discovered_encyclopedia_entries[discovery_key] = true
+	_save_inventory()
+	encyclopedia_changed.emit()
 
 
 func get_stock_holdings() -> Dictionary:

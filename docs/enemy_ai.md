@@ -12,9 +12,9 @@
 | `res://scripts/components/enemy_tactical_component.gd` | 根据本怪物的感知报告生成预测、扇形搜查和伏击目标 |
 | `res://scripts/components/enemy_movement_component.gd` | 巡逻、游荡、直线移动、共享 A* 请求、局部绕障和卡住恢复 |
 | `res://scripts/components/monster_simulation_manager.gd` | 在轻量虚拟记录和真实敌人节点之间分批物化、休眠与回收 |
-| `res://scripts/game/game_world.gd` | 建立整图人口目标、障碍矩形和共享导航网格，并统一处理死亡掉落 |
+| `res://scripts/game/game_world.gd` | 建立整图人口目标、障碍矩形和共享导航网格，并统一处理死亡掉落与怪物图鉴遇敌存档 |
 
-`res://scenes/enemies/stelle/voidranger_reaver.tscn` 与 `res://scenes/enemies/stelle/voidranger_eliminator.tscn` 分别复用近战、远程组合根并显式组合三个 AI 组件，`GameWorld` 显式组合人口管理器。感知不控制移动或攻击，战术不访问其他怪物，移动不推断玩家状态。当前怪物内容池只注册这两个星扩展包场景，组合根脚本继续作为后续敌人模板的共享实现。
+`res://scenes/enemies/stelle/voidranger_reaver.tscn` 与 `res://scenes/enemies/stelle/voidranger_eliminator.tscn` 分别复用近战、远程组合根并显式组合三个 AI 组件，`GameWorld` 显式组合人口管理器。感知不控制移动或攻击，战术不访问其他怪物，移动不推断玩家状态。当前怪物内容池注册两种星扩展包虚卒与两种穹扩展包流浪者；组合根脚本继续作为后续敌人模板的共享实现。
 
 ## 2. 虚拟人口生命周期
 
@@ -33,6 +33,7 @@ GameWorld 建立整图虚拟记录
 - 所有活跃敌人复用 `GameWorld` 缓存的 A* 网格。单个敌人只缓存自身路径和重算时机。
 - 内容目录扫描出的怪物场景会与场景检查器池去重合并。自定义敌人必须遵守实例化、目标、变体、死亡和注销协议。
 - 人口管理器创建真实敌人时优先使用 `set_primary_target()`，使玩家长期引用不会因仅设置当前目标而丢失；兼容节点可以只实现 `set_target()`。
+- `BasicMonster.set_primary_target()` 在获得有效玩家目标且 `monster_id` 非空时发出 `player_encountered(monster_id)`；`MonsterSimulationManager` 仅转发为 `monster_encountered(monster_id)`，`GameWorld` 再调用 `GlobalInventory.register_monster_encounter()`。这条单向信号链让敌人和人口组件不读取存档服务，并让重复物化由稳定 ID 去重。
 
 具体人口目标、激活半径、批大小与上限见机制总表第 12 章。
 
@@ -105,7 +106,7 @@ GameWorld 建立整图虚拟记录
 - 新敌人优先继承 `BasicMonster`，只覆写差异行为，不复制感知、战术或人口生命周期。
 - 感知组件不得调用攻击、动画或移动代码；战术组件不得读取其他怪物状态；移动组件只接收目的地、速度和导航请求。
 - 新实心遮挡物必须同时位于正确环境碰撞层、加入 `environment_obstacles`，并向 `GameWorld` 注册障碍矩形。
-- 新敌人场景应可实例化为 `Node2D`，并兼容 `set_target()`、`apply_spawn_variation()`、模拟启停和 `died` 信号。
+- 新敌人场景应可实例化为 `Node2D`，并兼容 `set_target()`、`set_primary_target()`、`apply_spawn_variation()`、模拟启停和 `died` 信号；需要进入怪物图鉴的场景还必须声明非空 `monster_id`、`display_name`、`description` 并发出 `player_encountered`。
 - 死亡只由 `GameWorld` 结算一次掉落；敌人脚本不得直接访问库存、强化或商店服务。敌人可在派发死亡信号后保留仅用于视觉的尸体动画，但必须关闭物理、AI 与重复伤害入口。
 - 若未来重新引入协同 AI，应建立独立通信组件和明确的数据生命周期，不得把共享状态塞回感知组件。
 

@@ -50,6 +50,8 @@ const DRAG_PREVIEW_TILT_RADIANS: float = 0.035
 const DISABLED_OVERLAY_COLOR: Color = Color(0.16, 0.16, 0.16, 0.72)
 ## 通用物品详情格式化器；用于读取统一物品名称与中文类型标签。
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
+## 全局 UI 样式指南；负责读取当前卡片背景与边框色，不处理物品耐久、品质和目标状态。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 通用耐久条组件；只有同时带有当前耐久和最大耐久属性的物品才会显示。
 const DURABILITY_BAR_SCRIPT: Script = preload("res://scripts/ui/weapon_durability_bar.gd")
 ## 库存限制配置；通用卡片数量必须与库存服务的单组上限保持一致。
@@ -115,6 +117,12 @@ func _ready() -> void:
 	_refresh_content()
 	queue_redraw()
 	call_deferred("_synchronize_host_hover_state")
+
+
+func _notification(what: int) -> void:
+	## 主题切换后请求重绘；卡片绘制阶段实时读取当前色板，不修改耐久、品质或合法目标等业务状态。
+	if what == NOTIFICATION_THEME_CHANGED:
+		queue_redraw()
 
 
 func configure(item_resource: Resource, quantity: int = 1, context_text: String = "", detail_bbcode: String = "", empty_text: String = "空", display_name_override: String = "", secondary_detail_bbcode: String = "") -> void:
@@ -257,9 +265,9 @@ static func get_standard_size() -> Vector2:
 
 
 func _draw() -> void:
-	# 卡片背景；所有物品共享同一底色，合法目标只叠加统一绿色提示。
+	# 卡片背景；基础表面跟随当前 UI 风格，合法目标继续叠加原有绿色业务提示。
 	var card_rect: Rect2 = Rect2(Vector2.ZERO, size)
-	draw_rect(card_rect, NORMAL_BACKGROUND_COLOR, true)
+	draw_rect(card_rect, UI_STYLE_GUIDE.get_item_card_background_color(), true)
 	if _highlighted:
 		draw_rect(card_rect, HIGHLIGHT_BACKGROUND_COLOR, true)
 	if _cooldown_ratio > 0.0:
@@ -267,8 +275,8 @@ func _draw() -> void:
 		var cooldown_height: float = size.y * _cooldown_ratio
 		var cooldown_rect: Rect2 = Rect2(Vector2(0.0, size.y - cooldown_height), Vector2(size.x, cooldown_height))
 		draw_rect(cooldown_rect, Color(1.0, 1.0, 1.0, 0.42), true)
-	# 卡片边框；选中物品使用统一青色，其余物品使用统一蓝灰色。
-	var border_color: Color = SELECTED_BORDER_COLOR if _selected else NORMAL_BORDER_COLOR
+	# 卡片边框；选中物品使用当前风格强调色，其余物品使用当前风格普通边框。
+	var border_color: Color = UI_STYLE_GUIDE.get_accent_color() if _selected else UI_STYLE_GUIDE.get_item_card_border_color()
 	draw_style_box(_create_border_style(border_color), card_rect)
 
 

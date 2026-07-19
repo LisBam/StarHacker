@@ -9,7 +9,7 @@ signal ui_style_changed(style_id: String)
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 当前项目原有风格标识；默认使用黑蓝科技风，保证旧存档和首次启动保持原视觉。
 const STYLE_BLACK_BLUE_TECH: String = "black_blue_tech"
-## 黑白替代风格标识；用于纯黑、灰阶与白色高对比界面。
+## 黑白替代风格标识；用于纯黑、白灰控件和高对比界面，不改变业务语义颜色。
 const STYLE_BLACK_WHITE_MINIMAL: String = "black_white_minimal"
 ## UI 风格配置文件路径；独立保存以便导出、导入和删除存档时统一处理。
 const SAVE_PATH: String = "user://ui_style_settings.cfg"
@@ -30,23 +30,11 @@ var _overlay_dim_references: Array[WeakRef] = []
 var _window_panel_references: Array[WeakRef] = []
 ## 已注册子分区面板弱引用；每项指向显式覆盖 panel 样式的 Control，用于双向切换时重建内部区域。
 var _section_panel_references: Array[WeakRef] = []
-## 黑白风格灰度材质；默认延迟创建并由全部 UI CanvasItem 共享，避免为每个控件编译重复着色器。
-var _monochrome_material: ShaderMaterial
-## 被灰度材质临时覆盖的控件记录；键为实例 ID，值保存弱引用与原材质，切回黑蓝风格时原样恢复。
-var _original_material_records: Dictionary = {}
 
 
 func _enter_tree() -> void:
 	## 在主场景创建任何 UI 前读取设置，保证首次生成的主题就是玩家上次选择的风格。
 	_load_settings()
-
-
-func _ready() -> void:
-	## 监听后续动态加入场景树的控件，使黑白风格同样覆盖运行时创建的面板、卡片和弹窗内容。
-	if not get_tree().node_added.is_connected(_on_tree_node_added):
-		get_tree().node_added.connect(_on_tree_node_added)
-	if not get_tree().node_removed.is_connected(_on_tree_node_removed):
-		get_tree().node_removed.connect(_on_tree_node_removed)
 
 
 func get_ui_style_id() -> String:
@@ -69,7 +57,7 @@ func get_style_display_name(style_id: String) -> String:
 
 
 func is_black_white_style() -> bool:
-	## 返回当前是否为纯灰阶风格；样式指南和动态控件覆盖使用该结果统一判断。
+	## 返回当前是否为黑白简约风；样式指南据此替换通用控件色板，不处理业务语义颜色。
 	return _ui_style_id == STYLE_BLACK_WHITE_MINIMAL
 
 
@@ -86,29 +74,26 @@ func set_ui_style_id(style_id: String) -> void:
 
 
 func register_theme_root(target: Control) -> void:
-	## 登记拥有独立 Theme 的界面根节点；重复登记保持幂等，并立即同步当前灰度覆盖状态。
+	## 登记拥有独立 Theme 的界面根节点；重复登记保持幂等，切换时立即重建通用控件主题。
 	if target == null:
 		return
 	_append_unique_reference(_theme_root_references, target)
-	_refresh_monochrome_subtree(target)
 
 
 func register_screen_background(target: ColorRect) -> void:
-	## 登记完整页面背景；风格切换后会更新颜色并同步灰度材质。
+	## 登记完整页面背景；风格切换后只更新页面基础色，不修改节点材质或子控件颜色。
 	if target == null:
 		return
 	_append_unique_reference(_screen_background_references, target)
 	target.color = UI_STYLE_GUIDE.get_screen_background_color()
-	_refresh_monochrome_control(target)
 
 
 func register_overlay_dim(target: ColorRect) -> void:
-	## 登记全屏聚焦遮罩；风格切换后会更新颜色并同步灰度材质。
+	## 登记全屏聚焦遮罩；风格切换后只更新遮罩基础色，不修改节点材质或子控件颜色。
 	if target == null:
 		return
 	_append_unique_reference(_overlay_dim_references, target)
 	target.color = UI_STYLE_GUIDE.get_overlay_dim_color()
-	_refresh_monochrome_control(target)
 
 
 func register_window_panel(target: Control) -> void:
@@ -117,7 +102,6 @@ func register_window_panel(target: Control) -> void:
 		return
 	_append_unique_reference(_window_panel_references, target)
 	target.add_theme_stylebox_override("panel", UI_STYLE_GUIDE.create_window_panel_style())
-	_refresh_monochrome_subtree(target)
 
 
 func register_section_panel(target: Control) -> void:
@@ -126,7 +110,6 @@ func register_section_panel(target: Control) -> void:
 		return
 	_append_unique_reference(_section_panel_references, target)
 	target.add_theme_stylebox_override("panel", UI_STYLE_GUIDE.create_section_panel_style())
-	_refresh_monochrome_subtree(target)
 
 
 func _load_settings() -> void:
@@ -159,20 +142,12 @@ func _normalize_style_id(style_id: String) -> String:
 
 
 func _refresh_registered_ui() -> void:
-	## 刷新所有独立主题、背景和遮罩，并应用或恢复黑白风格灰度材质。
+	## 刷新所有独立主题、背景、遮罩和面板；主题切换只替换通用 UI 色板，绝不覆盖节点材质。
 	_refresh_theme_roots()
 	_refresh_registered_panels(_window_panel_references, true)
 	_refresh_registered_panels(_section_panel_references, false)
 	_refresh_registered_color_rects(_screen_background_references, true)
 	_refresh_registered_color_rects(_overlay_dim_references, false)
-	if is_black_white_style():
-		for root_reference in _theme_root_references:
-			# 主题根节点；失效引用会在主题刷新阶段被清理，此处只处理仍存活的 Control。
-			var theme_root: Control = root_reference.get_ref() as Control
-			if theme_root != null:
-				_apply_monochrome_to_subtree(theme_root)
-	else:
-		_restore_original_materials()
 
 
 func _refresh_theme_roots() -> void:
@@ -223,152 +198,3 @@ func _append_unique_reference(references: Array[WeakRef], target: Control) -> vo
 		if registered_target == target:
 			return
 	references.append(weakref(target))
-
-
-func _on_tree_node_added(node: Node) -> void:
-	## 黑白风格启用期间覆盖新加入任一已注册 UI 子树的控件，保证动态卡片和弹窗保持灰阶。
-	if not is_black_white_style() or not (node is Control):
-		return
-	# 新控件；只有位于已登记 UI 根之下时才应用灰度，战斗世界和非界面节点不受影响。
-	var added_control: Control = node as Control
-	if _is_inside_registered_ui(added_control):
-		_apply_monochrome_to_subtree(added_control)
-
-
-func _on_tree_node_removed(node: Node) -> void:
-	## 动态 UI 节点离开场景树时延迟检查材质记录；同树重挂载保留原材质，真正释放才清理。
-	if not (node is Control):
-		return
-	# 被移除控件实例 ID；延迟到当前树变更结束后区分重挂载与永久释放。
-	var instance_id: int = node.get_instance_id()
-	call_deferred("_cleanup_removed_material_record", instance_id)
-
-
-func _cleanup_removed_material_record(instance_id: int) -> void:
-	## 清理已经永久释放或等待释放的材质记录；仍存活的重挂载控件必须保留首次记录的原材质。
-	if not _original_material_records.has(instance_id):
-		return
-	# 材质记录；只由灰度覆盖入口创建，包含控件弱引用与切换前原材质。
-	var material_record: Dictionary = _original_material_records.get(instance_id, {}) as Dictionary
-	# 控件弱引用；节点已释放时为空，重挂载或暂存节点仍可解析。
-	var target_reference: WeakRef = material_record.get("reference") as WeakRef
-	# 目标控件；排队释放视为永久离开，普通 remove_child 或 reparent 继续保留记录。
-	var target: Control = target_reference.get_ref() as Control if target_reference != null else null
-	if target != null and not target.is_queued_for_deletion():
-		return
-	_original_material_records.erase(instance_id)
-
-
-func _is_inside_registered_ui(target: Control) -> bool:
-	## 返回目标是否等于或从属于任一已注册主题根；失效根节点在检查时同步清理。
-	for reference_index in range(_theme_root_references.size() - 1, -1, -1):
-		# 候选主题根；用于限制灰度材质只影响 UI，不覆盖战斗场景与角色画面。
-		var theme_root: Control = _theme_root_references[reference_index].get_ref() as Control
-		if theme_root == null:
-			_theme_root_references.remove_at(reference_index)
-			continue
-		if target == theme_root or theme_root.is_ancestor_of(target):
-			return true
-	return false
-
-
-func _refresh_monochrome_subtree(root_control: Control) -> void:
-	## 根据当前风格对新登记子树应用灰度或恢复原材质；登记阶段不会等待下一次设置切换。
-	if is_black_white_style():
-		_apply_monochrome_to_subtree(root_control)
-	else:
-		_restore_materials_in_subtree(root_control)
-
-
-func _refresh_monochrome_control(target: Control) -> void:
-	## 根据当前风格处理单个颜色控件；用于背景和遮罩在登记时立即同步。
-	if is_black_white_style():
-		_apply_monochrome_material(target)
-	else:
-		_restore_original_material(target)
-
-
-func _apply_monochrome_to_subtree(root_control: Control) -> void:
-	## 为当前 UI 子树内全部 Control 安装灰度材质；每个控件单独处理可覆盖自绘颜色和业务局部覆盖。
-	_apply_monochrome_material(root_control)
-	for child_node in root_control.get_children():
-		if child_node is Control:
-			_apply_monochrome_to_subtree(child_node as Control)
-		else:
-			_apply_monochrome_to_control_descendants(child_node)
-
-
-func _apply_monochrome_to_control_descendants(parent_node: Node) -> void:
-	## 穿过非 Control 中间节点继续查找界面控件，兼容 CanvasLayer、Window 和普通组织节点。
-	for child_node in parent_node.get_children():
-		if child_node is Control:
-			_apply_monochrome_to_subtree(child_node as Control)
-		else:
-			_apply_monochrome_to_control_descendants(child_node)
-
-
-func _apply_monochrome_material(target: Control) -> void:
-	## 保存控件原材质并安装共享灰度材质；同一实例只记录一次，避免覆盖原始恢复信息。
-	# 控件实例 ID；作为材质恢复记录的稳定运行时键，节点释放后不会用于新实例。
-	var instance_id: int = target.get_instance_id()
-	if not _original_material_records.has(instance_id):
-		_original_material_records[instance_id] = {"reference": weakref(target), "material": target.material}
-	target.material = _get_monochrome_material()
-	target.queue_redraw()
-
-
-func _get_monochrome_material() -> ShaderMaterial:
-	## 延迟创建并返回共享灰度 CanvasItem 材质；着色器保留原透明度，只把 RGB 转为视觉亮度。
-	if _monochrome_material != null:
-		return _monochrome_material
-	# 灰度着色器；同时处理纹理、文字、StyleBox 和自绘图元，保证分散的业务颜色也进入黑白风格。
-	var monochrome_shader: Shader = Shader.new()
-	monochrome_shader.code = "shader_type canvas_item;\nvoid fragment() {\n\tvec4 sampled_ui_color = texture(TEXTURE, UV) * COLOR;\n\tfloat luminance = dot(sampled_ui_color.rgb, vec3(0.299, 0.587, 0.114));\n\tCOLOR = vec4(vec3(luminance), sampled_ui_color.a);\n}"
-	_monochrome_material = ShaderMaterial.new()
-	_monochrome_material.shader = monochrome_shader
-	return _monochrome_material
-
-
-func _restore_original_materials() -> void:
-	## 恢复全部仍存活控件的原材质并清空记录；已释放节点的弱引用会安全跳过。
-	for instance_id in _original_material_records.keys():
-		# 材质记录；只由本服务创建，包含控件弱引用与切换前原材质。
-		var material_record: Dictionary = _original_material_records.get(instance_id, {}) as Dictionary
-		# 目标控件；节点可能已经关闭释放，失效时无需恢复。
-		var target: Control = (material_record.get("reference") as WeakRef).get_ref() as Control if material_record.get("reference") is WeakRef else null
-		if target != null:
-			target.material = material_record.get("material") as Material
-			target.queue_redraw()
-	_original_material_records.clear()
-
-
-func _restore_materials_in_subtree(root_control: Control) -> void:
-	## 恢复指定子树内已经被本服务覆盖的材质；通常用于黑蓝风格下登记复用界面。
-	_restore_original_material(root_control)
-	for child_node in root_control.get_children():
-		if child_node is Control:
-			_restore_materials_in_subtree(child_node as Control)
-		else:
-			_restore_materials_in_control_descendants(child_node)
-
-
-func _restore_materials_in_control_descendants(parent_node: Node) -> void:
-	## 穿过非 Control 中间节点恢复后代控件，保持与灰度应用遍历规则完全一致。
-	for child_node in parent_node.get_children():
-		if child_node is Control:
-			_restore_materials_in_subtree(child_node as Control)
-		else:
-			_restore_materials_in_control_descendants(child_node)
-
-
-func _restore_original_material(target: Control) -> void:
-	## 恢复单个控件在启用黑白风格前的材质；没有记录时保持调用方现状。
-	# 控件实例 ID；用于查找当前运行期内的原材质记录。
-	var instance_id: int = target.get_instance_id()
-	if not _original_material_records.has(instance_id):
-		return
-	# 材质记录；恢复完成后立即移除，防止后续实例 ID 复用读取旧状态。
-	var material_record: Dictionary = _original_material_records.get(instance_id, {}) as Dictionary
-	target.material = material_record.get("material") as Material
-	target.queue_redraw()
-	_original_material_records.erase(instance_id)

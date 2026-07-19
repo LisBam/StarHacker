@@ -5,6 +5,8 @@ class_name MonsterSimulationManager
 ## 远处敌人不会进入场景树，也不会执行 AI、物理、碰撞或绘制；返回加载范围时会按原位置与剩余生命重新创建。
 
 signal virtual_monster_died(monster: Node2D)
+## 真实怪物获得玩家目标时转发的图鉴遇敌信号；GameWorld 接收后交给全局库存服务持久化。
+signal monster_encountered(monster_id: String)
 
 ## 怪物加载半径；默认 2400 像素，虚拟记录进入该范围后才允许实例化为真实敌人。
 @export_range(256.0, 12000.0, 1.0) var active_radius: float = 2400.0
@@ -242,6 +244,9 @@ func _materialize_record(record: Dictionary) -> bool:
 		return false
 	spawn_parent.add_child(monster)
 	monster.global_position = record.get("position", Vector2.ZERO)
+	# 怪物遇敌信号；必须在注入玩家目标前连接，因为目标注入会同步派发首次遇到事件。
+	if monster.has_signal("player_encountered") and not monster.is_connected("player_encountered", Callable(self, "_on_materialized_monster_encountered")):
+		monster.connect("player_encountered", Callable(self, "_on_materialized_monster_encountered"))
 	if monster.has_method("set_primary_target"):
 		monster.call("set_primary_target", _target)
 	elif monster.has_method("set_target"):
@@ -257,6 +262,11 @@ func _materialize_record(record: Dictionary) -> bool:
 	_node_record_ids[monster.get_instance_id()] = int(record.get("id", 0))
 	_materialized_count += 1
 	return true
+
+
+func _on_materialized_monster_encountered(monster_id: String) -> void:
+	## 转发真实怪物的遇敌事件；人口管理器不读取全局库存，保证虚拟人口职责只限生命周期管理。
+	monster_encountered.emit(monster_id)
 
 
 func _unmaterialize_record(record: Dictionary, monster: Node2D) -> void:

@@ -1,7 +1,7 @@
 extends PanelContainer
 class_name EncyclopediaPanel
 
-## 图鉴面板只负责展示内容目录提供的武器、装备与资源模板。
+## 图鉴面板只负责展示内容目录提供的武器、装备、资源与怪物模板。
 ## 解锁状态由 GlobalInventory 永久保存；本组件不保存物品副本，也不参与购买、装备或消耗流程。
 
 signal closed
@@ -16,6 +16,8 @@ const TAB_WEAPONS: String = "weapons"
 const TAB_EQUIPMENT: String = "equipment"
 ## 资源图鉴页签稳定标识；包含内容目录道具与统一的强化石条目。
 const TAB_RESOURCES: String = "resources"
+## 怪物图鉴页签稳定标识；读取全部怪物场景并按内容扩展包归属分组展示。
+const TAB_MONSTERS: String = "monsters"
 ## 未解锁条目的统一占位文本；名称、类型与说明均使用该文本，避免泄露未获取物品信息。
 const UNKNOWN_ENTRY_TEXT: String = "？？？"
 ## 图鉴扩展包展示优先级；默认将稳定 ID 为 stelle 的“星”扩展包固定在基础内容之后，未注册时自动跳过且不影响其余扩展包目录顺序。
@@ -98,7 +100,7 @@ func refresh() -> void:
 		_connect_inventory_signal()
 	_refresh_content_pack_group_metadata()
 	_clear_entry_grid()
-	# 当前类别全部条目；包含可静态发现的目录资源，以及资源页统一的强化石条目，筛选前用于统计完整收集进度。
+	# 当前类别全部条目；包含目录资源、统一强化石条目或怪物场景，筛选前用于统计完整收集进度。
 	var all_entries: Array[Dictionary] = _build_catalog_entries(_active_tab)
 	# 已解锁条目数；只统计当前类别全部条目，不因搜索或扩展包筛选改变永久收集进度。
 	var discovered_count: int = 0
@@ -168,7 +170,7 @@ func _build_content() -> void:
 	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	UI_STYLE_GUIDE.apply_title_label(title_label, 24)
 	content.add_child(title_label)
-	# 分类页签容器；三个类别互斥切换，始终保持当前类别的高亮按下状态。
+	# 分类页签容器；四个类别互斥切换，始终保持当前类别的高亮按下状态。
 	var tabs: HBoxContainer = HBoxContainer.new()
 	tabs.alignment = BoxContainer.ALIGNMENT_CENTER
 	tabs.add_theme_constant_override("separation", 8)
@@ -176,6 +178,7 @@ func _build_content() -> void:
 	_add_tab_button(tabs, TAB_WEAPONS, "武器")
 	_add_tab_button(tabs, TAB_EQUIPMENT, "装备")
 	_add_tab_button(tabs, TAB_RESOURCES, "资源")
+	_add_tab_button(tabs, TAB_MONSTERS, "怪物")
 	# 图鉴查询栏；关键词筛选与仓库搜索保持相同匹配范围，只改变当前左侧列表而不改变图鉴永久状态。
 	var query_bar: HBoxContainer = HBoxContainer.new()
 	query_bar.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -194,7 +197,7 @@ func _build_content() -> void:
 	var progress_label: Label = Label.new()
 	progress_label.name = "EncyclopediaProgress"
 	progress_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	progress_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.ACCENT_MUTED_COLOR)
+	UI_STYLE_GUIDE.apply_muted_accent_label(progress_label)
 	content.add_child(progress_label)
 	_progress_label = progress_label
 	# 图鉴主体分栏；左侧为可点击条目列表，右侧为当前选中条目的完整资料，两侧共用当前页签快照。
@@ -368,9 +371,21 @@ func _does_entry_match_search_text(entry: Dictionary, search_text: String) -> bo
 
 
 func _build_catalog_entries(tab_id: String) -> Array[Dictionary]:
-	## 当前类别全部图鉴条目；每项保存只读模板资源或强化石通用元数据，不保存玩家库存实例。
+	## 当前类别全部图鉴条目；每项保存只读模板资源、怪物场景快照或强化石通用元数据，不保存玩家库存实例。
 	var entries: Array[Dictionary] = []
 	if _content_catalog == null:
+		return entries
+	if tab_id == TAB_MONSTERS:
+		# 全部怪物场景路径；图鉴必须保留未解锁扩展包怪物的占位条目，因此不读取可用内容池接口。
+		if not _content_catalog.has_method("get_all_enemy_scene_paths"):
+			return entries
+		var monster_scene_paths: PackedStringArray = _content_catalog.call("get_all_enemy_scene_paths") as PackedStringArray
+		for monster_scene_path in monster_scene_paths:
+			# 怪物图鉴条目；场景根缺少稳定 monster_id 时安全跳过，避免生成永远无法解锁的占位项。
+			var monster_entry: Dictionary = _build_monster_entry(monster_scene_path)
+			if not monster_entry.is_empty():
+				entries.append(monster_entry)
+		entries.sort_custom(Callable(self, "_compare_catalog_entries"))
 		return entries
 	# 内容目录查询方法；全量路径接口不受可用内容池过滤，确保未获得条目也会占用一个“？？？”图鉴位置。
 	var method_name: String = "get_all_weapon_paths" if tab_id == TAB_WEAPONS else ("get_all_equipment_paths" if tab_id == TAB_EQUIPMENT else "get_all_item_paths")
@@ -388,6 +403,67 @@ func _build_catalog_entries(tab_id: String) -> Array[Dictionary]:
 		entries.append(_build_enhancement_stone_entry())
 	entries.sort_custom(Callable(self, "_compare_catalog_entries"))
 	return entries
+
+
+func _build_monster_entry(monster_scene_path: String) -> Dictionary:
+	## 从怪物场景构建图鉴只读快照；仅实例化离树根节点读取导出数据，不启动 AI、物理、掉落或战斗行为。
+	# 怪物预制体；只有可加载 PackedScene 才能提供稳定的类型、数值和内容包归属。
+	var monster_scene: PackedScene = load(monster_scene_path) as PackedScene
+	if monster_scene == null:
+		return {}
+	# 怪物离树实例；未加入场景树不会触发 ready，因此不会被误登记为玩家遇到。
+	var monster_root: Node = monster_scene.instantiate()
+	if monster_root == null:
+		return {}
+	# 稳定怪物标识；图鉴发现记录以该 ID 保存，空值表示场景未满足内容创作协议。
+	var monster_id: String = str(monster_root.get("monster_id")).strip_edges()
+	if monster_id.is_empty():
+		monster_root.free()
+		return {}
+	# 内容包归属；与物品图鉴使用同一个路径索引，未登记路径属于基础内容。
+	var content_pack_id: String = ""
+	if _content_catalog != null and _content_catalog.has_method("get_content_pack_id_for_resource_path"):
+		content_pack_id = str(_content_catalog.call("get_content_pack_id_for_resource_path", monster_scene_path)).strip_edges()
+	# 内容组标题；基础内容和各扩展包复用当前图鉴的正式名称缓存。
+	var content_pack_title: String = str(_content_pack_display_names.get(content_pack_id, content_pack_id if not content_pack_id.is_empty() else "基础内容"))
+	# 内容组排序序号；基础内容固定在最前，已登记扩展包沿目录规则排序。
+	var content_pack_order: int = int(_content_pack_sort_orders.get(content_pack_id, FALLBACK_SORT_ORDER))
+	# 攻击类型；远程怪物公开 ranged_projectile_damage，其他当前基础怪物均按近战展示。
+	var is_ranged_monster: bool = "ranged_projectile_damage" in monster_root
+	# 图鉴战斗数值；仅读取导出配置，不读取出生倍率或当前战斗中的临时生命值。
+	var maximum_health: float = maxf(float(monster_root.get("max_health")), 0.0)
+	var attack_power: float = maxf(float(monster_root.get("attack_power")), 0.0)
+	var defense_power: float = maxf(float(monster_root.get("defense_power")), 0.0)
+	var move_speed: float = maxf(float(monster_root.get("move_speed")), 0.0)
+	var damage_value: float = maxf(float(monster_root.get("ranged_projectile_damage")) if is_ranged_monster else float(monster_root.get("attack_damage")), 0.0)
+	var attack_cooldown: float = maxf(float(monster_root.get("cooldown")) if is_ranged_monster else float(monster_root.get("attack_cooldown")), 0.0)
+	# 只读展示快照；所有字段在释放离树实例前复制，后续 UI 不再持有怪物节点。
+	var entry: Dictionary = {
+		"entry_key": "monster:%s" % monster_id,
+		"content_pack_id": content_pack_id,
+		"content_pack_title": content_pack_title,
+		"content_pack_order": content_pack_order,
+		"equipment_set_sort_key": "",
+		"equipment_slot_sort_order": FALLBACK_SORT_ORDER,
+		"resource_quality_sort_order": FALLBACK_SORT_ORDER,
+		"resource": null,
+		"is_enhancement_stone": false,
+		"is_monster": true,
+		"monster_id": monster_id,
+		"monster_scene_path": monster_scene_path,
+		"display_name": str(monster_root.get("display_name")).strip_edges(),
+		"icon_text": "敌",
+		"type_text": "怪物 · %s" % ("远程" if is_ranged_monster else "近战"),
+		"description": str(monster_root.get("description")).strip_edges(),
+		"max_health": maximum_health,
+		"attack_power": attack_power,
+		"defense_power": defense_power,
+		"move_speed": move_speed,
+		"damage_value": damage_value,
+		"attack_cooldown": attack_cooldown,
+	}
+	monster_root.free()
+	return entry
 
 
 func _build_resource_entry(item_resource: Resource) -> Dictionary:
@@ -526,6 +602,9 @@ func _get_resource_quality_sort_order(item_resource: Resource) -> int:
 func _is_entry_discovered(entry: Dictionary) -> bool:
 	if _global_inventory == null:
 		return false
+	# 是否为怪物条目；怪物不属于库存资源，首次获得有效玩家目标时由怪物组件登记稳定 monster_id。
+	if bool(entry.get("is_monster", false)):
+		return _global_inventory.has_method("is_monster_discovered") and bool(_global_inventory.call("is_monster_discovered", str(entry.get("monster_id", ""))))
 	# 是否为强化石通用条目；随机资源使用独立公开查询，不伪造不存在的固定 Resource 模板。
 	var is_enhancement_stone: bool = bool(entry.get("is_enhancement_stone", false))
 	if is_enhancement_stone:
@@ -600,7 +679,7 @@ func _build_entry_card(entry: Dictionary, is_discovered: bool, entry_index: int)
 	entry_button.tooltip_text = entry_button.text
 	entry_button.pressed.connect(_on_entry_button_pressed.bind(entry_index))
 	if not is_discovered:
-		entry_button.add_theme_color_override("font_color", UI_STYLE_GUIDE.DISABLED_TEXT_COLOR)
+		entry_button.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_disabled_text_color())
 	return entry_button
 
 
@@ -661,6 +740,10 @@ func _refresh_selected_detail() -> void:
 	if not _is_entry_discovered(selected_entry):
 		_detail_label.text = "[center][font_size=28]%s[/font_size][/center]" % UNKNOWN_ENTRY_TEXT
 		return
+	# 已解锁怪物；展示从离树场景快照读取的固定图鉴资料，不实例化 AI 或读取临时战斗状态。
+	if bool(selected_entry.get("is_monster", false)):
+		_detail_label.text = _build_monster_detail_bbcode(selected_entry)
+		return
 	# 已解锁静态资源；使用库存与仓库相同的完整 BBCode，避免图鉴复制耐久、套装与强化属性公式。
 	var item_resource: Resource = selected_entry.get("resource") as Resource
 	if item_resource != null:
@@ -668,6 +751,21 @@ func _refresh_selected_detail() -> void:
 		return
 	# 已解锁强化石通用条目；随机强化石没有固定实例，详情仅展示其长期不变的类别说明。
 	_detail_label.text = "[font_size=18][b]%s[/b][/font_size]\n类型：%s\n\n%s" % [str(selected_entry.get("display_name", "强化石")), str(selected_entry.get("type_text", "资源 · 强化石")), str(selected_entry.get("description", ""))]
+
+
+func _build_monster_detail_bbcode(entry: Dictionary) -> String:
+	## 格式化已解锁怪物的固定图鉴资料；只显示场景导出基准值，不把当前出生倍率或剩余生命误写为类型属性。
+	# 正式名称；异常空值回退“未知怪物”，正常流程已由 monster_id 和场景作者保证名称存在。
+	var display_name: String = str(entry.get("display_name", "未知怪物"))
+	# 类型文本；固定为怪物近战或远程分类，便于与场景实际攻击协议对应。
+	var type_text: String = str(entry.get("type_text", "怪物"))
+	# 图鉴说明；允许空说明，空值时提供固定兜底而不暴露内部场景路径。
+	var description: String = str(entry.get("description", "")).strip_edges()
+	if description.is_empty():
+		description = "暂无怪物描述。"
+	# 攻击间隔；保留一位小数与近战和远程场景的导出秒数一致。
+	var attack_cooldown: float = float(entry.get("attack_cooldown", 0.0))
+	return "[font_size=18][b]%s[/b][/font_size]\n类型：%s\n\n%s\n\n最大生命：%d\n攻击力：%d\n防御力：%d\n移动速度：%d\n单次伤害：%d\n攻击间隔：%.1f 秒" % [display_name, type_text, description, roundi(float(entry.get("max_health", 0.0))), roundi(float(entry.get("attack_power", 0.0))), roundi(float(entry.get("defense_power", 0.0))), roundi(float(entry.get("move_speed", 0.0))), roundi(float(entry.get("damage_value", 0.0))), attack_cooldown]
 
 
 func _clear_entry_grid() -> void:

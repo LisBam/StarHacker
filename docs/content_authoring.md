@@ -11,7 +11,7 @@
 | 武器 | `res://data/weapons/` | `.tres`、`.res` | `weapon_id` | 商店武器池、怪物武器掉落池、宝箱武器池、开发者全部武器发放、库存存档恢复 |
 | 装备 | `res://data/equipment/` | `.tres`、`.res` | `equipment_id` | 商店装备池、怪物装备掉落池、宝箱装备池、开发者全部装备发放、库存存档恢复 |
 | 道具 | `res://data/items/` | `.tres`、`.res` | `item_id` | 商店道具池、开发者对应道具发放、库存存档恢复；`repair_kit` 还会进入怪物与宝箱修复包池 |
-| 怪物 | `res://scenes/enemies/` | `.tscn`、`.scn` | 无独立 ID，资源路径必须唯一 | 正式战斗与训练场随机怪物生成池 |
+| 怪物 | `res://scenes/enemies/` | `.tscn`、`.scn` | `monster_id` | 正式战斗与训练场随机怪物生成池、怪物图鉴 |
 | 角色 | `res://data/characters/` | `.tres`、`.res` | `character_id` | 独立角色选择列表、会话选择、战斗基础属性、战斗 HUD 名称、训练场角色切换列表 |
 | 扩展包 | `res://data/content_packs/` | `.tres`、`.res` | `pack_id` | 把所属角色解锁状态映射到武器、装备、道具和怪物四类内容池 |
 
@@ -20,7 +20,7 @@
 ## 2. 推荐创建流程
 
 1. 在对应目录复制最接近目标的现有 `.tres` 或 `.tscn` 模板。
-2. 修改文件名，并为武器、装备、道具、角色、套装或扩展包填写新的唯一英文 ID；ID 建议只使用小写英文字母、数字和下划线。
+2. 修改文件名，并为武器、装备、道具、怪物、角色、套装或扩展包填写新的唯一英文 ID；ID 建议只使用小写英文字母、数字和下划线。
 3. 修改显示名称、说明和数值。怪物场景应保留现有怪物节点协议、死亡信号、阵营碰撞层和 AI 组件结构，再按需要替换脚本或参数。
 4. 返回 Godot 编辑器等待外部文件导入完成；若游戏正在运行，停止并重新启动。内容目录在项目启动时建立，不在单次运行中持续轮询磁盘。
 5. 按本页的接入范围验证内容。商店已有库存不会被强制覆盖，新内容从下一次手动或自动刷新开始参与抽取；怪物和掉落池从下一次进入战斗开始生效。
@@ -49,7 +49,7 @@
 - 道具资源必须声明非空 `item_kind` 与 `item_id`，且 `item_kind` 不能为 `weapon` 或 `equipment`。合法道具会自动进入商店、宝箱和怪物掉落池；复制现有修复包并保持 `repair_kit` 类型还可完整复用堆叠与修复行为。
 - 新的道具类型可以被内容目录、商店和存档路径识别，但如果它引入新的使用行为、卡片字段、筛选类别或堆叠规则，仍需实现对应的独立数据组件与业务组件；自动发现只负责注册，不会猜测未知玩法。
 - 限时消耗品使用 `ConsumableData` 与 `item_kind=consumable`，填写 `effect_stat`、`effect_amount` 和 `duration_seconds`。当前支持移速比例、手持武器攻速比例、闪避率百分点与每秒能量恢复点数；能量恢复支持 `0.1` 点精度。只能在战斗共享背包点击“使用”，成功施加后扣除 1 个。同一 `item_id` 再次使用刷新持续时间而不叠加自身，不同 ID 可以相加。攻速效果只进入武器冷却计算，不进入角色属性面板。
-- 怪物目录中的场景必须能够加载为 `PackedScene`，根节点必须填写非负 `spawn_weight`；`GameWorld` 以全部可用场景的权重占比抽取类型，0 可保留场景但不会自然生成。复制当前的 `res://scenes/enemies/stelle/voidranger_reaver.tscn` 或 `res://scenes/enemies/stelle/voidranger_eliminator.tscn` 可以分别复用近战、远程生成协议，并通过默认 1.0 的 `drop_multiplier` 调整该怪物全部掉落概率；完全不同的根节点或脚本必须自行实现 GameWorld、MonsterSimulationManager 和死亡掉落所需接口，未声明掉落倍率时按 1.0 处理。
+- 怪物目录中的场景必须能够加载为 `PackedScene`，根节点必须填写非空且全目录唯一的 `monster_id`、玩家可见的 `display_name` 和 `description`，并填写非负 `spawn_weight`；`GameWorld` 以全部可用场景的权重占比抽取类型，0 可保留场景但不会自然生成。复制当前的 `res://scenes/enemies/stelle/voidranger_reaver.tscn` 或 `res://scenes/enemies/stelle/voidranger_eliminator.tscn` 可以分别复用近战、远程生成协议，并通过默认 1.0 的 `drop_multiplier` 调整该怪物全部掉落概率；完全不同的根节点或脚本必须自行实现 GameWorld、MonsterSimulationManager 和死亡掉落所需接口，未声明掉落倍率时按 1.0 处理。
 - 近战怪物需要攻击自推进时在根节点填写 `attack_front_recoil_force`；远程怪物需要开火后退时填写 `attack_recoil_force`。两者单位均为无碰撞理论位移像素，默认 0；同一怪物可以同时配置两项，前坐沿攻击方向、后坐沿反方向。死亡模型默认在 `death_animation_duration=0.52` 秒内旋转 `death_animation_rotation_degrees=18` 度并淡出，必须保留 `died` 信号的即时掉落语义。
 - 角色资源必须使用 `CharacterData` 或提供兼容的 `character_id` 与 `to_profile()`；基础属性在进入战斗和训练场切换角色时应用。`passive_skills` 可引用多个 `PassiveSkillData` 兼容资源并全部生效，`active_skills` 按顺序装入当前三个主动槽；旧 `passive` 与 `active` 字符串只作为未迁移档案的详情兜底。技能资源、行为接口、目标组和验证步骤见 `docs/skill_system.md`。
 - 角色 `move_speed` 使用属性点而非直接像素速度，运行时按 `1 点 = 2 像素/秒` 换算；例如填写 `100` 等效实际速度 `200`，装备移速比例继续作用于属性点。
@@ -60,7 +60,7 @@
 
 - `ContentCatalog` 是 `project.godot` 中的自动加载服务，每次项目启动时扫描一次。开发期间外部复制完成后，等待 Godot 导入并重新运行项目即可生效。
 - `ContentCatalog` 保留全部合法注册项，并在武器、装备、道具和怪物复数查询时按 `SessionState` 的角色解锁状态过滤扩展包内容。角色解锁本质上是永久解锁其唯一扩展包，不存在单独解锁某把武器或某只怪物的分支。
-- 图鉴使用 `get_all_weapon_paths()`、`get_all_equipment_paths()` 与 `get_all_item_paths()` 读取未经过可用内容池过滤的只读模板列表，为每个静态内容保留一个收集位置；这些接口仅限展示，商店、掉落与开发者发放必须继续使用原有可用内容查询。图鉴通过 `get_content_pack_id_for_resource_path()` 查询资源归属，空结果表示基础内容；每个分类先显示基础内容、再固定显示 `stelle`（星）扩展包，其余扩展包保持内容目录稳定顺序并显示标题与组内条目。同一 `equipment_set` 内的 `equipment_slot` 固定为 `head`、`body`、`legs`、`feet`；资源优先读取 `quality_id` 的 `low`、`medium`、`high`、`supreme`、`specialized` 顺序，没有该字段时按显示名称“初级 / 中级 / 高级 / 极品 / 特化”前缀排序。随机强化石没有固定模板，图鉴将任意一颗强化石归为同一个基础资源条目。
+- 图鉴使用 `get_all_weapon_paths()`、`get_all_equipment_paths()`、`get_all_item_paths()` 与 `get_all_enemy_scene_paths()` 读取未经过可用内容池过滤的只读内容。怪物页仅离树实例化场景根以读取 `monster_id`、名称、说明与基础数值，不进入场景树、不启动 AI；怪物第一次被注入有效玩家目标时解锁对应稳定 ID。所有图鉴分类通过 `get_content_pack_id_for_resource_path()` 查询资源归属，空结果表示基础内容；每个分类先显示基础内容、再固定显示 `stelle`（星）扩展包，其余扩展包保持内容目录稳定顺序并显示标题与组内条目。同一 `equipment_set` 内的 `equipment_slot` 固定为 `head`、`body`、`legs`、`feet`；资源优先读取 `quality_id` 的 `low`、`medium`、`high`、`supreme`、`specialized` 顺序，没有该字段时按显示名称“初级 / 中级 / 高级 / 极品 / 特化”前缀排序。随机强化石没有固定模板，图鉴将任意一颗强化石归为同一个基础资源条目。
 - 星、穹、银狼的角色资源均设置为开局默认解锁。当前已实现 `stelle`、`caelus` 与 `silver_wolf` 三份内容清单；银狼清单包含武器、装备与道具，当前没有专属怪物。
 - 当前实际内容池包含 4 把基础武器、4 件起源套装基础装备，以及三套扩展包合计 6 把武器、12 件套装装备、3 种修复包、4 种限时消耗品和 4 种怪物。基础内容不写入任何 `ContentPackData` 清单并始终开放；后续新增内容必须先明确基础内容或角色扩展包归属。
 - 商店服务会先按扩展包状态过滤场景检查器路径，再合并自动目录；相同资源路径不会获得重复抽取权重。角色解锁后新增路径从下一次正常商品刷新参与抽取，历史商店版本不会自动重建库存。
@@ -73,6 +73,7 @@
 
 - 重新启动项目后，Godot 输出中没有资源加载、脚本解析或重复 ID 错误。
 - 新增武器、装备或道具应先在主菜单“图鉴”对应分类显示“？？？”。通过初始发放、商店购买、战斗拾取或开发者发放实际获得一次后，重新打开图鉴必须显示正式名称、类型与说明；随后出售、消耗或丢弃该物品后仍须保持解锁。
+- 新增怪物应先在“图鉴 / 怪物”显示“？？？”。进入包含该怪物的战斗并使其获得玩家目标后，图鉴必须立即显示名称、说明与基础战斗数值；重新启动、该怪物休眠后再次物化或死亡后均不得重新锁定。将怪物场景加入扩展包清单后，它必须显示在对应扩展包标题下。
 - 图鉴关键词搜索必须匹配新增内容的正式名称、中文类型或说明；将内容路径加入某个 `ContentPackData` 清单后，重新打开对应分类时，该条目必须出现在这份扩展包标题之后，而不再停留在基础内容分组。
 - 武器、装备和道具能在下一轮商店刷新中参与对应分类抽取；开发者菜单的“全部”发放能覆盖新增模板。
 - 武器、修复包和消耗品在正式战斗掉落或宝箱池中可被选中，拾取后能保存并在重启后恢复。

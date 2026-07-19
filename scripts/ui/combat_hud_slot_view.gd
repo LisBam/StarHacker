@@ -6,6 +6,8 @@ class_name CombatHudSlotView
 
 ## 通用耐久条脚本；武器槽传入具有耐久属性的资源时显示，技能槽传入 null 时自动隐藏。
 const DURABILITY_BAR_SCRIPT: Script = preload("res://scripts/ui/weapon_durability_bar.gd")
+## 全局 UI 样式指南；紧凑技能与武器卡片从这里读取背景、边框与普通文字主题。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 普通背景颜色；默认沿用原技能槽深蓝黑色，使左右两侧槽位以技能 UI 为视觉基准。
 const NORMAL_BACKGROUND_COLOR: Color = Color(0.025, 0.045, 0.075, 0.92)
 ## 普通边框颜色；默认使用技能槽青蓝描边，左右常驻 HUD 保持统一。
@@ -62,6 +64,12 @@ func _ready() -> void:
 	_build_content()
 	_refresh_content_visuals()
 	queue_redraw()
+
+
+func _notification(what: int) -> void:
+	## 主题切换后仅请求重绘；绘制阶段实时读取色板，避免保存旧风格的背景和边框颜色。
+	if what == NOTIFICATION_THEME_CHANGED:
+		queue_redraw()
 
 
 func configure_hud_content(display_size: Vector2, key_text: String, display_name: String, detail_text: String, display_resource: Resource = null, content_opacity: float = 1.0) -> void:
@@ -216,13 +224,12 @@ func _build_content() -> void:
 	_key_label = Label.new()
 	_key_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_key_label.add_theme_font_size_override("font_size", 10)
-	_key_label.add_theme_color_override("font_color", Color(0.48, 0.88, 1.0, 1.0))
+	UI_STYLE_GUIDE.apply_title_label(_key_label)
 	content.add_child(_key_label)
 	_name_label = Label.new()
 	_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_name_label.add_theme_font_size_override("font_size", 12)
-	_name_label.add_theme_color_override("font_color", Color(0.78, 0.94, 1.0, 1.0))
 	content.add_child(_name_label)
 	_detail_label = Label.new()
 	_detail_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -270,6 +277,8 @@ func _draw() -> void:
 	var slot_rect: Rect2 = Rect2(Vector2.ZERO, size)
 	# 槽位样式；每次绘制按当前选中状态选择边框颜色，不保存跨实例共享可变资源。
 	# 当前样式由本实例独占并在状态变化时提前更新，绘制阶段只复用结果。
+	_slot_style.bg_color = UI_STYLE_GUIDE.get_compact_card_background_color()
+	_slot_style.border_color = UI_STYLE_GUIDE.get_accent_color() if _selected else UI_STYLE_GUIDE.get_compact_card_border_color()
 	var slot_style: StyleBoxFlat = _slot_style
 	draw_style_box(slot_style, slot_rect)
 	if _highlighted:
@@ -282,8 +291,8 @@ func _draw() -> void:
 
 func _refresh_slot_style() -> void:
 	## 刷新当前实例的背景与边框样式；只在初始化或选中状态变化时调用，冷却动画重绘直接复用结果。
-	_slot_style.bg_color = NORMAL_BACKGROUND_COLOR
-	_slot_style.border_color = SELECTED_BORDER_COLOR if _selected else NORMAL_BORDER_COLOR
+	_slot_style.bg_color = UI_STYLE_GUIDE.get_compact_card_background_color()
+	_slot_style.border_color = UI_STYLE_GUIDE.get_accent_color() if _selected else UI_STYLE_GUIDE.get_compact_card_border_color()
 	_slot_style.set_border_width_all(2)
 	_slot_style.set_corner_radius_all(6)
 

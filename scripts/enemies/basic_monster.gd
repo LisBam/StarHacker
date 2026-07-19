@@ -7,6 +7,8 @@ class_name BasicMonster
 
 signal health_changed(current_health: float, max_health: float)
 signal died
+## 玩家首次进入该怪物目标协议时派发的图鉴遇敌信号；GlobalInventory 由 GameWorld 等战斗宿主处理，怪物不直接依赖存档服务。
+signal player_encountered(monster_id: String)
 
 ## 战斗爆发特效脚本；默认通过路径预加载，避免怪物脚本依赖 Godot 全局类名缓存解析顺序。
 const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat_burst_effect.gd")
@@ -41,6 +43,10 @@ const DAMAGE_INSTIGATOR_PARENT_SEARCH_LIMIT: int = 8
 
 ## 怪物显示名称；默认“基础怪物”用于内容识别与后续图鉴界面，新怪物场景应填写设计文档中的正式名称。
 @export var display_name: String = "基础怪物"
+## 怪物唯一标识；默认空字符串表示未配置，图鉴与存档通过该稳定英文 ID 记录玩家是否已经遇到该类型。
+@export var monster_id: String = ""
+## 怪物图鉴说明；默认空字符串，已解锁图鉴会显示该文本，运行时不会动态修改。
+@export_multiline var description: String = ""
 ## 生成权重；取值大于等于 0，默认 100 用于未配置旧场景，GameWorld 按全部可用怪物权重占比抽取类型，0 可保留场景但禁止自然生成。
 @export_range(0.0, 100000.0, 1.0, "or_greater") var spawn_weight: float = 100.0
 ## 最大血量；取值应大于 0，默认 60 用于训练场怪物强度，运行时修改会影响怪物承伤能力。
@@ -423,6 +429,14 @@ func set_primary_target(target_node: Node) -> void:
 	_primary_target = target_node as Node2D
 	_damage_retaliation_target = null
 	set_target(_primary_target)
+	_emit_player_encountered()
+
+
+func _emit_player_encountered() -> void:
+	## 在怪物获得有效玩家目标时通知战斗宿主；虚拟人口反复物化由存档服务按稳定 ID 去重。
+	if _primary_target == null or monster_id.strip_edges().is_empty():
+		return
+	player_encountered.emit(monster_id)
 
 
 func get_current_target() -> Node2D:

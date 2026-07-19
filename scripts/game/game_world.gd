@@ -382,6 +382,8 @@ func _ready() -> void:
 		_monster_simulation_manager.call("initialize", _player, spawn_parent, _player, TRAINING_MONSTER_GROUP)
 		if _monster_simulation_manager.has_signal("virtual_monster_died") and not _monster_simulation_manager.is_connected("virtual_monster_died", Callable(self, "_on_monster_died")):
 			_monster_simulation_manager.connect("virtual_monster_died", Callable(self, "_on_monster_died"))
+		if _monster_simulation_manager.has_signal("monster_encountered") and not _monster_simulation_manager.is_connected("monster_encountered", Callable(self, "_on_monster_encountered")):
+			_monster_simulation_manager.connect("monster_encountered", Callable(self, "_on_monster_encountered"))
 	_spawn_monster_batch()
 	_monster_replenish_remaining = monster_replenish_interval
 	_update_explored_cells(true)
@@ -2069,6 +2071,9 @@ func _spawn_monster_batch(requested_count: int = -1) -> void:
 		var spawn_parent: Node = _monster_parent if _monster_parent != null else self
 		spawn_parent.add_child(monster)
 		monster.global_position = spawn_position
+		# 兼容直生怪物的遇敌信号；加载管理器缺失时仍由 GameWorld 统一写入怪物图鉴。
+		if monster.has_signal("player_encountered") and not monster.is_connected("player_encountered", Callable(self, "_on_monster_encountered")):
+			monster.connect("player_encountered", Callable(self, "_on_monster_encountered"))
 		if monster.has_signal("died"):
 			monster.connect("died", Callable(self, "_on_monster_died").bind(monster))
 		if monster.has_method("set_primary_target"):
@@ -2244,6 +2249,14 @@ func _get_target_monster_population() -> int:
 		var second_stage_ratio: float = clampf((_survival_time_seconds - first_milestone_time) / (second_milestone_time - first_milestone_time), 0.0, 1.0)
 		return roundi(lerpf(float(monster_population_five_minute_count), float(monster_population_ten_minute_count), second_stage_ratio))
 	return maxi(monster_population_ten_minute_count, 0)
+
+
+func _on_monster_encountered(monster_id: String) -> void:
+	## 接收战斗怪物的首次遇敌事件并转交永久图鉴服务；GameWorld 是战斗节点与局外存档之间的协调边界。
+	# 全局库存服务；由自动加载创建，缺失时保持战斗可运行，避免独立场景预览依赖完整游戏启动顺序。
+	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+	if global_inventory != null and global_inventory.has_method("register_monster_encounter"):
+		global_inventory.call("register_monster_encounter", monster_id)
 
 
 func _on_monster_died(monster_node: Node) -> void:

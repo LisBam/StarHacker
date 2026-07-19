@@ -44,7 +44,10 @@ var _critical_damage: float = 1.5
 ## 已命中目标实例编号集合；默认空，防止穿透弹体在重叠碰撞帧中重复伤害同一目标。
 var _hit_target_ids: Dictionary = {}
 ## 已命中碰撞体 RID；默认只在发生穿透后追加，扫掠射线会排除它们以继续检测后方目标。
+## 当前实现把弹体自身 RID 固定放在首项，后续仍只追加实际穿透目标；同一数组可直接供每帧扫掠射线复用。
 var _excluded_collision_rids: Array[RID] = []
+## 最大飞行距离平方；默认由 max_distance 在 ready 与设置入口同步，用于高频回收判断避免逐帧开方。
+var _max_distance_squared: float = 0.0
 ## 弹体伤害的实际发起单位；默认 null，由远程攻击组件在生成时注入玩家，供敌人受伤改索敌使用。
 var _damage_instigator: Node
 ## 弹射随机源；每颗弹体独立随机化，用于在合法反射半平面内生成不同弹道。
@@ -53,6 +56,8 @@ var _bounce_random: RandomNumberGenerator = RandomNumberGenerator.new()
 
 func _ready() -> void:
 	_start_position = global_position
+	_max_distance_squared = maxf(max_distance, 1.0) * maxf(max_distance, 1.0)
+	_excluded_collision_rids = [get_rid()]
 	_bounce_random.randomize()
 	body_entered.connect(_on_body_entered)
 	area_entered.connect(_on_area_entered)
@@ -67,7 +72,7 @@ func _physics_process(delta: float) -> void:
 	global_position = target_position
 	_age += delta
 
-	if _age >= lifetime or global_position.distance_to(_start_position) >= max_distance:
+	if _age >= lifetime or global_position.distance_squared_to(_start_position) >= _max_distance_squared:
 		queue_free()
 
 
@@ -87,6 +92,7 @@ func set_damage(value: float) -> void:
 
 func set_max_distance(value: float) -> void:
 	max_distance = maxf(value, 1.0)
+	_max_distance_squared = max_distance * max_distance
 
 
 func set_impact_force(value: float) -> void:
@@ -157,9 +163,7 @@ func _on_area_entered(area: Area2D) -> void:
 
 func _handle_swept_collision(target_position: Vector2) -> bool:
 	# 射线查询参数；取值为当前位置到目标位置，默认使用弹体碰撞掩码检测怪物和环境。
-	var excluded_rids: Array[RID] = [get_rid()]
-	excluded_rids.append_array(_excluded_collision_rids)
-	var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(global_position, target_position, collision_mask, excluded_rids)
+	var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(global_position, target_position, collision_mask, _excluded_collision_rids)
 	query.collide_with_areas = true
 	query.collide_with_bodies = true
 	# 射线命中结果；取值为空字典或包含 collider/position，默认用于提前处理高速碰撞。
@@ -204,7 +208,9 @@ func _apply_hit(target: Node, collision_normal: Vector2 = Vector2.ZERO) -> bool:
 		return true
 	piercing_count -= 1
 	if target is CollisionObject2D:
-		_excluded_collision_rids.append((target as CollisionObject2D).get_rid())
+		# 已穿透目标 RID；写入实例内高频查询缓存，后续扫线不会再次命中同一碰撞体。
+		var target_rid: RID = (target as CollisionObject2D).get_rid()
+		_excluded_collision_rids.append(target_rid)
 	# 弹射是独立于穿透的可选能力；没有剩余弹射次数时必须保持原方向继续飞行，不能因为尝试弹射而销毁穿透弹体。
 	if bounce_count > 0:
 		_try_bounce(collision_normal if not collision_normal.is_zero_approx() else _get_fallback_collision_normal(target))

@@ -8,6 +8,8 @@ class_name ActiveSkillBar
 const MINIMUM_LABEL_AXIS_SIZE: float = 1.0
 ## 局内共享紧凑槽位视图；主动技能与右侧武器栏通过同一组件统一外观和状态接口。
 const COMBAT_HUD_SLOT_VIEW_SCRIPT: Script = preload("res://scripts/ui/combat_hud_slot_view.gd")
+## 技能栏动态状态刷新间隔；固定 0.05 秒提供 20 次/秒的冷却与发动条件反馈，避免静态三槽 UI 每个渲染帧重复格式化文本。
+const DYNAMIC_REFRESH_INTERVAL_SECONDS: float = 0.05
 
 ## 单个技能槽最小尺寸；默认 150×58 像素，三个槽并排时适配 1280×720 战斗 HUD。
 @export var slot_minimum_size: Vector2 = Vector2(150.0, 58.0)
@@ -64,6 +66,8 @@ var _cooldown_overlays: Array[ColorRect] = []
 var _cooldown_labels: Array[Label] = []
 ## 每个技能槽的共享局内视图；元素顺序与技能组件槽位一致，名称、按键、能耗和遮罩统一由该组件显示。
 var _slot_views: Array[Control] = []
+## 技能栏动态刷新累计时间；默认 0，达到固定间隔后统一刷新三个槽位并重新计时。
+var _dynamic_refresh_elapsed: float = 0.0
 
 
 func _ready() -> void:
@@ -82,9 +86,14 @@ func configure(active_skill_component: Node) -> void:
 	refresh()
 
 
-func _process(_delta: float) -> void:
-	if is_visible_in_tree():
-		_refresh_cooldowns()
+func _process(delta: float) -> void:
+	if not is_visible_in_tree():
+		return
+	_dynamic_refresh_elapsed += maxf(delta, 0.0)
+	if _dynamic_refresh_elapsed < DYNAMIC_REFRESH_INTERVAL_SECONDS:
+		return
+	_dynamic_refresh_elapsed = fmod(_dynamic_refresh_elapsed, DYNAMIC_REFRESH_INTERVAL_SECONDS)
+	_refresh_cooldowns()
 
 
 func refresh() -> void:

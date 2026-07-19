@@ -57,8 +57,10 @@ func _ready() -> void:
 	_randomize_individual_shooting()
 
 
-func _process(delta: float) -> void:
-	_cooldown_remaining = maxf(_cooldown_remaining - delta, 0.0)
+func _update_ai_decision(delta: float) -> void:
+	## 远程攻击冷却与基础 AI 的错峰时间步统一推进；敌人无需额外注册逐帧 process 回调，累计 delta 仍保持真实秒数。
+	_cooldown_remaining = maxf(_cooldown_remaining - maxf(delta, 0.0), 0.0)
+	super._update_ai_decision(delta)
 
 
 func _randomize_individual_shooting() -> void:
@@ -102,19 +104,20 @@ func _update_target_behavior(_delta: float, target_distance: float) -> void:
 	else:
 		velocity = Vector2.ZERO
 
-	_try_fire_projectile(target_direction)
+	_try_fire_projectile(target_direction, has_line_of_sight)
 
 
-func _try_fire_projectile(direction: Vector2) -> void:
+func _try_fire_projectile(direction: Vector2, has_line_of_sight: bool) -> void:
 	if _is_dying or projectile_scene == null or _cooldown_remaining > 0.0 or direction.is_zero_approx():
 		return
-	if not is_instance_valid(_target) or not _target_is_visible:
+	if not is_instance_valid(_target) or not _target_is_visible or not has_line_of_sight:
 		return
 	# 发射瞬间目标距离；再次读取实时位置，防止低频 AI 决策后玩家已经离开 shoot_range 仍然放空枪。
-	var current_target_distance: float = global_position.distance_to(_target.global_position)
-	if current_target_distance > maxf(shoot_range, 0.0):
-		return
-	if not _has_line_of_sight_to_target():
+	# 实际比较使用距离平方，保持原范围语义并避免为开火复核执行平方根计算。
+	var current_target_distance_squared: float = global_position.distance_squared_to(_target.global_position)
+	# 当前有效开火距离；最低为 0，平方后与目标距离比较可避免额外开方。
+	var current_shoot_range: float = maxf(shoot_range, 0.0)
+	if current_target_distance_squared > current_shoot_range * current_shoot_range:
 		return
 	# 实际发射方向；使用敌人独立随机源在配置偏移角度内变化，避免所有远程敌人保持绝对精准。
 	var resolved_direction: Vector2 = direction.normalized().rotated(deg_to_rad(_random.randf_range(-maxf(ranged_projectile_deviation_degrees, 0.0), maxf(ranged_projectile_deviation_degrees, 0.0))))

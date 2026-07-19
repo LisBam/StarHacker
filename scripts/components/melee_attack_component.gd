@@ -76,6 +76,8 @@ func _ready() -> void:
 	body_entered.connect(_on_body_entered)
 	area_entered.connect(_on_area_entered)
 	_set_hitbox_enabled(false)
+	# 组件初始没有命中窗口或冷却状态，首次成功攻击会按需重新启用处理。
+	set_process(false)
 
 
 func _process(delta: float) -> void:
@@ -85,6 +87,9 @@ func _process(delta: float) -> void:
 		_active_remaining = maxf(_active_remaining - delta, 0.0)
 		if _active_remaining <= 0.0:
 			_finish_attack()
+	if _cooldown_remaining <= 0.0 and _active_remaining <= 0.0:
+		# 空闲处理关闭；下一次成功攻击会重新启用，蓄力范围预览不依赖本回调。
+		set_process(false)
 
 
 func try_attack(direction: Vector2, weapon_data: Resource = null, attack_modifiers: Dictionary = {}) -> bool:
@@ -119,6 +124,8 @@ func try_attack(direction: Vector2, weapon_data: Resource = null, attack_modifie
 	_cooldown_duration = selected_cooldown
 	_active_remaining = selected_active_duration
 	_set_hitbox_enabled(true)
+	# 命中窗口与冷却都由本回调推进，攻击提交成功后立即启用处理。
+	set_process(true)
 	attack_started.emit(direction)
 	return true
 

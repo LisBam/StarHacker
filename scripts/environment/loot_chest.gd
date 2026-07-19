@@ -71,16 +71,26 @@ func _ready() -> void:
 	add_to_group("loot_chests")
 	add_to_group("environment_obstacles")
 	_refresh_quality_state()
-	set_process(true)
+	# 未交互宝箱只保留物理、绘制与受伤入口，长按开始后再启用进度处理。
+	set_process(false)
 
 
 func _process(delta: float) -> void:
 	if _opened:
+		set_process(false)
 		return
 	if not _interaction_active or _interaction_player == null or not is_instance_valid(_interaction_player):
+		_interaction_active = false
+		_interaction_player = null
+		set_process(false)
 		_reset_hold_progress()
 		return
-	if global_position.distance_to(_interaction_player.global_position) > get_interaction_radius():
+	# 当前交互距离；与 HUD 使用同一宝箱公开半径，平方比较避免长按期间逐帧开方。
+	var interaction_distance: float = get_interaction_radius()
+	if global_position.distance_squared_to(_interaction_player.global_position) > interaction_distance * interaction_distance:
+		_interaction_active = false
+		_interaction_player = null
+		set_process(false)
 		_reset_hold_progress()
 		return
 	# 当前有效开启时间；受伤后按剩余生命比例线性缩短，生命归零会由伤害流程立即开启。
@@ -121,10 +131,14 @@ func set_open_interaction_active(active: bool, player: Node2D) -> void:
 	if not active:
 		_interaction_active = false
 		_interaction_player = null
+		# 取消或松开长按后立即停止进度回调，等待下一次交互重新启用。
+		set_process(false)
 		_reset_hold_progress()
 		return
 	_interaction_active = true
 	_interaction_player = player
+	# 长按请求生效后启用进度回调，实际距离仍由宝箱自身逐帧复核。
+	set_process(true)
 	if _interaction_label != null:
 		_interaction_label.visible = false
 
@@ -169,6 +183,7 @@ func _release_loot(broken_open: bool) -> void:
 		return
 	_opened = true
 	_interaction_active = false
+	set_process(false)
 	# 当前品质配置；用于抽取掉落数量并读取极品最低高品质数量。
 	var quality_config: Dictionary = QUALITY_CONFIGS.get(_quality_id, QUALITY_CONFIGS[QUALITY_COMMON]) as Dictionary
 	# 实际掉落数量；在当前品质闭区间内等概率抽取，极品额外请求至少 5 件高品质物品。

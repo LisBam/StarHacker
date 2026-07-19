@@ -242,7 +242,9 @@ func _materialize_record(record: Dictionary) -> bool:
 		return false
 	spawn_parent.add_child(monster)
 	monster.global_position = record.get("position", Vector2.ZERO)
-	if monster.has_method("set_target"):
+	if monster.has_method("set_primary_target"):
+		monster.call("set_primary_target", _target)
+	elif monster.has_method("set_target"):
 		monster.call("set_target", _target)
 	if monster.has_signal("died"):
 		monster.connect("died", Callable(self, "_on_materialized_monster_died").bind(monster), CONNECT_ONE_SHOT)

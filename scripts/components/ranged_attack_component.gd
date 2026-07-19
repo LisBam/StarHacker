@@ -47,6 +47,8 @@ var _active_combo_direction: Vector2 = Vector2.RIGHT
 var _active_combo_weapon: Resource
 ## 弹体偏移随机源；默认启动时随机化，每颗弹体独立生成受分层范围约束的角度偏移。
 var _deviation_random: RandomNumberGenerator = RandomNumberGenerator.new()
+## 枪口空间查询复用圆形；初始使用引擎默认半径，每次攻击查询前同步 muzzle_block_check_radius，避免每颗弹体重复分配 Shape2D 资源。
+var _muzzle_block_shape: CircleShape2D = CircleShape2D.new()
 
 ## 枪口节点缓存；默认按 muzzle_path 解析，允许为空并走备用距离，修改会影响弹体出生位置来源。
 @onready var _muzzle: Node2D = get_node_or_null(muzzle_path) as Node2D
@@ -54,11 +56,16 @@ var _deviation_random: RandomNumberGenerator = RandomNumberGenerator.new()
 
 func _ready() -> void:
 	_deviation_random.randomize()
+	# 组件初始没有冷却或连击状态，首次成功攻击会按需重新启用处理。
+	set_process(false)
 
 
 func _process(delta: float) -> void:
 	if _combo_rounds_remaining <= 0:
 		_cooldown_remaining = maxf(_cooldown_remaining - delta, 0.0)
+		if _cooldown_remaining <= 0.0:
+			# 空闲处理关闭；后续攻击会由 _start_cooldown 重新启用，不改变公开冷却状态。
+			set_process(false)
 		return
 	# 连击期间冷却保持满值；HUD 从首轮开始显示冷却覆盖，末轮完成后才开始正常减少。
 	_cooldown_remaining = _cooldown_duration
@@ -260,6 +267,7 @@ func _build_scatter_deviation_offsets_degrees(scatter_count: int, deviation_degr
 func _start_cooldown(duration: float) -> void:
 	_cooldown_remaining = maxf(duration, 0.0)
 	_cooldown_duration = maxf(duration, 0.0)
+	set_process(_cooldown_remaining > 0.0 or _combo_rounds_remaining > 0)
 
 
 func _weapon_has_attribute(weapon_data: Resource, property_name: StringName) -> bool:
@@ -305,8 +313,9 @@ func _is_muzzle_area_blocked(direction: Vector2, spawn_position: Vector2) -> boo
 		return false
 
 	# 枪口碰撞圆形；取值为临时 CircleShape2D，默认检测枪口是否已经在墙体内部。
-	var circle_shape: CircleShape2D = CircleShape2D.new()
-	circle_shape.radius = check_radius
+	# 当前局部变量引用组件私有 Shape2D；资源本体跨攻击复用，只更新查询半径以避免连续射击时产生短生命周期资源。
+	_muzzle_block_shape.radius = check_radius
+	var circle_shape: CircleShape2D = _muzzle_block_shape
 	# 枪口检测朝向；取值来自攻击方向，默认只用于构建 Transform2D。
 	var check_rotation: float = direction.angle() if not direction.is_zero_approx() else 0.0
 	# 枪口形状查询参数；取值为枪口圆形和环境掩码，默认用于阻止墙内生成弹体。

@@ -1276,6 +1276,9 @@ func use_repair_kit_with_result(repair_kit_resource: Resource, source_location: 
 	_queue_save_inventory()
 	_emit_storage_changed(source_location)
 	notify_weapon_runtime_state_changed(weapon_resource)
+	if _is_resource_equipped(weapon_resource):
+		# 已装备物品修复后必须立即刷新装备属性、套装门槛与战斗 HUD；仓库和背包物品只需保存自身耐久。
+		equipment_changed.emit()
 	if _run_active:
 		# 股市统计服务；只记录正式战斗内实际成功消耗的修复包，局外整备不会影响行情。
 		var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")

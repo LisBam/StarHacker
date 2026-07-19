@@ -51,11 +51,14 @@ var _disabled_overlay: ColorRect
 var _durability_bar: Control
 ## 当前交互动效补间；默认 null，新状态开始前停止旧补间避免缩放叠加。
 var _interaction_tween: Tween
+## 槽位背景样式实例；每个视图独占一份并在选中状态变化时更新边框，避免冷却重绘时重复创建 StyleBoxFlat。
+var _slot_style: StyleBoxFlat = StyleBoxFlat.new()
 
 
 func _ready() -> void:
 	custom_minimum_size = _display_size
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_refresh_slot_style()
 	_build_content()
 	_refresh_content_visuals()
 	queue_redraw()
@@ -96,14 +99,21 @@ func configure_compact_layout(display_size: Vector2, show_context_label: bool) -
 
 func set_visual_state(selected: bool, highlighted: bool) -> void:
 	## 更新选中与合法目标视觉；只重绘背景和边框。
+	if _selected == selected and _highlighted == highlighted:
+		return
 	_selected = selected
 	_highlighted = highlighted
+	_refresh_slot_style()
 	queue_redraw()
 
 
 func set_cooldown_ratio(cooldown_ratio: float) -> void:
 	## 设置武器冷却进度遮罩；技能整槽秒数遮罩由 set_state_overlay() 独立控制。
-	_progress_ratio = clampf(cooldown_ratio, 0.0, 1.0)
+	# 标准冷却比例；限制在 0 至 1，相同值不重复请求 CanvasItem 重绘。
+	var resolved_ratio: float = clampf(cooldown_ratio, 0.0, 1.0)
+	if is_equal_approx(_progress_ratio, resolved_ratio):
+		return
+	_progress_ratio = resolved_ratio
 	queue_redraw()
 
 
@@ -111,13 +121,18 @@ func set_state_overlay(visible: bool, overlay_color: Color, overlay_text: String
 	## 设置技能冷却或后续段状态遮罩；文字始终居中，不参与实际计时。
 	if _state_overlay == null or _state_label == null:
 		return
-	_state_overlay.visible = visible
-	_state_overlay.color = overlay_color
-	_state_label.text = overlay_text
+	if _state_overlay.visible != visible:
+		_state_overlay.visible = visible
+	if _state_overlay.color != overlay_color:
+		_state_overlay.color = overlay_color
+	if _state_label.text != overlay_text:
+		_state_label.text = overlay_text
 
 
 func set_disabled_state(disabled: bool) -> void:
 	## 设置不可选覆盖状态；禁用时立即恢复原始缩放。
+	if _disabled == disabled:
+		return
 	_disabled = disabled
 	if _disabled_overlay != null:
 		_disabled_overlay.visible = _disabled
@@ -254,11 +269,8 @@ func _draw() -> void:
 	# 槽位矩形；技能与武器共享相同背景、边框、圆角与高亮规则。
 	var slot_rect: Rect2 = Rect2(Vector2.ZERO, size)
 	# 槽位样式；每次绘制按当前选中状态选择边框颜色，不保存跨实例共享可变资源。
-	var slot_style: StyleBoxFlat = StyleBoxFlat.new()
-	slot_style.bg_color = NORMAL_BACKGROUND_COLOR
-	slot_style.border_color = SELECTED_BORDER_COLOR if _selected else NORMAL_BORDER_COLOR
-	slot_style.set_border_width_all(2)
-	slot_style.set_corner_radius_all(6)
+	# 当前样式由本实例独占并在状态变化时提前更新，绘制阶段只复用结果。
+	var slot_style: StyleBoxFlat = _slot_style
 	draw_style_box(slot_style, slot_rect)
 	if _highlighted:
 		draw_rect(slot_rect, HIGHLIGHT_BACKGROUND_COLOR, true)
@@ -266,6 +278,14 @@ func _draw() -> void:
 		# 进度遮罩矩形；从底部向上覆盖剩余比例，与原武器冷却语义一致。
 		var progress_height: float = size.y * _progress_ratio
 		draw_rect(Rect2(Vector2(0.0, size.y - progress_height), Vector2(size.x, progress_height)), PROGRESS_OVERLAY_COLOR, true)
+
+
+func _refresh_slot_style() -> void:
+	## 刷新当前实例的背景与边框样式；只在初始化或选中状态变化时调用，冷却动画重绘直接复用结果。
+	_slot_style.bg_color = NORMAL_BACKGROUND_COLOR
+	_slot_style.border_color = SELECTED_BORDER_COLOR if _selected else NORMAL_BORDER_COLOR
+	_slot_style.set_border_width_all(2)
+	_slot_style.set_corner_radius_all(6)
 
 
 func _play_host_scale(host_control: Control, target_scale: Vector2) -> void:

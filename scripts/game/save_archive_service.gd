@@ -2,6 +2,7 @@ extends Node
 
 ## 存档归档服务统一负责把多个独立服务拥有的持久化文件封装为单文件，并安全恢复到用户目录。
 ## 本服务不解析任何业务存档内容，也不替代各服务的保存职责；导出只读取已经落盘的数据，导入后通过重启让各服务重新加载。
+## 删除功能补充：服务按同一白名单停用活动文件，并通过跨重启保护标记保证旧运行时状态不能重新落盘生效。
 
 ## 归档格式版本；默认 1，用于拒绝未来不兼容的结构，修改时必须同步迁移规则与框架文档。
 const ARCHIVE_VERSION: int = 1
@@ -11,9 +12,16 @@ const ARCHIVE_EXTENSION: String = "lisbamsave"
 const BACKUP_DIRECTORY_PREFIX: String = "save_import_backup_"
 ## 临时导入文件后缀；默认 temp_import，所有文件验证并写入成功后才替换正式存档。
 const IMPORT_TEMPORARY_SUFFIX: String = ".temp_import"
+## 临时删除文件后缀；删除时先把全部活动存档移出正式路径，全部成功后再清理，失败时可统一回滚。
+const DELETE_TEMPORARY_SUFFIX: String = ".temp_delete"
+## 删除待处理标记；删除确认后保留到下一次启动清理完成，用于拦截退出阶段可能发生的旧状态回写。
+const DELETE_PENDING_MARKER_PATH: String = "user://save_delete_pending_v1.marker"
+## 删除待处理标记内容；只用于人工识别文件用途，不参与业务状态、版本或兼容判断。
+const DELETE_PENDING_MARKER_CONTENT: String = "Star Hacker save deletion pending."
 ## 游戏英文名；写入归档元数据便于跨语言环境识别，不参与兼容校验或导入资格判断。
 const GAME_ENGLISH_NAME: String = "Star Hacker"
 ## 项目允许导出与导入的存档文件白名单；新增持久化服务时必须同步追加，避免遗漏或允许任意路径写入。
+## 删除功能补充：同一白名单也是活动存档删除边界，非白名单文件与历史导入备份目录不受影响。
 const SAVE_FILE_NAMES: Array[String] = [
 	"character_unlocks.json",
 	"input_bindings.cfg",
@@ -23,6 +31,12 @@ const SAVE_FILE_NAMES: Array[String] = [
 	"stock_market_state.json",
 	"mining_farm_state.json",
 ]
+
+
+func _enter_tree() -> void:
+	## 在其他持久化 AutoLoad 读取文件前完成上次确认的删除，确保退出阶段回写也不会恢复旧档。
+	if FileAccess.file_exists(DELETE_PENDING_MARKER_PATH):
+		_complete_pending_save_deletion()
 
 
 func export_archive(destination_path: String) -> Dictionary:
@@ -155,10 +169,138 @@ func import_archive(source_path: String) -> Dictionary:
 	return {"success": true, "message": "存档导入成功，游戏将重启。", "backup_path": backup_directory}
 
 
+func delete_save_data() -> Dictionary:
+	## 删除全部白名单活动存档；先统一改名暂存，任一改名失败时回滚，避免下次启动读取半套存档。
+	# 删除待处理标记写入结果；标记必须先落盘，保证意外退出或旧状态回写会在下一次启动继续清理。
+	var marker_result: Error = _write_delete_pending_marker()
+	if marker_result != OK:
+		return _build_result(false, "无法创建删除保护标记，当前存档未修改。")
+	# 已暂存记录；每项保存原路径与临时路径，供失败回滚和成功清理使用。
+	var staged_records: Array[Dictionary] = []
+	for file_name in SAVE_FILE_NAMES:
+		# 正式存档路径；只由固定白名单拼接，删除入口不接受任何外部文件名或目录。
+		var active_path: String = "user://" + file_name
+		# 删除临时路径；与正式文件位于同一目录，改名不会跨文件系统。
+		var staged_path: String = active_path + DELETE_TEMPORARY_SUFFIX
+		# 上次异常退出遗留的临时删除文件；它不参与读档，但本次操作仍应先清理以保证删除结果完整。
+		if FileAccess.file_exists(staged_path):
+			# 遗留临时文件清理结果；无法清理时不触碰当前活动存档，避免覆盖或混合未知旧数据。
+			var stale_remove_result: Error = DirAccess.remove_absolute(ProjectSettings.globalize_path(staged_path))
+			if stale_remove_result != OK:
+				return _build_delete_staging_failure_result(staged_records, "无法清理旧的删除临时文件：%s" % file_name)
+		if not FileAccess.file_exists(active_path):
+			continue
+		# 暂存改名结果；只有所有现有活动文件都离开正式路径后才进入永久清理阶段。
+		var stage_result: Error = DirAccess.rename_absolute(ProjectSettings.globalize_path(active_path), ProjectSettings.globalize_path(staged_path))
+		if stage_result != OK:
+			return _build_delete_staging_failure_result(staged_records, "删除存档失败：%s" % file_name)
+		staged_records.append({"active_path": active_path, "staged_path": staged_path})
+
+	# 临时文件清理失败列表；正式路径已经全部为空，残留临时文件不会被任何业务服务读取。
+	var cleanup_failures: Array[String] = []
+	for staged_record in staged_records:
+		# 暂存文件路径；来源只可能是上方固定白名单改名结果。
+		var staged_path: String = str(staged_record.get("staged_path", ""))
+		if staged_path.is_empty() or not FileAccess.file_exists(staged_path):
+			continue
+		# 永久清理结果；失败时记录明确文件名，但不把旧数据恢复到活动路径。
+		var remove_result: Error = DirAccess.remove_absolute(ProjectSettings.globalize_path(staged_path))
+		if remove_result != OK:
+			cleanup_failures.append(staged_path.get_file().trim_suffix(DELETE_TEMPORARY_SUFFIX))
+	if not cleanup_failures.is_empty():
+		return _build_result(true, "活动存档已删除，游戏重启后将继续清理临时文件：%s" % "、".join(cleanup_failures))
+
+	return _build_result(true, "存档已删除，游戏将重启。")
+
+
 func restart_game() -> void:
 	## 请求桌面平台在退出后重启当前项目，使新导入存档由全部 AutoLoad 从干净状态重新读取。
+	## 删除功能补充：删除成功时同样使用本入口，让下一进程在业务读档前消费保护标记并初始化默认状态。
 	OS.set_restart_on_exit(true)
 	get_tree().quit()
+
+
+func _build_delete_staging_failure_result(staged_records: Array[Dictionary], failure_message: String) -> Dictionary:
+	## 处理删除暂存阶段失败；只有文件回滚与保护标记解除都成功时才允许报告“当前存档已保留”。
+	# 暂存文件回滚是否完整成功；false 表示部分活动文件已经无法安全恢复，必须继续执行删除保护。
+	var rollback_succeeded: bool = _rollback_staged_save_files(staged_records)
+	# 保护标记移除结果；仅在回滚完整时尝试解除，失败则保留标记并通过立即重启完成确定性删除。
+	var marker_remove_result: Error = _remove_delete_pending_marker() if rollback_succeeded else FAILED
+	if rollback_succeeded and marker_remove_result == OK:
+		return _build_result(false, "%s，当前存档已保留。" % failure_message)
+	return _build_result(true, "%s，无法安全恢复原状态，游戏将重启并完成存档删除。" % failure_message)
+
+
+func _rollback_staged_save_files(staged_records: Array[Dictionary]) -> bool:
+	## 把尚未进入永久清理阶段的临时文件恢复到原路径；按逆序处理并返回是否完整恢复。
+	# 回滚是否完整成功；默认 true，任一路径冲突或改名失败后变为 false，调用方不得再承诺保留存档。
+	var rollback_succeeded: bool = true
+	for record_index in range(staged_records.size() - 1, -1, -1):
+		# 暂存记录；键只由 delete_save_data() 创建，不接受归档或 UI 外部数据。
+		var staged_record: Dictionary = staged_records[record_index]
+		# 原活动路径；回滚前必须为空，避免覆盖删除流程之外新生成的数据。
+		var active_path: String = str(staged_record.get("active_path", ""))
+		# 临时路径；存在时才尝试改回正式文件名。
+		var staged_path: String = str(staged_record.get("staged_path", ""))
+		if active_path.is_empty() or staged_path.is_empty():
+			rollback_succeeded = false
+			continue
+		if not FileAccess.file_exists(staged_path):
+			continue
+		if FileAccess.file_exists(active_path):
+			rollback_succeeded = false
+			continue
+		# 回滚结果；失败表示底层文件系统异常，记录警告供开发者定位但不继续覆盖其他路径。
+		var rollback_result: Error = DirAccess.rename_absolute(ProjectSettings.globalize_path(staged_path), ProjectSettings.globalize_path(active_path))
+		if rollback_result != OK:
+			rollback_succeeded = false
+			push_warning("删除存档回滚失败：%s" % active_path.get_file())
+	return rollback_succeeded
+
+
+func _write_delete_pending_marker() -> Error:
+	## 写入一次性删除保护标记；文件成功关闭后才返回 OK，调用方据此决定是否允许触碰活动存档。
+	# 标记文件；位于固定 user:// 路径，不接受外部路径或文件名。
+	var marker_file: FileAccess = FileAccess.open(DELETE_PENDING_MARKER_PATH, FileAccess.WRITE)
+	if marker_file == null:
+		return FileAccess.get_open_error()
+	marker_file.store_string(DELETE_PENDING_MARKER_CONTENT)
+	marker_file.close()
+	return OK
+
+
+func _remove_delete_pending_marker() -> Error:
+	## 删除一次性保护标记；标记不存在视为已经完成，不影响删除失败后的安全回滚。
+	if not FileAccess.file_exists(DELETE_PENDING_MARKER_PATH):
+		return OK
+	return DirAccess.remove_absolute(ProjectSettings.globalize_path(DELETE_PENDING_MARKER_PATH))
+
+
+func _complete_pending_save_deletion() -> void:
+	## 清除活动文件、导入临时文件和删除临时文件；全部成功后才移除保护标记。
+	# 清理失败路径；只记录固定白名单派生路径，非空表示下次启动仍需继续尝试。
+	var cleanup_failures: Array[String] = []
+	for file_name in SAVE_FILE_NAMES:
+		# 当前模块相关路径；活动文件与两种临时文件都可能在异常退出后残留。
+		var related_paths: Array[String] = [
+			"user://" + file_name,
+			"user://" + file_name + IMPORT_TEMPORARY_SUFFIX,
+			"user://" + file_name + DELETE_TEMPORARY_SUFFIX,
+		]
+		for related_path in related_paths:
+			if not FileAccess.file_exists(related_path):
+				continue
+			# 路径清理结果；失败时保留标记并继续处理其他模块，避免单文件异常阻断整体清理。
+			var remove_result: Error = DirAccess.remove_absolute(ProjectSettings.globalize_path(related_path))
+			if remove_result != OK:
+				cleanup_failures.append(related_path.get_file())
+	if not cleanup_failures.is_empty():
+		push_warning("存档删除启动清理未完成：%s" % "、".join(cleanup_failures))
+		return
+	# 保护标记移除结果；失败时下次启动会幂等重复清理，不会恢复任何已经删除的数据。
+	var marker_remove_result: Error = _remove_delete_pending_marker()
+	if marker_remove_result != OK:
+		push_warning("存档删除保护标记无法移除，将在下次启动重试。")
 
 
 func _create_unique_backup_directory() -> String:

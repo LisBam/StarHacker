@@ -19,7 +19,8 @@
 
 | 服务 | 核心职责 | 持久化 |
 | --- | --- | --- |
-| `SaveLocationMigration` | 历史迁移实现占位；`project.godot` 注册行已注释，不参与当前 AutoLoad 启动 | 无新增持久化；既有完成标记不再读取 |
+| `SaveArchiveService` | 作为首个 AutoLoad，按白名单导出、导入或删除全部活动存档；导入前备份，导入或删除成功后重启，删除重启时在其他服务读档前完成保护性清理 | 玩家选择的 `.lisbamsave`；导入备份位于 `user://save_import_backup_<时间戳>/`；删除保护标记位于 `user://save_delete_pending_v1.marker` |
+| `SaveLocationMigration` | 历史迁移实现占位；未在 `project.godot` 注册，不参与当前 AutoLoad 启动 | 无新增持久化；既有完成标记不再读取 |
 | `ContentCatalog` | 启动时扫描角色、武器、装备、道具、怪物和扩展包清单，按角色解锁状态过滤内容池 | 无 |
 | `SessionState` | 保存当前游戏模式、已确认角色与永久角色/扩展包解锁状态 | `user://character_unlocks.json`；角色选择和解锁永久保存，模式仅运行期 |
 | `InputBindings` | 管理默认与自定义输入映射 | `user://input_bindings.cfg` |
@@ -28,7 +29,6 @@
 | `ShopService` | 生成普通商店与灰市库存，维护刷新状态 | `user://shop_state.json` |
 | `StockMarketService` | 维护行情、事件、证券币和对局行为影响 | `user://stock_market_state.json` |
 | `MiningFarmService` | 维护算力币、矿场资产、在线收益和临时增益 | `user://mining_farm_state.json` |
-| `SaveArchiveService` | 按白名单封装与恢复全部已落盘存档，不解析业务内容；导入前备份并在成功后重启 | 玩家选择的 `.lisbamsave`；导入备份位于 `user://save_import_backup_<时间戳>/` |
 | `SceneTransition` | 统一场景切换和黑屏过渡 | 无 |
 
 服务是数据所有者，面板只读取快照、发出命令并响应信号。新增跨场景状态时先确认归属，不得在多个 UI 脚本中各保存一份可变副本。
@@ -89,11 +89,11 @@
 - `CombatHud` 运行时实例化角色系统的当前角色模式，负责 O 键打开、关闭、输入锁定和场景树暂停；角色档案、属性条与技能卡片仍由角色系统从 `SessionState` 读取，HUD 不保存副本。
 - 战斗常驻 HUD 将技能栏放在屏幕左下角、武器栏放在屏幕右下角，角色名字、生命与能量独立保留在底部中心；常驻 HUD 节点必须位于全部交互遮罩之前，菜单显示时不依赖逐项隐藏也不会覆盖菜单内容。
 - 右下常驻武器栏由 `CombatHud` 直接创建 `CombatHudSlotView` 并读取装备组件快照，顶部使用与技能按键相同的居中区域显示“远程 1 / 远程 2 / 近战”，下方显示武器名、能耗、耐久、当前手持高亮和攻击冷却；它不复用 `WeaponSlotControl` 或 `ItemCardView`，装备、卸下、修复、强化和拖拽操作只存在于背包等交互界面。
-- 主菜单与暂停设置复用 `SaveTransferControl` 提供存档导出、导入和文件选择；控件只调用 `SaveArchiveService`，不直接访问各业务存档。
+- 主菜单与暂停设置复用 `SaveTransferControl` 提供存档导出、导入、删除和文件选择；控件只调用 `SaveArchiveService`，不直接访问各业务存档。`SaveDeletionConfirmationDialog` 独立负责“确认删除”精确输入校验，不拥有文件删除权限。
 - `SharedBackpackPanel` 同时服务主菜单和战斗 HUD；上下文只决定丢弃和局外仓库快捷入口等少量业务差异，容量标签始终读取 `GlobalInventory` 的真实背包组数。
 - `InventoryQuery` 为仓库、背包、商店、锻造与结算提供无副作用的分类、强化词条筛选、套装筛选、搜索和排序结果；`EquipmentSetFilterControl` 统一维护套装多选 UI，不拥有库存数据。
 - `ItemCardView`、`WeaponDurabilityBar` 和 `ItemDetailFormatter` 统一物品展示，宿主只提供操作协议。
-- `CommonConfirmationDialog`、`SellQuantityDialog`、`SecuritiesTransferDialog`、`EnhancementResultDialog` 和 `ItemActionPopup` 分别承载明确的弹窗交互。
+- `CommonConfirmationDialog`、`SaveDeletionConfirmationDialog`、`SellQuantityDialog`、`SecuritiesTransferDialog`、`EnhancementResultDialog` 和 `ItemActionPopup` 分别承载明确的弹窗交互。
 - `UiStyleGuide`、`DialogOuterFrame`、`ProgressSliderVisual` 和 `CharacterSkillCard` 分别统一窗口、弹窗、滑条与角色技能详情视觉，规则见 `docs/ui_style.md`。
 - 背包、仓库和锻造等库存长列表只在自身可见时消费库存变化信号；隐藏期间仅记录待刷新状态，重新打开后从 `GlobalInventory` 读取一次最新快照。同一帧连续出现库存、装备、仓库或星穹信号时，每个可见面板最多重建 1 次列表。
 - 可见的仓库与共享背包按资源实例身份复用 `StorageItemControl`：容器内移动只更新真实来源下标，数量或状态变化只刷新对应卡片，跨容器移动只创建目标新增卡片并释放来源移出卡片；未变化物品不重新创建视觉节点、详情文本或信号连接。
@@ -173,12 +173,15 @@ ContentCatalog 模板
 - `SessionState` 把已解锁角色稳定 ID 与最后确认的 `selected_character_id` 写入 `user://character_unlocks.json`；角色档案中的 `unlocked_by_default` 每次启动都会加入当前默认解锁集合，无效或已锁定的角色选择回退为星。
 - 资源实例同时保存稳定 ID、资源路径和运行时字段，用于恢复当前版本创建的独立物品实例。
 - 存档版本常量只标识当前写入结构。项目尚未发布正式版本，库存补发、强化公式转换、商店重建、股市进度缩放、旧堆叠拆分、图鉴补账和项目目录复制等迁移入口均已停用。
-- `SaveLocationMigration` 脚本保留为历史实现参考，`project.godot` 注册行与脚本内调用均已注释；启动时不会实例化该服务，也不会读取或复制同级旧项目目录文件。
+- `SaveLocationMigration` 脚本保留为历史实现参考，但未在 `project.godot` 注册且脚本内迁移调用已注释；启动时不会实例化该服务，也不会读取或复制同级旧项目目录文件。
 - 普通高频变化可合并写入；货币兑换、股票成交等跨资产操作应立即保存，缩短文件间状态不一致窗口。
 - 测试不得直接覆盖日常 `user://` 数据，具体隔离要求见 `docs/功能验证测试规范.md`。
 - 存档导出使用默认名 `Star_Hacker_save_<本地时间>.lisbamsave`，保存 `character_unlocks.json`、`input_bindings.cfg`、`debug_settings.cfg`、`global_inventory.json`、`shop_state.json`、`stock_market_state.json` 与 `mining_farm_state.json` 的原始字节；尚未生成的文件不写入归档。根元数据同时保存项目中文名与英文名，只用于人工识别，不参与兼容校验。
 - 存档导入只接受格式版本 1 与固定文件白名单。服务先完成 JSON、文件名和 Base64 内容校验，再写入同目录临时文件，完整备份当前存档后替换正式文件；归档中缺失的模块文件会按快照语义移除，成功后重启游戏统一加载。
+- 存档删除使用与导出、导入相同的七个文件白名单。服务先写入 `save_delete_pending_v1.marker`，再把全部现有活动存档改名到同目录 `.temp_delete` 路径；任一暂存失败时统一回滚，全部暂存成功后永久移除并立即重启。保护标记保留到下一次启动，`SaveArchiveService` 作为首个 AutoLoad 会在任何业务服务读档前再次删除活动文件、`.temp_import` 与 `.temp_delete` 残留，完成后移除标记，因此退出阶段的旧状态回写也不能恢复被删除存档。
+- 存档删除只清理当前项目用户目录中的活动白名单文件和内部临时文件，不删除玩家自行导出的 `.lisbamsave`，也不删除历史导入备份目录；这些外部或备份快照只有玩家主动导入时才会重新成为活动存档。
 - 战斗暂停设置导出只包含已经落盘的数据，不强制保存正式战斗中的临时背包、装备与耐久变化，继续遵守本局成功、失败或正常退出结算后统一持久化的所有权规则。
+- 战斗暂停设置删除会丢弃当前活动存档及尚未落盘的本局内存变化，不执行战斗结算；重启后全部服务按首次启动默认值初始化。
 
 ## 6. 参数管理
 

@@ -79,7 +79,7 @@ func _build_interface() -> void:
 	_title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_title_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_title_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.ACCENT_COLOR)
+	UI_STYLE_GUIDE.apply_title_label(_title_label)
 	_title_label.add_theme_font_size_override("font_size", UI_STYLE_GUIDE.DIALOG_TITLE_FONT_SIZE)
 	_title_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	_title_label.offset_left = UI_STYLE_GUIDE.DIALOG_TITLE_SIDE_PADDING

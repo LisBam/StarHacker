@@ -78,6 +78,10 @@ func _ready() -> void:
 	_build_interface()
 	_interface_ready = true
 	_refresh_display()
+	# UI 风格服务；主题根重建完成后才同步局部卡片样式，避免在主题通知的递归阶段重复创建 StyleBox。
+	var ui_style_settings: Node = get_tree().root.get_node_or_null("UiStyleSettings")
+	if ui_style_settings != null and ui_style_settings.has_signal("ui_style_changed") and not ui_style_settings.is_connected("ui_style_changed", Callable(self, "_on_ui_style_changed")):
+		ui_style_settings.connect("ui_style_changed", Callable(self, "_on_ui_style_changed"))
 
 
 func configure(skill_name: String, skill_description: String, skill_type: String, cooldown_seconds: float, energy_cost: int) -> void:
@@ -157,7 +161,7 @@ func _build_interface() -> void:
 	_description_label = Label.new()
 	_description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_description_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_description_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.SECONDARY_TEXT_COLOR)
+	UI_STYLE_GUIDE.apply_secondary_label(_description_label)
 	card_content.add_child(_description_label)
 
 
@@ -225,8 +229,8 @@ func _apply_card_style(highlighted: bool) -> void:
 	## 根据展开或悬停状态更新整体边框；尺寸与内容留白保持不变，避免列表跳动。
 	# 卡片样式；普通状态使用弱分区色，高亮状态提高背景和边框亮度。
 	var card_style: StyleBoxFlat = StyleBoxFlat.new()
-	card_style.bg_color = UI_STYLE_GUIDE.CHARACTER_SKILL_CARD_HIGHLIGHT_COLOR if highlighted else UI_STYLE_GUIDE.SECTION_BACKGROUND_COLOR
-	card_style.border_color = UI_STYLE_GUIDE.ACCENT_COLOR if highlighted else UI_STYLE_GUIDE.SECTION_BORDER_COLOR
+	card_style.bg_color = UI_STYLE_GUIDE.get_character_skill_card_highlight_color() if highlighted else UI_STYLE_GUIDE.get_section_background_color()
+	card_style.border_color = UI_STYLE_GUIDE.get_accent_color() if highlighted else UI_STYLE_GUIDE.get_section_border_color()
 	card_style.set_border_width_all(CARD_HIGHLIGHT_BORDER_WIDTH if highlighted else CARD_NORMAL_BORDER_WIDTH)
 	card_style.set_corner_radius_all(UI_STYLE_GUIDE.SECTION_CORNER_RADIUS)
 	add_theme_stylebox_override("panel", card_style)
@@ -236,7 +240,7 @@ func _apply_header_style(hovered: bool) -> void:
 	## 更新标题行背景；悬停时显示弱青蓝底，普通状态保持透明以突出整体卡片边框。
 	# 标题样式；透明边框避免标题行与卡片整体边框形成重复轮廓。
 	var header_style: StyleBoxFlat = StyleBoxFlat.new()
-	header_style.bg_color = UI_STYLE_GUIDE.CHARACTER_SKILL_HEADER_HOVER_COLOR if hovered else Color.TRANSPARENT
+	header_style.bg_color = UI_STYLE_GUIDE.get_character_skill_header_hover_color() if hovered else Color.TRANSPARENT
 	header_style.set_corner_radius_all(UI_STYLE_GUIDE.SECTION_CORNER_RADIUS)
 	_header_panel.add_theme_stylebox_override("panel", header_style)
 
@@ -280,4 +284,11 @@ func _on_header_mouse_entered() -> void:
 
 func _on_header_mouse_exited() -> void:
 	_header_hovered = false
+	_refresh_expanded_state()
+
+
+func _on_ui_style_changed(_style_id: String) -> void:
+	## 在风格服务完成根主题刷新后重建局部卡片样式；技能徽章的业务颜色不在此处改写。
+	if not _interface_ready or not is_inside_tree() or _header_panel == null or not is_instance_valid(_header_panel):
+		return
 	_refresh_expanded_state()

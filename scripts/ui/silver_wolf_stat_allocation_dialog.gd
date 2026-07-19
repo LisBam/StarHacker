@@ -154,7 +154,7 @@ func _build_content() -> void:
 		_attribute_sliders[attribute_key] = attribute_slider
 	_total_label = Label.new()
 	_total_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_total_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.ACCENT_COLOR)
+	UI_STYLE_GUIDE.apply_title_label(_total_label)
 	_content_box.add_child(_total_label)
 
 

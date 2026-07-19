@@ -24,7 +24,7 @@
 | `ContentCatalog` | 启动时扫描角色、武器、装备、道具、怪物和扩展包清单，按角色解锁状态过滤内容池 | 无 |
 | `SessionState` | 保存当前游戏模式、已确认角色与永久角色/扩展包解锁状态 | `user://character_unlocks.json`；角色选择和解锁永久保存，模式仅运行期 |
 | `InputBindings` | 管理默认与自定义输入映射 | `user://input_bindings.cfg` |
-| `UiStyleSettings` | 管理“黑蓝科技风 / 黑白简约风”选择、即时主题刷新与 UI 灰度覆盖 | `user://ui_style_settings.cfg` |
+| `UiStyleSettings` | 管理“黑蓝科技风 / 黑白简约风”选择与通用控件主题即时刷新，不覆盖业务语义颜色或节点材质 | `user://ui_style_settings.cfg` |
 | `DebugSettings` | 管理开发者调试选项 | `user://debug_settings.cfg` |
 | `GlobalInventory` | 拥有星穹、仓库、背包、装备槽、持仓、永久图鉴发现记录和战斗结算数据 | `user://global_inventory.json` |
 | `ShopService` | 生成普通商店与灰市库存，维护刷新状态 | `user://shop_state.json` |
@@ -76,11 +76,11 @@
 
 ### 3.3 世界与敌人层
 
-- `GameWorld` 负责地图边界、独立背景网格绘制、环境生成、探索记录、撤离点、宝箱、掉落池、虚拟人口目标和共享导航缓存；怪物类型按各场景根节点的 `spawn_weight` 占比抽取，背景网格间距不参与玩法边界或导航计算。
-- `MonsterSimulationManager` 只负责虚拟敌人记录与真实节点之间的分批物化和休眠。
+- `GameWorld` 负责地图边界、独立背景网格绘制、环境生成、探索记录、撤离点、宝箱、掉落池、虚拟人口目标和共享导航缓存；怪物类型按各场景根节点的 `spawn_weight` 占比抽取，背景网格间距不参与玩法边界或导航计算。它还接收怪物遇敌事件并交给 `GlobalInventory` 持久化图鉴发现状态。
+- `MonsterSimulationManager` 只负责虚拟敌人记录与真实节点之间的分批物化和休眠，并转发真实怪物的遇敌事件，不访问存档服务。
 - `BasicMonster` 组合感知、战术和移动组件；`RangedMonster` 只增加安全距离与射击行为。
 - `WeaponDrop` 是统一地面物品载体，可承载武器、装备、强化石和道具的独立资源副本；武器与自然掉落默认数量为 1，玩家整组丢弃的可堆叠资源由单个节点保存 1 至 10 的数量并在拾取时原子合并。
-- 虚拟敌人物化时优先调用 `set_primary_target()`，确保组合根同时保存长期玩家目标与当前目标；只有不支持该协议的自定义节点才回退 `set_target()`。
+- 虚拟敌人物化时优先调用 `set_primary_target()`，确保组合根同时保存长期玩家目标与当前目标；只有不支持该协议的自定义节点才回退 `set_target()`。带有稳定 `monster_id` 的基础怪物会在有效玩家目标注入时发出遇敌信号，重复物化由库存服务按 ID 去重。
 - 未交互宝箱不注册逐帧处理；HUD 以 0.12 秒默认批次刷新附近掉落物与宝箱目标，并在同一批次复用掉落物查询结果。按下或松开拾取键仍即时开始或停止已选宝箱交互，长按期间继续逐帧复核新掉落物以维持拾取优先级。
 
 敌人状态机与加载协议见 `docs/enemy_ai.md`，掉落概率、人口曲线和撤离数值见机制总表。
@@ -88,14 +88,14 @@
 ### 3.4 UI 层
 
 - `CombatHud` 负责局内信息、暂停、地图、拾取提示、物资撤离和结算编排，不直接拥有库存数据。
-- `EncyclopediaPanel` 只读取 `ContentCatalog` 的全量武器、装备与道具模板，并通过 `GlobalInventory` 的稳定发现记录决定显示正式信息或“？？？”。左侧列表只负责选择当前条目，右侧完整详情复用 `ItemDetailFormatter`；关键词筛选匹配名称、类型和说明，条目固定按基础内容、`stelle`（星）扩展包、其余扩展包目录顺序分组，并在每个扩展包前显示标题分割。组内装备按套装聚合并固定为头部、躯干、腿部、脚部；资源按初级、中级、高级、极品排列，无法识别品质时回退名称排序。它不复制物品数值或规则、不修改库存，也不把浏览、商店预览或临时快照视为获得。
+- `EncyclopediaPanel` 读取 `ContentCatalog` 的全量武器、装备、道具与怪物模板，并通过 `GlobalInventory` 的稳定发现记录决定显示正式信息或“？？？”。怪物只在离树场景实例中读取稳定 ID、说明和基础属性，首次有效遇敌后解锁；左侧列表只负责选择当前条目，右侧物品详情复用 `ItemDetailFormatter`，怪物详情显示其固定基础数值。关键词筛选匹配名称、类型和说明，条目固定按基础内容、`stelle`（星）扩展包、其余扩展包目录顺序分组，并在每个扩展包前显示标题分割。组内装备按套装聚合并固定为头部、躯干、腿部、脚部；资源按初级、中级、高级、极品排列，无法识别品质时回退名称排序。它不复制物品数值或规则、不修改库存，也不把浏览、商店预览或临时快照视为获得。
 - `CombatHud` 运行时实例化角色系统的当前角色模式，负责 O 键打开、关闭、输入锁定和场景树暂停；角色档案、属性条与技能卡片仍由角色系统从 `SessionState` 读取，HUD 不保存副本。
 - 战斗常驻 HUD 将技能栏放在屏幕左下角、武器栏放在屏幕右下角，角色名字、生命与能量独立保留在底部中心；常驻 HUD 节点必须位于全部交互遮罩之前，菜单显示时不依赖逐项隐藏也不会覆盖菜单内容。
 - 右下常驻武器栏由 `CombatHud` 直接创建 `CombatHudSlotView` 并读取装备组件快照，顶部使用与技能按键相同的居中区域显示“远程 1 / 远程 2 / 近战”，下方显示武器名、能耗、耐久、当前手持高亮和攻击冷却；它不复用 `WeaponSlotControl` 或 `ItemCardView`，装备、卸下、修复、强化和拖拽操作只存在于背包等交互界面。
 - 主菜单与暂停设置复用 `SaveTransferControl` 提供存档导出、导入、删除和文件选择；控件只调用 `SaveArchiveService`，不直接访问各业务存档。`SaveDeletionConfirmationDialog` 独立负责“确认删除”精确输入校验，不拥有文件删除权限。
 - `SharedBackpackPanel` 同时服务主菜单和战斗 HUD；上下文只决定丢弃和局外仓库快捷入口等少量业务差异，容量标签始终读取 `GlobalInventory` 的真实背包组数。
 - `InventoryQuery` 为仓库、背包、商店、锻造与结算提供无副作用的分类、强化词条筛选、套装筛选、搜索和排序结果；`EquipmentSetFilterControl` 统一维护套装多选 UI，不拥有库存数据。
-- `ItemCardView`、`WeaponDurabilityBar` 和 `ItemDetailFormatter` 统一物品展示，宿主只提供操作协议。
+- `ItemCardView`、`WeaponDurabilityBar` 和 `ItemDetailFormatter` 统一物品展示，宿主只提供操作协议。`ItemCardView` 和 `CombatHudSlotView` 通过 `UiStyleGuide` 切换卡片表面色板，耐久和其他业务语义色不参与主题替换。
 - `CommonConfirmationDialog`、`SaveDeletionConfirmationDialog`、`SellQuantityDialog`、`SecuritiesTransferDialog`、`EnhancementResultDialog` 和 `ItemActionPopup` 分别承载明确的弹窗交互。
 - `UiStyleSettings`、`UiStyleSelector`、`UiStyleGuide`、`DialogOuterFrame`、`ProgressSliderVisual` 和 `CharacterSkillCard` 分别统一风格状态、设置入口、窗口、弹窗、滑条与角色技能详情视觉，规则见 `docs/ui_style.md`。
 - 背包、仓库和锻造等库存长列表只在自身可见时消费库存变化信号；隐藏期间仅记录待刷新状态，重新打开后从 `GlobalInventory` 读取一次最新快照。同一帧连续出现库存、装备、仓库或星穹信号时，每个可见面板最多重建 1 次列表。
@@ -212,11 +212,11 @@ ContentCatalog 模板
 - 正式战斗中的普通拾取、丢弃、装备与耐久变化先写入 `GlobalInventory` 内存状态，不为每次操作重复序列化包含仓库的完整存档；成功撤离、失败或正常退出结算后统一落盘。物资撤离点已经送回仓库的资产使用强制保存路径，不等待本局最终结算。
 - 正式战斗失败结算由 `GlobalInventory` 按所有权位置统一执行：背包堆叠按物品单位独立抽取，武器栏与四个防具装备槽按每件物品独立抽取；实际遗失条目统一进入结算列表、灰市快照和最终存档，HUD 只负责根据死亡或提前逃跑传入两类保留率。
 - `GlobalInventory` 对背包执行 50 组原子容量预检，并把所有正式可堆叠资源限制为每组 10 件；武器和装备始终单件成组。读档数量直接限制到现行 10 件上限，不执行历史大堆叠拆分或溢出转仓库。
-- `user://global_inventory.json` 只能由 `/root/GlobalInventory` AutoLoad 写入；独立测试实例、临时验证脚本和普通场景节点没有持久化权限。库存服务只维护这一份主存档，不自动生成额外恢复或备份文件。当前存档显式保存稳定图鉴发现键、强化累计、强化次数、二手状态和耐久字段；读档只恢复这些现行字段，不根据持有物品补建图鉴，也不清理或转换历史强化石数据。
+- `user://global_inventory.json` 只能由 `/root/GlobalInventory` AutoLoad 写入；独立测试实例、临时验证脚本和普通场景节点没有持久化权限。库存服务只维护这一份主存档，不自动生成额外恢复或备份文件。当前存档显式保存物品与怪物的稳定图鉴发现键、强化累计、强化次数、二手状态和耐久字段；读档只恢复这些现行字段，不根据持有物品补建图鉴，也不清理或转换历史强化石数据。
 
 ### 7.3 敌人与环境
 
-- 新敌人优先继承 `BasicMonster` 并遵守目标、死亡和模拟启停协议。生命归零时必须立即停止玩法逻辑并派发一次死亡信号；允许保留不可交互模型播放冲击和淡出，默认持续 0.52 秒后回收。尸体继续消耗击杀一击已写入的外部速度并保留环境墙体阻挡，但不再处于可受击战斗层。
+- 新敌人优先继承 `BasicMonster` 并遵守目标、死亡和模拟启停协议，且必须填写唯一 `monster_id` 与图鉴说明。生命归零时必须立即停止玩法逻辑并派发一次死亡信号；允许保留不可交互模型播放冲击和淡出，默认持续 0.52 秒后回收。尸体继续消耗击杀一击已写入的外部速度并保留环境墙体阻挡，但不再处于可受击战斗层。
 - 新实心障碍必须同时满足碰撞层、`environment_obstacles` 分组和导航障碍缓存要求。
 - 动态障碍发生变化后必须使导航与地图缓存失效，避免视觉、碰撞和寻路状态分离。
 

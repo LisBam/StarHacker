@@ -4,6 +4,8 @@ class_name ProgressSliderVisual
 ## 可视进度拖动条组件覆盖在原生 HSlider 上方，负责绘制未完成轨道、已完成进度与滑块。
 ## 原生 HSlider 继续独立处理鼠标、键盘、步长、最小值和最大值，本组件不修改任何业务数值。
 
+## 全局 UI 样式指南；自绘层从这里读取当前滑条色板，避免绕过主题而固定使用青蓝色。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 子节点固定名称；安装接口通过该名称避免同一个 HSlider 重复挂载多个视觉层。
 const VISUAL_NODE_NAME: StringName = &"ProgressSliderVisual"
 
@@ -27,6 +29,8 @@ const VISUAL_NODE_NAME: StringName = &"ProgressSliderVisual"
 @export var handle_fill_color: Color = Color(0.88, 0.98, 1.0, 1.0)
 ## 禁用进度颜色；默认低饱和灰蓝，保留当前进度位置但明确不可交互。
 @export var disabled_progress_color: Color = Color(0.28, 0.36, 0.40, 0.88)
+## 是否跟随全局 UI 色板；默认 true，设置为 false 时才使用本组件的导出颜色作为局部特例。
+@export var use_ui_style_palette: bool = true
 
 ## 关联的原生拖动条；默认 null，由 install() 在挂载时配置，只读取其范围、当前值和交互状态。
 var _slider: HSlider
@@ -72,6 +76,12 @@ func _configure(slider: HSlider) -> void:
 	queue_redraw()
 
 
+func _notification(what: int) -> void:
+	## 主题根切换时请求重绘；自绘滑条不自动读取 Theme 资源，必须显式刷新当前色板。
+	if what == NOTIFICATION_THEME_CHANGED:
+		queue_redraw()
+
+
 func _process(_delta: float) -> void:
 	if _slider == null or not is_instance_valid(_slider):
 		set_process(false)
@@ -99,18 +109,26 @@ func _draw() -> void:
 	var value_ratio: float = _get_value_ratio()
 	# 当前滑块横坐标；同时作为已完成进度终点。
 	var handle_x: float = lerpf(track_start_x, track_end_x, value_ratio)
-	_draw_rounded_segment(track_start_x, track_end_x, center_y, track_border_color, track_width + 2.0)
-	_draw_rounded_segment(track_start_x, track_end_x, center_y, track_background_color, track_width)
-	# 当前进度颜色；禁用时灰显，悬停或拖动时使用更亮青蓝色。
-	var active_progress_color: Color = disabled_progress_color if _slider.editable == false else (progress_highlight_color if _last_hovered or _dragging else progress_color)
+	# 当前风格色板；默认实时读取全局主题，局部特例可通过检查器关闭色板跟随。
+	var resolved_track_background_color: Color = UI_STYLE_GUIDE.get_slider_track_background_color() if use_ui_style_palette else track_background_color
+	var resolved_track_border_color: Color = UI_STYLE_GUIDE.get_slider_track_border_color() if use_ui_style_palette else track_border_color
+	var resolved_progress_color: Color = UI_STYLE_GUIDE.get_slider_progress_color() if use_ui_style_palette else progress_color
+	var resolved_progress_highlight_color: Color = UI_STYLE_GUIDE.get_slider_progress_highlight_color() if use_ui_style_palette else progress_highlight_color
+	var resolved_handle_border_color: Color = UI_STYLE_GUIDE.get_slider_handle_border_color() if use_ui_style_palette else handle_border_color
+	var resolved_handle_fill_color: Color = UI_STYLE_GUIDE.get_slider_handle_fill_color() if use_ui_style_palette else handle_fill_color
+	var resolved_disabled_progress_color: Color = UI_STYLE_GUIDE.get_slider_disabled_progress_color() if use_ui_style_palette else disabled_progress_color
+	_draw_rounded_segment(track_start_x, track_end_x, center_y, resolved_track_border_color, track_width + 2.0)
+	_draw_rounded_segment(track_start_x, track_end_x, center_y, resolved_track_background_color, track_width)
+	# 当前进度颜色；禁用时灰显，悬停或拖动时使用当前风格的高亮色。
+	var active_progress_color: Color = resolved_disabled_progress_color if _slider.editable == false else (resolved_progress_highlight_color if _last_hovered or _dragging else resolved_progress_color)
 	if value_ratio > 0.0:
 		_draw_rounded_segment(track_start_x, handle_x, center_y, active_progress_color, track_width)
 	# 当前滑块半径；悬停和拖动时略微放大，清楚标记可拖动位置。
 	var active_handle_radius: float = handle_radius + 1.0 if _last_hovered or _dragging else handle_radius
 	# 滑块阴影；扩大 2 像素并保持低透明度，增强与轨道重叠处的层次。
 	draw_circle(Vector2(handle_x, center_y), active_handle_radius + 2.0, Color(0.0, 0.0, 0.0, 0.42))
-	draw_circle(Vector2(handle_x, center_y), active_handle_radius, handle_border_color if _slider.editable else disabled_progress_color)
-	draw_circle(Vector2(handle_x, center_y), maxf(active_handle_radius - 3.0, 1.0), handle_fill_color if _slider.editable else Color(0.62, 0.66, 0.68, 1.0))
+	draw_circle(Vector2(handle_x, center_y), active_handle_radius, resolved_handle_border_color if _slider.editable else resolved_disabled_progress_color)
+	draw_circle(Vector2(handle_x, center_y), maxf(active_handle_radius - 3.0, 1.0), resolved_handle_fill_color if _slider.editable else Color(0.62, 0.66, 0.68, 1.0))
 
 
 func _get_value_ratio() -> float:

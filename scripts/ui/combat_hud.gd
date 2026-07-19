@@ -471,6 +471,8 @@ var _training_character_button_container: VBoxContainer
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	UI_STYLE_GUIDE.apply_screen_theme(_root_control)
+	UI_STYLE_GUIDE.apply_semantic_progress_bar(_health_bar)
+	UI_STYLE_GUIDE.apply_semantic_progress_bar(_energy_bar)
 	UI_STYLE_GUIDE.apply_window_panel(_inventory_panel)
 	UI_STYLE_GUIDE.apply_window_panel(_pause_menu_panel)
 	UI_STYLE_GUIDE.apply_window_panel(_pause_settings_panel)

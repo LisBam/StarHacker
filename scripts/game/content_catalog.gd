@@ -85,6 +85,11 @@ func get_enemy_scene_paths() -> PackedStringArray:
 	return _filter_unlocked_content_paths(_enemy_scene_paths)
 
 
+func get_all_enemy_scene_paths() -> PackedStringArray:
+	## 返回全部已注册怪物场景路径；图鉴使用未经过角色扩展包可用性过滤的目录，保留未遇到怪物的占位条目。
+	return _enemy_scene_paths.duplicate()
+
+
 func get_weapon_path(weapon_id: String) -> String:
 	return str(_weapon_paths_by_id.get(weapon_id, ""))
 

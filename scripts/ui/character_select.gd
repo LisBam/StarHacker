@@ -311,7 +311,10 @@ func _apply_display_mode() -> void:
 	## 根据宿主用途切换完整选择或当前角色展示；详情内容始终复用同一滚动面板。
 	# 是否仅展示当前角色；true 时禁止通过本界面切换或确认其他角色。
 	var current_character_only: bool = display_mode == DISPLAY_MODE_CURRENT_CHARACTER
-	_background.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR if current_character_only else UI_STYLE_GUIDE.SCREEN_BACKGROUND_COLOR
+	if current_character_only:
+		UI_STYLE_GUIDE.apply_overlay_dim(_background)
+	else:
+		UI_STYLE_GUIDE.apply_screen_background(_background)
 	_character_list_panel.visible = not current_character_only
 	_confirm_button.visible = not current_character_only
 	_bottom_actions.alignment = BoxContainer.ALIGNMENT_CENTER if current_character_only else BoxContainer.ALIGNMENT_END

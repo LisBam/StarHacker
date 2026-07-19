@@ -241,8 +241,16 @@ func _ensure_interface_initialized() -> void:
 	get_cancel_button().text = "取消"
 	_apply_dialog_visual_style()
 	_build_interface()
+	# 弹窗内部根面板；登记后黑白风格覆盖说明、滑条、数量输入、结果和操作按钮。
+	var dialog_content_root: Control = get_child(0, true) as Control
+	if dialog_content_root != null:
+		UI_STYLE_GUIDE.apply_screen_theme(dialog_content_root)
 	DIALOG_OUTER_FRAME_SCRIPT.install(self)
 	confirmed.connect(_on_confirmed)
+	# UI 风格服务；弹窗可能在设置切换前已经初始化，监听后重建 Window 自身样式。
+	var ui_style_settings: Node = get_tree().root.get_node_or_null("UiStyleSettings")
+	if ui_style_settings != null and ui_style_settings.has_signal("ui_style_changed") and not ui_style_settings.is_connected("ui_style_changed", Callable(self, "_on_ui_style_changed")):
+		ui_style_settings.connect("ui_style_changed", Callable(self, "_on_ui_style_changed"))
 
 
 func _present_current_configuration(initial_value: int = 1) -> void:
@@ -309,8 +317,8 @@ func _apply_dialog_visual_style() -> void:
 	var dialog_theme: Theme = UI_STYLE_GUIDE.create_theme()
 	# 弹窗面板样式；透明度由检查器参数统一控制，便于后续按整体 UI 风格调整。
 	var dialog_panel_style: StyleBoxFlat = StyleBoxFlat.new()
-	dialog_panel_style.bg_color = Color(0.035, 0.045, 0.055, dialog_background_alpha)
-	dialog_panel_style.border_color = Color(0.30, 0.50, 0.60, minf(dialog_background_alpha + 0.10, 1.0))
+	dialog_panel_style.bg_color = Color(UI_STYLE_GUIDE.get_window_background_color(), dialog_background_alpha)
+	dialog_panel_style.border_color = Color(UI_STYLE_GUIDE.get_window_border_color(), minf(dialog_background_alpha + 0.10, 1.0))
 	dialog_panel_style.set_border_width_all(1)
 	dialog_panel_style.set_corner_radius_all(8)
 	dialog_panel_style.content_margin_top = UI_STYLE_GUIDE.DIALOG_TITLE_HEIGHT
@@ -319,6 +327,12 @@ func _apply_dialog_visual_style() -> void:
 	dialog_theme.set_stylebox("panel", "AcceptDialog", dialog_panel_style)
 	dialog_theme.set_stylebox("panel", "ConfirmationDialog", dialog_panel_style)
 	theme = dialog_theme
+
+
+func _on_ui_style_changed(_style_id: String) -> void:
+	## 风格切换后重建数量弹窗背景、边框和基础控件主题，当前业务模式与数量保持不变。
+	_apply_dialog_visual_style()
+	DIALOG_OUTER_FRAME_SCRIPT.install(self)
 
 
 func _on_slider_value_changed(value: float) -> void:

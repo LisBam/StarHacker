@@ -29,7 +29,15 @@ const DIALOG_OUTER_FRAME_SCRIPT: Script = preload("res://scripts/ui/dialog_outer
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_apply_standard_style()
+	# 弹窗内部根面板；登记后黑白风格可覆盖正文、原生按钮与后续动态子控件。
+	var dialog_content_root: Control = get_child(0, true) as Control
+	if dialog_content_root != null:
+		UI_STYLE_GUIDE.apply_screen_theme(dialog_content_root)
 	DIALOG_OUTER_FRAME_SCRIPT.install(self)
+	# UI 风格服务；弹窗可能在设置切换前已经创建，监听后即时重建 Window 自身背景与边框。
+	var ui_style_settings: Node = get_tree().root.get_node_or_null("UiStyleSettings")
+	if ui_style_settings != null and ui_style_settings.has_signal("ui_style_changed") and not ui_style_settings.is_connected("ui_style_changed", Callable(self, "_on_ui_style_changed")):
+		ui_style_settings.connect("ui_style_changed", Callable(self, "_on_ui_style_changed"))
 
 
 func present(dialog_title: String, message: String, confirm_text: String = "确认", cancel_text: String = "取消", requested_width: int = -1, requested_height: int = 0, confirmation_enabled: bool = true) -> void:
@@ -134,10 +142,10 @@ func _reset_message_layout() -> void:
 func _apply_standard_style() -> void:
 	# 弹窗面板样式；颜色、透明度、白边和圆角直接对齐物品悬浮信息浮窗。
 	var panel_style: StyleBoxFlat = StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.025, 0.04, 0.055, background_alpha)
+	panel_style.bg_color = Color(UI_STYLE_GUIDE.get_window_background_color(), background_alpha)
 	panel_style.border_color = Color(1.0, 1.0, 1.0, 0.92)
 	# 全局窗口边框补充；通用确认窗口使用青蓝描边与其他窗口对齐，白边说明保留为历史兼容注释。
-	panel_style.border_color = UI_STYLE_GUIDE.WINDOW_BORDER_COLOR
+	panel_style.border_color = UI_STYLE_GUIDE.get_window_border_color()
 	panel_style.set_border_width_all(border_width)
 	panel_style.set_corner_radius_all(corner_radius)
 	panel_style.content_margin_left = 18.0
@@ -152,3 +160,9 @@ func _apply_standard_style() -> void:
 	UI_STYLE_GUIDE.apply_primary_button(get_ok_button())
 	get_ok_button().custom_minimum_size = Vector2(96.0, 34.0)
 	get_cancel_button().custom_minimum_size = Vector2(96.0, 34.0)
+
+
+func _on_ui_style_changed(_style_id: String) -> void:
+	## 风格切换后重建 Window 专用主题，并刷新既有最外层框架的标题栏和描边。
+	_apply_standard_style()
+	DIALOG_OUTER_FRAME_SCRIPT.install(self)

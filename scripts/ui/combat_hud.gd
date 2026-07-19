@@ -38,6 +38,8 @@ const SUPPLY_EXTRACTION_PANEL_SCRIPT: Script = preload("res://scripts/ui/supply_
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 可视进度拖动条组件；为暂停设置主音量滑条绘制实时进度，不接管原生输入与音量换算。
 const PROGRESS_SLIDER_VISUAL_SCRIPT: Script = preload("res://scripts/ui/progress_slider_visual.gd")
+## UI 风格选择组件；暂停设置复用其选项构建、服务绑定、即时保存与全局刷新逻辑。
+const UI_STYLE_SELECTOR_SCRIPT: Script = preload("res://scripts/ui/ui_style_selector.gd")
 ## 主动技能栏脚本；动态显示三个技能槽的实际按键、名称和冷却，不接管技能输入状态机。
 const ACTIVE_SKILL_BAR_SCRIPT: Script = preload("res://scripts/ui/active_skill_bar.gd")
 ## 局内共享槽位视图；左侧技能栏和右侧纯展示武器栏直接复用同一视觉组件。
@@ -336,6 +338,8 @@ var _pause_key_binding_page: VBoxContainer
 var _pause_key_binding_back_button: Button
 ## 暂停设置首页控件列表；元素为 Control，默认用于在设置首页和按键绑定页之间切换可见性。
 var _pause_settings_home_controls: Array[Control] = []
+## 暂停设置 UI 风格选择组件；默认运行时插入主音量下方并与主菜单共享同一持久化服务。
+var _pause_ui_style_selector: Control
 ## 暂停设置存档传输控件；默认运行时创建，导出仅包含各服务已经落盘的持久化状态。
 ## 删除功能补充：删除会丢弃本局未落盘内存变化，并通过重启恢复到首次启动默认状态。
 var _pause_save_transfer_control: Control
@@ -1172,7 +1176,7 @@ func _build_supply_extraction_overlay() -> void:
 	_supply_extraction_overlay = overlay
 	# 遮罩暗层；覆盖全部 HUD 并吸收鼠标输入。
 	var dim: ColorRect = ColorRect.new()
-	dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
+	UI_STYLE_GUIDE.apply_overlay_dim(dim)
 	dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	overlay.add_child(dim)
@@ -1228,7 +1232,7 @@ func _build_combat_developer_overlay() -> void:
 	# 开发者背景遮罩；使用深色半透明背景把战斗调试菜单与暂停地图分离。
 	var developer_dim: ColorRect = ColorRect.new()
 	developer_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	developer_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
+	UI_STYLE_GUIDE.apply_overlay_dim(developer_dim)
 	developer_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	developer_overlay.add_child(developer_dim)
 	# 战斗开发者菜单；复用局外组件，但隐藏星穹与仓库操作并显示无限属性和训练工具。
@@ -1978,6 +1982,16 @@ func _build_pause_key_binding_navigation() -> void:
 	if _pause_key_binding_page != null:
 		return
 
+	# 暂停设置 UI 风格选择组件；放在主音量行之后，切换结果立即作用于战斗内全部 UI。
+	var ui_style_selector: Control = UI_STYLE_SELECTOR_SCRIPT.new() as Control
+	if ui_style_selector != null:
+		ui_style_selector.name = "PauseUiStyleSelector"
+		_pause_settings_content.add_child(ui_style_selector)
+		# 主音量行；作为固定插入锚点，避免后续存档与按键入口顺序变化影响 UI 风格位置。
+		var pause_master_volume_row: Control = get_node("Root/PauseOverlay/PauseSettingsPanel/PauseSettingsMargin/PauseSettingsContent/PauseMasterVolumeRow") as Control
+		_pause_settings_content.move_child(ui_style_selector, pause_master_volume_row.get_index() + 1)
+		_pause_ui_style_selector = ui_style_selector
+
 	# 按键绑定入口按钮；取值为 Button，默认放在暂停设置首页用于进入独立按键绑定页。
 	var key_binding_button: Button = Button.new()
 	key_binding_button.name = "PauseKeyBindingPageButton"
@@ -1998,6 +2012,7 @@ func _build_pause_key_binding_navigation() -> void:
 	_pause_settings_home_controls = [
 		get_node("Root/PauseOverlay/PauseSettingsPanel/PauseSettingsMargin/PauseSettingsContent/PauseSettingsTitle") as Control,
 		get_node("Root/PauseOverlay/PauseSettingsPanel/PauseSettingsMargin/PauseSettingsContent/PauseMasterVolumeRow") as Control,
+		_pause_ui_style_selector,
 		_pause_key_binding_button,
 		_pause_save_transfer_control,
 		get_node("Root/PauseOverlay/PauseSettingsPanel/PauseSettingsMargin/PauseSettingsContent/PauseSettingsSpacer") as Control,

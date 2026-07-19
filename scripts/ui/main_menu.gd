@@ -17,6 +17,8 @@ const SAVE_TRANSFER_CONTROL_SCRIPT: Script = preload("res://scripts/ui/save_tran
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 可视进度拖动条组件；为主音量滑条绘制完整轨道、当前进度和实时滑块位置，不改变音量业务逻辑。
 const PROGRESS_SLIDER_VISUAL_SCRIPT: Script = preload("res://scripts/ui/progress_slider_visual.gd")
+## UI 风格选择组件；主菜单设置复用其选项构建、服务绑定、即时保存与全局刷新逻辑。
+const UI_STYLE_SELECTOR_SCRIPT: Script = preload("res://scripts/ui/ui_style_selector.gd")
 ## 局外仓库面板脚本；默认在主菜单点击仓库按钮后动态创建并读取全局背包服务。
 const WAREHOUSE_PANEL_SCRIPT: Script = preload("res://scripts/ui/warehouse_panel.gd")
 ## 主菜单背包面板脚本；复用游戏内背包装备结构，局外丢弃会直接永久移除物品。
@@ -93,6 +95,8 @@ var _key_binding_page: VBoxContainer
 var _key_binding_back_button: Button
 ## 设置首页控件列表；元素为 Control，默认用于在多页设置之间统一隐藏或显示首页内容。
 var _settings_home_controls: Array[Control] = []
+## 主菜单 UI 风格选择组件；默认运行时插入主音量下方并即时同步全局风格设置。
+var _ui_style_selector: Control
 ## 主菜单存档传输控件；默认运行时插入设置首页，导入成功后由全局服务重启游戏。
 ## 删除功能补充：删除成功后同样由全局服务重启，并在其他业务服务读档前清理活动存档。
 var _save_transfer_control: Control
@@ -139,7 +143,7 @@ func _ready() -> void:
 	UI_STYLE_GUIDE.apply_danger_button(_quit_button)
 	UI_STYLE_GUIDE.apply_title_label(get_node("Center/Title") as Label)
 	UI_STYLE_GUIDE.apply_title_label(_settings_title_label)
-	(get_node("Background") as ColorRect).color = UI_STYLE_GUIDE.SCREEN_BACKGROUND_COLOR
+	UI_STYLE_GUIDE.apply_screen_background(get_node("Background") as ColorRect)
 	PROGRESS_SLIDER_VISUAL_SCRIPT.install(_master_volume_slider)
 	_master_bus_index = AudioServer.get_bus_index("Master")
 	_start_button.pressed.connect(_on_start_button_pressed)
@@ -293,7 +297,7 @@ func _build_warehouse_overlay() -> void:
 	var warehouse_dim: ColorRect = ColorRect.new()
 	warehouse_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# 全局遮罩补充；实际颜色由样式指南统一为带蓝色分量的深色透明层。
-	warehouse_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
+	UI_STYLE_GUIDE.apply_overlay_dim(warehouse_dim)
 	warehouse_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	warehouse_overlay.add_child(warehouse_dim)
 
@@ -329,7 +333,7 @@ func _build_backpack_overlay() -> void:
 	var backpack_dim: ColorRect = ColorRect.new()
 	backpack_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# 全局遮罩补充；背包与其他局外窗口使用同一深蓝黑透明层。
-	backpack_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
+	UI_STYLE_GUIDE.apply_overlay_dim(backpack_dim)
 	backpack_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	backpack_overlay.add_child(backpack_dim)
 	# 背包面板；居中显示并保持与游戏内背包接近的 960×620 尺寸。
@@ -369,7 +373,7 @@ func _build_shop_overlay() -> void:
 	var shop_dim: ColorRect = ColorRect.new()
 	shop_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# 全局遮罩补充；实际颜色由样式指南统一管理。
-	shop_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
+	UI_STYLE_GUIDE.apply_overlay_dim(shop_dim)
 	shop_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	shop_overlay.add_child(shop_dim)
 
@@ -408,7 +412,7 @@ func _build_forge_overlay() -> void:
 	var forge_dim: ColorRect = ColorRect.new()
 	forge_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# 全局遮罩补充；实际颜色由样式指南统一管理。
-	forge_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
+	UI_STYLE_GUIDE.apply_overlay_dim(forge_dim)
 	forge_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	forge_overlay.add_child(forge_dim)
 
@@ -444,7 +448,7 @@ func _build_stock_market_overlay() -> void:
 	# 股市背景遮罩；透明度与商店、仓库保持一致，使行情面板成为清晰的局外焦点。
 	var stock_market_dim: ColorRect = ColorRect.new()
 	stock_market_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	stock_market_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
+	UI_STYLE_GUIDE.apply_overlay_dim(stock_market_dim)
 	stock_market_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	stock_market_overlay.add_child(stock_market_dim)
 	# 股市面板；固定 1040×620 像素并由独立组件处理行情展示与交易确认。
@@ -480,7 +484,7 @@ func _build_mining_farm_overlay() -> void:
 	# 矿场背景遮罩；使用与股市一致的深色透明度，使两个局外资产系统视觉并列。
 	var mining_farm_dim: ColorRect = ColorRect.new()
 	mining_farm_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	mining_farm_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
+	UI_STYLE_GUIDE.apply_overlay_dim(mining_farm_dim)
 	mining_farm_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	mining_farm_overlay.add_child(mining_farm_dim)
 	# 矿场面板；固定 1080×640 像素并由独立组件维护卡片、交易与动画。
@@ -515,7 +519,7 @@ func _build_encyclopedia_overlay() -> void:
 	# 图鉴背景遮罩；使用与仓库、商店和矿场一致的深蓝黑透明层突出收集信息。
 	var encyclopedia_dim: ColorRect = ColorRect.new()
 	encyclopedia_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	encyclopedia_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
+	UI_STYLE_GUIDE.apply_overlay_dim(encyclopedia_dim)
 	encyclopedia_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	encyclopedia_overlay.add_child(encyclopedia_dim)
 	# 图鉴面板；固定 1000×640 像素，四列条目网格在该尺寸下保留名称与说明的可读空间。
@@ -551,7 +555,7 @@ func _build_developer_overlay() -> void:
 	# 开发者背景遮罩；使用深色半透明背景突出隐藏调试菜单。
 	var developer_dim: ColorRect = ColorRect.new()
 	developer_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	developer_dim.color = UI_STYLE_GUIDE.OVERLAY_DIM_COLOR
+	UI_STYLE_GUIDE.apply_overlay_dim(developer_dim)
 	developer_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	developer_overlay.add_child(developer_dim)
 	# 开发者菜单面板；居中显示资源与星穹快捷操作。
@@ -725,6 +729,14 @@ func _build_key_binding_navigation() -> void:
 	if _key_binding_page != null:
 		return
 
+	# UI 风格选择组件；放在主音量行之后，所有选项名称、保存和全局刷新都由组件与服务共同维护。
+	var ui_style_selector: Control = UI_STYLE_SELECTOR_SCRIPT.new() as Control
+	if ui_style_selector != null:
+		ui_style_selector.name = "MainMenuUiStyleSelector"
+		_settings_content.add_child(ui_style_selector)
+		_settings_content.move_child(ui_style_selector, _master_volume_row.get_index() + 1)
+		_ui_style_selector = ui_style_selector
+
 	# 按键绑定入口按钮；取值为 Button，默认放在设置首页用于进入独立按键绑定页面。
 	var key_binding_button: Button = Button.new()
 	key_binding_button.name = "KeyBindingPageButton"
@@ -745,6 +757,7 @@ func _build_key_binding_navigation() -> void:
 	_settings_home_controls = [
 		_settings_title_label,
 		_master_volume_row,
+		_ui_style_selector,
 		_key_binding_button,
 		_save_transfer_control,
 		_settings_spacer,

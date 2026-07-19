@@ -62,6 +62,14 @@ func _ready() -> void:
 	exclusive = true
 	unresizable = true
 	theme = UI_STYLE_GUIDE.create_theme()
+	# UI 风格服务；弹窗不是 Control，登记其内部全尺寸面板即可让黑白风格覆盖正文、输入和按钮子树。
+	var dialog_content_root: Control = get_child(0, true) as Control
+	if dialog_content_root != null:
+		UI_STYLE_GUIDE.apply_screen_theme(dialog_content_root)
+	# UI 风格服务；弹窗可能在设置切换前已经创建，监听后重建 Window 基础主题。
+	var ui_style_settings: Node = get_tree().root.get_node_or_null("UiStyleSettings")
+	if ui_style_settings != null and ui_style_settings.has_signal("ui_style_changed") and not ui_style_settings.is_connected("ui_style_changed", Callable(self, "_on_ui_style_changed")):
+		ui_style_settings.connect("ui_style_changed", Callable(self, "_on_ui_style_changed"))
 	get_ok_button().text = "确认分配"
 	get_ok_button().custom_minimum_size = Vector2(116.0, 36.0)
 	UI_STYLE_GUIDE.apply_primary_button(get_ok_button())
@@ -70,6 +78,11 @@ func _ready() -> void:
 	canceled.connect(_keep_dialog_open)
 	_build_content()
 	_apply_input_limits()
+
+
+func _on_ui_style_changed(_style_id: String) -> void:
+	## 风格切换后重建属性分配弹窗的 Window 主题，当前分配数值与输入限制保持不变。
+	theme = UI_STYLE_GUIDE.create_theme()
 
 
 func setup(base_attribute_value: float, maximum_adjustment_ratio: float, allocation_step: float) -> void:

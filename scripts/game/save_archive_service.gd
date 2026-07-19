@@ -25,6 +25,7 @@ const GAME_ENGLISH_NAME: String = "Star Hacker"
 const SAVE_FILE_NAMES: Array[String] = [
 	"character_unlocks.json",
 	"input_bindings.cfg",
+	"ui_style_settings.cfg",
 	"debug_settings.cfg",
 	"global_inventory.json",
 	"shop_state.json",

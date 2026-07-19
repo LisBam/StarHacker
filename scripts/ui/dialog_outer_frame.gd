@@ -46,6 +46,7 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	z_index = 100
+	UI_STYLE_GUIDE.apply_screen_theme(self)
 	_build_interface()
 	if _dialog != null and not _dialog.title_changed.is_connected(_refresh_title):
 		_dialog.title_changed.connect(_refresh_title)
@@ -56,12 +57,12 @@ func _ready() -> void:
 func _draw() -> void:
 	# 标题栏矩形；完全不透明的深蓝背景保证标题区域不会透出场景颜色。
 	var title_rect: Rect2 = Rect2(Vector2.ZERO, Vector2(size.x, UI_STYLE_GUIDE.DIALOG_TITLE_HEIGHT))
-	draw_rect(title_rect, UI_STYLE_GUIDE.DIALOG_TITLE_BACKGROUND_COLOR, true)
+	draw_rect(title_rect, UI_STYLE_GUIDE.get_dialog_title_background_color(), true)
 	# 标题分隔线起点；位于标题栏底部并避开外框左右描边。
 	var separator_start: Vector2 = Vector2(float(UI_STYLE_GUIDE.DIALOG_OUTER_BORDER_WIDTH), UI_STYLE_GUIDE.DIALOG_TITLE_HEIGHT)
 	# 标题分隔线终点；与起点共同形成横跨窗口内部的连续青蓝细线。
 	var separator_end: Vector2 = Vector2(size.x - float(UI_STYLE_GUIDE.DIALOG_OUTER_BORDER_WIDTH), UI_STYLE_GUIDE.DIALOG_TITLE_HEIGHT)
-	draw_line(separator_start, separator_end, UI_STYLE_GUIDE.WINDOW_BORDER_COLOR, 1.0)
+	draw_line(separator_start, separator_end, UI_STYLE_GUIDE.get_window_border_color(), 1.0)
 	# 最外层边框；仅绘制轮廓不覆盖内部控件，始终位于弹窗内容和按钮上方。
 	var outer_style: StyleBoxFlat = UI_STYLE_GUIDE.create_dialog_outer_frame_style()
 	draw_style_box(outer_style, Rect2(Vector2.ZERO, size))

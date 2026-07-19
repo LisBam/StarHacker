@@ -19,6 +19,7 @@ config/name_en="Star Hacker"
 [autoload]
 
 SaveArchiveService="*res://scripts/game/save_archive_service.gd"
+UiStyleSettings="*res://scripts/game/ui_style_settings.gd"
 ContentCatalog="*res://scripts/game/content_catalog.gd"
 SessionState="*res://scripts/game/session_state.gd"
 InputBindings="*res://scripts/game/input_bindings.gd"

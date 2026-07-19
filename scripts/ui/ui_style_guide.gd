@@ -96,6 +96,20 @@ const SCROLLBAR_THICKNESS: float = 14.0
 const EQUIPMENT_GROUP_SPACER_HEIGHT: float = 6.0
 ## 自定义弹窗标题栏背景；固定完全不透明的深蓝色，避免最外层标题区域透出场景背景。
 const DIALOG_TITLE_BACKGROUND_COLOR: Color = Color(0.025, 0.045, 0.065, 1.0)
+## 黑白简约风完整页面背景；使用纯黑保留最大文字对比度，运行时由风格设置服务选择。
+const BLACK_WHITE_SCREEN_BACKGROUND_COLOR: Color = Color(0.015, 0.015, 0.015, 1.0)
+## 黑白简约风聚焦遮罩；保持纯黑半透明，避免在弹窗外继续出现彩色环境干扰。
+const BLACK_WHITE_OVERLAY_DIM_COLOR: Color = Color(0.0, 0.0, 0.0, 0.76)
+## 黑白简约风主窗口背景；略高于纯黑以区分页面与窗口层级。
+const BLACK_WHITE_WINDOW_BACKGROUND_COLOR: Color = Color(0.055, 0.055, 0.055, 0.985)
+## 黑白简约风主窗口边框；使用高亮白灰线形成简洁高对比轮廓。
+const BLACK_WHITE_WINDOW_BORDER_COLOR: Color = Color(0.88, 0.88, 0.88, 0.96)
+## 黑白简约风子分区背景；比主窗口略亮，用灰度差异表达嵌套层级。
+const BLACK_WHITE_SECTION_BACKGROUND_COLOR: Color = Color(0.105, 0.105, 0.105, 0.96)
+## 黑白简约风子分区边框；使用中灰弱化内部区域，避免与主窗口白边争夺焦点。
+const BLACK_WHITE_SECTION_BORDER_COLOR: Color = Color(0.42, 0.42, 0.42, 0.94)
+## 黑白简约风标题栏背景；使用不透明近黑色，保证标题文字和关闭按钮清晰可读。
+const BLACK_WHITE_DIALOG_TITLE_BACKGROUND_COLOR: Color = Color(0.035, 0.035, 0.035, 1.0)
 
 
 ## 为完整页面或可复用面板安装统一控件主题；调用后所有后代控件自动继承按钮、输入、滚动和分区样式。
@@ -103,6 +117,10 @@ static func apply_screen_theme(target: Control) -> void:
 	if target == null:
 		return
 	target.theme = create_theme()
+	# UI 风格服务；存在时登记独立主题根，使设置切换能立即刷新当前页面和后续动态控件。
+	var ui_style_settings: Node = _get_ui_style_settings()
+	if ui_style_settings != null and ui_style_settings.has_method("register_theme_root"):
+		ui_style_settings.call("register_theme_root", target)
 
 
 ## 为顶层 PanelContainer 应用主窗口背景、青蓝描边、圆角和轻量阴影。
@@ -110,6 +128,10 @@ static func apply_window_panel(target: Control) -> void:
 	if target == null:
 		return
 	target.add_theme_stylebox_override("panel", create_window_panel_style())
+	# UI 风格服务；存在时登记主窗口面板，使黑蓝与黑白双向切换都能刷新显式覆盖。
+	var ui_style_settings: Node = _get_ui_style_settings()
+	if ui_style_settings != null and ui_style_settings.has_method("register_window_panel"):
+		ui_style_settings.call("register_window_panel", target)
 
 
 ## 为窗口内部 PanelContainer 应用弱化分区样式，适合装备栏、交易区、统计区和列表承载区。
@@ -117,6 +139,10 @@ static func apply_section_panel(target: Control) -> void:
 	if target == null:
 		return
 	target.add_theme_stylebox_override("panel", create_section_panel_style())
+	# UI 风格服务；存在时登记子分区面板，使运行时切换不会保留首次创建时的旧风格。
+	var ui_style_settings: Node = _get_ui_style_settings()
+	if ui_style_settings != null and ui_style_settings.has_method("register_section_panel"):
+		ui_style_settings.call("register_section_panel", target)
 
 
 ## 为主操作按钮切换到青蓝高亮变体；按钮仍保留统一尺寸和禁用状态。
@@ -153,7 +179,64 @@ static func apply_title_label(target: Label, font_size: int = 0) -> void:
 static func apply_overlay_dim(target: ColorRect) -> void:
 	if target == null:
 		return
-	target.color = OVERLAY_DIM_COLOR
+	target.color = get_overlay_dim_color()
+	# UI 风格服务；存在时登记遮罩，使设置切换能即时刷新当前已打开或隐藏的窗口背景。
+	var ui_style_settings: Node = _get_ui_style_settings()
+	if ui_style_settings != null and ui_style_settings.has_method("register_overlay_dim"):
+		ui_style_settings.call("register_overlay_dim", target)
+
+
+## 将完整页面 ColorRect 设置为当前 UI 风格背景，并登记后续即时刷新。
+static func apply_screen_background(target: ColorRect) -> void:
+	if target == null:
+		return
+	target.color = get_screen_background_color()
+	# UI 风格服务；存在时登记页面背景，切换风格后无需重建场景即可刷新。
+	var ui_style_settings: Node = _get_ui_style_settings()
+	if ui_style_settings != null and ui_style_settings.has_method("register_screen_background"):
+		ui_style_settings.call("register_screen_background", target)
+
+
+## 返回当前 UI 风格的完整页面背景色；服务不可用时保持原黑蓝科技风。
+static func get_screen_background_color() -> Color:
+	return BLACK_WHITE_SCREEN_BACKGROUND_COLOR if is_black_white_style_active() else SCREEN_BACKGROUND_COLOR
+
+
+## 返回当前 UI 风格的聚焦遮罩色；服务不可用时保持原黑蓝科技风。
+static func get_overlay_dim_color() -> Color:
+	return BLACK_WHITE_OVERLAY_DIM_COLOR if is_black_white_style_active() else OVERLAY_DIM_COLOR
+
+
+## 返回当前 UI 风格的主窗口背景色；黑白风格使用纯灰阶表面。
+static func get_window_background_color() -> Color:
+	return BLACK_WHITE_WINDOW_BACKGROUND_COLOR if is_black_white_style_active() else WINDOW_BACKGROUND_COLOR
+
+
+## 返回当前 UI 风格的主窗口边框色；黑白风格使用高对比白灰描边。
+static func get_window_border_color() -> Color:
+	return BLACK_WHITE_WINDOW_BORDER_COLOR if is_black_white_style_active() else WINDOW_BORDER_COLOR
+
+
+## 返回当前 UI 风格的子分区背景色；黑白风格只通过灰阶明度表达层级。
+static func get_section_background_color() -> Color:
+	return BLACK_WHITE_SECTION_BACKGROUND_COLOR if is_black_white_style_active() else SECTION_BACKGROUND_COLOR
+
+
+## 返回当前 UI 风格的子分区边框色；黑白风格使用弱中灰描边。
+static func get_section_border_color() -> Color:
+	return BLACK_WHITE_SECTION_BORDER_COLOR if is_black_white_style_active() else SECTION_BORDER_COLOR
+
+
+## 返回当前 UI 风格的弹窗标题栏背景色；黑白风格使用不透明近黑色。
+static func get_dialog_title_background_color() -> Color:
+	return BLACK_WHITE_DIALOG_TITLE_BACKGROUND_COLOR if is_black_white_style_active() else DIALOG_TITLE_BACKGROUND_COLOR
+
+
+## 返回当前是否启用黑白简约风；没有主循环或服务时安全返回 false。
+static func is_black_white_style_active() -> bool:
+	# UI 风格服务；运行时由 AutoLoad 提供，资源导入和纯脚本验证阶段允许为空。
+	var ui_style_settings: Node = _get_ui_style_settings()
+	return ui_style_settings != null and ui_style_settings.has_method("is_black_white_style") and bool(ui_style_settings.call("is_black_white_style"))
 
 
 ## 创建项目统一主题；主题只包含视觉资源，不持有节点或服务引用，可安全分配给任意 Control 根节点。
@@ -266,7 +349,7 @@ static func create_theme() -> Theme:
 ## 创建主窗口 StyleBox；包含 2 像素青蓝边框、8 像素圆角、内容留白与柔和阴影。
 static func create_window_panel_style() -> StyleBoxFlat:
 	# 主窗口样式；独立创建以允许调用方后续局部修改而不影响共享主题。
-	var panel_style: StyleBoxFlat = _create_flat_style(WINDOW_BACKGROUND_COLOR, WINDOW_BORDER_COLOR, 2, WINDOW_CORNER_RADIUS)
+	var panel_style: StyleBoxFlat = _create_flat_style(get_window_background_color(), get_window_border_color(), 2, WINDOW_CORNER_RADIUS)
 	panel_style.shadow_color = Color(0.0, 0.0, 0.0, 0.52)
 	panel_style.shadow_size = 10
 	return panel_style
@@ -274,7 +357,7 @@ static func create_window_panel_style() -> StyleBoxFlat:
 
 ## 创建窗口内部子分区 StyleBox；默认使用 1 像素弱描边和 6 像素圆角。
 static func create_section_panel_style() -> StyleBoxFlat:
-	return _create_flat_style(SECTION_BACKGROUND_COLOR, SECTION_BORDER_COLOR, 1, SECTION_CORNER_RADIUS)
+	return _create_flat_style(get_section_background_color(), get_section_border_color(), 1, SECTION_CORNER_RADIUS)
 
 
 ## 创建弹窗 StyleBox；透明度会同时影响背景和边框，用于数量、转账、确认及信息提示窗口。
@@ -282,9 +365,9 @@ static func create_dialog_panel_style(background_alpha: float = 0.92) -> StyleBo
 	# 安全透明度；限制在可读范围内，防止调用方传入异常值导致窗口完全透明或不透明。
 	var resolved_alpha: float = clampf(background_alpha, 0.40, 1.0)
 	# 弹窗背景色；沿用主窗口 RGB，仅替换调用方指定透明度。
-	var dialog_background: Color = Color(WINDOW_BACKGROUND_COLOR, resolved_alpha)
+	var dialog_background: Color = Color(get_window_background_color(), resolved_alpha)
 	# 弹窗边框色；始终比背景略不透明，保证复杂场景上仍能辨认窗口边界。
-	var dialog_border: Color = Color(WINDOW_BORDER_COLOR, minf(resolved_alpha + 0.10, 1.0))
+	var dialog_border: Color = Color(get_window_border_color(), minf(resolved_alpha + 0.10, 1.0))
 	return _create_flat_style(dialog_background, dialog_border, 2, WINDOW_CORNER_RADIUS, 14.0, 10.0)
 
 
@@ -303,7 +386,7 @@ static func create_dialog_theme(background_alpha: float = 0.92) -> Theme:
 ## 创建由 DialogOuterFrame 直接绘制的最外层轮廓；中心透明，仅覆盖完全不透明的青蓝边框与阴影。
 static func create_dialog_outer_frame_style() -> StyleBoxFlat:
 	# 最外层样式；中心关闭绘制，避免覆盖弹窗正文、输入控件和按钮。
-	var outer_style: StyleBoxFlat = _create_flat_style(Color.TRANSPARENT, Color(WINDOW_BORDER_COLOR, 1.0), DIALOG_OUTER_BORDER_WIDTH, DIALOG_OUTER_CORNER_RADIUS)
+	var outer_style: StyleBoxFlat = _create_flat_style(Color.TRANSPARENT, Color(get_window_border_color(), 1.0), DIALOG_OUTER_BORDER_WIDTH, DIALOG_OUTER_CORNER_RADIUS)
 	outer_style.draw_center = false
 	outer_style.shadow_color = Color(0.0, 0.0, 0.0, 0.48)
 	outer_style.shadow_size = 8
@@ -386,3 +469,14 @@ static func _create_flat_style(background_color: Color, border_color: Color, bor
 	style.content_margin_top = maxf(vertical_content_margin, 0.0)
 	style.content_margin_bottom = maxf(vertical_content_margin, 0.0)
 	return style
+
+
+## 获取当前场景树中的 UI 风格设置 AutoLoad；静态样式函数通过本入口保持对业务服务零依赖。
+static func _get_ui_style_settings() -> Node:
+	# 主循环；编辑器导入、资源检查或纯脚本环境中可能不是 SceneTree，此时不访问场景根节点。
+	var main_loop: MainLoop = Engine.get_main_loop()
+	if not (main_loop is SceneTree):
+		return null
+	# 场景树；只用于读取固定 AutoLoad 节点，不持有其引用或访问其他业务服务。
+	var scene_tree: SceneTree = main_loop as SceneTree
+	return scene_tree.root.get_node_or_null("UiStyleSettings")

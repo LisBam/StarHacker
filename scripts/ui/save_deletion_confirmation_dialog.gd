@@ -59,8 +59,16 @@ func _ensure_interface_initialized() -> void:
 	get_cancel_button().text = "取消"
 	_apply_dialog_visual_style()
 	_build_interface()
+	# 弹窗内部根面板；登记后黑白风格覆盖警告、输入框、校验文本和操作按钮。
+	var dialog_content_root: Control = get_child(0, true) as Control
+	if dialog_content_root != null:
+		UI_STYLE_GUIDE.apply_screen_theme(dialog_content_root)
 	DIALOG_OUTER_FRAME_SCRIPT.install(self)
 	confirmed.connect(_on_confirmed)
+	# UI 风格服务；弹窗可能在切换前已经初始化，监听后重建 Window 自身样式。
+	var ui_style_settings: Node = get_tree().root.get_node_or_null("UiStyleSettings")
+	if ui_style_settings != null and ui_style_settings.has_signal("ui_style_changed") and not ui_style_settings.is_connected("ui_style_changed", Callable(self, "_on_ui_style_changed")):
+		ui_style_settings.connect("ui_style_changed", Callable(self, "_on_ui_style_changed"))
 
 
 func _build_interface() -> void:
@@ -81,7 +89,7 @@ func _build_interface() -> void:
 	warning_label.custom_minimum_size = Vector2(float(dialog_width - 56), 0.0)
 	warning_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	warning_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	warning_label.text = "此操作会永久删除角色、物品、货币、商店、股市、矿场、按键与调试设置。\n请输入“%s”后才能继续。" % CONFIRMATION_PHRASE
+	warning_label.text = "此操作会永久删除角色、物品、货币、商店、股市、矿场、按键、UI 风格与调试设置。\n请输入“%s”后才能继续。" % CONFIRMATION_PHRASE
 	warning_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.DANGER_COLOR)
 	content.add_child(warning_label)
 	# 确认短语输入框；不使用占位内容代替真实输入，玩家必须主动键入完整四字短语。
@@ -108,8 +116,8 @@ func _apply_dialog_visual_style() -> void:
 	var dialog_theme: Theme = UI_STYLE_GUIDE.create_theme()
 	# 弹窗面板样式；标题栏净空由全局常量维护，底部净空保证操作按钮不贴住外框。
 	var dialog_panel_style: StyleBoxFlat = StyleBoxFlat.new()
-	dialog_panel_style.bg_color = Color(0.035, 0.045, 0.055, dialog_background_alpha)
-	dialog_panel_style.border_color = Color(0.30, 0.50, 0.60, minf(dialog_background_alpha + 0.10, 1.0))
+	dialog_panel_style.bg_color = Color(UI_STYLE_GUIDE.get_window_background_color(), dialog_background_alpha)
+	dialog_panel_style.border_color = Color(UI_STYLE_GUIDE.get_window_border_color(), minf(dialog_background_alpha + 0.10, 1.0))
 	dialog_panel_style.set_border_width_all(1)
 	dialog_panel_style.set_corner_radius_all(8)
 	dialog_panel_style.content_margin_top = UI_STYLE_GUIDE.DIALOG_TITLE_HEIGHT
@@ -121,6 +129,12 @@ func _apply_dialog_visual_style() -> void:
 	UI_STYLE_GUIDE.apply_danger_button(get_ok_button())
 	get_ok_button().custom_minimum_size = Vector2(112.0, 36.0)
 	get_cancel_button().custom_minimum_size = Vector2(96.0, 36.0)
+
+
+func _on_ui_style_changed(_style_id: String) -> void:
+	## 风格切换后重建删除弹窗背景、边框和按钮主题，输入内容与校验状态保持不变。
+	_apply_dialog_visual_style()
+	DIALOG_OUTER_FRAME_SCRIPT.install(self)
 
 
 func _on_confirmation_text_changed(input_text: String) -> void:

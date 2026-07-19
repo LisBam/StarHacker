@@ -24,6 +24,7 @@
 | `ContentCatalog` | 启动时扫描角色、武器、装备、道具、怪物和扩展包清单，按角色解锁状态过滤内容池 | 无 |
 | `SessionState` | 保存当前游戏模式、已确认角色与永久角色/扩展包解锁状态 | `user://character_unlocks.json`；角色选择和解锁永久保存，模式仅运行期 |
 | `InputBindings` | 管理默认与自定义输入映射 | `user://input_bindings.cfg` |
+| `UiStyleSettings` | 管理“黑蓝科技风 / 黑白简约风”选择、即时主题刷新与 UI 灰度覆盖 | `user://ui_style_settings.cfg` |
 | `DebugSettings` | 管理开发者调试选项 | `user://debug_settings.cfg` |
 | `GlobalInventory` | 拥有星穹、仓库、背包、装备槽、持仓、永久图鉴发现记录和战斗结算数据 | `user://global_inventory.json` |
 | `ShopService` | 生成普通商店与灰市库存，维护刷新状态 | `user://shop_state.json` |
@@ -96,7 +97,7 @@
 - `InventoryQuery` 为仓库、背包、商店、锻造与结算提供无副作用的分类、强化词条筛选、套装筛选、搜索和排序结果；`EquipmentSetFilterControl` 统一维护套装多选 UI，不拥有库存数据。
 - `ItemCardView`、`WeaponDurabilityBar` 和 `ItemDetailFormatter` 统一物品展示，宿主只提供操作协议。
 - `CommonConfirmationDialog`、`SaveDeletionConfirmationDialog`、`SellQuantityDialog`、`SecuritiesTransferDialog`、`EnhancementResultDialog` 和 `ItemActionPopup` 分别承载明确的弹窗交互。
-- `UiStyleGuide`、`DialogOuterFrame`、`ProgressSliderVisual` 和 `CharacterSkillCard` 分别统一窗口、弹窗、滑条与角色技能详情视觉，规则见 `docs/ui_style.md`。
+- `UiStyleSettings`、`UiStyleSelector`、`UiStyleGuide`、`DialogOuterFrame`、`ProgressSliderVisual` 和 `CharacterSkillCard` 分别统一风格状态、设置入口、窗口、弹窗、滑条与角色技能详情视觉，规则见 `docs/ui_style.md`。
 - 背包、仓库和锻造等库存长列表只在自身可见时消费库存变化信号；隐藏期间仅记录待刷新状态，重新打开后从 `GlobalInventory` 读取一次最新快照。同一帧连续出现库存、装备、仓库或星穹信号时，每个可见面板最多重建 1 次列表。
 - 可见的仓库与共享背包按资源实例身份复用 `StorageItemControl`：容器内移动只更新真实来源下标，数量或状态变化只刷新对应卡片，跨容器移动只创建目标新增卡片并释放来源移出卡片；未变化物品不重新创建视觉节点、详情文本或信号连接。
 - 战斗 HUD 的生命、能量与护盾继续由信号即时刷新；生存时间、全地图人口和撤离提示默认每 0.1 秒刷新。主动技能栏以固定 0.05 秒间隔更新三槽冷却与发动条件，不参与技能实际计时。
@@ -179,9 +180,9 @@ ContentCatalog 模板
 - `SaveLocationMigration` 脚本保留为历史实现参考，但未在 `project.godot` 注册且脚本内迁移调用已注释；启动时不会实例化该服务，也不会读取或复制同级旧项目目录文件。
 - 普通高频变化可合并写入；货币兑换、股票成交等跨资产操作应立即保存，缩短文件间状态不一致窗口。
 - 测试不得直接覆盖日常 `user://` 数据，具体隔离要求见 `docs/功能验证测试规范.md`。
-- 存档导出使用默认名 `Star_Hacker_save_<本地时间>.lisbamsave`，保存 `character_unlocks.json`、`input_bindings.cfg`、`debug_settings.cfg`、`global_inventory.json`、`shop_state.json`、`stock_market_state.json` 与 `mining_farm_state.json` 的原始字节；尚未生成的文件不写入归档。根元数据同时保存项目中文名与英文名，只用于人工识别，不参与兼容校验。
+- 存档导出使用默认名 `Star_Hacker_save_<本地时间>.lisbamsave`，保存 `character_unlocks.json`、`input_bindings.cfg`、`ui_style_settings.cfg`、`debug_settings.cfg`、`global_inventory.json`、`shop_state.json`、`stock_market_state.json` 与 `mining_farm_state.json` 的原始字节；尚未生成的文件不写入归档。根元数据同时保存项目中文名与英文名，只用于人工识别，不参与兼容校验。
 - 存档导入只接受格式版本 1 与固定文件白名单。服务先完成 JSON、文件名和 Base64 内容校验，再写入同目录临时文件，完整备份当前存档后替换正式文件；归档中缺失的模块文件会按快照语义移除，成功后重启游戏统一加载。
-- 存档删除使用与导出、导入相同的七个文件白名单。服务先写入 `save_delete_pending_v1.marker`，再把全部现有活动存档改名到同目录 `.temp_delete` 路径；任一暂存失败时统一回滚，全部暂存成功后永久移除并立即重启。保护标记保留到下一次启动，`SaveArchiveService` 作为首个 AutoLoad 会在任何业务服务读档前再次删除活动文件、`.temp_import` 与 `.temp_delete` 残留，完成后移除标记，因此退出阶段的旧状态回写也不能恢复被删除存档。
+- 存档删除使用与导出、导入相同的八个文件白名单。服务先写入 `save_delete_pending_v1.marker`，再把全部现有活动存档改名到同目录 `.temp_delete` 路径；任一暂存失败时统一回滚，全部暂存成功后永久移除并立即重启。保护标记保留到下一次启动，`SaveArchiveService` 作为首个 AutoLoad 会在任何业务服务读档前再次删除活动文件、`.temp_import` 与 `.temp_delete` 残留，完成后移除标记，因此退出阶段的旧状态回写也不能恢复被删除存档。
 - 存档删除只清理当前项目用户目录中的活动白名单文件和内部临时文件，不删除玩家自行导出的 `.lisbamsave`，也不删除历史导入备份目录；这些外部或备份快照只有玩家主动导入时才会重新成为活动存档。
 - 战斗暂停设置导出只包含已经落盘的数据，不强制保存正式战斗中的临时背包、装备与耐久变化，继续遵守本局成功、失败或正常退出结算后统一持久化的所有权规则。
 - 战斗暂停设置删除会丢弃当前活动存档及尚未落盘的本局内存变化，不执行战斗结算；重启后全部服务按首次启动默认值初始化。

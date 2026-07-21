@@ -460,14 +460,23 @@ func _on_silver_wolf_button_pressed() -> void:
 
 func _on_confirm_button_pressed() -> void:
 	_set_session_selected_character(_selected_character_id)
-	_change_scene_with_transition(main_menu_scene_path)
+	_change_scene_with_transition(_consume_return_scene_path())
 
 
 func _on_back_button_pressed() -> void:
 	if display_mode == DISPLAY_MODE_CURRENT_CHARACTER:
 		close_requested.emit()
 		return
-	_change_scene_with_transition(main_menu_scene_path)
+	_change_scene_with_transition(_consume_return_scene_path())
+
+
+func _consume_return_scene_path() -> String:
+	## 返回并消费 SessionState 中的一次性导航目标；普通主菜单入口没有覆盖值时继续使用 main_menu_scene_path。
+	# 会话状态节点；缺失时角色页保持原有固定返回主菜单行为，方便场景单独运行。
+	var session_state: Node = _get_session_state()
+	if session_state != null and session_state.has_method("consume_character_select_return_scene_path"):
+		return str(session_state.call("consume_character_select_return_scene_path", main_menu_scene_path))
+	return main_menu_scene_path
 
 
 func _change_scene_with_transition(scene_path: String) -> void:

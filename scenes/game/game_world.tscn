@@ -1,4 +1,4 @@
-[gd_scene load_steps=24 format=3]
+[gd_scene load_steps=25 format=3]
 
 [ext_resource type="Script" path="res://scripts/game/game_world.gd" id="1_game_world"]
 [ext_resource type="PackedScene" path="res://scenes/characters/player.tscn" id="2_player"]
@@ -22,6 +22,7 @@
 [ext_resource type="Resource" path="res://data/items/repair_kit_medium.tres" id="25_repair_kit_medium"]
 [ext_resource type="Resource" path="res://data/items/repair_kit_advanced.tres" id="26_repair_kit_advanced"]
 [ext_resource type="PackedScene" path="res://scenes/environment/loot_chest.tscn" id="27_loot_chest"]
+[ext_resource type="Script" path="res://scripts/components/selected_character_runtime_component.gd" id="28_selected_character_runtime"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_shield_inner_border"]
 bg_color = Color(0, 0, 0, 0)
@@ -43,6 +44,9 @@ loot_chest_scene = ExtResource("27_loot_chest")
 
 [node name="Player" parent="." instance=ExtResource("2_player")]
 position = Vector2(0, 0)
+
+[node name="SelectedCharacterRuntimeComponent" type="Node" parent="."]
+script = ExtResource("28_selected_character_runtime")
 
 [node name="MonsterSimulationManager" type="Node" parent="."]
 script = ExtResource("23_monster_simulation_manager")

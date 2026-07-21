@@ -69,6 +69,8 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 @export var player_active_skill_component_path: NodePath = ^"ActiveSkillComponent"
 ## 玩家装备组件相对路径；默认 EquipmentComponent，用于角色切换时同步基础移动速度。
 @export var player_equipment_component_path: NodePath = ^"EquipmentComponent"
+## 当前角色运行时配置组件路径；默认指向世界直属 SelectedCharacterRuntimeComponent，负责统一注入角色档案、技能与基础属性。
+@export var selected_character_runtime_component_path: NodePath = ^"SelectedCharacterRuntimeComponent"
 ## 环境物父节点路径；默认指向 Environment 容器，允许为空并回退到 GameWorld，修改会影响随机墙体和建筑层级。
 @export var environment_parent_path: NodePath = ^"Environment"
 ## 随机环境预制体列表；默认由场景指定墙体和建筑，元素必须能实例化为 Node2D，修改会影响地图障碍类型池。
@@ -348,6 +350,8 @@ var _skill_map_markers: Dictionary = {}
 
 ## 玩家节点缓存；默认按 player_path 获取，允许为空并以世界原点作为生成中心。
 @onready var _player: Node2D = get_node_or_null(player_path) as Node2D
+## 当前角色运行时配置组件缓存；缺失时继续执行本脚本保留的旧初始化流程，保证迁移场景可独立运行。
+@onready var _selected_character_runtime_component: Node = get_node_or_null(selected_character_runtime_component_path)
 ## 玩家摄像机缓存；默认按 player_camera_path 获取，缺失时探索系统回退 exploration_radius 圆形范围。
 @onready var _player_camera: Camera2D = get_node_or_null(player_camera_path) as Camera2D
 ## 环境物父节点缓存；默认按 environment_parent_path 获取，允许为空并回退到当前 GameWorld。
@@ -871,6 +875,19 @@ func _begin_global_inventory_run() -> void:
 
 func _apply_selected_character() -> void:
 	if _player == null:
+		return
+	if _selected_character_runtime_component != null and _selected_character_runtime_component.has_method("apply_character"):
+		# 兼容回退档案；正式内容档案缺失时继续使用 GameWorld 原有检查器参数，保留独立场景的可配置能力。
+		var fallback_profile: Dictionary = {
+			"id": _selected_character_id,
+			"display_name": _get_character_display_name(_selected_character_id),
+			"max_health": _get_character_max_health(_selected_character_id),
+			"max_energy": _get_character_max_energy(_selected_character_id),
+			"move_speed": _get_character_move_speed(_selected_character_id),
+			"attack_power": _get_character_attack_power(_selected_character_id),
+			"defense_power": _get_character_defense_power(_selected_character_id),
+		}
+		_selected_character_runtime_component.call("apply_character", _selected_character_id, fallback_profile)
 		return
 
 	# 当前角色档案；优先来自自动内容目录，旧场景缺少目录服务时继续使用现有导出参数。

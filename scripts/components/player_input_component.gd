@@ -97,6 +97,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func get_movement_vector() -> Vector2:
+	## 战斗输入关闭时移动意图固定归零；弹窗、大地图和大厅局外面板不允许玩家继续在界面背后移动。
+	if not _combat_input_enabled:
+		return Vector2.ZERO
 	# 水平输入合成值；取值范围通常为 -1 到 1，默认 0 表示无左右输入，修改会影响返回移动方向的 X 分量。
 	var horizontal: float = 0.0
 	# 垂直输入合成值；取值范围通常为 -1 到 1，默认 0 表示无上下输入，修改会影响返回移动方向的 Y 分量。

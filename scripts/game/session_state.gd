@@ -27,6 +27,8 @@ var game_mode: String = MODE_HACK
 var selected_character_id: String = CHARACTER_STELLE
 ## 已解锁角色标识；启动时合并角色档案中的默认解锁项与存档项，运行时只允许通过 unlock_character 增加。
 var _unlocked_character_ids: Array[String] = []
+## 角色选择页一次性返回场景；默认空字符串表示使用页面检查器中的主菜单路径，仅在跨场景导航期间保留且不写入存档。
+var _character_select_return_scene_path: String = ""
 
 
 func _ready() -> void:
@@ -47,6 +49,21 @@ func set_game_mode(next_game_mode: String) -> void:
 func set_selected_character(next_character_id: String) -> void:
 	selected_character_id = normalize_character_id(next_character_id)
 	_save_character_unlocks()
+
+
+func set_character_select_return_scene_path(scene_path: String) -> void:
+	## 设置角色选择页本次完成或返回时的目标场景；只接受 res:// 下的 tscn，非法值清空并回退页面默认路径。
+	# 标准场景路径；去除首尾空白后校验资源协议与扩展名，避免把任意文件交给场景切换接口。
+	var normalized_scene_path: String = scene_path.strip_edges()
+	_character_select_return_scene_path = normalized_scene_path if normalized_scene_path.begins_with("res://") and normalized_scene_path.ends_with(".tscn") else ""
+
+
+func consume_character_select_return_scene_path(default_scene_path: String) -> String:
+	## 读取并清除一次性角色页返回目标；没有有效目标时返回调用方提供的主菜单路径。
+	# 返回场景路径；优先使用本次导航目标，读取后立即清空防止未来入口继承陈旧大厅状态。
+	var return_scene_path: String = _character_select_return_scene_path if not _character_select_return_scene_path.is_empty() else default_scene_path
+	_character_select_return_scene_path = ""
+	return return_scene_path
 
 
 func unlock_character(character_id: String) -> bool:

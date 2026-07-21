@@ -20,6 +20,16 @@ grow_horizontal = 2
 grow_vertical = 2
 color = Color(0.0509804, 0.0666667, 0.0862745, 1)
 
+[node name="SwitchLobbyMenuButton" type="Button" parent="." unique_id=449885006]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(188, 42)
+layout_mode = 1
+offset_left = 18.0
+offset_top = 18.0
+offset_right = 206.0
+offset_bottom = 60.0
+text = "切换大厅/菜单"
+
 [node name="Center" type="VBoxContainer" parent="." unique_id=1425652412]
 custom_minimum_size = Vector2(440, 360)
 layout_mode = 1

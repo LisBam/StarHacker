@@ -4,6 +4,9 @@ extends Control
 ## 这里保留骇入、训练场、角色系统、设置和退出等清晰路径，避免把游戏流程逻辑写进具体按钮。
 ## 战斗入口直接使用 SessionState 当前角色；角色选择作为独立系统从底部“角色”按钮进入。
 
+## 大厅面板宿主的聚合可见状态变化信号；大厅据此统一锁定或恢复玩家与实体交互。
+signal modal_visibility_changed(visible: bool)
+
 ## 正式骇入模式标识；默认写入 SessionState，修改会影响骇入入口进入后的模式判定。
 const GAME_MODE_HACK: String = "hack"
 ## 训练场模式标识；默认写入 SessionState，修改会影响训练场入口进入后的模式判定。
@@ -37,10 +40,38 @@ const ENCYCLOPEDIA_PANEL_SCRIPT: Script = preload("res://scripts/ui/encyclopedia
 const DEVELOPER_MENU_SCRIPT: Script = preload("res://scripts/ui/developer_menu.gd")
 ## 开发者模式解锁序列；默认由六个英文字母组成，输入错误会按首字母重新匹配。
 const DEVELOPER_UNLOCK_SEQUENCE: String = "LISBAM"
+## 大厅正式骇入动作标识；固定 hack，由实体交互协议映射到现有骇入入口。
+const LOBBY_ACTION_HACK: String = "hack"
+## 大厅训练场动作标识；固定 training，由实体交互协议映射到现有训练场入口。
+const LOBBY_ACTION_TRAINING: String = "training"
+## 大厅角色动作标识；固定 character，进入独立角色系统并把返回目标设置为当前大厅。
+const LOBBY_ACTION_CHARACTER: String = "character"
+## 大厅背包动作标识；固定 backpack，复用主菜单局外背包面板。
+const LOBBY_ACTION_BACKPACK: String = "backpack"
+## 大厅仓库动作标识；固定 warehouse，复用主菜单仓库面板。
+const LOBBY_ACTION_WAREHOUSE: String = "warehouse"
+## 大厅商店动作标识；固定 shop，复用主菜单商店面板。
+const LOBBY_ACTION_SHOP: String = "shop"
+## 大厅锻造动作标识；固定 forge，复用主菜单锻造面板。
+const LOBBY_ACTION_FORGE: String = "forge"
+## 大厅股市动作标识；固定 stock_market，复用主菜单股市面板。
+const LOBBY_ACTION_STOCK_MARKET: String = "stock_market"
+## 大厅矿场动作标识；固定 mining_farm，复用主菜单矿场面板。
+const LOBBY_ACTION_MINING_FARM: String = "mining_farm"
+## 大厅图鉴动作标识；固定 encyclopedia，复用主菜单图鉴面板。
+const LOBBY_ACTION_ENCYCLOPEDIA: String = "encyclopedia"
+## 大厅设置动作标识；固定 settings，复用主菜单设置面板。
+const LOBBY_ACTION_SETTINGS: String = "settings"
+## 大厅退出动作标识；固定 quit，执行与主菜单退出按钮相同的关闭程序命令。
+const LOBBY_ACTION_QUIT: String = "quit"
 ## 角色系统场景路径；默认由主菜单底部“角色”按钮进入，只允许填写 tscn 资源，运行时通常不动态修改。
 @export_file("*.tscn") var character_select_scene_path: String = "res://scenes/ui/character_select.tscn"
 ## 游戏场景路径；骇入和训练场入口写入模式后直接进入该场景，当前角色由 SessionState 提供。
 @export_file("*.tscn") var game_scene_path: String = "res://scenes/game/game_world.tscn"
+## 主大厅场景路径；默认由左上角“切换大厅/菜单”按钮进入，只允许填写 tscn 资源。
+@export_file("*.tscn") var lobby_scene_path: String = "res://scenes/game/main_lobby.tscn"
+## 大厅面板宿主模式；默认 false 显示完整主菜单，设为 true 时隐藏菜单本体并只保留可由实体打开的复用面板。
+@export var lobby_host_mode: bool = false
 
 ## 骇入按钮缓存；默认绑定唯一名 StartButton，必须是 Button，修改节点名会导致正式入口无法进入战斗。
 @onready var _start_button: Button = %StartButton
@@ -83,6 +114,14 @@ const DEVELOPER_UNLOCK_SEQUENCE: String = "LISBAM"
 @onready var _settings_spacer: Control = get_node("SettingsPanel/SettingsMargin/SettingsContent/SettingsSpacer") as Control
 ## 设置返回按钮缓存；默认绑定唯一名 SettingsBackButton，点击后关闭设置面板。
 @onready var _settings_back_button: Button = %SettingsBackButton
+## 菜单与大厅切换按钮缓存；默认位于主菜单左上角，大厅宿主模式下隐藏并由 LobbyHud 提供同名按钮。
+@onready var _switch_lobby_menu_button: Button = %SwitchLobbyMenuButton
+## 主菜单背景缓存；大厅宿主模式下隐藏，避免覆盖大厅世界画面。
+@onready var _background: ColorRect = get_node("Background") as ColorRect
+## 主菜单中央入口容器缓存；大厅宿主模式下隐藏，所有入口改由世界实体触发。
+@onready var _center_menu: Control = get_node("Center") as Control
+## 主菜单底部功能栏缓存；大厅宿主模式下隐藏，局外面板继续由同一脚本动态创建。
+@onready var _bottom_menu_margin: Control = get_node("BottomMenuMargin") as Control
 
 ## Master 音频总线索引；取值为 -1 或有效总线下标，默认 -1 表示尚未解析，修改会影响音量应用目标。
 var _master_bus_index: int = -1
@@ -135,6 +174,8 @@ var _developer_overlay: Control
 var _developer_menu: Control
 ## 开发者序列当前匹配下标；取值 0 到序列长度，默认 0 表示等待字母 L。
 var _developer_sequence_index: int = 0
+## 上一次向大厅报告的面板可见状态；默认 false，宿主模式每帧只在状态实际变化时派发一次信号。
+var _last_reported_modal_visibility: bool = false
 
 
 func _ready() -> void:
@@ -144,7 +185,8 @@ func _ready() -> void:
 	UI_STYLE_GUIDE.apply_danger_button(_quit_button)
 	UI_STYLE_GUIDE.apply_title_label(get_node("Center/Title") as Label)
 	UI_STYLE_GUIDE.apply_title_label(_settings_title_label)
-	UI_STYLE_GUIDE.apply_screen_background(get_node("Background") as ColorRect)
+	UI_STYLE_GUIDE.apply_screen_background(_background)
+	UI_STYLE_GUIDE.apply_primary_button(_switch_lobby_menu_button)
 	PROGRESS_SLIDER_VISUAL_SCRIPT.install(_master_volume_slider)
 	_master_bus_index = AudioServer.get_bus_index("Master")
 	_start_button.pressed.connect(_on_start_button_pressed)
@@ -161,6 +203,7 @@ func _ready() -> void:
 	_encyclopedia_button.pressed.connect(_on_encyclopedia_button_pressed)
 	_master_volume_slider.value_changed.connect(_on_master_volume_slider_value_changed)
 	_settings_back_button.pressed.connect(_on_settings_back_button_pressed)
+	_switch_lobby_menu_button.pressed.connect(_on_switch_lobby_menu_button_pressed)
 	_build_key_binding_navigation()
 	_build_warehouse_overlay()
 	_build_backpack_overlay()
@@ -173,7 +216,21 @@ func _ready() -> void:
 	_settings_panel.visible = false
 	_show_key_binding_page(false)
 	_sync_master_volume_slider()
-	_start_button.grab_focus()
+	_apply_lobby_host_mode()
+	set_process(lobby_host_mode)
+	if not lobby_host_mode:
+		_start_button.grab_focus()
+
+
+func _process(_delta: float) -> void:
+	if not lobby_host_mode:
+		return
+	# 当前面板状态；只要任意设置页、局外功能页或开发者页可见，就需要大厅锁定玩家与实体交互。
+	var current_modal_visibility: bool = is_modal_open()
+	if current_modal_visibility == _last_reported_modal_visibility:
+		return
+	_last_reported_modal_visibility = current_modal_visibility
+	modal_visibility_changed.emit(_last_reported_modal_visibility)
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -208,6 +265,7 @@ func _on_training_button_pressed() -> void:
 
 func _on_character_button_pressed() -> void:
 	_settings_panel.visible = false
+	_set_character_select_return_scene_path()
 	_change_scene_with_transition(character_select_scene_path)
 
 
@@ -219,6 +277,78 @@ func _on_settings_button_pressed() -> void:
 
 func _on_quit_button_pressed() -> void:
 	get_tree().quit()
+
+
+func _on_switch_lobby_menu_button_pressed() -> void:
+	_change_scene_with_transition(lobby_scene_path)
+
+
+func perform_lobby_action(action_id: String) -> bool:
+	## 把大厅实体的稳定动作标识映射到现有主菜单入口；返回 false 表示动作未注册且不会产生副作用。
+	match action_id:
+		LOBBY_ACTION_HACK:
+			_on_start_button_pressed()
+		LOBBY_ACTION_TRAINING:
+			_on_training_button_pressed()
+		LOBBY_ACTION_CHARACTER:
+			_on_character_button_pressed()
+		LOBBY_ACTION_BACKPACK:
+			_on_backpack_button_pressed()
+		LOBBY_ACTION_WAREHOUSE:
+			_on_warehouse_button_pressed()
+		LOBBY_ACTION_SHOP:
+			_on_shop_button_pressed()
+		LOBBY_ACTION_FORGE:
+			_on_forge_button_pressed()
+		LOBBY_ACTION_STOCK_MARKET:
+			_on_stock_market_button_pressed()
+		LOBBY_ACTION_MINING_FARM:
+			_on_mining_farm_button_pressed()
+		LOBBY_ACTION_ENCYCLOPEDIA:
+			_on_encyclopedia_button_pressed()
+		LOBBY_ACTION_SETTINGS:
+			_on_settings_button_pressed()
+		LOBBY_ACTION_QUIT:
+			_on_quit_button_pressed()
+		_:
+			return false
+	return true
+
+
+func is_modal_open() -> bool:
+	## 返回当前是否显示任意复用局外界面；大厅只依赖该聚合结果，不读取具体面板节点。
+	return (
+		_settings_panel.visible
+		or (_warehouse_overlay != null and _warehouse_overlay.visible)
+		or (_backpack_overlay != null and _backpack_overlay.visible)
+		or (_shop_overlay != null and _shop_overlay.visible)
+		or (_forge_overlay != null and _forge_overlay.visible)
+		or (_stock_market_overlay != null and _stock_market_overlay.visible)
+		or (_mining_farm_overlay != null and _mining_farm_overlay.visible)
+		or (_encyclopedia_overlay != null and _encyclopedia_overlay.visible)
+		or (_developer_overlay != null and _developer_overlay.visible)
+	)
+
+
+func _apply_lobby_host_mode() -> void:
+	## 切换完整菜单与大厅面板宿主表现；业务面板始终创建一次并由原关闭协议复用。
+	_background.visible = not lobby_host_mode
+	_center_menu.visible = not lobby_host_mode
+	_bottom_menu_margin.visible = not lobby_host_mode
+	_switch_lobby_menu_button.visible = not lobby_host_mode
+	mouse_filter = Control.MOUSE_FILTER_IGNORE if lobby_host_mode else Control.MOUSE_FILTER_STOP
+	if lobby_host_mode:
+		process_mode = Node.PROCESS_MODE_ALWAYS
+
+
+func _set_character_select_return_scene_path() -> void:
+	# 会话状态节点；一次性返回目标属于跨场景导航状态，由 SessionState 统一持有而不写入永久存档。
+	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
+	if session_state == null or not session_state.has_method("set_character_select_return_scene_path"):
+		return
+	# 当前场景路径；完整主菜单返回自身，大厅宿主嵌入时返回 MainLobby，避免角色页固定跳回菜单。
+	var current_scene_path: String = get_tree().current_scene.scene_file_path if get_tree().current_scene != null else "res://scenes/ui/main_menu.tscn"
+	session_state.call("set_character_select_return_scene_path", current_scene_path)
 
 
 func _on_warehouse_button_pressed() -> void:

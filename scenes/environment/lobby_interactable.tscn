@@ -1,0 +1,44 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/environment/lobby_interactable.gd" id="1_lobby_interactable"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_lobby_interactable"]
+size = Vector2(150, 72)
+
+[node name="LobbyInteractable" type="StaticBody2D" groups=["lobby_interactables"]]
+collision_layer = 16
+collision_mask = 0
+script = ExtResource("1_lobby_interactable")
+
+[node name="Body" type="Polygon2D" parent="."]
+color = Color(0.04, 0.12, 0.15, 1)
+polygon = PackedVector2Array(-75, -36, 75, -36, 75, 36, -75, 36)
+
+[node name="Border" type="Line2D" parent="."]
+points = PackedVector2Array(-75, -36, 75, -36, 75, 36, -75, 36, -75, -36)
+width = 2.0
+default_color = Color(0.28, 0.64, 0.72, 1)
+
+[node name="DisplayNameLabel" type="Label" parent="."]
+offset_left = -69.0
+offset_top = -18.0
+offset_right = 69.0
+offset_bottom = 10.0
+theme_override_font_sizes/font_size = 17
+text = "交互设施"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="InteractionKeyLabel" type="Label" parent="."]
+offset_left = -69.0
+offset_top = 10.0
+offset_right = 69.0
+offset_bottom = 30.0
+theme_override_colors/font_color = Color(0.48, 0.88, 1, 1)
+theme_override_font_sizes/font_size = 11
+text = "F"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_lobby_interactable")

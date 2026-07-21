@@ -6,12 +6,13 @@
 
 | 入口 | 实现 | 职责 |
 | --- | --- | --- |
-| 主菜单 | `res://scenes/ui/main_menu.tscn`、`res://scripts/ui/main_menu.gd` | 项目主场景；打开角色、图鉴、背包、仓库、商店、锻造、股市、矿场及模式入口 |
+| 主菜单 | `res://scenes/ui/main_menu.tscn`、`res://scripts/ui/main_menu.gd` | 项目主场景；打开角色、图鉴、背包、仓库、商店、锻造、股市、矿场及模式入口；同一场景可作为大厅局外面板宿主 |
+| 主大厅 | `res://scenes/game/main_lobby.tscn`、`res://scripts/game/lobby_world.gd` | 承载当前角色自由移动、攻击、技能、静态交互设施与大厅 HUD；不创建敌人、掉落、撤离或战斗结算 |
 | 角色系统 | `res://scenes/ui/character_select.tscn`、`res://scripts/ui/character_select.gd` | 完整模式展示可选角色并持久化确认结果；当前角色模式隐藏角色列表，供战斗内只读查看同一套属性与技能详情 |
 | 战斗世界 | `res://scenes/game/game_world.tscn`、`res://scripts/game/game_world.gd` | 承载玩家、地图、环境、敌人人口、宝箱、掉落与撤离流程 |
 | 玩家预制体 | `res://scenes/characters/player.tscn`、`res://scripts/player/player_controller.gd` | 组合输入、移动、战斗属性、装备和攻击组件 |
 
-主菜单进入正式骇入或训练场前，只把模式写入 `SessionState`。已确认角色由同一服务跨场景保存。所有主场景切换统一经 `SceneTransition` 执行，业务 UI 不直接维护过渡动画。
+主菜单和主大厅进入正式骇入或训练场前，只把模式写入 `SessionState`。已确认角色由同一服务跨场景保存；角色页的一次性返回场景同样由该服务持有但不写入存档，使主菜单与大厅入口能各自原路返回。所有主场景切换统一经 `SceneTransition` 执行，业务 UI 不直接维护过渡动画。
 
 ## 2. AutoLoad 服务
 
@@ -22,7 +23,7 @@
 | `SaveArchiveService` | 作为首个 AutoLoad，按白名单导出、导入或删除全部活动存档；导入前备份，导入或删除成功后重启，删除重启时在其他服务读档前完成保护性清理 | 玩家选择的 `.lisbamsave`；导入备份位于 `user://save_import_backup_<时间戳>/`；删除保护标记位于 `user://save_delete_pending_v1.marker` |
 | `SaveLocationMigration` | 历史迁移实现占位；未在 `project.godot` 注册，不参与当前 AutoLoad 启动 | 无新增持久化；既有完成标记不再读取 |
 | `ContentCatalog` | 启动时扫描角色、武器、装备、道具、怪物和扩展包清单，按角色解锁状态过滤内容池 | 无 |
-| `SessionState` | 保存当前游戏模式、已确认角色与永久角色/扩展包解锁状态 | `user://character_unlocks.json`；角色选择和解锁永久保存，模式仅运行期 |
+| `SessionState` | 保存当前游戏模式、已确认角色、永久角色/扩展包解锁状态及角色页一次性返回目标 | `user://character_unlocks.json`；角色选择和解锁永久保存，模式与返回目标仅运行期 |
 | `InputBindings` | 管理默认与自定义输入映射 | `user://input_bindings.cfg` |
 | `UiStyleSettings` | 管理“黑蓝科技风 / 黑白简约风”选择与通用控件主题即时刷新，不覆盖业务语义颜色或节点材质 | `user://ui_style_settings.cfg` |
 | `DebugSettings` | 管理开发者调试选项 | `user://debug_settings.cfg` |
@@ -51,7 +52,7 @@
 
 | 组件 | 单一职责 |
 | --- | --- |
-| `PlayerInputComponent` | 把 InputMap 转换为移动、瞄准、攻击、疾跑和冲刺意图，并分别保存攻击按下边沿与持续状态；内部 `dodge` ID 仅用于旧按键存档兼容 |
+| `PlayerInputComponent` | 把 InputMap 转换为移动、瞄准、攻击、疾跑和冲刺意图，并分别保存攻击按下边沿与持续状态；战斗输入关闭时移动意图同步归零，内部 `dodge` ID 仅用于旧按键存档兼容 |
 | `ActiveSkillComponent` | 管理三个主动技能槽的按下、瞄准、锁定、蓄力、松手释放、能量与冷却；技能动作在 GUI 前接收并由战斗输入开关统一隔离，训练场可临时禁用主动技能冷却 |
 | `PassiveSkillComponent` | 按角色资源同时创建多个被动行为，并在角色切换时清理各自长期状态 |
 | `SkillTargetingVisual` | 绘制方向、位置和锁定目标范围，不参与目标合法性或命中结算 |
@@ -69,14 +70,18 @@
 | `DamageReceiverComponent` | 统一可受伤目标的伤害接收入口 |
 | `CombatDamageCalculator` | 统一伤害、攻防和暴击计算 |
 | `CombatHudSlotView` | 统一局内主动技能槽与常驻武器槽的纯展示接口，不拥有技能或装备数据，不承担物品卡牌交互 |
+| `SelectedCharacterRuntimeComponent` | 从 `SessionState` 读取当前角色档案，并统一把名称、基础属性、主动技能、被动技能和基础移速注入玩家预制体 |
+| `LobbyInteractionComponent` | 按固定批次选择大厅中距离碰撞边缘最近的合法实体，把可重绑定 F 动作转换为稳定 action ID 请求 |
 
 `PlayerController` 是组合根，只协调组件、朝向和战斗反馈，不拥有库存、输入解析或攻击公式。新增角色优先替换数据和子组件，避免扩张聚合脚本。
 
-角色技能同样不进入 `PlayerController`。`GameWorld` 只负责把当前 `CharacterData` 的主动与被动资源数组注入技能组件；行为实例通过明确接口访问属性、目标和地图标记。
+角色技能同样不进入 `PlayerController`。`GameWorld` 与 `LobbyWorld` 都委托 `SelectedCharacterRuntimeComponent` 把当前 `CharacterData` 的主动与被动资源数组注入技能组件；行为实例通过明确接口访问属性、目标和地图标记。
 
 ### 3.3 世界与敌人层
 
 - `GameWorld` 负责地图边界、独立背景网格绘制、环境生成、探索记录、撤离点、宝箱、掉落池、虚拟人口目标和共享导航缓存；怪物类型按各场景根节点的 `spawn_weight` 占比抽取，背景网格间距不参与玩法边界或导航计算。它还接收怪物遇敌事件并交给 `GlobalInventory` 持久化图鉴发现状态。
+- `LobbyWorld` 只组合玩家、共享角色配置、大厅交互、HUD 与主菜单面板宿主；面板打开时统一禁用玩家物理处理和实体交互，关闭后恢复，不启动 `GlobalInventory.begin_combat_run()` 或任何战斗时间线。
+- `LobbyInteractable` 是大厅当前统一设施占位体：使用第 5 物理层的 `StaticBody2D` 阻挡玩家与弹体，不实现受伤接口；未来可替换视觉子节点，但必须保留 action ID、边缘距离查询和不可移动碰撞协议。
 - `MonsterSimulationManager` 只负责虚拟敌人记录与真实节点之间的分批物化和休眠，并转发真实怪物的遇敌事件，不访问存档服务。
 - `BasicMonster` 组合感知、战术和移动组件；`RangedMonster` 只增加安全距离与射击行为。
 - `WeaponDrop` 是统一地面物品载体，可承载武器、装备、强化石和道具的独立资源副本；武器与自然掉落默认数量为 1，玩家整组丢弃的可堆叠资源由单个节点保存 1 至 10 的数量并在拾取时原子合并。
@@ -88,6 +93,7 @@
 ### 3.4 UI 层
 
 - `CombatHud` 负责局内信息、暂停、地图、拾取提示、物资撤离和结算编排，不直接拥有库存数据。
+- `LobbyHud` 负责大厅左上切换按钮、最近设施提示、角色生命能量、主动技能和武器快照；它不处理 F 输入、设施距离或场景动作。主菜单以 `lobby_host_mode` 嵌入更高 CanvasLayer，只复用局外面板，不复制背包、仓库、商店等业务 UI。
 - `EncyclopediaPanel` 读取 `ContentCatalog` 的全量武器、装备、道具与怪物模板，并通过 `GlobalInventory` 的稳定发现记录决定显示正式信息或“？？？”。怪物只在离树场景实例中读取稳定 ID、说明和基础属性，首次有效遇敌后解锁；左侧列表只负责选择当前条目，右侧物品详情复用 `ItemDetailFormatter`，怪物详情显示其固定基础数值。关键词筛选匹配名称、类型和说明，条目固定按基础内容、`stelle`（星）扩展包、其余扩展包目录顺序分组，并在每个扩展包前显示标题分割。组内装备按套装聚合并固定为头部、躯干、腿部、脚部；资源按初级、中级、高级、极品排列，无法识别品质时回退名称排序。它不复制物品数值或规则、不修改库存，也不把浏览、商店预览或临时快照视为获得。
 - `CombatHud` 运行时实例化角色系统的当前角色模式，负责 O 键打开、关闭、输入锁定和场景树暂停；角色档案、属性条与技能卡片仍由角色系统从 `SessionState` 读取，HUD 不保存副本。
 - 战斗常驻 HUD 将技能栏放在屏幕左下角、武器栏放在屏幕右下角，角色名字、生命与能量独立保留在底部中心；常驻 HUD 节点必须位于全部交互遮罩之前，菜单显示时不依赖逐项隐藏也不会覆盖菜单内容。
@@ -146,7 +152,8 @@ InputMap -> PlayerInputComponent -> PlayerController
 
 ```text
 CharacterData 主动/被动资源数组
-        -> GameWorld 注入玩家技能组件
+		-> SelectedCharacterRuntimeComponent 注入玩家技能组件
+		-> GameWorld / LobbyWorld 组合场景
         -> InputMap C/V/B 或被动初始化
         -> 通用瞄准、锁定、蓄力与冷却状态
         -> 独立行为节点 -> 属性 / 目标 / 地图公开接口
@@ -169,7 +176,7 @@ ContentCatalog 模板
 
 ### 4.5 场景与输入
 
-`InputBindings` 直接更新 Godot `InputMap`，技能一、二、三、角色展示与移动、武器和其他界面操作共用同一改键与持久化流程。玩家显式解除绑定后不得回退到默认物理键；只有动作缺失或尚未初始化时才允许组件兜底。默认操作及玩家可见规则以机制总表为准。
+`InputBindings` 直接更新 Godot `InputMap`，技能一、二、三、角色展示与移动、武器和其他界面操作共用同一改键与持久化流程。大厅交互复用 `pickup_nearby` 动作并由 `LobbyInteractionComponent` 转为设施 action ID；玩家显式解除绑定后不得回退到默认物理键，只有动作缺失或尚未初始化时才允许组件兜底。任意界面关闭战斗输入后，移动意图、攻击、技能、冲刺与切枪同时失效。默认操作及玩家可见规则以机制总表为准。
 
 ## 5. 存档边界
 

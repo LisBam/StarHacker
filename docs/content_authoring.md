@@ -51,7 +51,7 @@
 - 限时消耗品使用 `ConsumableData` 与 `item_kind=consumable`，填写 `effect_stat`、`effect_amount` 和 `duration_seconds`。当前支持移速比例、手持武器攻速比例、闪避率百分点与每秒能量恢复点数；能量恢复支持 `0.1` 点精度。只能在战斗共享背包点击“使用”，成功施加后扣除 1 个。同一 `item_id` 再次使用刷新持续时间而不叠加自身，不同 ID 可以相加。攻速效果只进入武器冷却计算，不进入角色属性面板。
 - 怪物目录中的场景必须能够加载为 `PackedScene`，根节点必须填写非空且全目录唯一的 `monster_id`、玩家可见的 `display_name` 和 `description`，并填写非负 `spawn_weight`；`GameWorld` 以全部可用场景的权重占比抽取类型，0 可保留场景但不会自然生成。复制当前的 `res://scenes/enemies/stelle/voidranger_reaver.tscn` 或 `res://scenes/enemies/stelle/voidranger_eliminator.tscn` 可以分别复用近战、远程生成协议，并通过默认 1.0 的 `drop_multiplier` 调整该怪物全部掉落概率；完全不同的根节点或脚本必须自行实现 GameWorld、MonsterSimulationManager 和死亡掉落所需接口，未声明掉落倍率时按 1.0 处理。
 - 近战怪物需要攻击自推进时在根节点填写 `attack_front_recoil_force`；远程怪物需要开火后退时填写 `attack_recoil_force`。两者单位均为无碰撞理论位移像素，默认 0；同一怪物可以同时配置两项，前坐沿攻击方向、后坐沿反方向。死亡模型默认在 `death_animation_duration=0.52` 秒内旋转 `death_animation_rotation_degrees=18` 度并淡出，必须保留 `died` 信号的即时掉落语义。
-- 角色资源必须使用 `CharacterData` 或提供兼容的 `character_id` 与 `to_profile()`；基础属性在进入战斗和训练场切换角色时应用。`passive_skills` 可引用多个 `PassiveSkillData` 兼容资源并全部生效，`active_skills` 按顺序装入当前三个主动槽；旧 `passive` 与 `active` 字符串只作为未迁移档案的详情兜底。技能资源、行为接口、目标组和验证步骤见 `docs/skill_system.md`。
+- 角色资源必须使用 `CharacterData` 或提供兼容的 `character_id` 与 `to_profile()`；基础属性由 `SelectedCharacterRuntimeComponent` 在进入主大厅、进入战斗和训练场切换角色时统一应用。`passive_skills` 可引用多个 `PassiveSkillData` 兼容资源并全部生效，`active_skills` 按顺序装入当前三个主动槽；旧 `passive` 与 `active` 字符串只作为未迁移档案的详情兜底。技能资源、行为接口、目标组和验证步骤见 `docs/skill_system.md`。
 - 角色 `move_speed` 使用属性点而非直接像素速度，运行时按 `1 点 = 2 像素/秒` 换算；例如填写 `100` 等效实际速度 `200`，装备移速比例继续作用于属性点。
 - 扩展包资源必须使用 `ContentPackData` 或提供兼容的 `pack_id`、`character_id` 与四类路径查询接口。所属角色必须已经由角色目录注册；空 ID、未知角色、重复扩展包 ID、同角色第二份清单和重复内容归属不会获得额外注册权重。
 - 未列入任何扩展包清单的合法资源属于基础内容并始终可用；列入清单的资源只有在所属角色已解锁时才会由武器、装备、道具和怪物复数查询接口返回。按稳定 ID 进行的单项路径查询仍可恢复玩家已经持有的旧物品。
@@ -78,7 +78,7 @@
 - 武器、装备和道具能在下一轮商店刷新中参与对应分类抽取；开发者菜单的“全部”发放能覆盖新增模板。
 - 武器、修复包和消耗品在正式战斗掉落或宝箱池中可被选中，拾取后能保存并在重启后恢复。
 - 怪物能被虚拟人口管理器创建、唤醒、击杀和注销，死亡信号只结算一次；验证死亡冲击播放期间模型仍可见但 AI、攻击、碰撞与技能目标资格均已关闭，0.52 秒后才离树。
-- 角色出现在独立角色页与训练场切换列表，确认后名称、生命、能量、攻击、防御和移动速度与资源一致。
+- 角色出现在独立角色页与训练场切换列表，确认后主大厅、正式战斗和训练场中的名称、生命、能量、攻击、防御、移动速度与技能资源均与档案一致。
 - 角色详情能逐项展示全部主动与被动资源；进入战斗后被动全部创建，主动按前三项映射到技能一、二、三，空槽不产生行为。
 - 默认解锁角色启动后出现在 `SessionState.get_character_ids()`；锁定角色不会进入选择列表。调用 `unlock_character()` 后角色与其扩展包同时可用，重启后仍保持解锁。
 - 扩展包未解锁时，清单内四类路径均不进入复数内容池；解锁后武器、装备、道具和怪物路径全部出现，基础内容在两种状态下都不受影响。

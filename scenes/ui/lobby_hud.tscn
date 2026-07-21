@@ -1,0 +1,190 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/lobby_hud.gd" id="1_lobby_hud"]
+[ext_resource type="PackedScene" path="res://scenes/ui/active_skill_bar.tscn" id="2_active_skill_bar"]
+
+[node name="LobbyHud" type="CanvasLayer"]
+layer = 5
+script = ExtResource("1_lobby_hud")
+
+[node name="Root" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="SwitchViewButton" type="Button" parent="Root"]
+custom_minimum_size = Vector2(188, 42)
+layout_mode = 1
+anchors_preset = 0
+offset_left = 18.0
+offset_top = 18.0
+offset_right = 206.0
+offset_bottom = 60.0
+mouse_filter = 0
+text = "切换大厅/菜单"
+
+[node name="LobbyTitleLabel" type="Label" parent="Root"]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -160.0
+offset_top = 18.0
+offset_right = 160.0
+offset_bottom = 52.0
+text = "主大厅"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="InteractionPanel" type="PanelContainer" parent="Root"]
+visible = false
+custom_minimum_size = Vector2(420, 46)
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -210.0
+offset_top = -138.0
+offset_right = 210.0
+offset_bottom = -92.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="InteractionMargin" type="MarginContainer" parent="Root/InteractionPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 7
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 7
+
+[node name="InteractionLabel" type="Label" parent="Root/InteractionPanel/InteractionMargin"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.95, 1, 1)
+theme_override_font_sizes/font_size = 16
+text = "按 F 交互：设施"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="StatusPanel" type="PanelContainer" parent="Root"]
+custom_minimum_size = Vector2(390, 72)
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -195.0
+offset_top = -82.0
+offset_right = 195.0
+offset_bottom = -10.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="StatusMargin" type="MarginContainer" parent="Root/StatusPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 4
+
+[node name="StatusContent" type="VBoxContainer" parent="Root/StatusPanel/StatusMargin"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="CharacterNameLabel" type="Label" parent="Root/StatusPanel/StatusMargin/StatusContent"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "角色"
+horizontal_alignment = 1
+
+[node name="HealthLabel" type="Label" parent="Root/StatusPanel/StatusMargin/StatusContent"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "生命 -- / --"
+horizontal_alignment = 1
+
+[node name="HealthBar" type="ProgressBar" parent="Root/StatusPanel/StatusMargin/StatusContent"]
+custom_minimum_size = Vector2(0, 8)
+layout_mode = 2
+show_percentage = false
+
+[node name="EnergyLabel" type="Label" parent="Root/StatusPanel/StatusMargin/StatusContent"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "能量 -- / --"
+horizontal_alignment = 1
+
+[node name="EnergyBar" type="ProgressBar" parent="Root/StatusPanel/StatusMargin/StatusContent"]
+custom_minimum_size = Vector2(0, 8)
+layout_mode = 2
+show_percentage = false
+
+[node name="ActiveSkillPanel" type="PanelContainer" parent="Root"]
+custom_minimum_size = Vector2(362, 64)
+layout_mode = 1
+anchors_preset = -1
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 18.0
+offset_top = -82.0
+offset_right = 380.0
+offset_bottom = -18.0
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="SkillMargin" type="MarginContainer" parent="Root/ActiveSkillPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 5
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 5
+
+[node name="ActiveSkillBar" parent="Root/ActiveSkillPanel/SkillMargin" instance=ExtResource("2_active_skill_bar")]
+layout_mode = 2
+slot_minimum_size = Vector2(106, 50)
+
+[node name="WeaponPanel" type="PanelContainer" parent="Root"]
+custom_minimum_size = Vector2(382, 64)
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -400.0
+offset_top = -82.0
+offset_right = -18.0
+offset_bottom = -18.0
+grow_horizontal = 0
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="WeaponMargin" type="MarginContainer" parent="Root/WeaponPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = 5
+theme_override_constants/margin_right = 6
+theme_override_constants/margin_bottom = 5
+
+[node name="WeaponRows" type="HBoxContainer" parent="Root/WeaponPanel/WeaponMargin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+alignment = 1
+
+[node name="RangedSlots" type="HBoxContainer" parent="Root/WeaponPanel/WeaponMargin/WeaponRows"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="SlotDivider" type="VSeparator" parent="Root/WeaponPanel/WeaponMargin/WeaponRows"]
+layout_mode = 2
+
+[node name="MeleeSlotHost" type="HBoxContainer" parent="Root/WeaponPanel/WeaponMargin/WeaponRows"]
+layout_mode = 2

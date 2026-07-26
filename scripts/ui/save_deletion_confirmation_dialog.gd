@@ -115,11 +115,11 @@ func _apply_dialog_visual_style() -> void:
 	# 弹窗主题；复用全局控件状态并覆盖窗口面板透明度、描边、圆角和内容安全区域。
 	var dialog_theme: Theme = UI_STYLE_GUIDE.create_theme()
 	# 弹窗面板样式；标题栏净空由全局常量维护，底部净空保证操作按钮不贴住外框。
-	var dialog_panel_style: StyleBoxFlat = StyleBoxFlat.new()
-	dialog_panel_style.bg_color = Color(UI_STYLE_GUIDE.get_window_background_color(), dialog_background_alpha)
-	dialog_panel_style.border_color = Color(UI_STYLE_GUIDE.get_window_border_color(), minf(dialog_background_alpha + 0.10, 1.0))
-	dialog_panel_style.set_border_width_all(1)
-	dialog_panel_style.set_corner_radius_all(8)
+	# 统一样式补充；边框与圆角改由样式指南 create_dialog_panel_style() 统一生成 2 像素边框与 8 像素圆角，透明度沿用本弹窗 0.82 导出参数。
+	var dialog_panel_style: StyleBoxFlat = UI_STYLE_GUIDE.create_dialog_panel_style(dialog_background_alpha)
+	# 面板左右留白；统一函数默认 14 像素，本弹窗内容已有专用 MarginContainer，回退为跟随边框的自动留白以保持原布局。
+	dialog_panel_style.content_margin_left = -1.0
+	dialog_panel_style.content_margin_right = -1.0
 	dialog_panel_style.content_margin_top = UI_STYLE_GUIDE.DIALOG_TITLE_HEIGHT
 	dialog_panel_style.content_margin_bottom = UI_STYLE_GUIDE.DIALOG_ACTION_BOTTOM_CLEARANCE
 	dialog_theme.set_stylebox("panel", "Window", dialog_panel_style)

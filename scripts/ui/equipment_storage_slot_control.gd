@@ -19,8 +19,8 @@ const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.g
 ## 武器耐久条组件；局外装备槽使用与战斗和仓库卡片相同的底部读条。
 ## 通用耐久补充：当前实际显示由 ItemCardView 内部按耐久属性决定。
 const WEAPON_DURABILITY_BAR_SCRIPT: Script = preload("res://scripts/ui/weapon_durability_bar.gd")
-## 不可选武器灰色滤镜；默认保留一定透明度以继续显示武器名称和耐久信息。
-const UNAVAILABLE_TARGET_FILTER_COLOR: Color = Color(0.42, 0.42, 0.42, 0.78)
+## 不可选武器灰色滤镜；默认半透明灰黑层，与武器栏和物品卡片滤镜取值一致，保留武器名称和耐久信息可辨认。
+const UNAVAILABLE_TARGET_FILTER_COLOR: Color = Color(0.16, 0.16, 0.16, 0.72)
 ## 可选装备悬停缩放；默认 1.03，仅在绿色修复目标状态中启用。
 const TARGET_HOVER_SCALE: float = 1.03
 ## 可选装备悬停动画时长；默认 0.12 秒，进入和退出共用。

@@ -123,6 +123,10 @@ func _ready() -> void:
 	UI_STYLE_GUIDE.apply_primary_button(_confirm_button)
 	UI_STYLE_GUIDE.apply_title_label(_title_label)
 	UI_STYLE_GUIDE.apply_title_label(_character_name_label)
+	UI_STYLE_GUIDE.apply_title_label(_character_role_label)
+	UI_STYLE_GUIDE.apply_title_label(_passive_label)
+	UI_STYLE_GUIDE.apply_title_label(_active_label)
+	UI_STYLE_GUIDE.apply_title_label(_derived_unit_label)
 	UI_STYLE_GUIDE.apply_section_panel(_character_list_panel)
 	UI_STYLE_GUIDE.apply_window_panel(_detail_panel)
 	_stelle_button.toggle_mode = true

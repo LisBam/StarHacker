@@ -15,6 +15,8 @@ const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_form
 const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
 ## 锻造槽允许的最小边长；默认 48 像素，用于保护外部调用传入异常小尺寸时的文字与投放区域可用性。
 const MINIMUM_SLOT_SIZE: float = 48.0
+## 全局窗口样式指南；锻造槽宿主五态样式统一读取当前 UI 风格卡片色板，与仓库武器槽保持同一状态映射。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 
 ## 槽位下标；主锻造槽固定为 -1，周围牺牲槽使用 0 到 4。
 var _slot_index: int = -1
@@ -31,6 +33,12 @@ var _normal_style: StyleBoxFlat
 var _hover_style: StyleBoxFlat
 ## 槽位按下样式缓存；默认在 configure 创建，合法槽位继续使用按下反馈。
 var _pressed_style: StyleBoxFlat
+## 槽位禁用样式缓存；默认在 configure 创建，保持卡片底色与弱边框的低饱和可辨认状态。
+var _disabled_style: StyleBoxFlat
+## 槽位焦点样式缓存；默认在 configure 创建，透明背景配当前风格强调色描边。
+var _focus_style: StyleBoxFlat
+## 主题刷新重入保护；重建样式盒会再次触发主题变更通知，置位期间跳过嵌套刷新以避免递归。
+var _theme_refresh_in_progress: bool = false
 ## 通用物品卡片视图缓存；默认在配置槽位时创建，空槽与已放入物品共享同一排版和尺寸。
 var _item_card_view: Control
 
@@ -46,17 +54,8 @@ func configure(slot_index: int, is_main_slot: bool, slot_size: float = 84.0) -> 
 	size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	# 槽位基础样式；六个槽位统一正方形深色底与白色边框，主锻造槽与牺牲槽仅通过位置区分职责。
 	# 通用模板补充：该宿主样式仅保留交互兼容，最终可见轮廓由 160×72 的 ItemCardView 覆盖绘制。
-	_normal_style = StyleBoxFlat.new()
-	_normal_style.bg_color = Color(0.06, 0.075, 0.09, 0.94)
-	_normal_style.border_color = Color.WHITE
-	_normal_style.set_border_width_all(2)
-	_normal_style.set_corner_radius_all(4)
-	# 槽位悬停样式；保留白色边框并轻微提亮背景，便于确认可点击归还操作。
-	_hover_style = _normal_style.duplicate() as StyleBoxFlat
-	_hover_style.bg_color = Color(0.13, 0.17, 0.21, 0.98)
-	# 槽位按下样式；保持边框不变，避免锻造区视觉层级随点击发生跳变。
-	_pressed_style = _normal_style.duplicate() as StyleBoxFlat
-	_pressed_style.bg_color = Color(0.18, 0.22, 0.26, 1.0)
+	# 风格化补充：五态样式统一读取样式指南卡片色板并集中在 _rebuild_interaction_styles()，风格切换后可重建。
+	_rebuild_interaction_styles()
 	_refresh_interaction_styles()
 	_ensure_item_card_view()
 	if not pressed.is_connected(_on_pressed):
@@ -102,6 +101,37 @@ func set_invalid_state(is_invalid: bool) -> void:
 	refresh(_entry)
 
 
+func _rebuild_interaction_styles() -> void:
+	## 按当前 UI 风格重建槽位五态样式盒；只生成样式资源，实际应用由 _refresh_interaction_styles() 统一执行。
+	# 卡片基础背景；读取当前风格标准物品卡片底色，各状态只在其上调整明度与透明度，不再出现字面蓝色或纯白边框。
+	var card_background_color: Color = UI_STYLE_GUIDE.get_item_card_background_color()
+	_normal_style = StyleBoxFlat.new()
+	_normal_style.bg_color = Color(card_background_color, 0.94)
+	_normal_style.border_color = UI_STYLE_GUIDE.get_item_card_border_color()
+	_normal_style.set_border_width_all(2)
+	_normal_style.set_corner_radius_all(4)
+	# 槽位悬停样式；保留白色边框并轻微提亮背景，便于确认可点击归还操作。
+	# 风格化补充：悬停边框现改用当前风格弱强调色，背景仍维持原有轻微提亮的明度关系。
+	_hover_style = _normal_style.duplicate() as StyleBoxFlat
+	_hover_style.bg_color = Color(card_background_color.lerp(Color.WHITE, 0.10), 0.98)
+	_hover_style.border_color = UI_STYLE_GUIDE.get_accent_muted_color()
+	# 槽位按下样式；保持边框不变，避免锻造区视觉层级随点击发生跳变。
+	# 风格化补充：按下边框现改用当前风格强调色，背景继续沿用比悬停更亮一档的明度递进。
+	_pressed_style = _normal_style.duplicate() as StyleBoxFlat
+	_pressed_style.bg_color = Color(card_background_color.lerp(Color.WHITE, 0.16), 1.0)
+	_pressed_style.border_color = UI_STYLE_GUIDE.get_accent_color()
+	# 槽位禁用样式；沿用卡片底色并弱化边框，保证低饱和状态下仍可辨认投放区域。
+	_disabled_style = _normal_style.duplicate() as StyleBoxFlat
+	_disabled_style.bg_color = Color(card_background_color, 0.82)
+	_disabled_style.border_color = Color(UI_STYLE_GUIDE.get_item_card_border_color(), 0.55)
+	# 槽位焦点样式；透明背景只描当前风格强调色 2 像素边框，圆角与统一物品卡片保持一致。
+	_focus_style = StyleBoxFlat.new()
+	_focus_style.bg_color = Color.TRANSPARENT
+	_focus_style.border_color = UI_STYLE_GUIDE.get_accent_color()
+	_focus_style.set_border_width_all(2)
+	_focus_style.set_corner_radius_all(4)
+
+
 func _refresh_interaction_styles() -> void:
 	if _normal_style == null:
 		return
@@ -109,6 +139,23 @@ func _refresh_interaction_styles() -> void:
 	# 红色无效材料仍允许点击归还，但 hover 和 pressed 不再提亮为可锻造状态。
 	add_theme_stylebox_override("hover", _normal_style if _is_invalid else _hover_style)
 	add_theme_stylebox_override("pressed", _normal_style if _is_invalid else _pressed_style)
+	# 补齐禁用与焦点状态；禁用保持低饱和可辨认，焦点用透明底加强调描边，两者均随当前风格重建。
+	if _disabled_style != null:
+		add_theme_stylebox_override("disabled", _disabled_style)
+	if _focus_style != null:
+		add_theme_stylebox_override("focus", _focus_style)
+
+
+func _notification(what: int) -> void:
+	if what != NOTIFICATION_THEME_CHANGED:
+		return
+	# 主题切换刷新；样式仅在配置时创建一次，收到主题通知后按当前风格重建并重新应用，重入保护防止覆盖操作再次触发。
+	if _normal_style == null or _theme_refresh_in_progress:
+		return
+	_theme_refresh_in_progress = true
+	_rebuild_interaction_styles()
+	_refresh_interaction_styles()
+	_theme_refresh_in_progress = false
 
 
 func get_entry() -> Dictionary:

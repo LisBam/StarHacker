@@ -66,7 +66,6 @@ theme_override_constants/margin_bottom = 7
 
 [node name="InteractionLabel" type="Label" parent="Root/InteractionPanel/InteractionMargin"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.72, 0.95, 1, 1)
 theme_override_font_sizes/font_size = 16
 text = "按 F 交互：设施"
 horizontal_alignment = 1

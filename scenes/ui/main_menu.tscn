@@ -47,14 +47,12 @@ alignment = 1
 
 [node name="Title" type="Label" parent="Center" unique_id=836874813]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.721569, 0.894118, 1, 1)
 theme_override_font_sizes/font_size = 38
 text = "星穹骇客"
 horizontal_alignment = 1
 
 [node name="EnglishTitle" type="Label" parent="Center" unique_id=1250518934]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.48, 0.74, 0.9, 1)
 theme_override_font_sizes/font_size = 18
 text = "Star Hacker"
 horizontal_alignment = 1

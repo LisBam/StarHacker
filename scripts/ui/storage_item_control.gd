@@ -18,6 +18,8 @@ const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_form
 const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
 ## 库存限制配置；卡片显示数量和跨容器移动数量统一使用单组 10 件上限。
 const INVENTORY_LIMITS: Script = preload("res://scripts/data/inventory_limits.gd")
+## 全局窗口样式指南；战斗武器槽视觉的五态样式统一读取当前 UI 风格卡片色板，支持黑蓝与黑白即时切换。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 强化词条增强颜色；默认亮绿色，与悬停详情保持一致。
 const STONE_BENEFICIAL_COLOR: String = "#70e889"
 ## 强化词条削弱颜色；默认亮红色，与悬停详情保持一致。
@@ -85,6 +87,8 @@ var _item_card_view: Control
 var _extraction_prefix: String = ""
 ## 当前卡片是否正在作为拖拽来源；默认 false，拖拽结束时用于统一恢复缩放与透明度。
 var _is_drag_source_active: bool = false
+## 主题刷新重入保护；重建样式盒会再次触发主题变更通知，置位期间跳过嵌套刷新以避免递归。
+var _theme_refresh_in_progress: bool = false
 
 
 func configure(item_resource: Resource, location: String, item_index: int, quick_action_enabled: bool, extraction_prefix: String = "", quantity: int = 1, price_label: String = "价值", displayed_price_override: int = -1, show_remaining_enhancement_count: bool = false) -> void:
@@ -240,6 +244,14 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_THEME_CHANGED:
+		# 主题切换刷新；按当前风格重建武器槽五态样式并保留不可选卡片的悬停中和，重入保护防止覆盖操作再次触发本分支。
+		if _theme_refresh_in_progress:
+			return
+		_theme_refresh_in_progress = true
+		_refresh_interaction_theme(_weapon_target_selection_blocked or _item_selection_blocked)
+		_theme_refresh_in_progress = false
+		return
 	if what != NOTIFICATION_DRAG_END or not _is_drag_source_active:
 		return
 	# 拖拽结束恢复；无论投放成功或取消，都使用通用卡片动画恢复来源外观。
@@ -464,23 +476,40 @@ func _apply_weapon_slot_visual_style() -> void:
 		remove_theme_stylebox_override("normal")
 		remove_theme_stylebox_override("hover")
 		remove_theme_stylebox_override("pressed")
+		remove_theme_stylebox_override("disabled")
+		remove_theme_stylebox_override("focus")
 		return
+	# 卡片基础背景；读取当前风格标准物品卡片底色，各状态只在其上调整明度与透明度，不再出现字面蓝色。
+	var card_background_color: Color = UI_STYLE_GUIDE.get_item_card_background_color()
 	# 普通样式；颜色、边框宽度与 WeaponSlotControl 的绘制参数保持一致。
+	# 风格化补充：底色与边框改由样式指南提供，保留原有 0.92 透明度意图与状态明度递进关系。
 	var normal_style: StyleBoxFlat = StyleBoxFlat.new()
-	normal_style.bg_color = Color(0.06, 0.075, 0.09, 0.92)
-	normal_style.border_color = Color(0.22, 0.30, 0.36, 1.0)
+	normal_style.bg_color = Color(card_background_color, 0.92)
+	normal_style.border_color = UI_STYLE_GUIDE.get_item_card_border_color()
 	normal_style.set_border_width_all(2)
 	# 悬停样式；在不改变整体深色风格的前提下提供鼠标反馈。
 	var hover_style: StyleBoxFlat = normal_style.duplicate() as StyleBoxFlat
-	hover_style.bg_color = Color(0.09, 0.12, 0.15, 0.96)
-	hover_style.border_color = Color(0.42, 0.72, 0.82, 1.0)
+	hover_style.bg_color = Color(card_background_color.lerp(Color.WHITE, 0.05), 0.96)
+	hover_style.border_color = UI_STYLE_GUIDE.get_accent_muted_color()
 	# 按下样式；短暂加亮背景，保持与武器槽相同的紧凑边界。
 	var pressed_style: StyleBoxFlat = normal_style.duplicate() as StyleBoxFlat
-	pressed_style.bg_color = Color(0.12, 0.17, 0.20, 1.0)
-	pressed_style.border_color = Color(0.55, 0.92, 1.0, 1.0)
+	pressed_style.bg_color = Color(card_background_color.lerp(Color.WHITE, 0.10), 1.0)
+	pressed_style.border_color = UI_STYLE_GUIDE.get_accent_color()
+	# 禁用样式；沿用卡片底色并弱化边框，保证低饱和状态下仍可辨认槽位边界。
+	var disabled_style: StyleBoxFlat = normal_style.duplicate() as StyleBoxFlat
+	disabled_style.bg_color = Color(card_background_color, 0.82)
+	disabled_style.border_color = Color(UI_STYLE_GUIDE.get_item_card_border_color(), 0.55)
+	# 焦点样式；透明背景只描当前风格强调色 2 像素边框，圆角与统一物品卡片保持一致。
+	var focus_style: StyleBoxFlat = StyleBoxFlat.new()
+	focus_style.bg_color = Color.TRANSPARENT
+	focus_style.border_color = UI_STYLE_GUIDE.get_accent_color()
+	focus_style.set_border_width_all(2)
+	focus_style.set_corner_radius_all(4)
 	add_theme_stylebox_override("normal", normal_style)
 	add_theme_stylebox_override("hover", hover_style)
 	add_theme_stylebox_override("pressed", pressed_style)
+	add_theme_stylebox_override("disabled", disabled_style)
+	add_theme_stylebox_override("focus", focus_style)
 
 
 func _build_stone_card_bbcode(extraction_prefix: String) -> String:

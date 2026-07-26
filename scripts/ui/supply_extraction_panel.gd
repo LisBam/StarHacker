@@ -125,10 +125,10 @@ func _build_interface() -> void:
 	UI_STYLE_GUIDE.apply_title_label(title_label)
 	header.add_child(title_label)
 	_coins_label = Label.new()
-	_coins_label.add_theme_font_size_override("font_size", 17)
+	_coins_label.add_theme_font_size_override("font_size", 18)
 	header.add_child(_coins_label)
 	_remaining_value_label = Label.new()
-	_remaining_value_label.add_theme_font_size_override("font_size", 17)
+	_remaining_value_label.add_theme_font_size_override("font_size", 18)
 	header.add_child(_remaining_value_label)
 	# 关闭按钮；退出面板后由 CombatHud 解除暂停并恢复战斗输入。
 	var close_button: Button = Button.new()

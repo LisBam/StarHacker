@@ -136,6 +136,8 @@ func _build_interface() -> void:
 	_header_panel.gui_input.connect(_on_header_gui_input)
 	_header_panel.mouse_entered.connect(_on_header_mouse_entered)
 	_header_panel.mouse_exited.connect(_on_header_mouse_exited)
+	_header_panel.focus_entered.connect(_on_header_focus_changed)
+	_header_panel.focus_exited.connect(_on_header_focus_changed)
 	card_content.add_child(_header_panel)
 	# 标题行内容；技能名伸展占位，三个徽章保持内容宽度并右对齐。
 	var header_content: HBoxContainer = HBoxContainer.new()
@@ -172,9 +174,10 @@ func _create_badge_panel(background_color: Color) -> PanelContainer:
 	badge_panel.custom_minimum_size = Vector2(0.0, maxf(badge_minimum_height, MINIMUM_BADGE_HEIGHT))
 	badge_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	# 徽章样式；使用 1 像素强调边框和 6 像素圆角形成紧凑方框。
+	# 描边取色补充；改用样式指南实时接口跟随当前 UI 风格，徽章底色仍由主动、被动、CD 与能耗语义常量决定。
 	var badge_style: StyleBoxFlat = StyleBoxFlat.new()
 	badge_style.bg_color = background_color
-	badge_style.border_color = UI_STYLE_GUIDE.CHARACTER_SKILL_BADGE_BORDER_COLOR
+	badge_style.border_color = UI_STYLE_GUIDE.get_character_skill_badge_border_color()
 	badge_style.set_border_width_all(BADGE_BORDER_WIDTH)
 	badge_style.set_corner_radius_all(UI_STYLE_GUIDE.SECTION_CORNER_RADIUS)
 	badge_style.content_margin_left = maxf(badge_horizontal_padding, 0.0)
@@ -221,7 +224,8 @@ func _refresh_expanded_state() -> void:
 	## 更新说明可见性、提示文字与卡片高亮，展开不会修改技能数据。
 	_description_label.visible = _expanded
 	_header_panel.tooltip_text = "点击收起技能描述" if _expanded else "点击展开技能描述"
-	_apply_card_style(_expanded or _header_hovered)
+	# 键盘焦点纳入补充；焦点与悬停共用同一层高亮，二者同现时仍只应用一次强调，展开状态继续保持整卡高亮。
+	_apply_card_style(_expanded or _header_hovered or _is_header_focused())
 	_apply_header_style(_header_hovered)
 
 
@@ -239,10 +243,22 @@ func _apply_card_style(highlighted: bool) -> void:
 func _apply_header_style(hovered: bool) -> void:
 	## 更新标题行背景；悬停时显示弱青蓝底，普通状态保持透明以突出整体卡片边框。
 	# 标题样式；透明边框避免标题行与卡片整体边框形成重复轮廓。
+	# 键盘焦点补充；标题行持有焦点时使用与悬停相同的高亮底并追加强调描边，焦点与悬停同现时取该更明确的组合。
 	var header_style: StyleBoxFlat = StyleBoxFlat.new()
-	header_style.bg_color = UI_STYLE_GUIDE.get_character_skill_header_hover_color() if hovered else Color.TRANSPARENT
+	# 标题是否需要高亮底色；悬停与键盘焦点共用同一背景色，保证鼠标与键盘操作反馈一致。
+	var header_highlighted: bool = hovered or _is_header_focused()
+	header_style.bg_color = UI_STYLE_GUIDE.get_character_skill_header_hover_color() if header_highlighted else Color.TRANSPARENT
 	header_style.set_corner_radius_all(UI_STYLE_GUIDE.SECTION_CORNER_RADIUS)
+	if _is_header_focused():
+		# 焦点描边；仅键盘焦点存在时绘制强调色细边，与卡片外层 2 像素高亮边框宽度错开避免视觉冲突。
+		header_style.border_color = UI_STYLE_GUIDE.get_accent_color()
+		header_style.set_border_width_all(CARD_NORMAL_BORDER_WIDTH)
 	_header_panel.add_theme_stylebox_override("panel", header_style)
+
+
+func _is_header_focused() -> bool:
+	## 返回标题行是否持有键盘焦点；控件尚未构建或已被释放时安全返回 false。
+	return _header_panel != null and is_instance_valid(_header_panel) and _header_panel.has_focus()
 
 
 func _format_seconds(seconds: float) -> String:
@@ -287,8 +303,35 @@ func _on_header_mouse_exited() -> void:
 	_refresh_expanded_state()
 
 
+func _on_header_focus_changed() -> void:
+	## 键盘焦点进入或离开标题行后刷新高亮；焦点反馈与悬停共用刷新入口，不改变展开状态。
+	if not _interface_ready:
+		return
+	_refresh_expanded_state()
+
+
+func _refresh_badge_border_colors() -> void:
+	## 把三个徽章的描边同步到当前风格；徽章底色仍由主动、被动、CD 与能耗语义常量决定，不在此处改写。
+	# 类型徽章面板；刷新时从标签反查父面板，与冷却、能耗面板共用同一描边更新流程。
+	var type_badge_panel: PanelContainer = _type_badge_label.get_parent() as PanelContainer
+	for raw_badge_panel in [type_badge_panel, _cooldown_badge_panel, _energy_badge_panel]:
+		# 当前徽章面板；类型转换失败或节点已释放时跳过，保证风格切换不因个别控件异常中断。
+		var badge_panel: PanelContainer = raw_badge_panel as PanelContainer
+		if badge_panel == null or not is_instance_valid(badge_panel):
+			continue
+		# 当前徽章样式；读取已生效的覆盖样式，保留背景、圆角与内容边距。
+		var badge_style: StyleBoxFlat = badge_panel.get_theme_stylebox("panel") as StyleBoxFlat
+		if badge_style == null:
+			continue
+		# 独立样式副本；避免多个卡片共享同一资源时相互覆盖描边颜色。
+		var duplicated_style: StyleBoxFlat = badge_style.duplicate() as StyleBoxFlat
+		duplicated_style.border_color = UI_STYLE_GUIDE.get_character_skill_badge_border_color()
+		badge_panel.add_theme_stylebox_override("panel", duplicated_style)
+
+
 func _on_ui_style_changed(_style_id: String) -> void:
 	## 在风格服务完成根主题刷新后重建局部卡片样式；技能徽章的业务颜色不在此处改写。
 	if not _interface_ready or not is_inside_tree() or _header_panel == null or not is_instance_valid(_header_panel):
 		return
+	_refresh_badge_border_colors()
 	_refresh_expanded_state()

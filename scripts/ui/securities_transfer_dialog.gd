@@ -155,11 +155,11 @@ func _apply_dialog_visual_style() -> void:
 	## 应用半透明深色窗口样式；规格与股票数量弹窗一致，保持转账入口视觉统一。
 	var dialog_theme: Theme = UI_STYLE_GUIDE.create_theme()
 	# 窗口面板样式；透明度由检查器参数统一控制。
-	var dialog_panel_style: StyleBoxFlat = StyleBoxFlat.new()
-	dialog_panel_style.bg_color = Color(UI_STYLE_GUIDE.get_window_background_color(), dialog_background_alpha)
-	dialog_panel_style.border_color = Color(UI_STYLE_GUIDE.get_window_border_color(), minf(dialog_background_alpha + 0.10, 1.0))
-	dialog_panel_style.set_border_width_all(1)
-	dialog_panel_style.set_corner_radius_all(8)
+	# 统一样式补充；边框与圆角改由样式指南 create_dialog_panel_style() 统一生成 2 像素边框与 8 像素圆角，不再局部拼装。
+	var dialog_panel_style: StyleBoxFlat = UI_STYLE_GUIDE.create_dialog_panel_style(dialog_background_alpha)
+	# 面板左右留白；统一函数默认 14 像素，本弹窗内容已有专用 MarginContainer，回退为跟随边框的自动留白以保持原布局。
+	dialog_panel_style.content_margin_left = -1.0
+	dialog_panel_style.content_margin_right = -1.0
 	dialog_panel_style.content_margin_top = UI_STYLE_GUIDE.DIALOG_TITLE_HEIGHT
 	dialog_panel_style.content_margin_bottom = UI_STYLE_GUIDE.DIALOG_ACTION_BOTTOM_CLEARANCE
 	dialog_theme.set_stylebox("panel", "Window", dialog_panel_style)

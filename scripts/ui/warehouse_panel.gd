@@ -293,7 +293,7 @@ func _build_storage_interface() -> void:
 	header.add_child(_cancel_stone_use_button)
 	# 顶部关闭按钮；固定在标题栏内，展开背包后不会被下方内容推到窗口外。
 	var close_button: Button = Button.new()
-	close_button.custom_minimum_size = Vector2(112.0, 38.0)
+	close_button.custom_minimum_size = Vector2(116.0, 36.0)
 	close_button.text = "关闭仓库"
 	close_button.pressed.connect(_on_close_pressed)
 	header.add_child(close_button)
@@ -367,7 +367,7 @@ func _build_storage_interface() -> void:
 	var warehouse_title: Label = Label.new()
 	warehouse_title.text = "仓库"
 	warehouse_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	warehouse_title.add_theme_font_size_override("font_size", 17)
+	warehouse_title.add_theme_font_size_override("font_size", 18)
 	content.add_child(warehouse_title)
 
 	_warehouse_scroll = ScrollContainer.new()
@@ -406,7 +406,7 @@ func _build_storage_interface() -> void:
 	_backpack_title_label = Label.new()
 	_backpack_title_label.text = "背包 --/--"
 	_backpack_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_backpack_title_label.add_theme_font_size_override("font_size", 17)
+	_backpack_title_label.add_theme_font_size_override("font_size", 18)
 	_backpack_section.add_child(_backpack_title_label)
 
 	# 随身区双栏；左侧固定装备槽，右侧显示背包物品并接收仓库拖拽。
@@ -1148,23 +1148,7 @@ func _restore_stone_return_view() -> void:
 
 
 func _apply_danger_button_style(button: Button) -> void:
-	if button == null:
-		return
-	# 普通危险按钮样式；深红背景和亮红边框用于明确取消当前强化操作。
-	var normal_style: StyleBoxFlat = StyleBoxFlat.new()
-	normal_style.bg_color = Color(0.42, 0.08, 0.10, 0.96)
-	normal_style.border_color = Color(0.95, 0.24, 0.28, 1.0)
-	normal_style.set_border_width_all(2)
-	# 悬停危险按钮样式；提高亮度但保持红色语义。
-	var hover_style: StyleBoxFlat = normal_style.duplicate() as StyleBoxFlat
-	hover_style.bg_color = Color(0.58, 0.10, 0.13, 1.0)
-	# 按下危险按钮样式；使用更深红色提供明确点击反馈。
-	var pressed_style: StyleBoxFlat = normal_style.duplicate() as StyleBoxFlat
-	pressed_style.bg_color = Color(0.30, 0.04, 0.06, 1.0)
-	button.add_theme_stylebox_override("normal", normal_style)
-	button.add_theme_stylebox_override("hover", hover_style)
-	button.add_theme_stylebox_override("pressed", pressed_style)
-	button.add_theme_color_override("font_color", Color(1.0, 0.92, 0.92, 1.0))
+	UI_STYLE_GUIDE.apply_danger_button(button)
 
 
 func _on_item_drop_requested(drag_data: Dictionary, target_location: String, target_index: int) -> void:

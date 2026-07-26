@@ -173,7 +173,7 @@ func _build_interface() -> void:
 	var title_label: Label = Label.new()
 	title_label.text = "开发者菜单"
 	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_label.add_theme_font_size_override("font_size", 26)
+	title_label.add_theme_font_size_override("font_size", 25)
 	UI_STYLE_GUIDE.apply_title_label(title_label)
 	content.add_child(title_label)
 	# 隐藏入口提示；明确该菜单属于调试能力，避免误认为正式经济系统入口。

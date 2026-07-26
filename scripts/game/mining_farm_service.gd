@@ -61,13 +61,16 @@ const CONTRACT_DEFINITIONS: Array[Dictionary] = [
 	{"id": "long_term", "name": "长期算力合同", "duration_seconds": 21600, "payout_ratio": 0.98, "description": "锁定 6 小时在线时间，费率仅 2%，长线挂机最优出口"},
 ]
 ## 资产定义表；价格、单台整数产出、解锁门槛和说明均集中维护，UI 只读取公开副本。
+## 产出锚定说明；六档资产的静态回本时长按购买价除单台产出依次约为 11.1、10.4、9.7、9.3、8.8、8.5 在线小时，
+## 高档略优以奖励长线投入；调整产出或价格时必须保持回本时长在 8 至 12 在线小时区间并同步机制总表。
+## 解锁门槛说明；各档门槛约等于上一档资产 4 至 5 台的基础总产出，成长节奏与调整前保持一致。
 const ASSET_DEFINITIONS: Array[Dictionary] = [
-	{"id": "embedded_chip", "name": "嵌入式算力芯片", "price": 80000, "production": 8, "unlock_rate": 0, "description": "入门级低功耗算力单元，适合小额试水"},
-	{"id": "desktop_node", "name": "桌面矿机节点", "price": 450000, "production": 52, "unlock_rate": 30, "description": "家用级矿机，稳定产出，性价比均衡"},
-	{"id": "rack_server", "name": "机架式服务器组", "price": 2800000, "production": 360, "unlock_rate": 200, "description": "企业级服务器阵列，产出效率显著提升"},
-	{"id": "edge_station", "name": "边缘计算基站", "price": 16000000, "production": 2200, "unlock_rate": 1500, "description": "区域分布式算力节点，覆盖范围广"},
-	{"id": "regional_center", "name": "区域数据中心", "price": 95000000, "production": 14000, "unlock_rate": 10000, "description": "大型数据中心，算力密度极高"},
-	{"id": "quantum_cluster", "name": "量子计算集群", "price": 580000000, "production": 92000, "unlock_rate": 70000, "description": "顶级量子算力单元，游戏内产出天花板"},
+	{"id": "embedded_chip", "name": "嵌入式算力芯片", "price": 80000, "production": 2, "unlock_rate": 0, "description": "入门级低功耗算力单元，适合小额试水"},
+	{"id": "desktop_node", "name": "桌面矿机节点", "price": 450000, "production": 12, "unlock_rate": 8, "description": "家用级矿机，稳定产出，性价比均衡"},
+	{"id": "rack_server", "name": "机架式服务器组", "price": 2800000, "production": 80, "unlock_rate": 50, "description": "企业级服务器阵列，产出效率显著提升"},
+	{"id": "edge_station", "name": "边缘计算基站", "price": 16000000, "production": 480, "unlock_rate": 350, "description": "区域分布式算力节点，覆盖范围广"},
+	{"id": "regional_center", "name": "区域数据中心", "price": 95000000, "production": 3000, "unlock_rate": 2200, "description": "大型数据中心，算力密度极高"},
+	{"id": "quantum_cluster", "name": "量子计算集群", "price": 580000000, "production": 19000, "unlock_rate": 15000, "description": "顶级量子算力单元，游戏内产出天花板"},
 ]
 
 ## 面板打开时结算周期；默认 1 秒，直接形成清晰的逐秒整数产出节律。

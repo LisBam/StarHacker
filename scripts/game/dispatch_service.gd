@@ -26,9 +26,13 @@ const CRIT_CHANCE_MAXIMUM: float = 0.50
 ## 大成功报酬倍率；默认 1.5，实际到账为锁定报酬乘该倍率后向下取整。
 const CRIT_REWARD_MULTIPLIER: float = 1.5
 ## 委托定义表；时长、基础报酬、适性属性与说明集中维护，UI 只读取公开副本。
+## 报酬阶梯说明；五档委托按在线时长递增，报酬效率依次约为每小时 300、320、350、373、400 星穹，时长越长效率越高以奖励长线锁定。
+## 适性覆盖说明；五档委托的适性属性正好覆盖角色档案的移动速度、生命上限、防御力、能量上限与攻击力五维，任何角色都存在相对擅长的委托。
 const MISSION_DEFINITIONS: Array[Dictionary] = [
 	{"id": "intel_sweep", "name": "情报收集", "duration_seconds": 1800, "base_reward": 150, "affinity_stat": "move_speed", "affinity_name": "移动速度", "description": "潜入街区搜集骇入情报，脚程越快越不容易暴露"},
+	{"id": "garrison_watch", "name": "前线驻守", "duration_seconds": 3600, "base_reward": 320, "affinity_stat": "max_health", "affinity_name": "生命上限", "description": "驻守前哨要塞抵御持续袭扰，生命上限越高越能持久作战"},
 	{"id": "relic_escort", "name": "遗迹护送", "duration_seconds": 7200, "base_reward": 700, "affinity_stat": "defense_power", "affinity_name": "防御力", "description": "护送勘探商队穿越遗迹，防御越高越能扛住伏击"},
+	{"id": "energy_grid_patrol", "name": "能源网巡检", "duration_seconds": 10800, "base_reward": 1120, "affinity_stat": "max_energy", "affinity_name": "能量上限", "description": "巡检星海能源中继网络，能量上限越高越能支撑长时间作业"},
 	{"id": "deep_net_raid", "name": "深网渗透", "duration_seconds": 21600, "base_reward": 2400, "affinity_stat": "attack_power", "affinity_name": "攻击力", "description": "突袭深网数据堡垒，火力越强战果越丰厚"},
 ]
 

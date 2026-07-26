@@ -39,6 +39,7 @@
 | `BannerNotificationService` | 屏幕顶端全局横幅通知：CanvasLayer 图层 `1200` 高于场景过渡层，`process_mode = ALWAYS` 战斗内外与暂停期间均可播放；持有横幅开关并订阅强平等业务信号，业务服务不反向依赖 | `user://banner_notification_settings.cfg` |
 | `SceneTransition` | 统一场景切换和黑屏过渡 | 无 |
 | `NetworkSession` | 局域网联机会话：建房、UDP 房间发现、加入、成员名册与准备、共享地图种子分发、统一开局与战斗消息中继；`process_mode = ALWAYS` 且跨场景保持连接，完整协议见 `docs/multiplayer.md` | 无 |
+| `NetworkRoomStatusOverlay` | 联机房间状态字幕：CanvasLayer 图层 `120`，入房期间屏幕顶部常驻“联机房间 N/M”（已准备数/总人数），订阅名册与会话信号即时刷新并按 0.25 秒轮询兜底，正式战斗场景内隐藏；纯展示不拦截鼠标 | 无 |
 
 服务是数据所有者，面板只读取快照、发出命令并响应信号。新增跨场景状态时先确认归属，不得在多个 UI 脚本中各保存一份可变副本。
 

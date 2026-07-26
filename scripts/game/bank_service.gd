@@ -39,10 +39,11 @@ const BEAR_FIXED_RATE_MULTIPLIER: float = 1.25
 ## 算力币兑星穹换算比例；与矿场充值比例一致，违约抵扣按每 10000 算力币折抵 1 星穹执行。
 const COMPUTE_COINS_PER_GOLD: int = 10000
 ## 定期存单定义表；基础利率按在线时长阶梯递增，签订时再乘大盘与金库倍率后锁定。
+## 利率阶梯说明；三档基础利率折算每在线小时依次约 0.8%、0.9%、1.0%，时长越长效率越高，且始终显著低于贷款利率，杜绝存贷套利。
 const FIXED_DEPOSIT_DEFINITIONS: Array[Dictionary] = [
-	{"id": "short_term", "name": "短期存单", "duration_seconds": 1800, "base_rate": 0.010, "description": "锁定 30 分钟在线时间，基础利率 1.0%，小额资金快速周转"},
-	{"id": "standard_term", "name": "标准存单", "duration_seconds": 7200, "base_rate": 0.045, "description": "锁定 2 小时在线时间，基础利率 4.5%，收益风险均衡"},
-	{"id": "long_term", "name": "长期存单", "duration_seconds": 21600, "base_rate": 0.150, "description": "锁定 6 小时在线时间，基础利率 15.0%，长线挂机保本首选"},
+	{"id": "short_term", "name": "短期存单", "duration_seconds": 1800, "base_rate": 0.004, "description": "锁定 30 分钟在线时间，基础利率 0.4%，小额资金快速周转"},
+	{"id": "standard_term", "name": "标准存单", "duration_seconds": 7200, "base_rate": 0.018, "description": "锁定 2 小时在线时间，基础利率 1.8%，收益风险均衡"},
+	{"id": "long_term", "name": "长期存单", "duration_seconds": 21600, "base_rate": 0.060, "description": "锁定 6 小时在线时间，基础利率 6.0%，长线挂机保本首选"},
 ]
 
 ## 银行存档合并延迟；默认 0.5 秒，计息与倒计时的高频状态变化只执行一次磁盘写入。
@@ -267,6 +268,32 @@ func get_total_asset_estimate() -> int:
 	if mining_farm_service != null and mining_farm_service.has_method("get_balance"):
 		total_assets += maxi(int(mining_farm_service.call("get_balance")) / COMPUTE_COINS_PER_GOLD, 0)
 	return total_assets
+
+
+func get_asset_breakdown() -> Dictionary:
+	## 返回总资产估值的分项明细；口径与 get_total_asset_estimate 完全一致，供银行面板展示授信基数构成。
+	# 局外星穹；库存服务缺失时按 0 计入。
+	var coins: int = maxi(int(_global_inventory.call("get_coins")), 0) if _global_inventory != null and _global_inventory.has_method("get_coins") else 0
+	# 整数证券币；现货与杠杆市值波动大，不计入授信基数。
+	var securities_gold: int = 0
+	# 股市服务；缺失时证券币按 0 计入。
+	var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")
+	if stock_market_service != null and stock_market_service.has_method("get_securities_balance"):
+		securities_gold = maxi(int(floor(float(stock_market_service.call("get_securities_balance")))), 0)
+	# 算力币折算星穹；固定 10000:1 向下取整。
+	var compute_gold: int = 0
+	# 矿场服务；缺失时算力币按 0 计入。
+	var mining_farm_service: Node = get_tree().root.get_node_or_null("MiningFarmService")
+	if mining_farm_service != null and mining_farm_service.has_method("get_balance"):
+		compute_gold = maxi(int(mining_farm_service.call("get_balance")) / COMPUTE_COINS_PER_GOLD, 0)
+	return {
+		"coins": coins,
+		"account_balance": _account_balance,
+		"fixed_deposit_principal": _fixed_deposit_principal,
+		"securities_gold": securities_gold,
+		"compute_gold": compute_gold,
+		"total": coins + _account_balance + _fixed_deposit_principal + securities_gold + compute_gold,
+	}
 
 
 func get_maximum_loan_amount() -> int:

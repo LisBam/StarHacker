@@ -21,7 +21,16 @@ func _ready() -> void:
 		_lobby_hud.connect("network_settings_requested", Callable(self, "_on_network_settings_requested"))
 	_create_network_lobby_sync()
 	# 进场自动打开联机面板；延迟一帧确保宿主菜单完成 ready 与遮罩构建，面板打开会经聚合信号锁定玩家控制。
-	call_deferred("_open_network_panel")
+	# 入房免打扰补充；已在联机房间内时进场不再自动弹出面板（玩家经切换按钮往返大厅与菜单），左上角“联机设置”仍可随时打开。
+	if not _is_network_session_active():
+		call_deferred("_open_network_panel")
+
+
+func _is_network_session_active() -> bool:
+	## 查询本机是否已处于联机房间（主机或已加入）；会话服务缺失时按未入房处理。
+	# 联机会话服务；AutoLoad 常驻，场景切换不会中断连接。
+	var network_session: Node = get_tree().root.get_node_or_null("NetworkSession")
+	return network_session != null and network_session.has_method("is_session_active") and bool(network_session.call("is_session_active"))
 
 
 func _open_network_panel() -> void:

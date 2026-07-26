@@ -16,6 +16,10 @@ const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 const LOOT_CHEST_SCRIPT: Script = preload("res://scripts/environment/loot_chest.gd")
 ## 二手物品生成器；怪物与宝箱的新武器装备使用和商店完全相同的历史强化与耐久规则。
 const SECOND_HAND_ITEM_GENERATOR: Script = preload("res://scripts/data/second_hand_item_generator.gd")
+## 战斗网络同步器脚本；联机骇入时由 GameWorld 动态创建，单机流程不实例化任何多人逻辑节点。
+const NETWORK_COMBAT_SYNC_SCRIPT: Script = preload("res://scripts/game/network_combat_sync.gd")
+## 联机撤离点随机流种子偏移；与共享地图种子相加派生独立随机流，保证撤离点位置不受各端后续随机消耗影响。
+const NETWORK_EXTRACTION_SEED_OFFSET: int = 7717
 ## 宝箱高品质掉落概率；普通、中级、高级和极品分别使用 10%、30%、55% 和 75%，极品另保证至少 5 件高品质物品。
 const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, "high": 0.55, "supreme": 0.75}
 ## 宝箱武器类别权重；默认 0.25 表示每个掉落槽有 25% 概率选择武器。
@@ -349,6 +353,18 @@ var _navigation_marker_position: Vector2 = Vector2.ZERO
 var _has_navigation_marker: bool = false
 ## 技能地图标记表；键为技能稳定标记 ID，值为包含 position 与 kind 的只读数据，独立于玩家导航点和撤离点。
 var _skill_map_markers: Dictionary = {}
+## 联机战斗是否激活；默认 false，进入场景时从 NetworkSession 解析，影响地图种子来源、敌人产出归属与掉落宝箱同步。
+var _network_combat_active: bool = false
+## 本机是否为联机主机；默认 false，仅联机战斗激活时有效，客户端跳过敌人生成与人口补充。
+var _network_is_host: bool = false
+## 战斗网络同步器实例；默认 null，仅联机战斗激活时创建，负责队友化身、敌人复制与掉落宝箱仲裁。
+var _network_combat_sync: Node2D = null
+## 联机撤离点专用随机源；默认 null，联机时以共享种子派生，与主随机流隔离保证各端撤离点一致。
+var _network_extraction_random: RandomNumberGenerator = null
+## 联机预生成撤离点位置；进入地图时以专用随机流立即推导（此时全员世界状态一致），120 秒后直接使用。
+var _network_extraction_position: Vector2 = Vector2.ZERO
+## 是否已经预生成联机撤离点位置；默认 false，仅联机战斗置 true。
+var _has_network_extraction_position: bool = false
 
 ## 玩家节点缓存；默认按 player_path 获取，允许为空并以世界原点作为生成中心。
 @onready var _player: Node2D = get_node_or_null(player_path) as Node2D
@@ -373,6 +389,7 @@ func _ready() -> void:
 	_random.randomize()
 	_merge_automatically_discovered_content()
 	_apply_session_state()
+	_resolve_network_combat_session()
 	_begin_global_inventory_run()
 	_prepare_map_seed()
 	_environment_obstacle_rects.clear()
@@ -384,16 +401,23 @@ func _ready() -> void:
 	_spawn_loot_chests()
 	_spawn_supply_extraction_points()
 	_environment_obstacle_version += 1
-	if _monster_simulation_manager != null and _monster_simulation_manager.has_method("initialize"):
-		# 怪物挂载父节点；优先使用 Enemies 容器，缺失时回退 GameWorld，供加载管理器按需创建真实节点。
-		var spawn_parent: Node = _monster_parent if _monster_parent != null else self
-		_monster_simulation_manager.call("initialize", _player, spawn_parent, _player, TRAINING_MONSTER_GROUP)
-		if _monster_simulation_manager.has_signal("virtual_monster_died") and not _monster_simulation_manager.is_connected("virtual_monster_died", Callable(self, "_on_monster_died")):
-			_monster_simulation_manager.connect("virtual_monster_died", Callable(self, "_on_monster_died"))
-		if _monster_simulation_manager.has_signal("monster_encountered") and not _monster_simulation_manager.is_connected("monster_encountered", Callable(self, "_on_monster_encountered")):
-			_monster_simulation_manager.connect("monster_encountered", Callable(self, "_on_monster_encountered"))
-	_spawn_monster_batch()
+	if not _is_network_remote_client():
+		# 联机客户端不初始化虚拟人口；全部敌人由主机权威复制，本机只承载傀儡节点。
+		if _monster_simulation_manager != null and _monster_simulation_manager.has_method("initialize"):
+			# 怪物挂载父节点；优先使用 Enemies 容器，缺失时回退 GameWorld，供加载管理器按需创建真实节点。
+			var spawn_parent: Node = _monster_parent if _monster_parent != null else self
+			_monster_simulation_manager.call("initialize", _player, spawn_parent, _player, TRAINING_MONSTER_GROUP)
+			if _monster_simulation_manager.has_signal("virtual_monster_died") and not _monster_simulation_manager.is_connected("virtual_monster_died", Callable(self, "_on_monster_died")):
+				_monster_simulation_manager.connect("virtual_monster_died", Callable(self, "_on_monster_died"))
+			if _monster_simulation_manager.has_signal("monster_encountered") and not _monster_simulation_manager.is_connected("monster_encountered", Callable(self, "_on_monster_encountered")):
+				_monster_simulation_manager.connect("monster_encountered", Callable(self, "_on_monster_encountered"))
+		_spawn_monster_batch()
 	_monster_replenish_remaining = monster_replenish_interval
+	if _network_combat_active:
+		# 联机撤离点预推导；此刻全员环境障碍、宝箱缓存与玩家位置（出生原点）完全一致，专用随机流保证各端得到同一位置。
+		_network_extraction_position = _get_random_extraction_position()
+		_has_network_extraction_position = true
+		_create_network_combat_sync()
 	_update_explored_cells(true)
 
 
@@ -471,6 +495,55 @@ func _prepare_map_seed() -> void:
 
 	_random.seed = _active_map_seed
 	queue_redraw()
+
+
+func _resolve_network_combat_session() -> void:
+	## 解析联机战斗会话；联机时用主机广播的共享种子覆盖地图种子，使全员复现同一张地图、宝箱与物资撤离点，训练场不参与联机。
+	_network_combat_active = false
+	_network_is_host = false
+	_network_extraction_random = null
+	# 联机会话服务；由自动加载提供，缺失或战斗会话未激活时保持单机流程。
+	var network_session: Node = get_tree().root.get_node_or_null("NetworkSession")
+	if network_session == null or not network_session.has_method("is_combat_session_active"):
+		return
+	if _is_training_mode or not bool(network_session.call("is_combat_session_active")):
+		return
+	_network_combat_active = true
+	_network_is_host = bool(network_session.call("is_session_host"))
+	# 共享地图种子；非零时覆盖检查器种子，_prepare_map_seed 将据此产生确定性世界。
+	var shared_seed: int = int(network_session.call("get_shared_map_seed"))
+	if shared_seed != 0:
+		map_seed = shared_seed
+	# 联机撤离点随机源；以共享种子加固定偏移派生独立随机流，客户端跳过怪物随机消耗也不影响撤离点一致性。
+	_network_extraction_random = RandomNumberGenerator.new()
+	_network_extraction_random.seed = shared_seed + NETWORK_EXTRACTION_SEED_OFFSET
+
+
+func _create_network_combat_sync() -> void:
+	## 创建战斗网络同步器；同步器负责队友化身、敌人复制、掉落与宝箱仲裁，单机不创建该节点。
+	_network_combat_sync = NETWORK_COMBAT_SYNC_SCRIPT.new() as Node2D
+	if _network_combat_sync == null:
+		return
+	_network_combat_sync.name = "NetworkCombatSync"
+	add_child(_network_combat_sync)
+	# 傀儡挂载父节点；与敌人生成使用同一 Enemies 容器回退规则。
+	var spawn_parent: Node = _monster_parent if _monster_parent != null else self
+	_network_combat_sync.call("initialize", self, _player, spawn_parent, _monster_simulation_manager)
+
+
+func _is_network_remote_client() -> bool:
+	## 返回本机是否为联机客户端；客户端不生成、不补充敌人，全部敌人来自主机复制。
+	return _network_combat_active and not _network_is_host
+
+
+func is_network_combat_active() -> bool:
+	## 返回当前世界是否处于联机战斗；HUD 与调试工具据此调整暂停与人口展示行为。
+	return _network_combat_active
+
+
+func _get_extraction_random_source() -> RandomNumberGenerator:
+	## 返回撤离点使用的随机源；联机时使用共享种子派生的专用随机流，单机沿用主随机源保持旧行为。
+	return _network_extraction_random if _network_extraction_random != null else _random
 
 
 func is_training_mode() -> bool:
@@ -858,6 +931,7 @@ func spawn_weapon_drop(weapon_data: Resource, drop_position: Vector2) -> bool:
 	else:
 		drop_instance.set("weapon_data", weapon_data)
 
+	_notify_network_drop_spawned(drop_instance, weapon_data, 1, drop_instance.global_position, Vector2.INF, 0.0, 0.0)
 	return true
 
 
@@ -1190,7 +1264,8 @@ func _spawn_extraction_point() -> void:
 	if _has_extraction_point:
 		return
 
-	_extraction_point_position = _get_random_extraction_position()
+	# 撤离点最终位置；联机时使用进图预推导的确定性位置，单机保持实时随机。
+	_extraction_point_position = _network_extraction_position if _has_network_extraction_position else _get_random_extraction_position()
 	_extraction_point_node = _create_extraction_point_node(_extraction_point_position)
 	_has_extraction_point = true
 	_extraction_point_marked_on_map = _survival_time_seconds >= maxf(extraction_map_marker_time_seconds, 1.0)
@@ -1395,9 +1470,11 @@ func _get_random_extraction_candidate() -> Vector2:
 	var edge_margin: float = maxf(extraction_spawn_edge_margin, extraction_radius)
 	# 有效生成边界；取值为半边长减边界留白，默认确保撤离点位于地图内部。
 	var spawn_limit: float = maxf(0.0, half_size - edge_margin)
+	# 撤离点随机源；联机为共享种子派生的专用随机流，单机为世界主随机源。
+	var extraction_random: RandomNumberGenerator = _get_extraction_random_source()
 	return Vector2(
-		_random.randf_range(-spawn_limit, spawn_limit),
-		_random.randf_range(-spawn_limit, spawn_limit)
+		extraction_random.randf_range(-spawn_limit, spawn_limit),
+		extraction_random.randf_range(-spawn_limit, spawn_limit)
 	)
 
 
@@ -1970,6 +2047,15 @@ func _is_loot_chest_position_valid(candidate_position: Vector2) -> bool:
 
 
 func _on_loot_chest_released(chest_position: Vector2, quality_id: String, drop_count: int, minimum_high_quality_count: int, broken_open: bool) -> void:
+	if _network_combat_active and _network_combat_sync != null and _network_combat_sync.has_method("request_chest_release"):
+		# 联机出货仲裁；先向主机认领该宝箱，取得认领权的一端才执行本地掷点，防止两名成员同时开箱产生重复物资。
+		_network_combat_sync.call("request_chest_release", chest_position, quality_id, drop_count, minimum_high_quality_count, broken_open)
+		return
+	execute_loot_chest_release(chest_position, quality_id, drop_count, minimum_high_quality_count, broken_open)
+
+
+func execute_loot_chest_release(chest_position: Vector2, quality_id: String, drop_count: int, minimum_high_quality_count: int, broken_open: bool) -> void:
+	## 执行宝箱实际出货；单机由信号回调直接调用，联机由取得认领权的一端调用一次，掉落经网络登记钩子同步给全员。
 	# 最终掉落数量；主动长按开启时允许已触发套装追加物品，击毁宝箱始终保持品质原始数量。
 	var resolved_drop_count: int = _get_resolved_loot_chest_drop_count(drop_count, broken_open)
 	# 宝箱掉落循环；极品前五件强制高品质，其余物品按当前宝箱品质对应概率独立判定。
@@ -2116,6 +2202,22 @@ func _duplicate_random_or_highest_value_resource(resource_pool: Array[Resource],
 	return duplicated_resource if duplicated_resource != null else selected_template
 
 
+func remove_network_loot_chest_by_key(chest_key: String) -> void:
+	## 按位置键静默移除本机宝箱；联机中其他成员开启或击毁同位置宝箱后，本机对应宝箱不出货直接消失，障碍缓存经原移除信号更新。
+	for chest_instance_id in _loot_chest_obstacle_rects.keys():
+		# 宝箱实例对象；缓存键为实例编号，节点可能已被释放。
+		var chest_object: Object = instance_from_id(int(chest_instance_id))
+		if not (chest_object is Node2D):
+			continue
+		# 宝箱节点；位置键使用与同步器一致的 0.1 像素量化格式，宝箱布点由共享种子保证各端一致。
+		var chest_node: Node2D = chest_object as Node2D
+		if "%.1f_%.1f" % [chest_node.global_position.x, chest_node.global_position.y] != chest_key:
+			continue
+		if chest_node.has_method("force_network_remove"):
+			chest_node.call("force_network_remove")
+		return
+
+
 func _on_loot_chest_removed(chest: Node) -> void:
 	if chest == null:
 		return
@@ -2256,6 +2358,9 @@ func respawn_monsters() -> void:
 
 
 func _update_monster_replenishment(delta: float) -> void:
+	if _is_network_remote_client():
+		# 联机客户端没有虚拟人口；补充逻辑完全由主机执行并通过复制体现。
+		return
 	if _is_training_mode or _monster_replenishment_paused_by_training_tools:
 		return
 
@@ -2282,6 +2387,9 @@ func _update_monster_replenishment(delta: float) -> void:
 
 
 func _get_alive_monster_count() -> int:
+	if _is_network_remote_client() and _network_combat_sync != null and _network_combat_sync.has_method("get_replicated_population_count"):
+		# 联机客户端人口显示；读取主机敌人快照附带的全图人口，本机没有虚拟人口记录。
+		return int(_network_combat_sync.call("get_replicated_population_count"))
 	if _monster_simulation_manager != null and _monster_simulation_manager.has_method("get_population_count"):
 		return int(_monster_simulation_manager.call("get_population_count"))
 
@@ -2509,7 +2617,15 @@ func spawn_item_drop(item_data: Resource, drop_position: Vector2, launch_origin:
 		drop_instance.set("weapon_data", item_data)
 	if should_launch and drop_instance.has_method("play_launch_animation"):
 		drop_instance.call("play_launch_animation", resolved_drop_position, launch_duration, launch_arc_height)
+	_notify_network_drop_spawned(drop_instance, item_data, quantity, resolved_drop_position, launch_origin if should_launch else Vector2.INF, launch_duration if should_launch else 0.0, launch_arc_height if should_launch else 0.0)
 	return true
+
+
+func _notify_network_drop_spawned(drop_instance: Node, item_data: Resource, quantity: int, drop_position: Vector2, launch_origin: Vector2, launch_duration: float, launch_arc_height: float) -> void:
+	## 联机掉落登记钩子；本地新产生的掉落广播给全员，远程复制的掉落只登记编号，单机与训练场为空操作。
+	if not _network_combat_active or _network_combat_sync == null or not _network_combat_sync.has_method("on_local_drop_spawned"):
+		return
+	_network_combat_sync.call("on_local_drop_spawned", drop_instance, item_data, quantity, drop_position, launch_origin, launch_duration, launch_arc_height)
 
 
 func _get_scattered_drop_position(center_position: Vector2) -> Vector2:

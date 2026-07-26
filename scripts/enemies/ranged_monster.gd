@@ -145,6 +145,11 @@ func _try_fire_projectile(direction: Vector2, has_line_of_sight: bool) -> void:
 	if projectile.has_method("launch"):
 		projectile.call("launch", resolved_direction, ranged_projectile_speed)
 
+	# 联机弹体视觉同步；主机把出膛位置与最终方向（含散布随机）交给战斗同步器广播，客户端生成纯视觉弹体，单机无同步器时为空操作。
+	var network_combat_sync: Node = get_tree().get_first_node_in_group("network_combat_sync")
+	if network_combat_sync != null and network_combat_sync.has_method("notify_host_enemy_projectile"):
+		network_combat_sync.call("notify_host_enemy_projectile", projectile, resolved_direction, ranged_projectile_speed)
+
 	# 远程攻击自反馈；后坐力沿弹体反方向推动怪物，坐力为 0 时仍播放开火冲击特效但不改变移动。
 	_apply_attack_motion(resolved_direction)
 	_spawn_attack_effect()

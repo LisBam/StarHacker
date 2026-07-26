@@ -29,6 +29,7 @@ ShopService="*res://scripts/game/shop_service.gd"
 StockMarketService="*res://scripts/game/stock_market_service.gd"
 MiningFarmService="*res://scripts/game/mining_farm_service.gd"
 SceneTransition="*res://scripts/game/scene_transition.gd"
+NetworkSession="*res://scripts/game/network_session.gd"
 
 [display]
 

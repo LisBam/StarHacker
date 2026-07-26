@@ -141,6 +141,12 @@ func pickup_to_inventory(inventory_component: Node) -> bool:
 	if _launching or current_item_data == null or inventory_component == null or not inventory_component.has_method("add_item"):
 		return false
 
+	# 联机战斗同步器；掉落物已登记网络编号且同步器未处于代持执行时，拾取统一交给主机先到先得仲裁，防止两名成员拾取同一件物品。
+	var network_combat_sync: Node = get_tree().get_first_node_in_group("network_combat_sync")
+	if network_combat_sync != null and not str(get_meta("network_drop_id", "")).is_empty() and network_combat_sync.has_method("request_network_pickup"):
+		if not (network_combat_sync.has_method("is_pickup_bypass_active") and bool(network_combat_sync.call("is_pickup_bypass_active"))):
+			return bool(network_combat_sync.call("request_network_pickup", self, inventory_component))
+
 	# 实际拾取数量；新版组件可一次合并整组资源，旧组件只兼容单件掉落。
 	var pickup_quantity: int = get_quantity()
 	# 拾取是否成功；只有整个地面堆叠都被库存服务接收后才移除掉落节点，失败时数量和节点保持不变。

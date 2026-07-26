@@ -73,6 +73,12 @@ custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
 text = "训练场"
 
+[node name="MultiplayerButton" type="Button" parent="Center"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+text = "联机组队"
+
 [node name="SettingsButton" type="Button" parent="Center" unique_id=1647714624]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 44)

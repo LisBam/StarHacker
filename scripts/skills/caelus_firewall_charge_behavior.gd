@@ -95,9 +95,11 @@ func _resolve_collisions() -> void:
 	for raw_target in get_tree().get_nodes_in_group(target_group):
 		# 候选目标；必须有效、未命中过、提供伤害接口且位于碰撞半径内。
 		var target: Node2D = raw_target as Node2D
-		if target == null or target == _caster or target in _hit_targets or not is_instance_valid(target) or target.is_queued_for_deletion() or not target.has_method("apply_damage"):
+		if target == null:
 			continue
 		if _caster.global_position.distance_squared_to(target.global_position) > collision_radius_squared:
+			continue
+		if target == _caster or target in _hit_targets or not is_instance_valid(target) or target.is_queued_for_deletion() or not target.has_method("apply_damage"):
 			continue
 		_hit_targets[target] = true
 		# 垂直基准方向；顺时针旋转 90 度得到冲锋右侧方向，目标位于另一侧时反向。

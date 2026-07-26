@@ -30,7 +30,12 @@ GameWorld 建立整图虚拟记录
 
 - 虚拟记录只保存重建敌人所需的最小状态，不执行 AI、物理、绘制或远距离掉落。
 - 活跃敌人的物理移动逐帧执行；感知、射线、战术、寻路决策与远程攻击冷却按独立 AI 间隔错峰更新。远程怪物不再额外注册一个只递减冷却的渲染帧回调，冷却仍按两次 AI 决策之间累计的真实秒数推进。
+- 期望速度与外部击退速度都接近零的敌人跳过 `move_and_slide()` 物理提交，卡住检测按零位移推进；攻击范围内待机、战术驻守与巡逻等待状态不再产生物理服务器调用。
+- 感知、移动与战术组件拥有 `EnemyPerceptionComponent`、`EnemyMovementComponent`、`EnemyTacticalComponent` 全局类名；`BasicMonster` 通过强类型成员直接调用组件方法，热路径不使用字符串 `call()` 动态分发。
+- 战术情报按版本号增量拉取：战术组件先通过 `get_tactical_intelligence_revision()` 轻量比对版本，版本变化时才构造完整情报字典并直接引用交接，不做任何深拷贝；`medium_hotspots` 等嵌套数据遵循只读契约。
+- 战术选点采用射线优先的 A* 预算：墙角与旋转候选先用中心线射线粗筛，单次选点最多消耗 2 次完整 A* 验证，射线通畅的候选直接采用；障碍矩形通过 `get_minimap_obstacle_rects_readonly()` 只读引用访问，不复制整表。
 - 所有活跃敌人复用 `GameWorld` 缓存的 A* 网格。单个敌人只缓存自身路径和重算时机。
+- 目标刷新先做距离平方剔除再执行合法性校验；友方目标组为空时通过组计数短路，不分配组数组。
 - 内容目录扫描出的怪物场景会与场景检查器池去重合并。自定义敌人必须遵守实例化、目标、变体、死亡和注销协议。
 - 人口管理器创建真实敌人时优先使用 `set_primary_target()`，使玩家长期引用不会因仅设置当前目标而丢失；兼容节点可以只实现 `set_target()`。
 - `BasicMonster.set_primary_target()` 在获得有效玩家目标且 `monster_id` 非空时发出 `player_encountered(monster_id)`；`MonsterSimulationManager` 仅转发为 `monster_encountered(monster_id)`，`GameWorld` 再调用 `GlobalInventory.register_monster_encounter()`。这条单向信号链让敌人和人口组件不读取存档服务，并让重复物化由稳定 ID 去重。

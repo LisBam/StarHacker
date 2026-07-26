@@ -35,8 +35,9 @@ signal cooldowns_changed
 @export var targeting_visual_path: NodePath = ^"../SkillTargetingVisual"
 ## 技能蓄力条路径；默认指向同级 SkillChargeBar，缺失时蓄力数值仍会正常累计但不显示头顶进度。
 @export var charge_bar_path: NodePath = ^"../SkillChargeBar"
-## 目标选择刷新间隔；默认 0 表示瞄准期间每帧响应鼠标，设为正数可降低超大目标数量下的遍历频率。
-@export_range(0.0, 1.0, 0.01) var targeting_refresh_interval: float = 0.0
+## 目标选择刷新间隔；默认 0.05 秒批量刷新瞄准合法目标，与战斗 HUD 冷却刷新节奏一致。
+## 设为 0 可恢复瞄准期间每帧全量遍历，仅建议在目标数量极少的调试场景使用。
+@export_range(0.0, 1.0, 0.01) var targeting_refresh_interval: float = 0.05
 
 ## 当前技能资源槽；元素为 Resource 或 null，默认空数组，角色档案应用后按三个输入槽截取并填充。
 var _skill_resources: Array = []
@@ -288,14 +289,19 @@ func get_legal_targets(skill_data: Resource) -> Array[Node2D]:
 		return legal_targets
 	# 技能最大范围；至少 1 像素，所有目标按根节点世界位置判断。
 	var cast_range: float = maxf(float(skill_data.get("cast_range")), MINIMUM_CAST_RANGE)
+	# 技能最大范围平方；与平方距离比较等价于原判断，全量目标遍历时每个候选省去一次开方。
+	var cast_range_squared: float = cast_range * cast_range
 	for raw_target in get_tree().get_nodes_in_group(target_group):
 		# 候选目标；只有有效 Node2D 且不是施法者自身才进入其余合法性检查。
 		var target: Node2D = raw_target as Node2D
 		if target == null or target == caster or not is_instance_valid(target) or target.is_queued_for_deletion():
 			continue
+		# 先做纯距离剔除；范围外目标不再执行伤害接口与死亡状态等较贵的校验。
+		if caster.global_position.distance_squared_to(target.global_position) > cast_range_squared:
+			continue
 		if bool(skill_data.get("target_requires_damage_method")) and not target.has_method("apply_damage"):
 			continue
-		if _is_target_dead(target) or caster.global_position.distance_to(target.global_position) > cast_range:
+		if _is_target_dead(target):
 			continue
 		if bool(skill_data.get("target_requires_line_of_sight")) and not _has_line_of_sight(caster, target, int(skill_data.get("line_of_sight_collision_mask"))):
 			continue

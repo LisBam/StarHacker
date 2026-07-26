@@ -59,8 +59,6 @@ func _ready() -> void:
 	_max_distance_squared = maxf(max_distance, 1.0) * maxf(max_distance, 1.0)
 	_excluded_collision_rids = [get_rid()]
 	_bounce_random.randomize()
-	body_entered.connect(_on_body_entered)
-	area_entered.connect(_on_area_entered)
 
 
 func _physics_process(delta: float) -> void:
@@ -148,24 +146,13 @@ func get_knockback_direction() -> Vector2:
 	return _velocity.normalized()
 
 
-func _on_body_entered(body: Node) -> void:
-	if _apply_hit(body, _get_fallback_collision_normal(body)):
-		hit_body.emit(body, damage)
-
-
-func _on_area_entered(area: Area2D) -> void:
-	if area == self:
-		return
-
-	if _apply_hit(area, _get_fallback_collision_normal(area)):
-		hit_area.emit(area, damage)
-
-
 func _handle_swept_collision(target_position: Vector2) -> bool:
 	# 射线查询参数；取值为当前位置到目标位置，默认使用弹体碰撞掩码检测怪物和环境。
 	var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(global_position, target_position, collision_mask, _excluded_collision_rids)
 	query.collide_with_areas = true
 	query.collide_with_bodies = true
+	# 允许射线起点位于碰撞体内部时直接命中；接管原 Area2D 重叠信号覆盖的贴脸生成场景，保证首个物理帧即可结算。
+	query.hit_from_inside = true
 	# 射线命中结果；取值为空字典或包含 collider/position，默认用于提前处理高速碰撞。
 	var hit_result: Dictionary = get_world_2d().direct_space_state.intersect_ray(query)
 	if hit_result.is_empty():

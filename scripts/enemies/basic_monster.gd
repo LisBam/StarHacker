@@ -275,11 +275,11 @@ var _attack_cooldown_multiplier: float = 1.0
 ## 怪物局部随机数生成器；默认每只怪物独立随机化，修改会影响游荡点和等待时间。
 var _random: RandomNumberGenerator = RandomNumberGenerator.new()
 ## 感知组件实例；取值为 Node 或 null，默认从 perception_component_path 获取，负责索敌状态和记忆。
-var _perception_component: Node
+var _perception_component: EnemyPerceptionComponent
 ## 移动组件实例；取值为 Node 或 null，默认从 movement_component_path 获取，负责寻路、巡逻、绕障和击退。
-var _movement_component: Node
+var _movement_component: EnemyMovementComponent
 ## 战术组件实例；取值为 Node 或 null，默认从 tactical_component_path 获取，负责本怪物独立搜查和伏击点。
-var _tactical_component: Node
+var _tactical_component: EnemyTacticalComponent
 ## 护盾组件实例；默认在 ready 时创建并注入场景配置，伤害先由该组件吸收再结算生命。
 var _shield_component: Node
 ## 出生尺寸倍率；取值通常为 0.7 到 1.3，默认 1，供调试和其他系统读取本敌人的体型波动。
@@ -360,12 +360,12 @@ func _physics_process(delta: float) -> void:
 func _update_ai_decision(delta: float) -> void:
 	_refresh_combat_target()
 	if _movement_component != null:
-		_movement_component.call("update", delta)
+		_movement_component.update(delta)
 	if _perception_component != null:
-		_perception_component.call("update", delta)
+		_perception_component.update(delta)
 	_sync_perception_state()
 	if _tactical_component != null:
-		_tactical_component.call("update", delta)
+		_tactical_component.update(delta)
 
 	if not _has_target:
 		_update_wander(delta)
@@ -415,11 +415,11 @@ func set_target(target_node: Node) -> void:
 	_target = target_node as Node2D
 	_add_target_collision_exception(_target)
 	if _movement_component != null:
-		_movement_component.call("set_spawn_position", global_position)
+		_movement_component.set_spawn_position(global_position)
 	if _perception_component != null:
-		_perception_component.call("set_target", target_node)
+		_perception_component.set_target(target_node)
 	if _tactical_component != null:
-		_tactical_component.call("reset_intelligence")
+		_tactical_component.reset_intelligence()
 	_sync_perception_state()
 	_clear_navigation_path()
 
@@ -457,7 +457,9 @@ func _refresh_combat_target() -> void:
 		if _target != player_candidate:
 			set_target(player_candidate)
 		return
-	var friendly_candidate: Node2D = _find_nearest_valid_target_in_group(FRIENDLY_COMBAT_TARGET_GROUP)
+	# 友方战斗组即时节点数量；先用场景树计数短路，组内无单位时跳过最近友方查找，避免每次 AI 决策分配一次组节点数组。
+	var friendly_group_count: int = get_tree().get_node_count_in_group(FRIENDLY_COMBAT_TARGET_GROUP)
+	var friendly_candidate: Node2D = _find_nearest_valid_target_in_group(FRIENDLY_COMBAT_TARGET_GROUP) if friendly_group_count > 0 else null
 	if friendly_candidate != null:
 		if _target != friendly_candidate:
 			set_target(friendly_candidate)
@@ -481,18 +483,21 @@ func _find_nearest_valid_target_in_group(group_name: StringName) -> Node2D:
 	var nearest_distance_squared: float = maxf(vision_range, 0.0) * maxf(vision_range, 0.0)
 	for raw_candidate in get_tree().get_nodes_in_group(group_name):
 		var candidate: Node2D = raw_candidate as Node2D
-		if not _is_valid_combat_target(candidate):
+		if candidate == null:
 			continue
 		var distance_squared: float = global_position.distance_squared_to(candidate.global_position)
-		if distance_squared <= nearest_distance_squared:
-			nearest_distance_squared = distance_squared
-			nearest_target = candidate
+		if distance_squared > nearest_distance_squared:
+			continue
+		if not _is_valid_combat_target(candidate):
+			continue
+		nearest_distance_squared = distance_squared
+		nearest_target = candidate
 	return nearest_target
 
 
 func _is_target_in_acquisition_range(candidate: Node2D) -> bool:
 	## 普通候选必须在基础视野半径内；墙体仍由感知组件决定是否真正进入可见追击。
-	return _is_valid_combat_target(candidate) and global_position.distance_to(candidate.global_position) <= maxf(vision_range, 0.0)
+	return _is_valid_combat_target(candidate) and global_position.distance_squared_to(candidate.global_position) <= maxf(vision_range, 0.0) * maxf(vision_range, 0.0)
 
 
 func _is_valid_combat_target(candidate: Node2D) -> bool:
@@ -504,7 +509,11 @@ func _is_valid_combat_target(candidate: Node2D) -> bool:
 
 func _is_valid_retaliation_target(candidate: Node2D) -> bool:
 	## 受伤仇恨持续到目标失效或超出脱战范围，避免下一次普通决策立即切回玩家。
-	return _is_valid_combat_target(candidate) and global_position.distance_to(candidate.global_position) <= maxf(vision_range * lose_target_range_multiplier, vision_range)
+	if not _is_valid_combat_target(candidate):
+		return false
+	# 脱战判定半径；取基础视野与脱战倍率视野的较大值，配合距离平方比较省去每次开方，判定语义与原实现完全一致。
+	var retaliation_range: float = maxf(vision_range * lose_target_range_multiplier, vision_range)
+	return global_position.distance_squared_to(candidate.global_position) <= retaliation_range * retaliation_range
 
 
 func _add_target_collision_exception(target_node: Node) -> void:
@@ -524,25 +533,25 @@ func _remove_target_collision_exception(target_node: Variant) -> void:
 
 func refresh_ai_configuration() -> void:
 	if _perception_component != null:
-		_perception_component.call("apply_configuration", _build_perception_configuration())
+		_perception_component.apply_configuration(_build_perception_configuration())
 	if _movement_component != null:
-		_movement_component.call("apply_configuration", _build_movement_configuration())
+		_movement_component.apply_configuration(_build_movement_configuration())
 	if _tactical_component != null:
-		_tactical_component.call("apply_configuration", _build_tactical_configuration())
+		_tactical_component.apply_configuration(_build_tactical_configuration())
 
 
 func _resolve_ai_components() -> void:
-	_perception_component = _resolve_or_create_component(perception_component_path, ENEMY_PERCEPTION_COMPONENT_SCRIPT, "EnemyPerceptionComponent")
-	_movement_component = _resolve_or_create_component(movement_component_path, ENEMY_MOVEMENT_COMPONENT_SCRIPT, "EnemyMovementComponent")
-	_tactical_component = _resolve_or_create_component(tactical_component_path, ENEMY_TACTICAL_COMPONENT_SCRIPT, "EnemyTacticalComponent")
+	_perception_component = _resolve_or_create_component(perception_component_path, ENEMY_PERCEPTION_COMPONENT_SCRIPT, "EnemyPerceptionComponent") as EnemyPerceptionComponent
+	_movement_component = _resolve_or_create_component(movement_component_path, ENEMY_MOVEMENT_COMPONENT_SCRIPT, "EnemyMovementComponent") as EnemyMovementComponent
+	_tactical_component = _resolve_or_create_component(tactical_component_path, ENEMY_TACTICAL_COMPONENT_SCRIPT, "EnemyTacticalComponent") as EnemyTacticalComponent
 	if _movement_component != null:
-		_movement_component.call("initialize", self, _random)
+		_movement_component.initialize(self, _random)
 	if _perception_component != null:
 		# 搜查点验证回调；取值为移动组件的即时可行性检查，默认缺少移动组件时不执行候选过滤。
 		var destination_validator: Callable = Callable(_movement_component, "is_destination_immediately_reachable") if _movement_component != null else Callable()
-		_perception_component.call("initialize", self, _random, destination_validator)
+		_perception_component.initialize(self, _random, destination_validator)
 	if _tactical_component != null:
-		_tactical_component.call("initialize", self, _perception_component, _movement_component, _random)
+		_tactical_component.initialize(self, _perception_component, _movement_component, _random)
 
 
 func _resolve_or_create_component(component_path: NodePath, component_script: Script, fallback_name: String) -> Node:
@@ -651,15 +660,15 @@ func _sync_perception_state() -> void:
 
 	# 同步前的索敌状态；取值用于识别追击、搜查和巡逻之间的状态切换并清理旧路径。
 	var previous_ai_state: int = _target_ai_state
-	_has_target = bool(_perception_component.call("has_target"))
-	_target_is_visible = bool(_perception_component.call("is_target_visible"))
-	_target_ai_state = int(_perception_component.call("get_ai_state"))
+	_has_target = _perception_component.has_target()
+	_target_is_visible = _perception_component.is_target_visible()
+	_target_ai_state = _perception_component.get_ai_state()
 	if previous_ai_state == _target_ai_state:
 		return
 
 	_clear_navigation_path()
 	if _target_ai_state == TARGET_AI_STATE_IDLE and _movement_component != null:
-		_movement_component.call("reset_idle_movement")
+		_movement_component.reset_idle_movement()
 
 
 func _randomize_individual_behavior() -> void:
@@ -867,7 +876,7 @@ func _apply_self_motion_distance(direction: Vector2, motion_distance: float) -> 
 	var resolved_knockback_decay: float = maxf(knockback_decay, 1.0)
 	# 自反馈初速度；依据匀减速公式，使无碰撞场景下的最终移动距离与坐力点数一致。
 	var motion_initial_speed: float = sqrt(2.0 * resolved_knockback_decay * motion_distance)
-	_movement_component.call("apply_knockback", direction.normalized(), motion_initial_speed)
+	_movement_component.apply_knockback(direction.normalized(), motion_initial_speed)
 
 
 func _begin_death_sequence() -> void:
@@ -900,7 +909,7 @@ func _has_vision_line_of_sight_to_target() -> bool:
 	if _perception_component == null:
 		return false
 
-	return bool(_perception_component.call("has_vision_line_of_sight_to_target"))
+	return _perception_component.has_vision_line_of_sight_to_target()
 
 
 func _get_vision_line_of_sight_hit() -> Dictionary:
@@ -910,7 +919,7 @@ func _get_vision_line_of_sight_hit() -> Dictionary:
 		return empty_hit_result
 
 	# 组件视线命中结果；取值为空字典或包含环境碰撞信息，默认供继承怪物复用同一感知规则。
-	var raw_hit_result: Variant = _perception_component.call("get_vision_line_of_sight_hit")
+	var raw_hit_result: Variant = _perception_component.get_vision_line_of_sight_hit()
 	return raw_hit_result if raw_hit_result is Dictionary else {}
 
 
@@ -930,22 +939,22 @@ func _get_current_chase_destination() -> Vector2:
 		return global_position
 
 	# 感知组件提供的目标点；取值为玩家实时位置、最后线索、遮挡物背后锚点或区域搜查点。
-	var raw_destination: Variant = _perception_component.call("get_current_chase_destination")
+	var raw_destination: Variant = _perception_component.get_current_chase_destination()
 	# 感知兜底目标点；取值为合法 Vector2 或宿主当前位置，战术组件可在丢失状态下替换为分工点位。
 	var fallback_destination: Vector2 = raw_destination if raw_destination is Vector2 else global_position
 	if _tactical_component == null:
 		return fallback_destination
 
 	# 战术组件目标点；取值为墙角搜查、岔路卡位、外侧迂回或伏击坐标，异常时回退感知目标。
-	var raw_tactical_destination: Variant = _tactical_component.call("get_tactical_destination", fallback_destination)
+	var raw_tactical_destination: Variant = _tactical_component.get_tactical_destination(fallback_destination)
 	return raw_tactical_destination if raw_tactical_destination is Vector2 else fallback_destination
 
 
 func _should_pause_target_movement() -> bool:
 	# 感知观察暂停；默认用于普通搜查点短暂停留。
-	var perception_pause: bool = _perception_component != null and bool(_perception_component.call("is_movement_paused"))
+	var perception_pause: bool = _perception_component != null and _perception_component.is_movement_paused()
 	# 战术驻守暂停；默认用于卡位、迂回到点和完整搜查后的静止伏击。
-	var tactical_pause: bool = _tactical_component != null and bool(_tactical_component.call("should_pause_movement"))
+	var tactical_pause: bool = _tactical_component != null and _tactical_component.should_pause_movement()
 	return perception_pause or tactical_pause
 
 
@@ -975,9 +984,9 @@ func _update_wander(delta: float) -> void:
 		return
 
 	# 空闲移动速度；取值来自预设巡逻路线或出生点随机游荡，默认由移动组件统一处理绕障。
-	var raw_idle_velocity: Variant = _movement_component.call("get_idle_velocity", delta, _get_resolved_move_speed())
+	var raw_idle_velocity: Variant = _movement_component.get_idle_velocity(delta, _get_resolved_move_speed())
 	velocity = raw_idle_velocity if raw_idle_velocity is Vector2 else Vector2.ZERO
-	if _perception_component != null and bool(_perception_component.call("is_in_long_term_alert_region")):
+	if _perception_component != null and _perception_component.is_in_long_term_alert_region():
 		velocity *= clampf(long_term_alert_patrol_speed_multiplier, 0.0, 1.0)
 
 
@@ -992,7 +1001,7 @@ func apply_knockback(direction: Vector2, force: float) -> void:
 	if resolved_force <= 0.0 or _movement_component == null:
 		return
 
-	_movement_component.call("apply_knockback", direction, resolved_force)
+	_movement_component.apply_knockback(direction, resolved_force)
 
 
 func get_impact_force() -> float:
@@ -1040,7 +1049,7 @@ func _apply_impact_distance(direction: Vector2, impact_distance: float) -> void:
 	var resolved_knockback_decay: float = maxf(knockback_decay, 1.0)
 	# 冲击初速度；按匀减速公式换算，确保无碰撞时最终位移等于韧性折算后的冲击力点数。
 	var impact_initial_speed: float = sqrt(2.0 * resolved_knockback_decay * resolved_impact_distance)
-	_movement_component.call("apply_knockback", direction, impact_initial_speed)
+	_movement_component.apply_knockback(direction, impact_initial_speed)
 
 
 func _get_source_impact_force(source: Node) -> float:
@@ -1076,13 +1085,13 @@ func _get_steered_direction_to(destination: Vector2) -> Vector2:
 		return Vector2.ZERO
 
 	# 移动组件提供的方向；取值为 A* 路径或局部绕障后的单位向量，可见追击时允许终点轻微随机分散。
-	var raw_direction: Variant = _movement_component.call("get_steered_direction_to", destination, _target_is_visible)
+	var raw_direction: Variant = _movement_component.get_steered_direction_to(destination, _target_is_visible)
 	return raw_direction if raw_direction is Vector2 else Vector2.ZERO
 
 
 func _clear_navigation_path() -> void:
 	if _movement_component != null:
-		_movement_component.call("clear_navigation_path")
+		_movement_component.clear_navigation_path()
 
 
 func _move_with_external_velocity(delta: float) -> void:
@@ -1092,7 +1101,7 @@ func _move_with_external_velocity(delta: float) -> void:
 
 	# 本帧基础速度；取值来自追击或游荡逻辑，默认在叠加击退前缓存。
 	var desired_velocity: Vector2 = velocity
-	_movement_component.call("move_with_external_velocity", desired_velocity, delta)
+	_movement_component.move_with_external_velocity(desired_velocity, delta)
 
 
 func get_target_ai_state() -> int:
@@ -1100,7 +1109,7 @@ func get_target_ai_state() -> int:
 
 
 func get_occlusion_loss_count() -> int:
-	return int(_perception_component.call("get_line_of_sight_loss_count")) if _perception_component != null else 0
+	return _perception_component.get_line_of_sight_loss_count() if _perception_component != null else 0
 
 
 func get_target_search_destination() -> Vector2:
@@ -1108,7 +1117,7 @@ func get_target_search_destination() -> Vector2:
 		return global_position
 
 	# 当前搜查点；取值由感知组件维护，默认供调试显示或扩展动画系统读取。
-	var raw_destination: Variant = _perception_component.call("get_search_destination")
+	var raw_destination: Variant = _perception_component.get_search_destination()
 	return raw_destination if raw_destination is Vector2 else global_position
 
 

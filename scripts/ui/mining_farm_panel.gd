@@ -60,6 +60,14 @@ var _pending_startup_asset_id: String = ""
 var _show_exact_values: bool = false
 ## 等待二次确认的数量；默认 0，数量弹窗确认后保存到最终交易完成或取消。
 var _pending_quantity: int = 0
+## 产出呼吸 Tween；成员持有引用避免每次刷新都累积一个无引用的永久循环 Tween，重建前必须先终止旧动画。
+var _production_tween: Tween
+## 上次产出显示文本；默认空字符串，产出文本未变化时跳过标签重写与呼吸 Tween 重建。
+var _last_production_text: String = ""
+## 上次已渲染的整数显示余额；默认 -1 表示尚未渲染，余额滚动回调显示值未变化时跳过文本重建。
+var _last_rendered_balance: int = -1
+## 资产卡片重建是否已排队；默认 false，同帧多个服务信号合并为一次延迟重建。
+var _assets_rebuild_queued: bool = false
 
 ## 余额文本；显示整数或 K/M/B 两位小数缩写，实际余额始终保持整数。
 var _balance_label: Label
@@ -106,7 +114,8 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_progress_elapsed_seconds = fmod(_progress_elapsed_seconds + maxf(delta, 0.0), 1.0)
-	if _production_progress != null:
+	if _production_progress != null and not is_equal_approx(float(_production_progress.value), _progress_elapsed_seconds):
+		# 进度条写入守卫；值未变化时跳过属性赋值，避免暂停或极端帧率下的重复重绘请求。
 		_production_progress.value = _progress_elapsed_seconds
 
 
@@ -307,6 +316,10 @@ func _refresh_balance_text() -> void:
 		return
 	# 显示整数余额；动画中先把浮点显示值四舍五入为整数，再进行单位缩写。
 	var display_balance: int = maxi(int(round(_displayed_balance)), 0)
+	if display_balance == _last_rendered_balance:
+		# 显示值守卫；余额滚动动画每帧回调，整数显示值未变化时跳过余额与折合星穹文本重建。
+		return
+	_last_rendered_balance = display_balance
 	_balance_label.text = "%s 算力币" % _format_integer_value(display_balance)
 	_gold_equivalent_label.text = "折合星穹：%.4f" % (float(display_balance) / 10000.0)
 
@@ -314,38 +327,54 @@ func _refresh_balance_text() -> void:
 func _refresh_production(_unused_value: int = 0) -> void:
 	# 当前整数产出；服务不可用时显示 0，避免面板因单例缺失报错。
 	var production: int = int(_service.call("get_production_per_second")) if _service != null and _service.has_method("get_production_per_second") else 0
-	_production_label.text = "每秒产出 +%s" % _format_integer_value(production)
+	# 本次产出显示文本；与上次相同且循环动画仍有效时直接返回，不重建标签与 Tween。
+	var production_text: String = "每秒产出 +%s" % _format_integer_value(production)
+	if production_text == _last_production_text and _production_tween != null and _production_tween.is_valid():
+		return
+	_last_production_text = production_text
+	_production_label.text = production_text
+	if _production_tween != null and _production_tween.is_valid():
+		# 旧呼吸 Tween；重建前必须终止，否则每次刷新都会累积一个永久循环 Tween 造成泄漏。
+		_production_tween.kill()
 	# 呼吸动画；只作用于产出标签透明度，不改变布局或可点击区域。
-	var tween: Tween = create_tween().set_loops()
-	tween.tween_property(_production_label, "modulate:a", 0.66, 0.65)
-	tween.tween_property(_production_label, "modulate:a", 1.0, 0.65)
+	_production_tween = create_tween().set_loops()
+	_production_tween.tween_property(_production_label, "modulate:a", 0.66, 0.65)
+	_production_tween.tween_property(_production_label, "modulate:a", 1.0, 0.65)
 
 
 func _refresh_buffs() -> void:
 	if _buff_container == null:
 		return
-	for child in _buff_container.get_children():
-		child.queue_free()
 	# 当前增益列表；空列表显示稳定占位文本，避免状态栏高度跳动。
 	var buffs: Array = _service.call("get_active_buffs") as Array if _service != null and _service.has_method("get_active_buffs") else []
+	# 本次需要的标签数量；空增益仍占用一行占位文本，复用已有节点避免每秒倒计时销毁重建。
+	var required_label_count: int = maxi(buffs.size(), 1)
+	while _buff_container.get_child_count() > required_label_count:
+		# 多余标签；仅在增益数量减少时释放节点，常规倒计时刷新只更新文本。
+		var extra_label: Node = _buff_container.get_child(_buff_container.get_child_count() - 1)
+		_buff_container.remove_child(extra_label)
+		extra_label.queue_free()
+	while _buff_container.get_child_count() < required_label_count:
+		# 新增标签；仅在增益数量增加时创建节点，右对齐样式与原实现保持一致。
+		var created_label: Label = Label.new()
+		created_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		_buff_container.add_child(created_label)
 	if buffs.is_empty():
-		var empty_label: Label = Label.new()
-		empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		# 占位标签；复用首个子节点显示无增益状态，禁用文字色随当前 UI 风格取值。
+		var empty_label: Label = _buff_container.get_child(0) as Label
 		empty_label.text = "当前无临时增益"
 		empty_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_disabled_text_color())
-		_buff_container.add_child(empty_label)
 		return
-	for raw_buff in buffs:
+	for buff_index in range(buffs.size()):
 		# 单个增益快照；包含名称、比例和剩余在线时间，负时间表示随外部事件结束。
-		var buff: Dictionary = raw_buff as Dictionary
-		var buff_label: Label = Label.new()
-		buff_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		var buff: Dictionary = buffs[buff_index] as Dictionary
+		# 复用增益标签；按下标取已有子节点，仅更新颜色与文本，不重建控件。
+		var buff_label: Label = _buff_container.get_child(buff_index) as Label
 		buff_label.add_theme_color_override("font_color", Color(0.46, 0.92, 0.72, 1.0))
 		# 剩余时间文本；股市联动使用“至下次全量刷新”，骇入增益使用分秒倒计时。
 		var remaining: float = float(buff.get("remaining_seconds", -1.0))
 		var time_text: String = "至下次股市全量刷新" if remaining < 0.0 else _format_duration(remaining)
 		buff_label.text = "%s +%.2f%%  %s" % [str(buff.get("name", "增益")), float(buff.get("ratio", 0.0)) * 100.0, time_text]
-		_buff_container.add_child(buff_label)
 
 
 func _refresh_tabs() -> void:
@@ -364,6 +393,8 @@ func _switch_tab(tab_id: String) -> void:
 
 
 func _rebuild_assets() -> void:
+	# 任何直接重建都消化当前挂起的合并刷新；同帧稍后的延迟回调据此跳过重复重建。
+	_assets_rebuild_queued = false
 	if _asset_container == null:
 		return
 	for child in _asset_container.get_children():
@@ -564,10 +595,25 @@ func _on_production_settled(earned: int, _settled_seconds: int) -> void:
 func _on_production_changed(_production: int) -> void:
 	_refresh_production()
 	_refresh_buffs()
-	_rebuild_assets()
+	_queue_assets_rebuild()
 
 
 func _on_assets_changed() -> void:
+	_queue_assets_rebuild()
+
+
+func _queue_assets_rebuild() -> void:
+	## 合并资产卡片重建；参照仓库面板模式，同帧内 assets_changed 与 production_changed 多次触发只执行一次重建。
+	if _assets_rebuild_queued:
+		return
+	_assets_rebuild_queued = true
+	call_deferred("_flush_queued_assets_rebuild")
+
+
+func _flush_queued_assets_rebuild() -> void:
+	## 执行单次资产卡片重建；期间若已发生交易触发的直接重建，标志会被消化并跳过重复工作。
+	if not _assets_rebuild_queued:
+		return
 	_rebuild_assets()
 
 
@@ -667,6 +713,8 @@ func _format_integer_value(value: int) -> String:
 
 func _on_exact_value_toggled(enabled: bool) -> void:
 	_show_exact_values = enabled
+	# 显示格式切换会改变同一整数余额的缩写文本；重置渲染缓存确保守卫不拦截本次重建。
+	_last_rendered_balance = -1
 	_refresh_balance_text()
 	_refresh_production()
 	_rebuild_assets()

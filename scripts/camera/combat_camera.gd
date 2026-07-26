@@ -46,6 +46,10 @@ func _process(delta: float) -> void:
 		)
 		_shake_strength = maxf(_shake_strength - shake_decay * delta, 0.0)
 	offset = _base_offset + _teleport_follow_offset + shake_offset
+	if _shake_strength <= 0.0 and _teleport_follow_offset.is_zero_approx():
+		# 震动结束且传送追赶偏移已经回正；最后一帧把 offset 精确归位到基础偏移后停止逐帧处理，避免空闲相机每帧空转。
+		offset = _base_offset
+		set_process(false)
 
 
 func add_shake(amount: float) -> void:
@@ -53,6 +57,8 @@ func add_shake(amount: float) -> void:
 		return
 
 	_shake_strength = clampf(_shake_strength + amount, 0.0, max_shake_strength)
+	# 震动强度已写入，恢复逐帧处理；空闲停用期间 offset 不会再随机抖动。
+	set_process(true)
 
 
 func smooth_after_owner_teleport(previous_owner_position: Vector2, current_owner_position: Vector2) -> void:
@@ -68,3 +74,5 @@ func smooth_after_owner_teleport(previous_owner_position: Vector2, current_owner
 		_teleport_follow_tween.kill()
 	_teleport_follow_tween = create_tween()
 	_teleport_follow_tween.tween_property(self, "_teleport_follow_offset", Vector2.ZERO, maxf(teleport_follow_duration, 0.01)).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	# 传送追赶偏移进入回正补间，恢复逐帧处理；偏移归零后 _process 会再次自动停用。
+	set_process(true)

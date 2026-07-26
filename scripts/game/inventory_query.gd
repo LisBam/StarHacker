@@ -40,6 +40,11 @@ const SORT_DURABILITY: String = "durability"
 const STONE_ATTRIBUTE_DIRECTION_SEPARATOR: String = ":"
 ## 强化石方向筛选分组顺序；默认先展示全部“+”属性，再展示全部“-”属性。
 const STONE_FILTER_DIRECTIONS: Array[int] = [1, -1]
+## 搜索文本缓存条数上限；默认 2048 条，超限时一次性清空重建，防止长会话按资源实例累计的缓存键无限增长。
+const SEARCH_TEXT_CACHE_LIMIT: int = 2048
+
+## 搜索文本静态缓存；键为资源实例组合键，值为已拼接的小写搜索文本，命中后跳过整段搜索字符串重建。
+static var _search_text_cache: Dictionary = {}
 
 
 static func build_stone_attribute_filter_key(stat_name: String, direction: int) -> String:
@@ -234,11 +239,34 @@ static func _normalize_stone_attribute_filters(stone_attribute: Variant) -> Arra
 	return normalized_filters
 
 
+static func clear_search_text_cache() -> void:
+	## 清空搜索文本静态缓存；库存被整体重载或外部希望强制重建搜索文本时调用，日常运行依赖容量上限自动清理。
+	_search_text_cache.clear()
+
+
+static func _build_search_text_cache_key(item_resource: Resource) -> String:
+	## 生成搜索文本缓存键；普通物品的搜索字段在实例创建后不再变化，直接使用资源实例 id 即可。
+	## 强化石的搜索文本包含词条方向，额外并入品质与词条哈希组成组合键，任何词条差异都会落到新键，保证搜索结果永远正确。
+	# 物品类型；只有强化石的搜索文本内容依赖词条数据，其余物品名称、说明与分类均为创建后不变的静态字段。
+	var item_kind: String = str(item_resource.get("item_kind"))
+	if item_kind != "enhancement_stone":
+		return str(item_resource.get_instance_id())
+	# 强化石词条词典；升阶与读档都会生成新资源实例，这里仍并入哈希防御任何未来的在位改写路径。
+	var stone_modifiers: Variant = item_resource.get("modifiers")
+	# 词条哈希值；词典缺失的异常扩展资源按 0 处理，仍能获得稳定组合键。
+	var modifiers_hash: int = hash(stone_modifiers) if stone_modifiers is Dictionary else 0
+	return "%d:%s:%d" % [item_resource.get_instance_id(), str(item_resource.get("quality_id")), modifiers_hash]
+
+
 static func _build_search_text(entry: Dictionary) -> String:
 	# 条目资源；空资源使用空文本，避免关键词查询报错。
 	var item_resource: Resource = entry.get("resource") as Resource
 	if item_resource == null:
 		return ""
+	# 搜索文本缓存键；命中静态缓存时直接返回历史拼接结果，避免每条目每次查询都重建大字符串。
+	var cache_key: String = _build_search_text_cache_key(item_resource)
+	if _search_text_cache.has(cache_key):
+		return str(_search_text_cache.get(cache_key, ""))
 	# 搜索文本片段；包含名称、说明、分类和强化石属性方向，支持中文属性关键词。
 	var search_parts: PackedStringArray = PackedStringArray()
 	search_parts.append(str(item_resource.get("display_name")))
@@ -267,23 +295,80 @@ static func _build_search_text(entry: Dictionary) -> String:
 		if equipment_set != null:
 			search_parts.append(str(equipment_set.get("set_id")))
 			search_parts.append(str(equipment_set.get("display_name")))
-	return " ".join(search_parts).to_lower()
+	# 完整搜索文本；写入缓存前检查容量上限，超限时整体清空而不是逐条淘汰，绝不返回过期文本。
+	var search_text: String = " ".join(search_parts).to_lower()
+	if _search_text_cache.size() >= SEARCH_TEXT_CACHE_LIMIT:
+		_search_text_cache.clear()
+	_search_text_cache[cache_key] = search_text
+	return search_text
 
 
 static func _sort_entries(entries: Array[Dictionary], sort_mode: String) -> void:
-	# 插入排序索引；库存展示规模有限，稳定插入排序可保留相同值物品的原始顺序并避免闭包依赖。
-	for entry_index in range(1, entries.size()):
-		# 当前待插入条目；向前移动直到找到正确位置。
-		var moving_entry: Dictionary = entries[entry_index]
-		# 比较下标；从当前项前一位开始向左比较。
-		var compare_index: int = entry_index - 1
-		while compare_index >= 0 and _should_come_before(moving_entry, entries[compare_index], sort_mode):
-			entries[compare_index + 1] = entries[compare_index]
-			compare_index -= 1
-		entries[compare_index + 1] = moving_entry
+	## 装饰-排序-还原：排序前一次性为每条 entry 预计算当前 sort_mode 需要的排序键，比较阶段只读取预计算键，
+	## 不再让每次比较重新走价值与耐久的完整计算链；比较链本身与 _should_come_before 保持逐条一致。
+	## 稳定性说明：原插入排序稳定，且原比较函数末级已按唯一 source_index 升序收尾，构成严格全序；
+	## 装饰比较器保留同一 source_index 末级比较（结果数组本身按 source_index 升序构建，等价于原始顺序），
+	## 因此即使 Array.sort_custom 不稳定，相等键条目的最终顺序也与原实现逐位一致。
+	# 待排序条目数量；0 或 1 条时无需预计算排序键，直接保持原有顺序返回。
+	var entry_count: int = entries.size()
+	if entry_count <= 1:
+		return
+	# 装饰条目数组；每项持有原条目引用与预计算键，排序完成后按新顺序写回原数组并丢弃装饰记录。
+	var decorated_entries: Array[Dictionary] = []
+	for entry in entries:
+		# 单条装饰记录；键名仅存在于本地临时数组，不写入业务 entry 字典，因此无需前缀防冲突也无需事后清理。
+		var decorated_entry: Dictionary = {"entry": entry}
+		if sort_mode == SORT_ITEM_VALUE:
+			# 预计算总价值；单价乘堆叠数量，与 _should_come_before 的即时计算结果一致，每条只计算一次。
+			decorated_entry["total_value"] = _get_entry_total_value(entry)
+		elif sort_mode == SORT_DURABILITY:
+			# 预计算耐久比例；无耐久物品为 -1，保持与原比较函数相同的末尾排序位置。
+			decorated_entry["durability_ratio"] = _get_entry_durability_ratio(entry)
+			# 预计算当前耐久值；相同比例时的第二级降序比较键。
+			decorated_entry["current_durability"] = _get_entry_current_durability(entry)
+		# 预计算获得时间；默认排序与各模式回退比较统一使用的时间倒序键。
+		decorated_entry["acquired_at"] = float(entry.get("acquired_at", 0.0))
+		# 预计算源下标；唯一末级比较键，保证相等键条目维持原插入排序的稳定顺序。
+		decorated_entry["source_index"] = int(entry.get("source_index", 0))
+		decorated_entries.append(decorated_entry)
+	decorated_entries.sort_custom(_compare_decorated_entries.bind(sort_mode))
+	for entry_index in range(entry_count):
+		entries[entry_index] = decorated_entries[entry_index].get("entry") as Dictionary
+
+
+static func _compare_decorated_entries(first_decorated: Dictionary, second_decorated: Dictionary, sort_mode: String) -> bool:
+	## 比较两条装饰记录；比较层级、方向与相等判断和 _should_come_before 完全一致，只是读取预计算键而不重新计算。
+	if sort_mode == SORT_ITEM_VALUE:
+		# 第一项预计算总价值；来自装饰阶段的一次性计算结果。
+		var first_value: int = int(first_decorated.get("total_value", 0))
+		# 第二项预计算总价值；用于降序比较。
+		var second_value: int = int(second_decorated.get("total_value", 0))
+		if first_value != second_value:
+			return first_value > second_value
+	elif sort_mode == SORT_DURABILITY:
+		# 第一项预计算耐久比例；无耐久物品为 -1，始终排在全部带耐久物品之后。
+		var first_durability_ratio: float = float(first_decorated.get("durability_ratio", -1.0))
+		# 第二项预计算耐久比例；与第一项执行降序比较。
+		var second_durability_ratio: float = float(second_decorated.get("durability_ratio", -1.0))
+		if not is_equal_approx(first_durability_ratio, second_durability_ratio):
+			return first_durability_ratio > second_durability_ratio
+		# 第一项预计算当前耐久值；相同比例时优先显示实际剩余耐久更高的物品。
+		var first_current_durability: float = float(first_decorated.get("current_durability", -1.0))
+		# 第二项预计算当前耐久值；用于同耐久比例下的降序比较。
+		var second_current_durability: float = float(second_decorated.get("current_durability", -1.0))
+		if not is_equal_approx(first_current_durability, second_current_durability):
+			return first_current_durability > second_current_durability
+	# 第一项预计算获得时间；时间越新越靠前。
+	var first_time: float = float(first_decorated.get("acquired_at", 0.0))
+	# 第二项预计算获得时间；用于默认时间倒序比较。
+	var second_time: float = float(second_decorated.get("acquired_at", 0.0))
+	if not is_equal_approx(first_time, second_time):
+		return first_time > second_time
+	return int(first_decorated.get("source_index", 0)) < int(second_decorated.get("source_index", 0))
 
 
 static func _should_come_before(first_entry: Dictionary, second_entry: Dictionary, sort_mode: String) -> bool:
+	## 原始逐条比较实现；现作为装饰比较器的语义参照保留，任何排序规则调整必须同步修改 _compare_decorated_entries。
 	if sort_mode == SORT_ITEM_VALUE:
 		# 第一项总价值；单价乘堆叠数量，武器数量固定为 1。
 		var first_value: int = _get_entry_total_value(first_entry)

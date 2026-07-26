@@ -112,6 +112,34 @@ var _last_redraw_size: Vector2 = Vector2.ZERO
 var _last_redraw_navigation_marker_visible: bool = false
 ## 上次请求重绘时导航标点位置；默认零向量，用于标点移动后立即刷新指示线。
 var _last_redraw_navigation_marker_position: Vector2 = Vector2.ZERO
+## GameWorld 是否提供探索格列表接口；节点解析后缓存 has_method 结果，探索缓存刷新不再逐帧做方法名字符串查找。
+var _world_has_explored_cells_method: bool = false
+## GameWorld 是否提供探索版本接口；节点解析后缓存，版本比较成为探索缓存路径每帧唯一的动态调用。
+var _world_has_explored_version_method: bool = false
+## GameWorld 是否提供只读探索字典接口；节点解析后缓存，版本变化时优先直接持有内部字典引用而不再复制列表重建。
+var _world_has_explored_readonly_method: bool = false
+## GameWorld 是否提供撤离点标记状态接口；节点解析后缓存，每帧重绘判定与采样直接使用布尔分支。
+var _world_has_extraction_marked_method: bool = false
+## GameWorld 是否提供撤离点位置接口；节点解析后缓存，撤离点状态采样不再重复查找方法名。
+var _world_has_extraction_position_method: bool = false
+## GameWorld 是否提供导航标点状态接口；节点解析后缓存，导航点状态采样不再重复查找方法名。
+var _world_has_navigation_marker_method: bool = false
+## GameWorld 是否提供导航标点位置接口；节点解析后缓存，指示线终点采样不再重复查找方法名。
+var _world_has_navigation_position_method: bool = false
+## GameWorld 是否提供世界位置探索查询接口；节点解析后缓存，供物资撤离点标记的发现判定复用。
+var _world_has_position_explored_method: bool = false
+## 本帧采样的撤离点可见状态；_process 每帧采样一次，_should_redraw_map 与 _remember_redraw_state 共用同一份结果。
+var _redraw_sample_extraction_visible: bool = false
+## 本帧采样的撤离点位置；仅在采样撤离点可见时有效，不可见时固定零向量，与原状态记录规则保持一致。
+var _redraw_sample_extraction_position: Vector2 = Vector2.ZERO
+## 本帧采样的导航标点可见状态；标点创建或取消仍会在当帧触发重绘。
+var _redraw_sample_navigation_visible: bool = false
+## 本帧采样的导航标点位置；仅在采样标点可见时有效，不可见时固定零向量。
+var _redraw_sample_navigation_position: Vector2 = Vector2.ZERO
+## 本帧绘制使用的探索格尺寸；_draw 顶部采样一次，障碍逐格裁剪与迷雾绘制不再逐障碍反射调用 GameWorld。
+var _draw_frame_cell_size: float = 256.0
+## 本帧绘制使用的已探索格查询表；_draw 顶部取一次共享引用，只读使用，绝不修改任何键值。
+var _draw_frame_explored_lookup: Dictionary = {}
 
 ## 游戏世界节点缓存；默认按 game_world_path 获取，允许为空并使用兜底地图尺寸。
 @onready var _game_world: Node = get_node_or_null(game_world_path)
@@ -123,6 +151,15 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP if display_mode == DISPLAY_MODE_FULL and allow_navigation_marker_input else Control.MOUSE_FILTER_IGNORE
 	if display_mode == DISPLAY_MODE_FULL and allow_navigation_marker_input:
 		gui_input.connect(_on_map_gui_input)
+	# GameWorld 接口判定缓存；节点解析后一次性完成全部 has_method 查询，每帧重绘判定与状态采样只做布尔分支。
+	_world_has_explored_cells_method = _game_world != null and _game_world.has_method("get_explored_cells")
+	_world_has_explored_version_method = _game_world != null and _game_world.has_method("get_explored_cells_version")
+	_world_has_explored_readonly_method = _game_world != null and _game_world.has_method("get_explored_cells_readonly")
+	_world_has_extraction_marked_method = _game_world != null and _game_world.has_method("is_extraction_point_marked_on_map")
+	_world_has_extraction_position_method = _game_world != null and _game_world.has_method("get_extraction_point_position")
+	_world_has_navigation_marker_method = _game_world != null and _game_world.has_method("has_navigation_marker")
+	_world_has_navigation_position_method = _game_world != null and _game_world.has_method("get_navigation_marker_position")
+	_world_has_position_explored_method = _game_world != null and _game_world.has_method("is_world_position_explored")
 
 
 func _process(delta: float) -> void:
@@ -135,6 +172,8 @@ func _process(delta: float) -> void:
 	# 两种地图模式都刷新探索缓存，物资撤离点只有被玩家发现后才允许显示。
 	map_cache_changed = _refresh_explored_cache_if_needed() or map_cache_changed
 
+	# 本帧重绘状态采样补充：一次取齐撤离点与导航标点数据，重绘判定与状态记录共用同一份采样，不再同帧重复动态调用。
+	_sample_redraw_state()
 	if map_cache_changed or _should_redraw_map():
 		_remember_redraw_state()
 		_redraw_remaining = _get_redraw_interval()
@@ -146,6 +185,9 @@ func _draw() -> void:
 	var minimap_rect: Rect2 = Rect2(Vector2.ZERO, size)
 	# 当前世界可视区域；取值由显示模式决定，默认局部模式跟随玩家。
 	var world_view_rect: Rect2 = _get_current_world_view_rect()
+	# 本帧绘制采样补充：探索格尺寸与查询表在绘制开始时读取一次，供障碍逐格裁剪与迷雾绘制共用，不再逐障碍重复调用。
+	_draw_frame_cell_size = _get_exploration_cell_size()
+	_draw_frame_explored_lookup = _get_explored_cell_lookup()
 	draw_rect(minimap_rect, minimap_background_color, true)
 	_draw_obstacles(world_view_rect)
 	_draw_fog(world_view_rect)
@@ -172,9 +214,10 @@ func _draw_obstacles(world_view_rect: Rect2) -> void:
 
 func _draw_explored_obstacle_rect(obstacle_rect: Rect2, world_view_rect: Rect2) -> void:
 	# 探索格尺寸；墙体与建筑按格裁剪，未进入玩家摄像机视野的部分不会在大小地图提前泄露。
-	var cell_size: float = _get_exploration_cell_size()
+	# 采样来源补充：改读 _draw 顶部的本帧采样成员，避免每个障碍矩形都重复反射调用 GameWorld 接口。
+	var cell_size: float = _draw_frame_cell_size
 	# 已探索格查询表；开发者解锁全图后同一缓存会立即允许绘制全部地图结构。
-	var explored_lookup: Dictionary = _get_explored_cell_lookup()
+	var explored_lookup: Dictionary = _draw_frame_explored_lookup
 	# 障碍覆盖起始格；向下取整包含左上边缘接触的探索格。
 	var start_cell: Vector2i = Vector2i(floori(obstacle_rect.position.x / cell_size), floori(obstacle_rect.position.y / cell_size))
 	# 障碍覆盖结束格；向上取整后减一包含右下边缘覆盖的最后一格。
@@ -200,9 +243,10 @@ func _draw_explored_obstacle_rect(obstacle_rect: Rect2, world_view_rect: Rect2) 
 
 func _draw_fog(world_view_rect: Rect2) -> void:
 	# 探索格子尺寸；取值来自 GameWorld 或兜底值，默认用于把迷雾拆成稳定网格。
-	var cell_size: float = _get_exploration_cell_size()
+	# 采样来源补充：与障碍绘制共用 _draw 顶部的本帧采样成员，同一帧不再重复取值。
+	var cell_size: float = _draw_frame_cell_size
 	# 已探索格查询表；键为 Vector2i，默认让大地图快速判断哪些格子不需要迷雾。
-	var explored_lookup: Dictionary = _get_explored_cell_lookup()
+	var explored_lookup: Dictionary = _draw_frame_explored_lookup
 	# 起始 X 格；取值为当前世界视野左边界所在格，默认覆盖完整大地图。
 	var start_cell_x: int = floori(world_view_rect.position.x / cell_size)
 	# 结束 X 格；取值为当前世界视野右边界所在格，默认覆盖完整大地图。
@@ -329,7 +373,8 @@ func _draw_skill_map_markers(world_view_rect: Rect2) -> void:
 
 
 func _is_world_position_discovered(world_position: Vector2) -> bool:
-	if _game_world != null and _game_world.has_method("is_world_position_explored"):
+	# 接口判定来源补充：has_method 结果已在 _ready 缓存为布尔成员，逐标记的发现判定不再重复查找方法名。
+	if _game_world != null and _world_has_position_explored_method:
 		return bool(_game_world.call("is_world_position_explored", world_position))
 	# 兼容接口缺失的临时场景；使用本地探索格缓存判断，不默认泄露未知点位。
 	var cell_size: float = _get_exploration_cell_size()
@@ -386,18 +431,20 @@ func _should_redraw_map() -> bool:
 		return true
 
 	# 当前撤离点可见状态；取值来自 GameWorld，默认用于标记出现或消失时立即刷新地图。
-	var extraction_visible: bool = _is_extraction_marker_visible()
+	# 采样来源补充：改读 _process 顶部的统一采样成员，与状态记录共用同一份数据，判定条件不变。
+	var extraction_visible: bool = _redraw_sample_extraction_visible
 	if extraction_visible != _last_redraw_extraction_visible:
 		return true
 
-	if extraction_visible and _get_extraction_marker_position() != _last_redraw_extraction_position:
+	if extraction_visible and _redraw_sample_extraction_position != _last_redraw_extraction_position:
 		return true
 
 	# 当前导航标点可见状态；取值来自 GameWorld，用于创建或取消标点时立即刷新。
-	var navigation_marker_visible: bool = _has_navigation_marker()
+	# 采样来源补充：与撤离点相同，读取本帧统一采样结果。
+	var navigation_marker_visible: bool = _redraw_sample_navigation_visible
 	if navigation_marker_visible != _last_redraw_navigation_marker_visible:
 		return true
-	if navigation_marker_visible and _get_navigation_marker_position() != _last_redraw_navigation_marker_position:
+	if navigation_marker_visible and _redraw_sample_navigation_position != _last_redraw_navigation_marker_position:
 		return true
 
 	if _player != null:
@@ -412,11 +459,20 @@ func _should_redraw_map() -> bool:
 func _remember_redraw_state() -> void:
 	_has_last_redraw_player_position = true
 	_last_redraw_player_position = _player.global_position if _player != null else Vector2.ZERO
-	_last_redraw_extraction_visible = _is_extraction_marker_visible()
-	_last_redraw_extraction_position = _get_extraction_marker_position() if _last_redraw_extraction_visible else Vector2.ZERO
-	_last_redraw_navigation_marker_visible = _has_navigation_marker()
-	_last_redraw_navigation_marker_position = _get_navigation_marker_position() if _last_redraw_navigation_marker_visible else Vector2.ZERO
+	# 采样来源补充：记录与判定共用 _process 顶部的同一份采样，记录内容与原直接动态调用结果一致。
+	_last_redraw_extraction_visible = _redraw_sample_extraction_visible
+	_last_redraw_extraction_position = _redraw_sample_extraction_position
+	_last_redraw_navigation_marker_visible = _redraw_sample_navigation_visible
+	_last_redraw_navigation_marker_position = _redraw_sample_navigation_position
 	_last_redraw_size = size
+
+
+func _sample_redraw_state() -> void:
+	## 采样本帧撤离点与导航标点状态；每帧只执行一轮 GameWorld 动态调用，重绘判定与状态记录共用同一份数据，不改变任何刷新条件语义。
+	_redraw_sample_extraction_visible = _is_extraction_marker_visible()
+	_redraw_sample_extraction_position = _get_extraction_marker_position() if _redraw_sample_extraction_visible else Vector2.ZERO
+	_redraw_sample_navigation_visible = _has_navigation_marker()
+	_redraw_sample_navigation_position = _get_navigation_marker_position() if _redraw_sample_navigation_visible else Vector2.ZERO
 
 
 func _get_redraw_interval() -> float:
@@ -458,29 +514,36 @@ func _refresh_obstacle_cache_if_needed() -> bool:
 
 
 func _refresh_explored_cache_if_needed() -> bool:
-	if _game_world == null or not _game_world.has_method("get_explored_cells"):
+	if _game_world == null or not _world_has_explored_cells_method:
 		if _has_explored_cache and _cached_explored_lookup.is_empty():
 			return false
 
-		_cached_explored_lookup.clear()
+		# 只读契约保护补充：改用重新赋值空字典代替 clear，绝不修改可能来自 GameWorld 的共享引用。
+		_cached_explored_lookup = {}
 		_cached_explored_version = -1
 		_has_explored_cache = true
 		return true
 
 	# 当前探索版本号；取值来自 GameWorld，缺少版本接口时使用 0 并只拉取一次。
 	var explored_version: int = 0
-	if _game_world.has_method("get_explored_cells_version"):
+	if _world_has_explored_version_method:
 		explored_version = int(_game_world.call("get_explored_cells_version"))
 	if _has_explored_cache and explored_version == _cached_explored_version:
 		return false
 
-	# 原始探索格列表；取值来自 GameWorld 动态调用，默认整理为字典查询表。
-	var raw_cells: Array = _game_world.call("get_explored_cells")
-	_cached_explored_lookup.clear()
-	# 原始探索格遍历项；取值可能为任意 Variant，默认只接收 Vector2i。
-	for raw_cell in raw_cells:
-		if raw_cell is Vector2i:
-			_cached_explored_lookup[raw_cell] = true
+	if _world_has_explored_readonly_method:
+		# 只读探索字典引用；GameWorld 直接提供内部字典（键为 Vector2i），持有引用查询即可，不再复制列表也不再重建查询表。
+		# 只读契约：绝不修改该字典；版本号变化仍返回 true 以触发上层重绘判定。
+		_cached_explored_lookup = _game_world.call("get_explored_cells_readonly")
+	else:
+		# 原始探索格列表；取值来自 GameWorld 动态调用，默认整理为字典查询表。
+		var raw_cells: Array = _game_world.call("get_explored_cells")
+		# 只读契约保护补充：兼容路径重建本地字典前先重新赋值空字典，脱离任何可能的共享引用。
+		_cached_explored_lookup = {}
+		# 原始探索格遍历项；取值可能为任意 Variant，默认只接收 Vector2i。
+		for raw_cell in raw_cells:
+			if raw_cell is Vector2i:
+				_cached_explored_lookup[raw_cell] = true
 
 	_cached_explored_version = explored_version
 	_has_explored_cache = true
@@ -495,14 +558,16 @@ func _get_obstacle_rects() -> Array[Rect2]:
 
 
 func _is_extraction_marker_visible() -> bool:
-	if _game_world == null or not _game_world.has_method("is_extraction_point_marked_on_map"):
+	# 接口判定来源补充：has_method 结果已在 _ready 缓存为布尔成员，每帧采样不再做方法名字符串查找。
+	if _game_world == null or not _world_has_extraction_marked_method:
 		return false
 
 	return bool(_game_world.call("is_extraction_point_marked_on_map"))
 
 
 func _get_extraction_marker_position() -> Vector2:
-	if _game_world == null or not _game_world.has_method("get_extraction_point_position"):
+	# 接口判定来源补充：has_method 结果已在 _ready 缓存为布尔成员，每帧采样不再做方法名字符串查找。
+	if _game_world == null or not _world_has_extraction_position_method:
 		return Vector2.ZERO
 
 	# 原始撤离点位置；取值可能为 Variant，默认只接收 Vector2。
@@ -514,11 +579,13 @@ func _get_extraction_marker_position() -> Vector2:
 
 
 func _has_navigation_marker() -> bool:
-	return _game_world != null and _game_world.has_method("has_navigation_marker") and bool(_game_world.call("has_navigation_marker"))
+	# 接口判定来源补充：has_method 结果已在 _ready 缓存为布尔成员，每帧采样不再做方法名字符串查找。
+	return _game_world != null and _world_has_navigation_marker_method and bool(_game_world.call("has_navigation_marker"))
 
 
 func _get_navigation_marker_position() -> Vector2:
-	if _game_world == null or not _game_world.has_method("get_navigation_marker_position"):
+	# 接口判定来源补充：has_method 结果已在 _ready 缓存为布尔成员，每帧采样不再做方法名字符串查找。
+	if _game_world == null or not _world_has_navigation_position_method:
 		return Vector2.ZERO
 	# 导航标点原始位置；取值可能为任意 Variant，默认只接收 Vector2。
 	var raw_position: Variant = _game_world.call("get_navigation_marker_position")

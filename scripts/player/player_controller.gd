@@ -588,7 +588,10 @@ func _get_movement_speed_multiplier(movement_direction: Vector2, delta: float) -
 	# 临时属性点倍率；以装备结算后的当前基础移速为分母，把技能提供的固定点数转换为移动组件可消费的倍率。
 	var base_move_speed_attribute: float = float(_movement_component.call("get_max_speed")) if _movement_component != null and _movement_component.has_method("get_max_speed") else 1.0
 	resolved_multiplier *= maxf((base_move_speed_attribute + _get_movement_speed_attribute_bonus()) / maxf(base_move_speed_attribute, 1.0), 0.0)
-	for raw_multiplier in _movement_speed_multiplier_sources.values():
+	# 移动倍率来源键；直接遍历字典键并按下标读取值，消除每物理帧 values() 产生的临时数组分配。
+	for multiplier_source_key in _movement_speed_multiplier_sources:
+		# 当前来源倍率；按键下标读取原始值，保持与原有 values() 遍历完全一致的连乘语义。
+		var raw_multiplier: Variant = _movement_speed_multiplier_sources[multiplier_source_key]
 		resolved_multiplier *= maxf(float(raw_multiplier), 0.0)
 	if _equipment_set_component != null and _equipment_set_component.has_method("get_contextual_movement_speed_multiplier"):
 		resolved_multiplier *= maxf(float(_equipment_set_component.call("get_contextual_movement_speed_multiplier", global_position, movement_direction)), 0.0)
@@ -630,7 +633,10 @@ func remove_movement_speed_attribute_bonus_source(source_id: String) -> void:
 func _get_movement_speed_attribute_bonus() -> float:
 	## 汇总全部固定移速属性来源；每个来源直接加算点数，结果最低为 0。
 	var total_bonus: float = 0.0
-	for raw_bonus in _movement_speed_attribute_bonus_sources.values():
+	# 移速加成来源键；直接遍历字典键并按下标读取值，消除每物理帧 values() 产生的临时数组分配。
+	for bonus_source_key in _movement_speed_attribute_bonus_sources:
+		# 当前来源加成；按键下标读取原始值，保持与原有 values() 遍历完全一致的加算语义。
+		var raw_bonus: Variant = _movement_speed_attribute_bonus_sources[bonus_source_key]
 		total_bonus += maxf(float(raw_bonus), 0.0)
 	return maxf(total_bonus, 0.0)
 

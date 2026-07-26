@@ -33,6 +33,8 @@ const RESOURCE_QUALITY_NAME_PREFIXES: Array[String] = ["初级", "中级", "高�
 const FALLBACK_SORT_ORDER: int = 999999
 ## 图鉴搜索框最小宽度；默认 260 像素，容纳中文关键词并在页签下方保持清晰单行布局。
 const SEARCH_FIELD_MINIMUM_WIDTH: float = 260.0
+## 搜索防抖等待时间；默认 0.2 秒，输入停止后才刷新一次左侧条目列表。
+const SEARCH_DEBOUNCE_SECONDS: float = 0.2
 ## 扩展包标题分割最小高度；默认 32 像素，使每组内容在左侧列表中拥有清晰可读的视觉边界。
 const CONTENT_PACK_DIVIDER_MINIMUM_HEIGHT: float = 32.0
 ## 左侧条目列表最小宽度；默认 280 像素，保证较长物品名称可读且为右侧完整详情保留主要空间。
@@ -80,6 +82,10 @@ var _detail_label: RichTextLabel
 var _close_button: Button
 ## 装备套装展开状态；默认收起，点击套装标题右侧箭头后展开该套装的四件装备。
 var _expanded_equipment_sets: Dictionary = {}
+## 图鉴目录条目缓存；键为页签稳定标识，值为该页签全部条目数组，命中后不再重新加载资源或实例化怪物场景，解锁状态仍在展示阶段实时判定。
+var _catalog_cache: Dictionary = {}
+## 搜索防抖计时器；单次触发，输入停止 0.2 秒后才执行一次完整刷新，清空搜索框时立即刷新。
+var _search_debounce_timer: Timer
 
 
 func _ready() -> void:
@@ -88,6 +94,7 @@ func _ready() -> void:
 	_resolve_services()
 	_build_content()
 	_connect_inventory_signal()
+	_connect_content_catalog_signal()
 	refresh()
 
 
@@ -98,6 +105,7 @@ func refresh() -> void:
 	if _content_catalog == null or _global_inventory == null:
 		_resolve_services()
 		_connect_inventory_signal()
+		_connect_content_catalog_signal()
 	_refresh_content_pack_group_metadata()
 	_clear_entry_grid()
 	# 当前类别全部条目；包含目录资源、统一强化石条目或怪物场景，筛选前用于统计完整收集进度。
@@ -159,6 +167,21 @@ func _connect_inventory_signal() -> void:
 		_global_inventory.connect("encyclopedia_changed", Callable(self, "_on_encyclopedia_changed"))
 
 
+func _connect_content_catalog_signal() -> void:
+	## 内容可用状态变化信号；扩展包解锁等目录侧变化发生时清空页签目录缓存，下一次刷新按最新目录重新构建条目。
+	if _content_catalog == null or not _content_catalog.has_signal("content_availability_changed"):
+		return
+	# 目录信号已连接状态；防止刷新流程重复解析服务时把同一回调重复注册。
+	var is_catalog_signal_connected: bool = _content_catalog.is_connected("content_availability_changed", Callable(self, "_on_content_availability_changed"))
+	if not is_catalog_signal_connected:
+		_content_catalog.connect("content_availability_changed", Callable(self, "_on_content_availability_changed"))
+
+
+func _on_content_availability_changed() -> void:
+	## 内容可用状态变化回调；只负责清空目录缓存，实际列表由下一次刷新或宿主打开面板时重新构建。
+	_catalog_cache.clear()
+
+
 func _build_content() -> void:
 	## 主内容纵向容器；承载标题、分类页签、进度、滚动条目区与返回按钮，所有间距只影响图鉴视觉。
 	var content: VBoxContainer = VBoxContainer.new()
@@ -193,6 +216,12 @@ func _build_content() -> void:
 	search_edit.text_changed.connect(_on_search_text_changed)
 	query_bar.add_child(search_edit)
 	_search_edit = search_edit
+	# 搜索防抖计时器初始化；常驻面板子节点，超时回调直接复用原有整体刷新入口。
+	_search_debounce_timer = Timer.new()
+	_search_debounce_timer.one_shot = true
+	_search_debounce_timer.wait_time = SEARCH_DEBOUNCE_SECONDS
+	_search_debounce_timer.timeout.connect(refresh)
+	add_child(_search_debounce_timer)
 	# 当前分类收集进度；刷新时按当前目录全部条目和永久发现记录更新。
 	var progress_label: Label = Label.new()
 	progress_label.name = "EncyclopediaProgress"
@@ -314,7 +343,13 @@ func _sync_tab_buttons() -> void:
 
 func _on_search_text_changed(_new_text: String) -> void:
 	## 处理图鉴关键词变化；输入即时过滤当前分类列表，不改变当前扩展包筛选、解锁记录或详情数据。
-	refresh()
+	# 搜索防抖处理；清空关键词立即刷新保证响应感，其余输入重置 0.2 秒计时并在停止输入后统一刷新一次。
+	if _search_debounce_timer == null or _new_text.strip_edges().is_empty():
+		if _search_debounce_timer != null:
+			_search_debounce_timer.stop()
+		refresh()
+		return
+	_search_debounce_timer.start()
 
 
 func _refresh_content_pack_group_metadata() -> void:
@@ -372,6 +407,12 @@ func _does_entry_match_search_text(entry: Dictionary, search_text: String) -> bo
 
 func _build_catalog_entries(tab_id: String) -> Array[Dictionary]:
 	## 当前类别全部图鉴条目；每项保存只读模板资源、怪物场景快照或强化石通用元数据，不保存玩家库存实例。
+	## 目录缓存补充：条目为构建列表所需的纯展示数据，解锁判定不进缓存并由 _is_entry_discovered 每次实时计算。
+	# 页签缓存命中检查；命中时直接复用已构建条目数组，搜索按键不再触碰磁盘加载与怪物场景实例化。
+	if _catalog_cache.has(tab_id):
+		# 已缓存条目数组；构建时即为类型化数组且刷新流程只读取不修改，可安全返回同一引用。
+		var cached_entries: Array[Dictionary] = _catalog_cache.get(tab_id)
+		return cached_entries
 	var entries: Array[Dictionary] = []
 	if _content_catalog == null:
 		return entries
@@ -386,6 +427,8 @@ func _build_catalog_entries(tab_id: String) -> Array[Dictionary]:
 			if not monster_entry.is_empty():
 				entries.append(monster_entry)
 		entries.sort_custom(Callable(self, "_compare_catalog_entries"))
+		# 怪物页签缓存写入；离树实例化成本最高，缓存后同页签刷新不再重新实例化任何怪物场景。
+		_catalog_cache[tab_id] = entries
 		return entries
 	# 内容目录查询方法；全量路径接口不受可用内容池过滤，确保未获得条目也会占用一个“？？？”图鉴位置。
 	var method_name: String = "get_all_weapon_paths" if tab_id == TAB_WEAPONS else ("get_all_equipment_paths" if tab_id == TAB_EQUIPMENT else "get_all_item_paths")
@@ -402,6 +445,8 @@ func _build_catalog_entries(tab_id: String) -> Array[Dictionary]:
 	if tab_id == TAB_RESOURCES:
 		entries.append(_build_enhancement_stone_entry())
 	entries.sort_custom(Callable(self, "_compare_catalog_entries"))
+	# 物品页签缓存写入；同页签后续刷新直接复用条目数组，不再触发任何磁盘资源加载。
+	_catalog_cache[tab_id] = entries
 	return entries
 
 

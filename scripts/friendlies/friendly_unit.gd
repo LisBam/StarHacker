@@ -138,13 +138,16 @@ func _find_nearest_hostile_target() -> Node2D:
 	var nearest_distance_squared: float = maxf(vision_range, 0.0) * maxf(vision_range, 0.0)
 	for raw_target in get_tree().get_nodes_in_group(hostile_target_group):
 		var candidate: Node2D = raw_target as Node2D
-		if candidate == self or not _is_hostile_target(candidate):
+		if candidate == null or candidate == self:
 			continue
 		# 候选距离平方；等距时保留先出现者，保证目标选择稳定。
 		var distance_squared: float = global_position.distance_squared_to(candidate.global_position)
-		if distance_squared <= nearest_distance_squared:
-			nearest_distance_squared = distance_squared
-			nearest_target = candidate
+		if distance_squared > nearest_distance_squared:
+			continue
+		if not _is_hostile_target(candidate):
+			continue
+		nearest_distance_squared = distance_squared
+		nearest_target = candidate
 	return nearest_target
 
 
@@ -202,12 +205,23 @@ func remove_attack_speed_bonus_source(source_id: String) -> void:
 
 func _update_attack_speed_bonus_durations(delta: float) -> void:
 	## 递减全部限时攻速来源，并在归零时精确移除对应来源。
-	for raw_source_id in _attack_speed_bonus_durations.keys():
+	if _attack_speed_bonus_durations.is_empty():
+		return
+	# 到期来源收集容器；默认 null 表示本帧没有来源归零，仅在确实需要移除时才创建数组，避免每物理帧固定产生临时分配。
+	var expired_source_ids: Variant = null
+	for raw_source_id in _attack_speed_bonus_durations:
 		# 当前来源 ID；键由公开设置入口保证为非空字符串。
 		var source_id: String = str(raw_source_id)
 		# 更新后剩余时间；最低为 0，归零时不再写回字典。
 		var remaining_duration: float = maxf(float(_attack_speed_bonus_durations[source_id]) - maxf(delta, 0.0), 0.0)
 		if remaining_duration <= 0.0:
-			remove_attack_speed_bonus_source(source_id)
+			if expired_source_ids == null:
+				expired_source_ids = []
+			expired_source_ids.append(source_id)
 		else:
 			_attack_speed_bonus_durations[source_id] = remaining_duration
+	if expired_source_ids == null:
+		return
+	# 到期来源遍历项；迭代结束后统一走公开移除入口，保持与逐项 erase 相同的移除副作用与顺序。
+	for expired_source_id in expired_source_ids:
+		remove_attack_speed_bonus_source(expired_source_id)

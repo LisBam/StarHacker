@@ -26,6 +26,8 @@ class_name DamageNumberPopup
 
 ## 每个受击目标当前仍存活的伤害飘字弱引用；键为目标实例 ID，值为 WeakRef 数组，用于计算下一次错位槽。
 static var _active_popups_by_target: Dictionary = {}
+## 按字号共享的 LabelSettings 静态缓存；键为整数字号，值为可复用资源，同字号飘字复用同一设置以消除逐次分配。
+static var _label_settings_by_font_size: Dictionary = {}
 
 
 static func spawn_damage_number(parent_node: Node, world_position: Vector2, damage_value: float, is_critical: bool, target_instance_id: int = 0) -> void:
@@ -46,17 +48,29 @@ static func _register_popup(target_instance_id: int, popup: DamageNumberPopup) -
 	if target_instance_id <= 0:
 		return 0
 	# 目标活动弱引用；失效节点不会被静态字典强引用，目标销毁后也可在下次命中时自然清理。
-	var active_references: Array = _active_popups_by_target.get(target_instance_id, []) as Array
+	var active_references: Array = _active_popups_by_target[target_instance_id] if _active_popups_by_target.has(target_instance_id) else []
 	# 仍有效的弱引用；每项必须解析到场景树内 DamageNumberPopup 才参与槽位计数。
-	var valid_references: Array = []
-	for popup_reference in active_references:
-		if popup_reference is WeakRef and is_instance_valid((popup_reference as WeakRef).get_ref()):
-			valid_references.append(popup_reference)
+	# 当前实现直接复用存量数组并原地剔除失效项，避免每次命中都构建新的临时数组。
+	var valid_references: Array = active_references
+	# 倒序遍历索引；从尾部开始原地移除失效项，避免正序删除时跳过相邻元素。
+	for reference_index in range(valid_references.size() - 1, -1, -1):
+		# 当前遍历弱引用；解析失败或节点已释放的项立即原地移除。
+		var popup_reference: Variant = valid_references[reference_index]
+		if not (popup_reference is WeakRef and is_instance_valid((popup_reference as WeakRef).get_ref())):
+			valid_references.remove_at(reference_index)
+	if valid_references.is_empty():
+		# 清理后没有存活飘字时先移除该目标键；防止已销毁目标的实例 ID 永久驻留静态字典造成泄漏。
+		_active_popups_by_target.erase(target_instance_id)
 	# 错位槽；当前有效数量即为新飘字序号，随后登记自身弱引用供后续伤害读取。
 	var offset_lane: int = valid_references.size()
 	valid_references.append(weakref(popup))
 	_active_popups_by_target[target_instance_id] = valid_references
 	return offset_lane
+
+
+static func reset_tracking() -> void:
+	## 清空全部按目标登记的飘字弱引用；供宿主在场景切换或战斗初始化入口调用，避免旧战斗目标的实例 ID 长期驻留静态字典。
+	_active_popups_by_target.clear()
 
 
 func _play(damage_value: float, is_critical: bool, offset_lane: int) -> void:
@@ -68,7 +82,17 @@ func _play(damage_value: float, is_critical: bool, offset_lane: int) -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	# 非线性字号；对数增长保证高伤害更大但不会无限膨胀。
 	var resolved_font_size: int = clampi(roundi(float(minimum_font_size) + log(maxf(damage_value, 0.0) + 1.0) * logarithmic_scale_strength), minimum_font_size, maximum_font_size)
-	add_theme_font_size_override("font_size", resolved_font_size)
+	# 当前有效主题字色；LabelSettings 会覆盖主题颜色，共享资源必须同步该颜色才能保持与字号覆盖方案完全相同的视觉。
+	var theme_font_color: Color = get_theme_color("font_color")
+	# 共享字号设置；同字号飘字复用同一静态 LabelSettings 资源，伤害颜色继续由 modulate 叠加，不改变渲染结果。
+	var shared_label_settings: LabelSettings = _label_settings_by_font_size.get(resolved_font_size) as LabelSettings
+	if shared_label_settings == null:
+		shared_label_settings = LabelSettings.new()
+		shared_label_settings.font_size = resolved_font_size
+		_label_settings_by_font_size[resolved_font_size] = shared_label_settings
+	if shared_label_settings.font_color != theme_font_color:
+		shared_label_settings.font_color = theme_font_color
+	label_settings = shared_label_settings
 	# 有效错位槽；限制槽数量防止极高攻速让文字横向无限远离受击目标。
 	var resolved_lane: int = posmod(offset_lane, maxi(offset_lane_count, 1))
 	# 横向方向；首段居中，后续依次右、左交替，并按层数逐步增加距离。

@@ -13,7 +13,8 @@ var _timed_shields: Array[Dictionary] = []
 
 
 func _ready() -> void:
-	set_process(true)
+	# 初始没有任何计时护盾记录，保持空闲不逐帧处理；护盾授予入口会恢复 process。
+	set_process(false)
 
 
 func configure(caster: Node2D, stats_component: Node, skill_data: Resource, _active_skill_component: Node) -> void:
@@ -47,6 +48,9 @@ func _process(delta: float) -> void:
 		if is_instance_valid(component) and component.has_method("remove_shield"):
 			component.call("remove_shield", float(record.get("amount", 0.0)), true)
 		_timed_shields.remove_at(index)
+	if _timed_shields.is_empty():
+		# 全部计时护盾已经到期，进入空闲并停止逐帧处理；下一次授予护盾会重新恢复。
+		set_process(false)
 
 
 func _grant_timed_shield(unit: Node2D, amount: float) -> void:
@@ -57,6 +61,8 @@ func _grant_timed_shield(unit: Node2D, amount: float) -> void:
 	var actual_amount: float = float(component.call("add_shield", amount, true))
 	if actual_amount > 0.0:
 		_timed_shields.append({"component": component, "amount": actual_amount, "remaining": maxf(float(_skill_data.get("shield_duration")), 0.01)})
+		# 新护盾计时记录已加入，恢复逐帧处理；空闲停用期间记录无法自行倒计时。
+		set_process(true)
 
 
 func shutdown() -> void:
@@ -66,3 +72,5 @@ func shutdown() -> void:
 		if is_instance_valid(component) and component.has_method("remove_shield"):
 			component.call("remove_shield", float((record as Dictionary).get("amount", 0.0)), true)
 	_timed_shields.clear()
+	# 记录已全部移除，立即停止逐帧处理；后续重新配置并授予护盾时会恢复。
+	set_process(false)

@@ -37,7 +37,6 @@ func _ready() -> void:
 	_start_position = global_position
 	_max_distance_squared = maxf(max_distance, 1.0) * maxf(max_distance, 1.0)
 	_swept_collision_exclusion_rids = [get_rid()]
-	body_entered.connect(_on_body_entered)
 
 
 func _physics_process(delta: float) -> void:
@@ -108,14 +107,6 @@ func get_knockback_direction() -> Vector2:
 	return _velocity.normalized()
 
 
-func _on_body_entered(body: Node) -> void:
-	if _has_hit:
-		return
-
-	if _apply_hit(body):
-		hit_body.emit(body, damage)
-
-
 func _handle_swept_collision(target_position: Vector2) -> bool:
 	if _has_hit:
 		return true
@@ -124,6 +115,8 @@ func _handle_swept_collision(target_position: Vector2) -> bool:
 	var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(global_position, target_position, collision_mask, _swept_collision_exclusion_rids)
 	query.collide_with_areas = false
 	query.collide_with_bodies = true
+	# 允许射线起点位于碰撞体内部时直接命中；接管原 body_entered 信号覆盖的贴脸生成场景，保证首个物理帧即可结算。
+	query.hit_from_inside = true
 	# 射线命中结果；取值为空字典或包含 collider/position，默认用于提前处理高速碰撞。
 	var hit_result: Dictionary = get_world_2d().direct_space_state.intersect_ray(query)
 	if hit_result.is_empty():

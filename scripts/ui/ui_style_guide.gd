@@ -181,6 +181,9 @@ const BLACK_WHITE_COMPACT_CARD_BACKGROUND_COLOR: Color = Color(0.055, 0.055, 0.0
 ## 黑白简约风紧凑 HUD 卡片边框；使用亮灰确保战斗中仍可清晰辨认槽位。
 const BLACK_WHITE_COMPACT_CARD_BORDER_COLOR: Color = Color(0.58, 0.58, 0.58, 0.86)
 
+## 静态缓存的 UI 风格设置节点；服务为 AutoLoad，正常运行生命周期内不会释放，缓存后所有取色点不再逐次执行场景树查找。
+static var _cached_ui_style_settings: Node = null
+
 
 ## 为完整页面或可复用面板安装统一控件主题；调用后所有后代控件自动继承按钮、输入、滚动和分区样式。
 static func apply_screen_theme(target: Control) -> void:
@@ -703,10 +706,16 @@ static func _resolve_style_color(black_blue_color: Color, black_white_color: Col
 
 ## 获取当前场景树中的 UI 风格设置 AutoLoad；静态样式函数通过本入口保持对业务服务零依赖。
 static func _get_ui_style_settings() -> Node:
+	# 静态缓存命中检查；服务是 AutoLoad，正常生命周期内不会释放，命中且实例有效时直接返回，避免每次取色都执行主循环与场景树查找。
+	# 缓存失效条件说明：仅当节点被释放（引擎关闭流程、纯脚本环境重置）导致 is_instance_valid 为 false 时回退到完整查找并回填；编辑器导入或纯脚本环境仍按原语义返回 null 且不写入缓存。
+	if _cached_ui_style_settings != null and is_instance_valid(_cached_ui_style_settings):
+		return _cached_ui_style_settings
 	# 主循环；编辑器导入、资源检查或纯脚本环境中可能不是 SceneTree，此时不访问场景根节点。
 	var main_loop: MainLoop = Engine.get_main_loop()
 	if not (main_loop is SceneTree):
 		return null
 	# 场景树；只用于读取固定 AutoLoad 节点，不持有其引用或访问其他业务服务。
 	var scene_tree: SceneTree = main_loop as SceneTree
-	return scene_tree.root.get_node_or_null("UiStyleSettings")
+	# 缓存回填；只缓存节点查找结果，不缓存 Theme 或颜色值，风格切换的刷新语义完全不受影响。
+	_cached_ui_style_settings = scene_tree.root.get_node_or_null("UiStyleSettings")
+	return _cached_ui_style_settings

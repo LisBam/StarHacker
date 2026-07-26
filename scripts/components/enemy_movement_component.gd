@@ -1,3 +1,5 @@
+## 敌人移动组件全局类名；供宿主聚合脚本与其他系统做类型化引用，不改变节点运行行为。
+class_name EnemyMovementComponent
 extends Node
 
 ## 敌人移动组件独立维护巡逻、A* 路径缓存、局部绕障、卡住恢复和外部击退。
@@ -78,6 +80,8 @@ var _path_recalculate_remaining: float = 0.0
 var _avoidance_side_bias: int = 1
 ## 当前卡住累计时间；取值大于等于 0，默认 0，持续移动失败时累加并触发重算路径。
 var _stuck_time: float = 0.0
+## 卡住判定最小位移的平方缓存；取值始终与 stuck_minimum_movement 的平方保持同步，用平方距离比较避免每帧开方。
+var _stuck_minimum_movement_squared: float = stuck_minimum_movement * stuck_minimum_movement
 
 
 func initialize(actor: CharacterBody2D, random_source: RandomNumberGenerator) -> void:
@@ -112,6 +116,8 @@ func apply_configuration(settings: Dictionary) -> void:
 	path_max_point_count = maxi(int(settings.get("path_max_point_count", path_max_point_count)), 1)
 	stuck_detection_time = maxf(float(settings.get("stuck_detection_time", stuck_detection_time)), 0.05)
 	stuck_minimum_movement = maxf(float(settings.get("stuck_minimum_movement", stuck_minimum_movement)), 0.0)
+	# 配置更新后同步刷新最小位移平方缓存，保证卡住检测的平方比较与原始阈值语义一致。
+	_stuck_minimum_movement_squared = stuck_minimum_movement * stuck_minimum_movement
 	knockback_decay = maxf(float(settings.get("knockback_decay", knockback_decay)), 1.0)
 	obstacle_collision_mask = int(settings.get("obstacle_collision_mask", obstacle_collision_mask))
 	_refresh_patrol_points()
@@ -267,14 +273,22 @@ func move_with_external_velocity(desired_velocity: Vector2, delta: float) -> voi
 	if not is_instance_valid(_actor):
 		return
 
+	if desired_velocity.is_zero_approx() and _knockback_velocity.is_zero_approx():
+		# 静止快速路径：期望速度与击退速度都接近零时跳过 move_and_slide 物理调用，按零位移维护卡住检测（静止本就不累计卡住）并保持击退衰减语义。
+		_actor.velocity = Vector2.ZERO
+		_update_stuck_state(desired_velocity, 0.0, delta)
+		_decay_knockback(delta)
+		return
+
 	# 移动前位置；取值为当前全局坐标，默认用于移动后判断怪物是否卡住。
 	var previous_position: Vector2 = _actor.global_position
 	_actor.velocity = desired_velocity + _knockback_velocity
 	_actor.move_and_slide()
 	# 本帧实际位移；取值为 move_and_slide 后的位置差，默认用于卡墙检测。
-	var moved_distance: float = _actor.global_position.distance_to(previous_position)
+	# 补充说明：改为平方距离并与预平方阈值比较，避免每敌人每物理帧执行开方。
+	var moved_distance_squared: float = _actor.global_position.distance_squared_to(previous_position)
 	_actor.velocity = desired_velocity
-	_update_stuck_state(desired_velocity, moved_distance, delta)
+	_update_stuck_state(desired_velocity, moved_distance_squared, delta)
 	_decay_knockback(delta)
 
 
@@ -442,6 +456,14 @@ func is_destination_immediately_reachable(destination: Vector2) -> bool:
 	return candidate_direction.is_zero_approx() or not _is_direction_blocked(candidate_direction.normalized())
 
 
+## 目的地射线粗筛；只做中心线射线检测、不触发 A*，供战术组件在完整导航验证前低成本过滤候选点。
+func is_destination_ray_clear(destination: Vector2) -> bool:
+	if not is_instance_valid(_actor):
+		return false
+
+	return not _is_path_to_destination_blocked(destination)
+
+
 func is_destination_navigable(destination: Vector2) -> bool:
 	if not is_instance_valid(_actor):
 		return false
@@ -492,12 +514,13 @@ func _is_path_to_destination_blocked(destination: Vector2) -> bool:
 	return not hit_result.is_empty()
 
 
-func _update_stuck_state(desired_velocity: Vector2, moved_distance: float, delta: float) -> void:
+## 卡住状态更新；第二个参数为本帧位移的平方值，与 _stuck_minimum_movement_squared 比较以保持原阈值判定语义。
+func _update_stuck_state(desired_velocity: Vector2, moved_distance_squared: float, delta: float) -> void:
 	if desired_velocity.length() <= 1.0 or not _knockback_velocity.is_zero_approx():
 		_stuck_time = 0.0
 		return
 
-	if moved_distance > stuck_minimum_movement:
+	if moved_distance_squared > _stuck_minimum_movement_squared:
 		_stuck_time = 0.0
 		return
 

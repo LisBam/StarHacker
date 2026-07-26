@@ -56,6 +56,8 @@ const ACTION_UNEQUIP: int = 6
 const ACTION_USE_REPAIR_KIT: int = 7
 ## 使用消耗品操作编号；仅战斗背包显示，成功施加临时效果后扣除一个对应道具。
 const ACTION_USE_CONSUMABLE: int = 8
+## 搜索防抖等待时间；默认 0.2 秒，输入停止后才执行一次背包物品列表重建。
+const SEARCH_DEBOUNCE_SECONDS: float = 0.2
 
 ## 面板最小尺寸；与战斗背包接近，确保左侧七个装备槽和右侧物品网格可读。
 @export var panel_minimum_size: Vector2 = Vector2(960.0, 620.0)
@@ -148,6 +150,8 @@ var _subcategory_bar: HBoxContainer
 var _refresh_queued: bool = false
 ## 隐藏期间库存是否发生变化；默认 false，隐藏面板不创建物品卡片，下一次宿主打开面板时通过公开刷新入口同步最新状态。
 var _refresh_pending: bool = false
+## 搜索防抖计时器；单次触发，文本变化时重置计时并在停止输入后统一重建一次，清空搜索框时立即刷新。
+var _search_debounce_timer: Timer
 
 
 func _ready() -> void:
@@ -234,8 +238,14 @@ func _build_interface() -> void:
 	_search_edit = LineEdit.new()
 	_search_edit.placeholder_text = "搜索物品、分类或强化词条"
 	_search_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_search_edit.text_changed.connect(func(_text: String) -> void: _rebuild_items())
+	_search_edit.text_changed.connect(_on_search_text_changed)
 	query_bar.add_child(_search_edit)
+	# 搜索防抖计时器初始化；常驻面板子节点，超时回调直接复用原有背包列表重建入口。
+	_search_debounce_timer = Timer.new()
+	_search_debounce_timer.one_shot = true
+	_search_debounce_timer.wait_time = SEARCH_DEBOUNCE_SECONDS
+	_search_debounce_timer.timeout.connect(_rebuild_items)
+	add_child(_search_debounce_timer)
 	_sort_option = OptionButton.new()
 	_sort_option.add_item("获得时间")
 	_sort_option.set_item_metadata(0, InventoryQuery.SORT_ACQUIRED_TIME)
@@ -617,6 +627,16 @@ func _on_subcategory_pressed(category_name: String) -> void:
 	_subcategory = category_name
 	_refresh_query_controls()
 	_rebuild_items()
+
+
+func _on_search_text_changed(_new_text: String) -> void:
+	## 处理背包搜索输入；清空搜索框立即重建保证响应感，其余输入重置 0.2 秒防抖计时并在停止输入后统一重建一次。
+	if _search_debounce_timer == null or _new_text.strip_edges().is_empty():
+		if _search_debounce_timer != null:
+			_search_debounce_timer.stop()
+		_rebuild_items()
+		return
+	_search_debounce_timer.start()
 
 
 func _on_sort_selected(item_index: int) -> void:

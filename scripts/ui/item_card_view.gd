@@ -106,6 +106,12 @@ var _interaction_host: Control
 var _host_resting_z_index: int = 0
 ## 是否已经记录当前宿主静止层级；默认 false，卡牌被重新挂载到其他宿主时会重新捕获。
 var _host_z_index_captured: bool = false
+## 边框样式缓存实例；默认 null，首次绘制时创建后持续复用，消除每次 _draw 的 StyleBoxFlat 分配。
+var _cached_border_style: StyleBoxFlat
+## 边框样式缓存当前颜色；默认全透明占位，与本次目标边框色不一致时才更新缓存实例的颜色字段。
+var _cached_border_color: Color = Color(0.0, 0.0, 0.0, 0.0)
+## 边框样式缓存置脏标记；默认 true，主题切换通知会重新置脏，保证风格切换后边框立即跟随新色板。
+var _border_style_dirty: bool = true
 
 
 func _ready() -> void:
@@ -122,6 +128,8 @@ func _ready() -> void:
 func _notification(what: int) -> void:
 	## 主题切换后请求重绘；卡片绘制阶段实时读取当前色板，不修改耐久、品质或合法目标等业务状态。
 	if what == NOTIFICATION_THEME_CHANGED:
+		# 边框缓存置脏；风格切换后下一次绘制强制刷新缓存实例的边框颜色，避免复用旧风格色值。
+		_border_style_dirty = true
 		queue_redraw()
 
 
@@ -141,6 +149,9 @@ func configure(item_resource: Resource, quantity: int = 1, context_text: String 
 
 func set_visual_state(selected: bool, highlighted: bool) -> void:
 	# 统一状态入口；只改变通用背景和边框，不改变任何系统的交互规则或物品数据。
+	# 相等守卫补充：与共享槽位视图相同，状态未变化时直接返回，不重复请求重绘。
+	if _selected == selected and _highlighted == highlighted:
+		return
 	_selected = selected
 	_highlighted = highlighted
 	queue_redraw()
@@ -148,7 +159,11 @@ func set_visual_state(selected: bool, highlighted: bool) -> void:
 
 func set_cooldown_ratio(cooldown_ratio: float) -> void:
 	# 冷却覆盖入口；统一卡片内部从底部向上绘制白色遮罩，非战斗系统保持默认零值。
-	_cooldown_ratio = clampf(cooldown_ratio, 0.0, 1.0)
+	# 标准冷却比例；限制在 0 至 1，与共享槽位视图相同，相同值不重复请求 CanvasItem 重绘。
+	var resolved_ratio: float = clampf(cooldown_ratio, 0.0, 1.0)
+	if is_equal_approx(_cooldown_ratio, resolved_ratio):
+		return
+	_cooldown_ratio = resolved_ratio
 	queue_redraw()
 
 
@@ -374,11 +389,19 @@ func _get_item_type_label() -> String:
 
 func _create_border_style(border_color: Color) -> StyleBoxFlat:
 	# 边框样式；透明内部只绘制统一圆角边界，背景由本控件先行绘制。
-	var border_style: StyleBoxFlat = StyleBoxFlat.new()
-	border_style.bg_color = Color.TRANSPARENT
-	border_style.border_color = border_color
-	border_style.set_border_width_all(int(BORDER_WIDTH))
-	border_style.set_corner_radius_all(int(CORNER_RADIUS))
+	# 样式缓存补充：改为复用成员缓存实例，只在边框颜色变化或主题切换置脏时更新颜色字段，消除每次绘制的 StyleBoxFlat 分配。
+	var border_style: StyleBoxFlat = _cached_border_style
+	if border_style == null:
+		border_style = StyleBoxFlat.new()
+		border_style.bg_color = Color.TRANSPARENT
+		border_style.set_border_width_all(int(BORDER_WIDTH))
+		border_style.set_corner_radius_all(int(CORNER_RADIUS))
+		_cached_border_style = border_style
+		_border_style_dirty = true
+	if _border_style_dirty or _cached_border_color != border_color:
+		border_style.border_color = border_color
+		_cached_border_color = border_color
+		_border_style_dirty = false
 	return border_style
 
 

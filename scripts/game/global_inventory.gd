@@ -1175,6 +1175,10 @@ func use_enhancement_stone(stone_resource: Resource, source_location: String, we
 
 
 func notify_weapon_runtime_state_changed(weapon_resource: Resource) -> void:
+	if _run_active:
+		# 战斗中快速路径；耐久变化只置位既有的战斗挂起标志，结算成功或失败都会统一排队真实存档，不再每 0.5 秒创建合并计时器与 Callable。
+		_combat_inventory_save_pending = true
+		return
 	if not _is_owned_weapon_resource(weapon_resource) or _durability_save_queued:
 		return
 	_durability_save_queued = true
@@ -2412,6 +2416,7 @@ func _save_inventory() -> void:
 	var save_file: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if save_file != null:
 		save_file.store_string(JSON.stringify(save_data))
+		save_file.close()
 
 
 func _get_serialized_encyclopedia_discoveries() -> Array[String]:

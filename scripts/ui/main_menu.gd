@@ -629,6 +629,7 @@ func _build_stock_market_overlay() -> void:
 	stock_market_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	stock_market_overlay.add_child(stock_market_dim)
 	# 股市面板；固定 1040×620 像素并由独立组件处理行情展示与交易确认。
+	# 实际高度补充；交易区内容会把最小高度撑到约 665 像素，下方双向生长设置保证超出部分上下均匀延伸。
 	var stock_market_panel: Control = STOCK_MARKET_PANEL_SCRIPT.new() as Control
 	if stock_market_panel == null:
 		stock_market_overlay.visible = false
@@ -641,6 +642,9 @@ func _build_stock_market_overlay() -> void:
 	stock_market_panel.offset_top = -310.0
 	stock_market_panel.offset_right = 520.0
 	stock_market_panel.offset_bottom = 310.0
+	# 面板双向生长；交易区内容把实际最小高度撑到超过预设 620 偏移时，超出部分向上下两侧均匀延伸，保证窗口始终屏幕居中。
+	stock_market_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	stock_market_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
 	stock_market_panel.connect("closed", Callable(self, "_on_stock_market_closed"))
 	stock_market_overlay.add_child(stock_market_panel)
 	_stock_market_panel = stock_market_panel

@@ -27,6 +27,7 @@ const CARD_SIZE: Vector2 = Vector2(160.0, 72.0)
 ## 面板微行情刷新来源标识；与 StockMarketService.REFRESH_DISPLAY 保持一致，用于跳过每秒的大盘缓存更新。
 const REFRESH_SOURCE_DISPLAY: String = "display"
 ## 面板目标尺寸；默认 1040×620，宿主应按该尺寸居中放置。
+## 实际高度补充；交易区纵向内容可能把最小高度撑到超过该值，宿主须把面板生长方向设为双向以保持屏幕居中。
 @export var panel_minimum_size: Vector2 = Vector2(1040.0, 620.0)
 ## 事件提示显示时长；默认 3 秒，结束后线性淡出。
 @export_range(0.5, 10.0, 0.1) var event_message_duration_seconds: float = 3.0
@@ -292,20 +293,20 @@ func _build_interface() -> void:
 	_leverage_close_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_leverage_close_button.pressed.connect(_on_leverage_close_pressed)
 	leverage_row.add_child(_leverage_close_button)
-	# 历史记录按钮行；位于“全部持仓”标题上方，左对齐提供交易历史入口。
-	var trade_history_row: HBoxContainer = HBoxContainer.new()
-	root_content.add_child(trade_history_row)
-	# 历史记录按钮；打开交易历史窗口查看买卖、杠杆与资金转账记录。
-	_trade_history_button = Button.new()
-	_trade_history_button.text = "历史记录"
-	_trade_history_button.custom_minimum_size = Vector2(110.0, 30.0)
-	_trade_history_button.pressed.connect(_on_trade_history_button_pressed)
-	trade_history_row.add_child(_trade_history_button)
 	# 持仓区标题；位于主体与横向持仓列表之间。
 	var holdings_title: Label = Label.new()
 	holdings_title.text = "全部持仓"
 	holdings_title.add_theme_font_size_override("font_size", 18)
 	root_content.add_child(holdings_title)
+	# 历史记录按钮；悬浮显示在“全部持仓”标题上方的既有空白区，打开交易历史窗口查看买卖、杠杆与资金转账记录。
+	# 布局无侵入补充；按钮挂载在标题标签下作为手动定位子控件，不占用竖向布局行，面板整体尺寸与原有布局保持不变。
+	_trade_history_button = Button.new()
+	_trade_history_button.text = "历史记录"
+	_trade_history_button.size = Vector2(110.0, 30.0)
+	# 悬浮位置；相对标题左上角向上偏移 36 像素，与标题保持 6 像素间距并落在左列股票卡下方的空白区域。
+	_trade_history_button.position = Vector2(0.0, -36.0)
+	_trade_history_button.pressed.connect(_on_trade_history_button_pressed)
+	holdings_title.add_child(_trade_history_button)
 	# 持仓横向滚动容器；五只股票同时持仓时仍可访问全部标准卡片。
 	var holdings_scroll: ScrollContainer = ScrollContainer.new()
 	holdings_scroll.custom_minimum_size = Vector2(0.0, 92.0)

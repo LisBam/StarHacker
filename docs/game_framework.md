@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | 主菜单 | `res://scenes/ui/main_menu.tscn`、`res://scripts/ui/main_menu.gd` | 项目主场景；打开角色、图鉴、背包、仓库、商店、锻造、股市、矿场及模式入口；同一场景可作为大厅局外面板宿主 |
 | 主大厅 | `res://scenes/game/main_lobby.tscn`、`res://scripts/game/lobby_world.gd` | 承载当前角色自由移动、攻击、技能、静态交互设施与大厅 HUD；不创建敌人、掉落、撤离或战斗结算 |
+| 联机大厅 | `res://scenes/game/multiplayer_lobby.tscn`、`res://scripts/game/multiplayer_lobby_world.gd`（继承 `LobbyWorld`） | 主菜单“联机”入口目标场景；进场自动打开联机面板，左上角提供“联机设置”入口，房间成员经 `NetworkLobbySync` 在同一大厅内互相可见；玩法约束与主大厅一致 |
 | 角色系统 | `res://scenes/ui/character_select.tscn`、`res://scripts/ui/character_select.gd` | 完整模式展示可选角色并持久化确认结果；当前角色模式隐藏角色列表，供战斗内只读查看同一套属性与技能详情 |
 | 战斗世界 | `res://scenes/game/game_world.tscn`、`res://scripts/game/game_world.gd` | 承载玩家、地图、环境、敌人人口、宝箱、掉落与撤离流程 |
 | 玩家预制体 | `res://scenes/characters/player.tscn`、`res://scripts/player/player_controller.gd` | 组合输入、移动、战斗属性、装备和攻击组件 |

@@ -16,6 +16,8 @@ const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quant
 const COMMON_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/common_confirmation_dialog.gd")
 ## 证券币转账弹窗脚本；负责整数星穹充值和整数证券币提现的金额输入与结果预览。
 const SECURITIES_TRANSFER_DIALOG_SCRIPT: Script = preload("res://scripts/ui/securities_transfer_dialog.gd")
+## 杠杆开仓弹窗脚本；负责方向、倍数与整数保证金输入和费用预览，最终成交由股市服务原子校验。
+const LEVERAGE_POSITION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/leverage_position_dialog.gd")
 ## 全局窗口样式指南；为股市基准界面补充统一按钮、输入、滚动和内部面板主题。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 标准股票卡片尺寸；固定 160×72，与项目物品卡片规范一致。
@@ -62,6 +64,14 @@ var _position_label: RichTextLabel
 var _buy_button: Button
 ## 卖出按钮；无当前持仓时禁用，点击后先打开数量选择弹窗。
 var _sell_button: Button
+## 杠杆开仓按钮；选中股票已有杠杆仓位或余额不足最低保证金时禁用，点击后打开杠杆开仓弹窗。
+var _leverage_open_button: Button
+## 杠杆平仓按钮；选中股票没有杠杆仓位时禁用，点击后打开实时刷新的平仓二次确认。
+var _leverage_close_button: Button
+## 杠杆持仓卡片按钮表；键为稳定股票标识，值为长期复用的透明按钮宿主，无仓位时只隐藏不释放。
+var _leverage_buttons: Dictionary = {}
+## 杠杆开仓弹窗；同一实例复用全部股票的开仓输入，实际建仓由股市服务执行。
+var _leverage_dialog: LeveragePositionDialog
 ## 顶部事件滚动提示；收到事件信号后显示并在 3 秒内线性淡出。
 var _event_banner: Label
 ## 数量选择弹窗；同一实例在买入和卖出模式间复用。
@@ -247,6 +257,24 @@ func _build_interface() -> void:
 	UI_STYLE_GUIDE.apply_danger_button(_sell_button)
 	_sell_button.pressed.connect(_on_sell_pressed)
 	trade_content.add_child(_sell_button)
+	# 杠杆按钮行；开仓与平仓并排放在现货买卖下方，共用交易区底部布局。
+	var leverage_row: HBoxContainer = HBoxContainer.new()
+	leverage_row.add_theme_constant_override("separation", 6)
+	trade_content.add_child(leverage_row)
+	# 杠杆开仓按钮；使用普通主题样式与主操作按钮区分，避免玩家误认为常规交易。
+	_leverage_open_button = Button.new()
+	_leverage_open_button.text = "杠杆开仓"
+	_leverage_open_button.custom_minimum_size = Vector2(0.0, 42.0)
+	_leverage_open_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_leverage_open_button.pressed.connect(_on_leverage_open_pressed)
+	leverage_row.add_child(_leverage_open_button)
+	# 杠杆平仓按钮；有仓位时才可用，点击后打开实时刷新的平仓确认窗口。
+	_leverage_close_button = Button.new()
+	_leverage_close_button.text = "杠杆平仓"
+	_leverage_close_button.custom_minimum_size = Vector2(0.0, 42.0)
+	_leverage_close_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_leverage_close_button.pressed.connect(_on_leverage_close_pressed)
+	leverage_row.add_child(_leverage_close_button)
 	# 持仓区标题；位于主体与横向持仓列表之间。
 	var holdings_title: Label = Label.new()
 	holdings_title.text = "全部持仓"
@@ -273,6 +301,15 @@ func _build_interface() -> void:
 	_empty_holdings_label.custom_minimum_size = Vector2(260.0, 72.0)
 	_empty_holdings_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_holdings_container.add_child(_empty_holdings_label)
+	# 持仓卡片预创建；按股票目录稳定顺序先建现货卡片再建杠杆卡片，保证两类卡片顺序不受持有先后影响。
+	for holding_stock_id in _stock_definitions_cache.keys():
+		# 预创建的现货持仓按钮；默认隐藏，首次刷新按实际持仓切换可见性。
+		var prepared_holding_button: Button = _create_holding_card_button(str(holding_stock_id))
+		prepared_holding_button.visible = false
+	for leverage_stock_id in _stock_definitions_cache.keys():
+		# 预创建的杠杆仓位按钮；默认隐藏，首次刷新按实际仓位切换可见性。
+		var prepared_leverage_button: Button = _create_leverage_card_button(str(leverage_stock_id))
+		prepared_leverage_button.visible = false
 	_quantity_dialog = SELL_QUANTITY_DIALOG_SCRIPT.new() as SellQuantityDialog
 	_quantity_dialog.connect("quantity_confirmed", Callable(self, "_on_trade_quantity_confirmed"))
 	_quantity_dialog.canceled.connect(_on_trade_canceled)
@@ -284,6 +321,10 @@ func _build_interface() -> void:
 	_securities_transfer_dialog = SECURITIES_TRANSFER_DIALOG_SCRIPT.new() as SecuritiesTransferDialog
 	_securities_transfer_dialog.connect("transfer_confirmed", Callable(self, "_on_securities_transfer_confirmed"))
 	add_child(_securities_transfer_dialog)
+	_leverage_dialog = LEVERAGE_POSITION_DIALOG_SCRIPT.new() as LeveragePositionDialog
+	_leverage_dialog.connect("leverage_confirmed", Callable(self, "_on_leverage_position_confirmed"))
+	_leverage_dialog.canceled.connect(_on_trade_canceled)
+	add_child(_leverage_dialog)
 
 
 func _connect_services() -> void:
@@ -298,6 +339,12 @@ func _connect_services() -> void:
 			_stock_market_service.connect("event_announced", Callable(self, "_on_event_announced"))
 		if _stock_market_service.has_signal("securities_balance_changed"):
 			_stock_market_service.connect("securities_balance_changed", Callable(self, "_on_securities_balance_changed"))
+		if _stock_market_service.has_signal("leverage_positions_changed"):
+			# 杠杆仓位变化信号；开仓、平仓与强制平仓后与其他资产信号共享同帧一次统一刷新。
+			_stock_market_service.connect("leverage_positions_changed", Callable(self, "_queue_refresh_all"))
+		if _stock_market_service.has_signal("leverage_position_closed"):
+			# 杠杆仓位关闭信号；主动与强制平仓统一在顶部横幅展示结算说明。
+			_stock_market_service.connect("leverage_position_closed", Callable(self, "_on_leverage_position_closed"))
 	if _global_inventory != null:
 		if _global_inventory.has_signal("coins_changed"):
 			_global_inventory.connect("coins_changed", Callable(self, "_queue_refresh_all"))
@@ -396,6 +443,27 @@ func _create_holding_card_button(stock_id: String) -> Button:
 	return host
 
 
+func _create_leverage_card_button(stock_id: String) -> Button:
+	## 创建一次可长期复用的杠杆仓位按钮；实时行情只更新其内部卡牌内容，与现货持仓卡片共用交互协议。
+	# 杠杆按钮宿主；自身透明，只负责选择股票、鼠标悬浮和标准卡牌交互动画。
+	var host: Button = Button.new()
+	host.name = "Leverage_%s" % stock_id
+	host.custom_minimum_size = CARD_SIZE
+	host.flat = true
+	host.focus_mode = Control.FOCUS_NONE
+	host.pressed.connect(_on_stock_selected.bind(stock_id))
+	host.mouse_entered.connect(_on_holding_card_hovered.bind(host, true))
+	host.mouse_exited.connect(_on_holding_card_hovered.bind(host, false))
+	# 杠杆标准卡牌；空资源展示模式按实时行情原位刷新方向、倍数、盈亏和净值。
+	var card: Control = ITEM_CARD_VIEW_SCRIPT.new() as Control
+	card.name = "Card"
+	card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.add_child(card)
+	_leverage_buttons[stock_id] = host
+	_holdings_container.add_child(host)
+	return host
+
+
 func _refresh_all() -> void:
 	# 任何直接全量刷新都消化当前挂起的合并刷新；同帧稍后的延迟回调据此跳过重复刷新。
 	_refresh_queued = false
@@ -479,11 +547,23 @@ func _refresh_selected_stock() -> void:
 	# 盈亏颜色；盈利绿色、亏损红色、持平白色。
 	var profit_color: String = "green" if profit > 0.0 else ("red" if profit < 0.0 else "white")
 	_position_label.text = "持仓 %d 股\n成本 %.2f\n[color=%s]浮盈亏 %+.0f (%+.2f%%)[/color]" % [quantity, average_cost, profit_color, profit, profit_ratio * 100.0]
+	# 选中股票杠杆仓位快照；空字典表示当前没有杠杆仓位。
+	var leverage_position: Dictionary = _stock_market_service.call("get_leverage_position", _selected_stock_id) as Dictionary if _stock_market_service.has_method("get_leverage_position") else {}
+	if leverage_position.is_empty():
+		_position_label.text += "\n杠杆：无仓位"
+	else:
+		# 杠杆浮动盈亏；正值盈利、负值亏损，展示颜色与现货盈亏语义一致。
+		var leverage_profit: float = float(leverage_position.get("profit", 0.0))
+		# 杠杆盈亏颜色；盈利绿色、亏损红色、持平白色。
+		var leverage_profit_color: String = "green" if leverage_profit > 0.0 else ("red" if leverage_profit < 0.0 else "white")
+		_position_label.text += "\n杠杆 %d×%s 保证金 %.0f\n[color=%s]杠杆盈亏 %+.2f[/color]  强平 %.2f" % [int(leverage_position.get("leverage", 1)), str(leverage_position.get("direction_name", "做多")), float(leverage_position.get("margin", 0.0)), leverage_profit_color, leverage_profit, float(leverage_position.get("liquidation_price", 0.0))]
 	# 当前永久星穹；仅用于证券币充值，不再直接参与股票买入结算。
 	var permanent_coins: int = int(_global_inventory.call("get_coins")) if _global_inventory != null else 0
 	# 当前证券币余额；支持两位小数，是股票买卖的唯一结算货币。
 	var securities_balance: float = float(_stock_market_service.call("get_securities_balance")) if _stock_market_service.has_method("get_securities_balance") else 0.0
-	_coins_label.text = "星穹：%d\n证券币：%.2f" % [permanent_coins, securities_balance]
+	# 证券账户总资产；余额、现货实时市值与杠杆实时净值之和，由服务统一计算保证口径一致。
+	var total_assets: float = float(_stock_market_service.call("get_total_securities_assets")) if _stock_market_service.has_method("get_total_securities_assets") else securities_balance
+	_coins_label.text = "星穹：%d\n证券币：%.2f\n总资产：%.2f" % [permanent_coins, securities_balance, total_assets]
 	# 充值按钮；按名称读取交易区动态控件，缺失时不影响核心行情显示。
 	if _deposit_button != null:
 		_deposit_button.disabled = permanent_coins <= 0
@@ -494,6 +574,16 @@ func _refresh_selected_stock() -> void:
 		_withdraw_button.disabled = minimum_withdrawal_amount <= 0 or floori(securities_balance) < minimum_withdrawal_amount
 	_buy_button.disabled = int(_stock_market_service.call("get_maximum_buy_quantity", _selected_stock_id)) <= 0
 	_sell_button.disabled = quantity <= 0
+	# 可选杠杆倍数目录；由服务提供，取最低倍数评估开仓入口可用性，避免面板硬编码倍率。
+	var leverage_multipliers: Array = _stock_market_service.call("get_leverage_multipliers") as Array if _stock_market_service.has_method("get_leverage_multipliers") else []
+	# 杠杆最低倍数下的最大保证金；连最低倍数都开不起时禁用开仓入口。
+	var leverage_maximum_margin: int = int(_stock_market_service.call("get_maximum_leverage_margin", int(leverage_multipliers[0]))) if not leverage_multipliers.is_empty() else 0
+	# 杠杆最低保证金门槛；服务统一配置，开仓按钮与弹窗滑条共用同一下限。
+	var leverage_minimum_margin: int = int(_stock_market_service.call("get_leverage_minimum_margin")) if _stock_market_service.has_method("get_leverage_minimum_margin") else 0
+	if _leverage_open_button != null:
+		_leverage_open_button.disabled = not leverage_position.is_empty() or leverage_maximum_margin < leverage_minimum_margin or leverage_minimum_margin <= 0
+	if _leverage_close_button != null:
+		_leverage_close_button.disabled = leverage_position.is_empty()
 
 
 func _refresh_holdings() -> void:
@@ -539,11 +629,48 @@ func _refresh_holdings() -> void:
 		var card: Control = host.get_node_or_null("Card") as Control
 		card.call("configure", null, 1, "%s · %d股" % [str(holding_definition.get("name", "股票")), quantity], "成本 %.2f  [color=%s]%+.2f / %+.2f%%[/color]" % [average_cost, profit_color, profit, profit_ratio * 100.0], "%.2f 证券币" % current_price)
 		card.call("set_visual_state", str(stock_id) == _selected_stock_id, false)
+	visible_holding_count += _refresh_leverage_cards()
 	if visible_holding_count == 0:
 		# 空持仓提示；在没有任何股票时替代卡片列表。
+		# 杠杆持仓补充：现货与杠杆仓位都为空时才显示空状态提示。
 		_empty_holdings_label.visible = true
 	else:
 		_empty_holdings_label.visible = false
+
+
+func _refresh_leverage_cards() -> int:
+	## 按稳定股票顺序刷新底部杠杆仓位卡片；返回当前可见杠杆卡片数量，供空状态提示统一判断。
+	# 可见杠杆卡片数量；无仓位股票的卡片保持隐藏。
+	var visible_leverage_count: int = 0
+	if _stock_market_service == null or not _stock_market_service.has_method("get_leverage_position"):
+		return 0
+	for stock_id in _stock_definitions_cache.keys():
+		# 当前遍历杠杆仓位快照；空字典表示该股票没有杠杆仓位。
+		var position: Dictionary = _stock_market_service.call("get_leverage_position", str(stock_id)) as Dictionary
+		# 当前杠杆卡片按钮；构建阶段已按目录顺序预创建，理论上不会缺失。
+		var host: Button = _leverage_buttons.get(str(stock_id)) as Button
+		if host == null:
+			host = _create_leverage_card_button(str(stock_id))
+		# 当前卡牌目标可见性；只在仓位建立或关闭的边界修改，实时盈亏刷新期间不会反复隐藏和显示。
+		var should_show_position: bool = not position.is_empty()
+		if host.visible != should_show_position:
+			host.visible = should_show_position
+		if not should_show_position:
+			continue
+		visible_leverage_count += 1
+		# 当前杠杆浮动盈亏；正值盈利、负值亏损。
+		var profit: float = float(position.get("profit", 0.0))
+		# 当前盈亏相对保证金比例；杠杆玩法以保证金回报率为主要观察指标。
+		var margin: float = maxf(float(position.get("margin", 0.0)), 0.01)
+		# 当前杠杆盈亏颜色；与现货持仓卡片的语义色一致。
+		var profit_color: String = "green" if profit > 0.0 else ("red" if profit < 0.0 else "white")
+		# 当前杠杆股票静态定义；卡片标题使用稳定显示名称，不随每秒行情变化。
+		var leverage_definition: Dictionary = _stock_definitions_cache.get(stock_id, {}) as Dictionary
+		# 杠杆标准卡片；标题标注杠杆属性，中部展示倍数方向与盈亏，底部展示实时净值。
+		var card: Control = host.get_node_or_null("Card") as Control
+		card.call("configure", null, 1, "%s · 杠杆" % str(leverage_definition.get("name", "股票")), "%d×%s  [color=%s]%+.2f / %+.1f%%[/color]" % [int(position.get("leverage", 1)), str(position.get("direction_name", "做多")), profit_color, profit, profit / margin * 100.0], "净值 %.2f 证券币" % float(position.get("equity", 0.0)))
+		card.call("set_visual_state", str(stock_id) == _selected_stock_id, false)
+	return visible_leverage_count
 
 
 func _get_holding(stock_id: String) -> Dictionary:
@@ -600,6 +727,61 @@ func _on_sell_pressed() -> void:
 	if maximum_quantity <= 0:
 		return
 	_begin_quantity_selection("sell", maximum_quantity)
+
+
+func _on_leverage_open_pressed() -> void:
+	## 打开杠杆开仓弹窗；缓存当前选中股票为交易目标，弹窗内的价格与余额随每秒行情持续刷新。
+	if _stock_market_service == null or not _stock_market_service.has_method("get_leverage_open_quote"):
+		return
+	if bool(_stock_market_service.call("has_leverage_position", _selected_stock_id)):
+		_show_event_banner("该股票已有杠杆仓位，请先平仓")
+		return
+	_pending_trade_type = "leverage_open"
+	_pending_stock_id = _selected_stock_id
+	_pending_unit_price = float(_stock_market_service.call("get_current_price", _pending_stock_id))
+	# 待开仓股票静态定义；弹窗只使用稳定显示名称，成交价以确认瞬间实时行情为准。
+	var definition: Dictionary = _stock_definitions_cache.get(_pending_stock_id, {}) as Dictionary
+	_leverage_dialog.present_open(str(definition.get("name", "股票")), _pending_unit_price, float(_stock_market_service.call("get_securities_balance")), float(_stock_market_service.call("get_leverage_fee_ratio")), int(_stock_market_service.call("get_leverage_minimum_margin")), float(_stock_market_service.call("get_leverage_liquidation_loss_ratio")), _stock_market_service.call("get_leverage_multipliers") as Array)
+
+
+func _on_leverage_close_pressed() -> void:
+	## 打开杠杆平仓二次确认；正文展示实时盈亏、手续费与返还金额，并随每秒行情持续刷新。
+	if _stock_market_service == null or not _stock_market_service.has_method("get_leverage_close_quote"):
+		return
+	# 平仓实时报价；没有仓位时直接提示并不打开确认窗口。
+	var quote: Dictionary = _stock_market_service.call("get_leverage_close_quote", _selected_stock_id) as Dictionary
+	if not bool(quote.get("valid", false)):
+		_show_event_banner(str(quote.get("message", "当前没有杠杆仓位")))
+		return
+	_pending_trade_type = "leverage_close"
+	_pending_stock_id = _selected_stock_id
+	_confirmation_dialog.present("确认杠杆平仓", _build_leverage_close_message(quote), "确认平仓", "取消", 480, trade_confirmation_dialog_height, bool(quote.get("executable", false)))
+
+
+func _on_leverage_position_confirmed(direction: int, leverage: int, margin: int) -> void:
+	## 执行杠杆开仓；服务按确认瞬间的实时价格与余额原子校验，失败时证券币保持不变。
+	if _stock_market_service == null or _pending_stock_id.is_empty():
+		return
+	# 开仓结果；统一读取服务返回消息，在顶部短暂提示成功或失败原因。
+	var open_result: Dictionary = _stock_market_service.call("request_leverage_open", _pending_stock_id, direction, leverage, margin) as Dictionary
+	_show_event_banner(str(open_result.get("message", "杠杆开仓已处理")))
+	_pending_trade_type = ""
+	_pending_stock_id = ""
+	_pending_quantity = 0
+	_pending_unit_price = 0.0
+	_refresh_all()
+
+
+func _on_leverage_position_closed(_stock_id: String, message: String) -> void:
+	## 杠杆仓位关闭回调；主动平仓与强制平仓统一在顶部横幅展示结算说明，行情信号会负责刷新界面。
+	_show_event_banner(message)
+
+
+func _build_leverage_close_message(quote: Dictionary) -> String:
+	## 构建杠杆平仓实时摘要；返回值可在每秒行情刷新时直接替换确认窗口正文。
+	# 平仓股票静态定义；正文使用稳定显示名称。
+	var definition: Dictionary = _stock_definitions_cache.get(_pending_stock_id, {}) as Dictionary
+	return "%s 杠杆仓位\n实时价格：%.2f 证券币\n浮动盈亏：%+.2f 证券币\n实时净值：%.2f 证券币\n平仓手续费：%.2f 证券币\n最终返还：%.2f 证券币\n净值持续波动，以点击确认瞬间的实时价格为准" % [str(definition.get("name", "股票")), float(quote.get("price", 0.0)), float(quote.get("profit", 0.0)), float(quote.get("equity", 0.0)), float(quote.get("fee", 0.0)), float(quote.get("total", 0.0))]
 
 
 func _on_securities_deposit_pressed() -> void:
@@ -673,6 +855,17 @@ func _on_trade_quantity_confirmed(quantity: int) -> void:
 
 
 func _on_trade_confirmed() -> void:
+	# 杠杆平仓确认分支；平仓没有数量概念，先于现货数量校验单独处理并共用统一的挂起状态清理。
+	if _pending_trade_type == "leverage_close" and not _pending_stock_id.is_empty():
+		# 平仓结果；服务按确认瞬间的实时价格结算净值并返还证券币。
+		var close_result: Dictionary = _stock_market_service.call("request_leverage_close", _pending_stock_id) as Dictionary
+		_show_event_banner(str(close_result.get("message", "杠杆平仓已处理")))
+		_pending_trade_type = ""
+		_pending_stock_id = ""
+		_pending_quantity = 0
+		_pending_unit_price = 0.0
+		_refresh_all()
+		return
 	if _pending_quantity <= 0 or _pending_stock_id.is_empty():
 		return
 	# 交易结果；统一读取服务返回消息，在顶部短暂提示成功或失败原因。
@@ -706,6 +899,21 @@ func _refresh_pending_trade_dialog() -> void:
 	# 当前永久星穹；买入数量上限和二次确认支付状态都按该余额实时复核。
 	# 证券币余额规则；旧永久星穹说明仅保留历史注释兼容，交易弹窗只使用证券币余额。
 	var available_coins: float = float(_stock_market_service.call("get_securities_balance"))
+	if _pending_trade_type == "leverage_open":
+		# 杠杆开仓弹窗实时刷新；同步实时价格与可用余额，保证金上限与强平价预览随之更新。
+		if _leverage_dialog != null and _leverage_dialog.visible:
+			_leverage_dialog.update_market(_pending_unit_price, available_coins)
+		return
+	if _pending_trade_type == "leverage_close":
+		# 杠杆平仓确认实时刷新；净值、手续费与返还金额按实时行情覆盖正文。
+		if _confirmation_dialog != null and _confirmation_dialog.visible:
+			# 平仓实时报价；仓位可能已被强制平仓，此时禁用确认并提示原因。
+			var close_quote: Dictionary = _stock_market_service.call("get_leverage_close_quote", _pending_stock_id) as Dictionary
+			if bool(close_quote.get("valid", false)):
+				_confirmation_dialog.update_confirmation_message(_build_leverage_close_message(close_quote), bool(close_quote.get("executable", false)))
+			else:
+				_confirmation_dialog.update_confirmation_message(str(close_quote.get("message", "当前没有杠杆仓位")), false)
+		return
 	if _quantity_dialog != null and _quantity_dialog.visible:
 		# 数量弹窗实时上限；买入按当前价和余额计算，卖出按当前持仓计算。
 		var maximum_quantity: int = int(_stock_market_service.call("get_maximum_buy_quantity", _pending_stock_id)) if _pending_trade_type == "buy" else int(_get_holding(_pending_stock_id).get("quantity", 0))
@@ -759,7 +967,7 @@ func _on_close_pressed() -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not is_visible_in_tree() or not (event is InputEventKey):
 		return
-	if (_quantity_dialog != null and _quantity_dialog.visible) or (_confirmation_dialog != null and _confirmation_dialog.visible) or (_securities_transfer_dialog != null and _securities_transfer_dialog.visible):
+	if (_quantity_dialog != null and _quantity_dialog.visible) or (_confirmation_dialog != null and _confirmation_dialog.visible) or (_securities_transfer_dialog != null and _securities_transfer_dialog.visible) or (_leverage_dialog != null and _leverage_dialog.visible):
 		return
 	# 键盘事件；只处理首次按下的 ESC，长按重复不会连续发送关闭信号。
 	var key_event: InputEventKey = event as InputEventKey

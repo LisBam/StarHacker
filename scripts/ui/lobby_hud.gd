@@ -6,6 +6,8 @@ class_name LobbyHud
 
 ## 玩家点击左上角切换按钮时派发；大厅世界负责实际场景路径和转场服务调用。
 signal switch_view_requested
+## 玩家点击左上角联机设置按钮时派发；联机大厅世界负责打开宿主菜单的联机面板。
+signal network_settings_requested
 
 ## 全局 UI 样式指南；大厅 HUD 的按钮、分区面板与标题跟随当前 UI 风格即时刷新。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
@@ -18,6 +20,11 @@ const WEAPON_SLOT_SIZE: Vector2 = Vector2(112.0, 54.0)
 
 ## 玩家节点路径；默认从 LobbyHud 指向大厅 Player，用于读取名称、属性与战斗组件。
 @export var player_path: NodePath = ^"../Player"
+## 是否显示左上角“联机设置”按钮；默认 false 保持主大厅原布局，联机大厅场景在实例上开启。
+@export var show_network_settings_button: bool = false
+
+## 联机设置按钮缓存；默认 null，仅在开关开启时于 ready 阶段创建在切换按钮正下方。
+var _network_settings_button: Button = null
 
 ## 动态刷新累计时间；默认 0，达到固定刷新间隔后统一更新武器冷却与耐久视图。
 var _dynamic_refresh_elapsed: float = 0.0
@@ -77,6 +84,7 @@ var _melee_slot_view: Control
 func _ready() -> void:
 	_apply_visual_style()
 	_switch_view_button.pressed.connect(_on_switch_view_button_pressed)
+	_build_network_settings_button()
 	_bind_player_components()
 	_build_weapon_slots()
 	if _active_skill_bar != null and _active_skill_bar.has_method("configure"):
@@ -101,11 +109,38 @@ func set_interaction_target(display_name: String, has_target: bool) -> void:
 
 
 func set_modal_open(open: bool) -> void:
-	## 同步复用面板状态；打开时隐藏交互提示并禁用场景切换，关闭后等待下一次目标信号恢复提示。
+	## 同步复用面板状态；打开时隐藏交互提示并禁用场景切换与联机设置，关闭后等待下一次目标信号恢复提示。
 	_modal_open = open
 	_switch_view_button.disabled = _modal_open
+	if _network_settings_button != null:
+		_network_settings_button.disabled = _modal_open
 	if _modal_open:
 		_interaction_panel.visible = false
+
+
+func set_lobby_title(title_text: String) -> void:
+	## 设置顶部场景身份标题；联机大厅等复用场景据此显示各自名称，不改变标题样式与位置。
+	if _lobby_title_label != null:
+		_lobby_title_label.text = title_text
+
+
+func _build_network_settings_button() -> void:
+	## 按开关创建左上角“联机设置”按钮；尺寸与切换按钮一致并紧贴其下方，点击只派发信号不持有面板逻辑。
+	if not show_network_settings_button or _root == null:
+		return
+	_network_settings_button = Button.new()
+	_network_settings_button.name = "NetworkSettingsButton"
+	_network_settings_button.text = "联机设置"
+	# 按钮定位；与切换按钮同宽同高（188×42），垂直方向留 6 像素间距。
+	_network_settings_button.position = Vector2(18.0, 66.0)
+	_network_settings_button.size = Vector2(188.0, 42.0)
+	UI_STYLE_GUIDE.apply_primary_button(_network_settings_button)
+	_network_settings_button.pressed.connect(_on_network_settings_button_pressed)
+	_root.add_child(_network_settings_button)
+
+
+func _on_network_settings_button_pressed() -> void:
+	network_settings_requested.emit()
 
 
 func refresh_all() -> void:

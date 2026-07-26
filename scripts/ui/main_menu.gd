@@ -74,6 +74,8 @@ const LOBBY_ACTION_QUIT: String = "quit"
 @export_file("*.tscn") var game_scene_path: String = "res://scenes/game/game_world.tscn"
 ## 主大厅场景路径；默认由左上角“切换大厅/菜单”按钮进入，只允许填写 tscn 资源。
 @export_file("*.tscn") var lobby_scene_path: String = "res://scenes/game/main_lobby.tscn"
+## 联机大厅场景路径；完整主菜单点击“联机”后进入该场景，进场后由大厅自动打开联机面板。
+@export_file("*.tscn") var multiplayer_lobby_scene_path: String = "res://scenes/game/multiplayer_lobby.tscn"
 ## 大厅面板宿主模式；默认 false 显示完整主菜单，设为 true 时隐藏菜单本体并只保留可由实体打开的复用面板。
 @export var lobby_host_mode: bool = false
 
@@ -678,6 +680,11 @@ func _build_mining_farm_overlay() -> void:
 
 
 func _on_multiplayer_button_pressed() -> void:
+	if not lobby_host_mode:
+		# 完整主菜单入口；点击“联机”先进入联机大厅，联机面板由大厅进场流程自动打开。
+		_settings_panel.visible = false
+		_change_scene_with_transition(multiplayer_lobby_scene_path)
+		return
 	if _multiplayer_overlay == null:
 		return
 	_settings_panel.visible = false

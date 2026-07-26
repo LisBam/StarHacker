@@ -268,6 +268,7 @@ func _broadcast_local_player_state() -> void:
 	var local_dead: bool = bool(_player_stats_component.call("is_dead")) if _player_stats_component != null and _player_stats_component.has_method("is_dead") else false
 	_network_session.call("broadcast_combat_message", {
 		"t": "player_state",
+		"ctx": "combat",
 		"x": _player.global_position.x,
 		"y": _player.global_position.y,
 		"aim": aim_direction.angle(),
@@ -1201,8 +1202,10 @@ func _on_combat_message_received(sender_peer_id: int, payload: Dictionary) -> vo
 
 
 func _apply_remote_player_state(sender_peer_id: int, payload: Dictionary) -> void:
-	## 应用一条队友状态包；离场成员的滞后状态包直接忽略。
+	## 应用一条队友状态包；离场成员的滞后状态包与非战斗上下文（联机大厅）状态包直接忽略。
 	if _departed_peer_ids.has(sender_peer_id):
+		return
+	if str(payload.get("ctx", "")) != "combat":
 		return
 	# 队友化身节点；名册同步竞态下可能尚未创建，触发一次补建。
 	var avatar: Node = _remote_avatars.get(sender_peer_id) as Node

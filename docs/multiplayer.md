@@ -7,7 +7,9 @@
 | 模块 | 实现 | 职责 |
 | --- | --- | --- |
 | 会话服务 | `scripts/game/network_session.gd`（AutoLoad `NetworkSession`） | ENet 建房与加入、UDP 局域网房间发现、成员名册与准备状态、共享地图种子分发、统一开局切场景、战斗消息中继 |
-| 联机面板 | `scripts/ui/multiplayer_lobby_panel.gd`（`MultiplayerLobbyPanel`） | 主菜单 960×620 居中窗口（标题“联机”，入口按钮与“训练场”并排同一行）；昵称编辑、房间列表、直连 IP、模式选择（组队骇入 / 大逃杀）、成员名册、准备与开始骇入入口 |
+| 联机面板 | `scripts/ui/multiplayer_lobby_panel.gd`（`MultiplayerLobbyPanel`） | 960×620 居中窗口（标题“联机”）；昵称编辑、房间列表、直连 IP、模式选择（组队骇入 / 大逃杀）、成员名册、准备与开始骇入入口 |
+| 联机大厅 | `scenes/game/multiplayer_lobby.tscn`、`scripts/game/multiplayer_lobby_world.gd`（`MultiplayerLobbyWorld`，继承 `LobbyWorld`） | 主菜单“联机”按钮（与“训练场”并排同一行）的目标场景；进场自动打开联机面板，左上角“切换大厅/菜单”下方提供“联机设置”按钮重新打开面板，1600×1000 场地无交互设施 |
+| 大厅在场同步器 | `scripts/game/network_lobby_sync.gd`（`NetworkLobbySync`） | 联机大厅内的成员互见：20Hz 广播带 `ctx=lobby` 的玩家状态包并以化身展示同房间成员；无伤害转发，成员停止发包 1.6 秒后按在场超时移除化身 |
 | 战斗同步器 | `scripts/game/network_combat_sync.gd`（`NetworkCombatSync`） | 联机骇入局内唯一实体复制协调者；由 `GameWorld` 在联机模式下动态创建，节点组 `network_combat_sync` |
 | 队友化身 | `scripts/player/remote_player_avatar.gd`（`RemotePlayerAvatar`） | 远程玩家在本机世界的代表；外观、昵称、生命护盾条、敌人可索敌可命中、受击转发 |
 | 伤害代理 | `scripts/game/network_damage_proxy.gd`（`NetworkDamageProxy`） | 在本机重建远程伤害来源的战斗数值接口（攻击力、暴击、冲击力、击退方向、位置） |
@@ -16,6 +18,7 @@
 
 ## 2. 会话流程
 
+0. 入口：完整主菜单点击“联机”经统一转场进入联机大厅，进场自动打开联机面板；左上角“联机设置”按钮可随时重新打开。面板打开期间大厅按既有聚合信号锁定玩家控制；关闭面板后可在大厅内自由移动等待。返回主菜单不断开房间连接。
 1. 建房：主机 `create_room()` 在端口 `24857` 创建 ENet 服务器（上限 4 人），同时绑定 UDP 端口 `24858` 应答房间探测。
 2. 发现：客户端面板可见且未入房时，按 1 秒间隔向 `255.255.255.255:24858` 广播探测串；主机回复 JSON 房间信息（房名、人数、版本、是否战斗中），3 秒未刷新的房间条目自动过期。
 3. 加入：从房间列表选中或直接输入 IP 调 `join_room(ip)`；握手成功后客户端提交个人档案（昵称、当前角色、准备状态）进入名册，名册由主机权威维护并全量广播。
@@ -87,7 +90,7 @@
 
 | 类型 | 方向 | 通道 | 内容 |
 | --- | --- | --- | --- |
-| `player_state` | 全员互播 | 不可靠 | 位置、瞄准角、生命、护盾、死亡 |
+| `player_state` | 全员互播 | 不可靠 | 位置、瞄准角、生命、护盾、死亡；`ctx` 字段区分 `combat` 与 `lobby` 场景上下文，战斗同步器只消费 combat、大厅同步器只消费 lobby，防止身处不同场景的成员状态互相串扰 |
 | `player_fire` | 全员互播 | 不可靠 | 弹体场景路径、出膛位置、速度向量、最大距离 |
 | `player_hit` | 主机→受害者 | 可靠 | 伤害、攻击力、暴击、冲击力、击退方向、来源位置 |
 | `enemy_add` / `enemy_remove` / `enemy_state` | 主机→客户端 | 可靠 / 可靠 / 不可靠 | 敌人生成参数 / 移除与击杀归属 / 位置生命快照与全图人口 |

@@ -36,6 +36,8 @@ const MINING_ACTION_SELL: String = "sell"
 const MINING_ACTION_RECHARGE: String = "recharge"
 ## 矿场提现操作；数量表示到账的整数永久星穹，摘要显示反推后的算力币成本与手续费。
 const MINING_ACTION_WITHDRAW: String = "withdraw"
+## 矿场合同签订操作；数量表示到期到账的整数星穹，摘要显示按合同费率反推的锁定算力币。
+const MINING_ACTION_CONTRACT: String = "contract"
 
 ## 弹窗默认宽度；默认 520 像素可容纳物品名称、数量滑条和数字输入框。
 ## 当前尺寸补充；默认值已调整为 400 像素以保持紧凑，仍可在检查器中按界面语言长度调整，运行时无需动态修改。
@@ -395,6 +397,10 @@ func _refresh_total_price(quantity: int) -> void:
 			# 提现总成本；按到账星穹整体反推并向上取整，与矿场服务正式公式一致。
 			var withdrawal_cost: int = ceili(float(resolved_quantity * _mining_unit_value) / (1.0 - _mining_withdrawal_fee_ratio))
 			_total_price_label.text = "到账 %d 星穹 · 需要 %s 算力币 · 手续费 %s" % [resolved_quantity, _format_mining_value(withdrawal_cost), _format_mining_value(withdrawal_cost - resolved_quantity * _mining_unit_value)]
+		elif _mining_action == MINING_ACTION_CONTRACT:
+			# 合同锁定成本；复用提现同款整体反推公式，费率损耗由宿主按“1 - 合同兑付比例”传入。
+			var contract_cost: int = ceili(float(resolved_quantity * _mining_unit_value) / (1.0 - _mining_withdrawal_fee_ratio))
+			_total_price_label.text = "到期到账 %d 星穹 · 需锁定 %s 算力币 · 损耗 %s" % [resolved_quantity, _format_mining_value(contract_cost), _format_mining_value(contract_cost - resolved_quantity * _mining_unit_value)]
 		elif _mining_action == MINING_ACTION_SELL:
 			# 出售返还；总官方价乘 60% 后整体向上取整，与矿场服务结算顺序一致。
 			var sell_return: int = ceili(float(resolved_quantity * _mining_unit_value) * _mining_sell_return_ratio)
@@ -425,6 +431,8 @@ func _get_mining_action_name() -> String:
 		return "充值"
 	if _mining_action == MINING_ACTION_WITHDRAW:
 		return "提现"
+	if _mining_action == MINING_ACTION_CONTRACT:
+		return "签订"
 	return "购买"
 
 

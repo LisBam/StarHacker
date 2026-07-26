@@ -21,6 +21,10 @@ signal combat_session_started
 
 ## 正式骇入模式标识；联机开局固定写入该模式，训练场不参与组队。
 const GAME_MODE_HACK: String = "hack"
+## 联机战斗模式：组队骇入；全员合作对抗敌人，玩家之间不可互相伤害，为默认模式。
+const COMBAT_MODE_TEAM: String = "team"
+## 联机战斗模式：大逃杀；全员随机分散出生在地图各处且可以互相攻击，敌人与物资规则保持不变。
+const COMBAT_MODE_BATTLE_ROYALE: String = "battle_royale"
 ## 联机对战 ENet 端口；默认 24857，主机监听该端口，直连加入也使用该端口。
 const GAME_PORT: int = 24857
 ## 局域网房间发现 UDP 端口；默认 24858，主机监听探测请求并回复房间信息。
@@ -58,6 +62,8 @@ var _session_state: int = SESSION_STATE_IDLE
 var _combat_session_active: bool = false
 ## 联机共享地图种子；开局时由主机生成并广播，GameWorld 用它复现同一张地图。
 var _shared_map_seed: int = 0
+## 当前联机战斗模式；取值为 COMBAT_MODE_TEAM 或 COMBAT_MODE_BATTLE_ROYALE，由主机选择并同步给全体成员，开局指令再次携带确保一致。
+var _session_combat_mode: String = COMBAT_MODE_TEAM
 ## 主机侧房间发现监听套接字；仅主机绑定发现端口，收到探测请求后回复房间信息。
 var _discovery_server_socket: PacketPeerUDP = null
 ## 客户端房间探测套接字；仅发现模式开启时存在，负责广播探测与接收回复。
@@ -153,6 +159,7 @@ func _reset_session_state() -> void:
 	_session_state = SESSION_STATE_IDLE
 	_combat_session_active = false
 	_shared_map_seed = 0
+	_session_combat_mode = COMBAT_MODE_TEAM
 	_roster.clear()
 
 
@@ -177,6 +184,38 @@ func set_local_ready(ready: bool) -> void:
 		return
 	if _session_state == SESSION_STATE_JOINED:
 		_rpc_submit_profile.rpc_id(1, _build_local_profile(ready))
+
+
+func set_session_combat_mode(combat_mode: String) -> void:
+	## 主机切换联机战斗模式；模式变化会清空全员准备状态，要求成员重新确认，客户端调用无效。
+	if _session_state != SESSION_STATE_HOSTING or _combat_session_active:
+		return
+	# 规范化模式标识；未知取值一律回退组队骇入。
+	var resolved_combat_mode: String = COMBAT_MODE_BATTLE_ROYALE if combat_mode == COMBAT_MODE_BATTLE_ROYALE else COMBAT_MODE_TEAM
+	if resolved_combat_mode == _session_combat_mode:
+		return
+	_session_combat_mode = resolved_combat_mode
+	_set_all_ready_false()
+	_rpc_sync_combat_mode.rpc(resolved_combat_mode)
+	_broadcast_roster()
+	session_state_changed.emit()
+
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_sync_combat_mode(combat_mode: String) -> void:
+	## 客户端接收主机的联机战斗模式；同步后刷新界面提示。
+	_session_combat_mode = COMBAT_MODE_BATTLE_ROYALE if combat_mode == COMBAT_MODE_BATTLE_ROYALE else COMBAT_MODE_TEAM
+	session_state_changed.emit()
+
+
+func get_session_combat_mode() -> String:
+	## 返回当前联机战斗模式标识；组队面板与 GameWorld 共用该查询。
+	return _session_combat_mode
+
+
+func is_battle_royale_mode() -> bool:
+	## 返回当前是否为大逃杀模式；GameWorld 据此启用分散出生与玩家互伤。
+	return _session_combat_mode == COMBAT_MODE_BATTLE_ROYALE
 
 
 func _submit_local_profile() -> void:
@@ -230,12 +269,16 @@ func _rpc_submit_profile(profile: Dictionary) -> void:
 		return
 	if not _roster.has(sender_peer_id) and _roster.size() >= MAX_PLAYERS:
 		return
+	# 该成员是否首次进入名册；新成员需要补发当前战斗模式，保证晚加入者界面一致。
+	var is_new_member: bool = not _roster.has(sender_peer_id)
 	_roster[sender_peer_id] = {
 		"name": str(profile.get("name", "玩家")).strip_edges(),
 		"character_id": str(profile.get("character_id", "stelle")),
 		"ready": bool(profile.get("ready", false)),
 	}
 	_broadcast_roster()
+	if is_new_member:
+		_rpc_sync_combat_mode.rpc_id(sender_peer_id, _session_combat_mode)
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -259,17 +302,18 @@ func request_start_combat() -> bool:
 		return false
 	# 共享地图种子；取非零随机整数，全员用同一种子复现地图、宝箱与物资撤离点。
 	var shared_seed: int = int(randi()) | 1
-	_rpc_begin_combat.rpc(shared_seed)
-	_rpc_begin_combat(shared_seed)
+	_rpc_begin_combat.rpc(shared_seed, _session_combat_mode)
+	_rpc_begin_combat(shared_seed, _session_combat_mode)
 	return true
 
 
 @rpc("authority", "call_remote", "reliable")
-func _rpc_begin_combat(shared_seed: int) -> void:
-	## 接收主机统一开局指令；写入共享种子与骇入模式后经全局过渡切入战斗场景。
+func _rpc_begin_combat(shared_seed: int, combat_mode: String) -> void:
+	## 接收主机统一开局指令；写入共享种子、战斗模式与骇入模式后经全局过渡切入战斗场景。
 	if _is_local_scene_busy():
 		return
 	_shared_map_seed = shared_seed
+	_session_combat_mode = COMBAT_MODE_BATTLE_ROYALE if combat_mode == COMBAT_MODE_BATTLE_ROYALE else COMBAT_MODE_TEAM
 	_combat_session_active = true
 	_set_all_ready_false()
 	# 会话状态服务；开局统一写入正式骇入模式，当前角色保持各自选择。
@@ -420,6 +464,7 @@ func _poll_discovery_server() -> void:
 			"player_count": _roster.size(),
 			"max_players": MAX_PLAYERS,
 			"in_combat": _combat_session_active,
+			"mode": _session_combat_mode,
 		}
 		_discovery_server_socket.set_dest_address(request_ip, request_port)
 		_discovery_server_socket.put_packet(JSON.stringify(reply_payload).to_utf8_buffer())

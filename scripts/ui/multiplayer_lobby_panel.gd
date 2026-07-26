@@ -11,6 +11,12 @@ signal closed
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 成员列表刷新用的准备状态文本；下标 0 为未准备、1 为已准备。
 const READY_STATE_TEXTS: Array[String] = ["未准备", "已准备"]
+## 组队骇入模式标识；与 NetworkSession.COMBAT_MODE_TEAM 保持一致，对应模式下拉框下标 0。
+const COMBAT_MODE_TEAM: String = "team"
+## 大逃杀模式标识；与 NetworkSession.COMBAT_MODE_BATTLE_ROYALE 保持一致，对应模式下拉框下标 1。
+const COMBAT_MODE_BATTLE_ROYALE: String = "battle_royale"
+## 模式显示名表；键为模式标识，值为玩家可见名称，房间列表与队伍提示共用。
+const COMBAT_MODE_DISPLAY_NAMES: Dictionary = {"team": "组队骇入", "battle_royale": "大逃杀"}
 
 ## 联机会话服务缓存；ready 时解析，缺失时面板显示服务不可用提示。
 var _network_session: Node = null
@@ -32,6 +38,8 @@ var _join_button: Button = null
 var _member_list: VBoxContainer = null
 ## 队伍提示标签；显示未入房提示或开局条件说明。
 var _team_hint_label: Label = null
+## 模式下拉框；下标 0 为组队骇入、1 为大逃杀，仅主机可操作，客户端只读显示同步值。
+var _mode_option_button: OptionButton = null
 ## 准备按钮；切换本机准备状态，文本随状态变化。
 var _ready_button: Button = null
 ## 开始骇入按钮；仅主机可见，全员准备后可点击并统一开局。
@@ -86,11 +94,11 @@ func _build_content() -> void:
 	add_child(root_layout)
 	# 面板标题；与其他局外面板一致使用 24 号标题。
 	var title_label: Label = Label.new()
-	title_label.text = "联机组队"
+	title_label.text = "联机"
 	UI_STYLE_GUIDE.apply_title_label(title_label, 24)
 	root_layout.add_child(title_label)
 	_status_label = Label.new()
-	_status_label.text = "在局域网内与其他玩家组队进行骇入"
+	_status_label.text = "在局域网内与其他玩家联机进行骇入"
 	UI_STYLE_GUIDE.apply_secondary_label(_status_label)
 	root_layout.add_child(_status_label)
 	# 昵称行容器；左标签右输入框。
@@ -209,6 +217,22 @@ func _build_team_section() -> Control:
 	section_title.text = "当前队伍"
 	UI_STYLE_GUIDE.apply_muted_accent_label(section_title)
 	section_layout.add_child(section_title)
+	# 模式选择行容器；左标签右下拉框。
+	var mode_row: HBoxContainer = HBoxContainer.new()
+	mode_row.add_theme_constant_override("separation", 8)
+	section_layout.add_child(mode_row)
+	# 模式行标签；固定文本。
+	var mode_caption: Label = Label.new()
+	mode_caption.text = "模式"
+	UI_STYLE_GUIDE.apply_secondary_label(mode_caption)
+	mode_row.add_child(mode_caption)
+	_mode_option_button = OptionButton.new()
+	_mode_option_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_mode_option_button.custom_minimum_size = Vector2(0.0, 36.0)
+	_mode_option_button.add_item(str(COMBAT_MODE_DISPLAY_NAMES[COMBAT_MODE_TEAM]), 0)
+	_mode_option_button.add_item(str(COMBAT_MODE_DISPLAY_NAMES[COMBAT_MODE_BATTLE_ROYALE]), 1)
+	_mode_option_button.item_selected.connect(_on_mode_option_selected)
+	mode_row.add_child(_mode_option_button)
 	_member_list = VBoxContainer.new()
 	_member_list.add_theme_constant_override("separation", 6)
 	_member_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -263,12 +287,13 @@ func _refresh_room_list() -> void:
 	for room_index in range(_discovered_room_cache.size()):
 		# 单个房间信息；包含房名、IP、人数与是否在战斗中。
 		var room_info: Dictionary = _discovered_room_cache[room_index]
-		# 房间展示文本；战斗中的房间标注不可中途加入。
-		var room_text: String = "%s（%s）%d/%d%s" % [
+		# 房间展示文本；附带当前模式，战斗中的房间标注不可中途加入。
+		var room_text: String = "%s（%s）%d/%d·%s%s" % [
 			str(room_info.get("room_name", "未命名房间")),
 			str(room_info.get("ip", "?")),
 			int(room_info.get("player_count", 0)),
 			int(room_info.get("max_players", 4)),
+			str(COMBAT_MODE_DISPLAY_NAMES.get(str(room_info.get("mode", COMBAT_MODE_TEAM)), "组队骇入")),
 			"·战斗中" if bool(room_info.get("in_combat", false)) else "",
 		]
 		_room_list.add_item(room_text)
@@ -305,10 +330,12 @@ func _refresh_team_section() -> void:
 		]
 		member_label.add_theme_color_override("font_color", Color(0.45, 0.9, 0.55, 1.0) if member_ready else UI_STYLE_GUIDE.get_secondary_text_color())
 		_member_list.add_child(member_label)
+	# 当前模式说明；大逃杀提示随机分散出生与玩家互伤，组队骇入提示合作规则。
+	var mode_description: String = "大逃杀：全员随机分散出生，玩家可互相攻击。" if str(_network_session.call("get_session_combat_mode")) == COMBAT_MODE_BATTLE_ROYALE else "组队骇入：全员同点出生并肩作战，玩家之间不可互伤。"
 	if bool(_network_session.call("is_session_host")):
-		_team_hint_label.text = "全员准备后可开始骇入；至少需要 2 名成员。开始后所有成员进入同一张地图。"
+		_team_hint_label.text = "%s全员准备后可开始（至少 2 名成员）；切换模式会清空全员准备。" % mode_description
 	else:
-		_team_hint_label.text = "等待主机开始骇入；请先点击“准备”。"
+		_team_hint_label.text = "%s等待主机开始；请先点击“准备”。" % mode_description
 
 
 func _refresh_action_states() -> void:
@@ -328,6 +355,10 @@ func _refresh_action_states() -> void:
 	if _ready_button != null:
 		_ready_button.disabled = not session_active
 		_ready_button.text = "取消准备" if session_active and bool(_network_session.call("is_local_ready")) else "准备"
+	if _mode_option_button != null:
+		# 模式下拉框状态；仅主机在房间内可切换，其余情况只读显示当前同步值。
+		_mode_option_button.disabled = not (session_active and bool(_network_session.call("is_session_host")))
+		_mode_option_button.select(1 if str(_network_session.call("get_session_combat_mode")) == COMBAT_MODE_BATTLE_ROYALE else 0)
 	if _start_button != null:
 		_start_button.visible = session_active and bool(_network_session.call("is_session_host"))
 		_start_button.disabled = not bool(_network_session.call("is_everyone_ready"))
@@ -411,6 +442,14 @@ func _on_join_button_pressed() -> void:
 	if bool(_network_session.call("join_room", target_ip)):
 		_status_label.text = "正在连接 %s …" % target_ip
 	_refresh_action_states()
+
+
+func _on_mode_option_selected(selected_index: int) -> void:
+	## 主机切换联机战斗模式；服务端会清空全员准备并向全体成员同步新模式。
+	if _network_session == null:
+		return
+	_network_session.call("set_session_combat_mode", COMBAT_MODE_BATTLE_ROYALE if selected_index == 1 else COMBAT_MODE_TEAM)
+	_refresh_team_section()
 
 
 func _on_ready_button_pressed() -> void:

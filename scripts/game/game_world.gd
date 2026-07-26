@@ -20,6 +20,16 @@ const SECOND_HAND_ITEM_GENERATOR: Script = preload("res://scripts/data/second_ha
 const NETWORK_COMBAT_SYNC_SCRIPT: Script = preload("res://scripts/game/network_combat_sync.gd")
 ## 联机撤离点随机流种子偏移；与共享地图种子相加派生独立随机流，保证撤离点位置不受各端后续随机消耗影响。
 const NETWORK_EXTRACTION_SEED_OFFSET: int = 7717
+## 大逃杀出生点随机流种子偏移；与共享地图种子相加派生独立随机流，全员在各自机器上推导出同一组出生点。
+const BATTLE_ROYALE_SPAWN_SEED_OFFSET: int = 15473
+## 大逃杀出生点离地图边缘留白；默认 640 像素，避免玩家出生贴边界墙或视野一半在图外。
+const BATTLE_ROYALE_SPAWN_EDGE_MARGIN: float = 640.0
+## 大逃杀出生点两两最小间距；默认 1600 像素，保证开局各玩家彼此在视野与常规交战距离之外。
+const BATTLE_ROYALE_SPAWN_MIN_SPACING: float = 1600.0
+## 大逃杀单个出生点候选尝试次数；默认 48，用于避开环境障碍与其他玩家出生点，全部失败时采用最后一个候选。
+const BATTLE_ROYALE_SPAWN_ATTEMPT_COUNT: int = 48
+## 大逃杀出生点障碍安全半径；默认 40 像素，大于玩家 18 像素碰撞半径以保留贴墙间隙。
+const BATTLE_ROYALE_SPAWN_CLEARANCE_RADIUS: float = 40.0
 ## 宝箱高品质掉落概率；普通、中级、高级和极品分别使用 10%、30%、55% 和 75%，极品另保证至少 5 件高品质物品。
 const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, "high": 0.55, "supreme": 0.75}
 ## 宝箱武器类别权重；默认 0.25 表示每个掉落槽有 25% 概率选择武器。
@@ -365,6 +375,10 @@ var _network_extraction_random: RandomNumberGenerator = null
 var _network_extraction_position: Vector2 = Vector2.ZERO
 ## 是否已经预生成联机撤离点位置；默认 false，仅联机战斗置 true。
 var _has_network_extraction_position: bool = false
+## 联机大逃杀模式是否激活；默认 false，进入场景时从 NetworkSession 解析，影响出生点分散与玩家互伤。
+var _network_battle_royale_active: bool = false
+## 联机全员出生点表；键为 peer_id，值为世界坐标，大逃杀模式下由共享随机流确定性推导，组队模式为空。
+var _network_spawn_positions: Dictionary = {}
 
 ## 玩家节点缓存；默认按 player_path 获取，允许为空并以世界原点作为生成中心。
 @onready var _player: Node2D = get_node_or_null(player_path) as Node2D
@@ -401,6 +415,14 @@ func _ready() -> void:
 	_spawn_loot_chests()
 	_spawn_supply_extraction_points()
 	_environment_obstacle_version += 1
+	if _network_combat_active:
+		# 联机撤离点预推导；此刻全员环境障碍、宝箱缓存与玩家位置（出生原点）完全一致，专用随机流保证各端得到同一位置。
+		# 注意必须先于大逃杀传送执行：撤离点校验读取玩家位置，传送后各端玩家位置不同会破坏确定性。
+		_network_extraction_position = _get_random_extraction_position()
+		_has_network_extraction_position = true
+		if _network_battle_royale_active:
+			# 大逃杀出生点表必须先于开局布怪推导；主机布怪据此避开每名玩家出生点周围的安全距离，防止玩家降生在怪堆中。
+			_compute_battle_royale_spawn_positions()
 	if not _is_network_remote_client():
 		# 联机客户端不初始化虚拟人口；全部敌人由主机权威复制，本机只承载傀儡节点。
 		if _monster_simulation_manager != null and _monster_simulation_manager.has_method("initialize"):
@@ -414,9 +436,8 @@ func _ready() -> void:
 		_spawn_monster_batch()
 	_monster_replenish_remaining = monster_replenish_interval
 	if _network_combat_active:
-		# 联机撤离点预推导；此刻全员环境障碍、宝箱缓存与玩家位置（出生原点）完全一致，专用随机流保证各端得到同一位置。
-		_network_extraction_position = _get_random_extraction_position()
-		_has_network_extraction_position = true
+		if _network_battle_royale_active:
+			_teleport_local_player_to_network_spawn()
 		_create_network_combat_sync()
 	_update_explored_cells(true)
 
@@ -501,6 +522,8 @@ func _resolve_network_combat_session() -> void:
 	## 解析联机战斗会话；联机时用主机广播的共享种子覆盖地图种子，使全员复现同一张地图、宝箱与物资撤离点，训练场不参与联机。
 	_network_combat_active = false
 	_network_is_host = false
+	_network_battle_royale_active = false
+	_network_spawn_positions.clear()
 	_network_extraction_random = null
 	# 联机会话服务；由自动加载提供，缺失或战斗会话未激活时保持单机流程。
 	var network_session: Node = get_tree().root.get_node_or_null("NetworkSession")
@@ -510,6 +533,7 @@ func _resolve_network_combat_session() -> void:
 		return
 	_network_combat_active = true
 	_network_is_host = bool(network_session.call("is_session_host"))
+	_network_battle_royale_active = network_session.has_method("is_battle_royale_mode") and bool(network_session.call("is_battle_royale_mode"))
 	# 共享地图种子；非零时覆盖检查器种子，_prepare_map_seed 将据此产生确定性世界。
 	var shared_seed: int = int(network_session.call("get_shared_map_seed"))
 	if shared_seed != 0:
@@ -539,6 +563,75 @@ func _is_network_remote_client() -> bool:
 func is_network_combat_active() -> bool:
 	## 返回当前世界是否处于联机战斗；HUD 与调试工具据此调整暂停与人口展示行为。
 	return _network_combat_active
+
+
+func is_network_battle_royale() -> bool:
+	## 返回当前是否为联机大逃杀模式；战斗同步器据此开启队友化身的玩家互伤碰撞层。
+	return _network_battle_royale_active
+
+
+func get_network_spawn_position_for_peer(peer_id: int) -> Vector2:
+	## 返回指定成员的联机出生点；大逃杀返回确定性推导结果，组队模式或未知成员回退本机玩家当前位置。
+	# 出生点条目；表中缺失时使用回退位置。
+	var spawn_entry: Variant = _network_spawn_positions.get(peer_id)
+	if spawn_entry is Vector2:
+		return spawn_entry
+	return _player.global_position if _player != null else Vector2.ZERO
+
+
+func _compute_battle_royale_spawn_positions() -> void:
+	## 推导大逃杀全员出生点表；本机玩家的实际传送由 _teleport_local_player_to_network_spawn 在主机布怪完成后执行。
+	## 各端使用同一共享随机流与同一环境缓存执行相同算法，因此无需网络传输即可得到全网一致的出生点表。
+	# 联机会话服务；提供按 peer_id 排序的成员名册，排序保证各端推导顺序一致。
+	var network_session: Node = get_tree().root.get_node_or_null("NetworkSession")
+	if network_session == null or _player == null:
+		return
+	# 出生点专用随机流；与地图主随机流及撤离点随机流互相独立。
+	var spawn_random: RandomNumberGenerator = RandomNumberGenerator.new()
+	spawn_random.seed = _active_map_seed + BATTLE_ROYALE_SPAWN_SEED_OFFSET
+	# 成员 peer_id 有序列表；名册快照本身按 peer_id 升序，此处再排序一次作为确定性保险。
+	var sorted_peer_ids: Array[int] = []
+	for member_profile in (network_session.call("get_roster_snapshot") as Array):
+		sorted_peer_ids.append(int((member_profile as Dictionary).get("peer_id", 0)))
+	sorted_peer_ids.sort()
+	# 出生点候选上限；地图半边长扣除边缘留白，保证出生视野完整。
+	var spawn_limit: float = maxf(get_map_half_size() - BATTLE_ROYALE_SPAWN_EDGE_MARGIN, 1.0)
+	# 已确定出生点列表；后续成员的候选需要与之保持最小间距。
+	var placed_positions: Array[Vector2] = []
+	_network_spawn_positions.clear()
+	for peer_id in sorted_peer_ids:
+		# 本成员最终出生点；全部尝试失败时保留最后一个候选，各端因同随机流得到相同回退结果。
+		var resolved_position: Vector2 = Vector2.ZERO
+		for _attempt_index in range(BATTLE_ROYALE_SPAWN_ATTEMPT_COUNT):
+			# 当前候选出生点；在留白后的地图范围内均匀抽取。
+			var candidate_position: Vector2 = Vector2(spawn_random.randf_range(-spawn_limit, spawn_limit), spawn_random.randf_range(-spawn_limit, spawn_limit))
+			resolved_position = candidate_position
+			if _is_position_blocked_by_environment(candidate_position, BATTLE_ROYALE_SPAWN_CLEARANCE_RADIUS):
+				continue
+			# 是否离已确定出生点过近；保证开局玩家彼此分散。
+			var too_close_to_placed: bool = false
+			for placed_position in placed_positions:
+				if placed_position.distance_to(candidate_position) < BATTLE_ROYALE_SPAWN_MIN_SPACING:
+					too_close_to_placed = true
+					break
+			if not too_close_to_placed:
+				break
+		placed_positions.append(resolved_position)
+		_network_spawn_positions[int(peer_id)] = resolved_position
+
+
+func _teleport_local_player_to_network_spawn() -> void:
+	## 把本机玩家传送到自己的大逃杀出生点；其余成员位置由化身状态同步呈现。
+	# 联机会话服务；提供本机 peer_id。
+	var network_session: Node = get_tree().root.get_node_or_null("NetworkSession")
+	if network_session == null or _player == null:
+		return
+	# 本机出生点条目；异常缺失时保持原点出生。
+	var local_spawn_entry: Variant = _network_spawn_positions.get(int(network_session.call("get_local_peer_id")))
+	if local_spawn_entry is Vector2:
+		_player.global_position = local_spawn_entry
+		if _player.has_method("clear_external_motion"):
+			_player.call("clear_external_motion")
 
 
 func _get_extraction_random_source() -> RandomNumberGenerator:
@@ -2703,10 +2796,30 @@ func _get_random_monster_spawn_position() -> Vector2:
 		var candidate_position: Vector2 = _get_random_monster_spawn_candidate()
 		if _player != null and candidate_position.distance_to(_player.global_position) < monster_spawn_min_distance:
 			continue
+		if _is_monster_spawn_too_close_to_network_players(candidate_position):
+			continue
 		if not _is_position_blocked_by_environment(candidate_position, 36.0):
 			return candidate_position
 
 	return _get_random_monster_spawn_candidate()
+
+
+func _is_monster_spawn_too_close_to_network_players(candidate_position: Vector2) -> bool:
+	## 联机多玩家生成保护；候选点必须同时远离全部玩家阵营单位（本地玩家与队友化身）和大逃杀预定出生点，单机直接放行。
+	## 该保护同时覆盖开局布怪与战斗期间的人口补充，只有主机会生成怪物，客户端不承担该开销。
+	if not _network_combat_active:
+		return false
+	# 最小安全距离平方；与单机玩家保护共用同一配置，使用平方比较避免逐候选开方。
+	var min_distance_squared: float = monster_spawn_min_distance * monster_spawn_min_distance
+	# 大逃杀预定出生点遍历项；开局布怪时化身尚未创建，用出生点表保证每名玩家降生区域安全。
+	for spawn_position in _network_spawn_positions.values():
+		if spawn_position is Vector2 and (spawn_position as Vector2).distance_squared_to(candidate_position) < min_distance_squared:
+			return true
+	# 玩家阵营单位遍历项；战斗期间的人口补充据此避开全部存活玩家与化身当前位置。
+	for combat_target in get_tree().get_nodes_in_group("player_combat_target"):
+		if combat_target is Node2D and is_instance_valid(combat_target) and (combat_target as Node2D).global_position.distance_squared_to(candidate_position) < min_distance_squared:
+			return true
+	return false
 
 
 func _get_random_monster_spawn_candidate() -> Vector2:

@@ -43,6 +43,8 @@ var _scan_cursor: int = 0
 var _update_remaining: float = 0.0
 ## 当前已实例化敌人数；默认 0，用于限制同时执行 AI 的真实节点总量。
 var _materialized_count: int = 0
+## 额外物化锚点列表；默认空，联机主机把远程队友化身注册为锚点，靠近任一锚点的虚拟敌人同样会实例化参战，单机流程不使用。
+var _additional_anchor_nodes: Array[Node2D] = []
 
 
 func initialize(player: Node2D, monster_parent: Node = null, target: Node = null, monster_group: StringName = &"") -> void:
@@ -51,6 +53,21 @@ func initialize(player: Node2D, monster_parent: Node = null, target: Node = null
 	_target = target if target != null else player
 	_monster_group = monster_group
 	_update_remaining = 0.0
+
+
+func set_additional_simulation_anchors(anchor_nodes: Array[Node2D]) -> void:
+	## 注册除玩家外的物化锚点；由联机战斗同步器在队友化身增减时调用，锚点失效会在距离计算时自动跳过。
+	_additional_anchor_nodes = anchor_nodes
+
+
+func _get_min_anchor_distance_squared(world_position: Vector2) -> float:
+	## 返回指定位置到玩家与全部有效额外锚点的最小距离平方；物化与休眠判定共用该结果，保证队友附近的敌人不被误卸载。
+	# 最小距离平方；默认以玩家为基准，逐个有效锚点取更小值。
+	var min_distance_squared: float = world_position.distance_squared_to(_player.global_position)
+	for anchor_node in _additional_anchor_nodes:
+		if is_instance_valid(anchor_node):
+			min_distance_squared = minf(min_distance_squared, world_position.distance_squared_to(anchor_node.global_position))
+	return min_distance_squared
 
 
 func add_virtual_monster(monster_scene: PackedScene, spawn_position: Vector2, size_multiplier: float, attribute_multiplier: float) -> bool:
@@ -173,7 +190,8 @@ func _scan_virtual_population() -> void:
 			return
 		# 记录世界位置；用于判断远处虚拟人口是否进入玩家加载范围。
 		var record_position: Vector2 = record.get("position", Vector2.ZERO)
-		if record_position.distance_squared_to(_player.global_position) > active_radius_squared:
+		# 加载距离判定改为取玩家与全部额外锚点的最小距离；单机没有额外锚点时结果与旧实现完全一致。
+		if _get_min_anchor_distance_squared(record_position) > active_radius_squared:
 			continue
 		if _materialize_record(record):
 			materialized_this_update += 1
@@ -208,7 +226,8 @@ func _unload_distant_materialized_monsters() -> void:
 			continue
 		# 当前真实敌人；仅在离开卸载半径后还原为虚拟记录。
 		var monster: Node2D = monster_object as Node2D
-		if monster.global_position.distance_squared_to(_player.global_position) <= unload_radius_squared:
+		# 卸载距离判定与加载共用最小锚点距离；正在与队友交战的敌人不会因远离主机玩家被强制休眠。
+		if _get_min_anchor_distance_squared(monster.global_position) <= unload_radius_squared:
 			continue
 		_unmaterialize_record(record, monster)
 

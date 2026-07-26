@@ -199,6 +199,17 @@ func _release_loot(broken_open: bool) -> void:
 	queue_free()
 
 
+func force_network_remove() -> void:
+	## 联机静默移除；其他成员已开启或击毁同位置宝箱时调用，本机不出货、不上报开箱统计，只派发移除信号并释放节点。
+	if _opened:
+		return
+	_opened = true
+	_interaction_active = false
+	set_process(false)
+	chest_removed.emit(self)
+	queue_free()
+
+
 func _reset_hold_progress() -> void:
 	_hold_elapsed = 0.0
 	if _open_progress != null:

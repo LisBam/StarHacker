@@ -36,6 +36,8 @@ const STOCK_MARKET_PANEL_SCRIPT: Script = preload("res://scripts/ui/stock_market
 const MINING_FARM_PANEL_SCRIPT: Script = preload("res://scripts/ui/mining_farm_panel.gd")
 ## 图鉴面板脚本；默认在主菜单点击图鉴按钮后动态创建，并从内容目录和永久库存读取展示与解锁状态。
 const ENCYCLOPEDIA_PANEL_SCRIPT: Script = preload("res://scripts/ui/encyclopedia_panel.gd")
+## 联机组队面板脚本；默认在主菜单点击联机组队按钮后动态创建，调用 NetworkSession 完成建房、发现、加入与统一开局。
+const MULTIPLAYER_PANEL_SCRIPT: Script = preload("res://scripts/ui/multiplayer_lobby_panel.gd")
 ## 隐藏开发者菜单脚本；默认只在主菜单依次输入 LISBAM 后显示。
 const DEVELOPER_MENU_SCRIPT: Script = preload("res://scripts/ui/developer_menu.gd")
 ## 开发者模式解锁序列；默认由六个英文字母组成，输入错误会按首字母重新匹配。
@@ -60,6 +62,8 @@ const LOBBY_ACTION_STOCK_MARKET: String = "stock_market"
 const LOBBY_ACTION_MINING_FARM: String = "mining_farm"
 ## 大厅图鉴动作标识；固定 encyclopedia，复用主菜单图鉴面板。
 const LOBBY_ACTION_ENCYCLOPEDIA: String = "encyclopedia"
+## 大厅联机组队动作标识；固定 multiplayer，复用主菜单联机组队面板。
+const LOBBY_ACTION_MULTIPLAYER: String = "multiplayer"
 ## 大厅设置动作标识；固定 settings，复用主菜单设置面板。
 const LOBBY_ACTION_SETTINGS: String = "settings"
 ## 大厅退出动作标识；固定 quit，执行与主菜单退出按钮相同的关闭程序命令。
@@ -77,6 +81,8 @@ const LOBBY_ACTION_QUIT: String = "quit"
 @onready var _start_button: Button = %StartButton
 ## 训练场按钮缓存；默认绑定唯一名 TrainingButton，必须是 Button，修改节点名会导致训练场入口无法进入战斗。
 @onready var _training_button: Button = %TrainingButton
+## 联机组队按钮缓存；默认绑定唯一名 MultiplayerButton，必须是 Button，点击后打开局域网组队面板。
+@onready var _multiplayer_button: Button = %MultiplayerButton
 ## 设置按钮缓存；默认绑定唯一名 SettingsButton，必须是 Button，修改节点名会导致主菜单无法打开设置。
 @onready var _settings_button: Button = %SettingsButton
 ## 退出按钮缓存；默认绑定唯一名 QuitButton，必须是 Button，修改节点名会导致主菜单无法退出程序。
@@ -168,6 +174,10 @@ var _mining_farm_panel: Control
 var _encyclopedia_overlay: Control
 ## 图鉴面板实例；关闭后复用，打开时从内容目录重新读取全部条目并同步永久发现状态。
 var _encyclopedia_panel: Control
+## 联机组队全屏遮罩；默认运行时创建并隐藏，显示时阻止主菜单其他入口接收鼠标输入。
+var _multiplayer_overlay: Control
+## 联机组队面板实例；关闭后复用，网络会话由 NetworkSession 常驻持有，面板关闭不会断开连接。
+var _multiplayer_panel: Control
 ## 开发者菜单全屏遮罩；默认运行时创建并隐藏，解锁后阻止其他主菜单控件接收输入。
 var _developer_overlay: Control
 ## 开发者菜单实例；默认由 DeveloperMenu 脚本动态创建并在关闭后复用。
@@ -195,6 +205,7 @@ func _ready() -> void:
 	_master_bus_index = AudioServer.get_bus_index("Master")
 	_start_button.pressed.connect(_on_start_button_pressed)
 	_training_button.pressed.connect(_on_training_button_pressed)
+	_multiplayer_button.pressed.connect(_on_multiplayer_button_pressed)
 	_settings_button.pressed.connect(_on_settings_button_pressed)
 	_quit_button.pressed.connect(_on_quit_button_pressed)
 	_character_button.pressed.connect(_on_character_button_pressed)
@@ -216,6 +227,7 @@ func _ready() -> void:
 	_build_stock_market_overlay()
 	_build_mining_farm_overlay()
 	_build_encyclopedia_overlay()
+	_build_multiplayer_overlay()
 	_build_developer_overlay()
 	_settings_panel.visible = false
 	_show_key_binding_page(false)
@@ -331,6 +343,8 @@ func perform_lobby_action(action_id: String) -> bool:
 			_on_mining_farm_button_pressed()
 		LOBBY_ACTION_ENCYCLOPEDIA:
 			_on_encyclopedia_button_pressed()
+		LOBBY_ACTION_MULTIPLAYER:
+			_on_multiplayer_button_pressed()
 		LOBBY_ACTION_SETTINGS:
 			_on_settings_button_pressed()
 		LOBBY_ACTION_QUIT:
@@ -351,6 +365,7 @@ func is_modal_open() -> bool:
 		or (_stock_market_overlay != null and _stock_market_overlay.visible)
 		or (_mining_farm_overlay != null and _mining_farm_overlay.visible)
 		or (_encyclopedia_overlay != null and _encyclopedia_overlay.visible)
+		or (_multiplayer_overlay != null and _multiplayer_overlay.visible)
 		or (_developer_overlay != null and _developer_overlay.visible)
 	)
 
@@ -660,6 +675,56 @@ func _build_mining_farm_overlay() -> void:
 	mining_farm_overlay.add_child(mining_farm_panel)
 	_mining_farm_panel = mining_farm_panel
 	mining_farm_overlay.visible = false
+
+
+func _on_multiplayer_button_pressed() -> void:
+	if _multiplayer_overlay == null:
+		return
+	_settings_panel.visible = false
+	_multiplayer_overlay.visible = true
+	if _multiplayer_panel != null and _multiplayer_panel.has_method("refresh"):
+		_multiplayer_panel.call("refresh")
+
+
+func _on_multiplayer_closed() -> void:
+	_multiplayer_overlay.visible = false
+	_multiplayer_button.grab_focus()
+
+
+func _build_multiplayer_overlay() -> void:
+	if _multiplayer_overlay != null:
+		return
+	# 联机组队遮罩；覆盖完整主菜单并拦截输入，网络会话保存在常驻服务中，关闭遮罩不断开连接。
+	var multiplayer_overlay: Control = Control.new()
+	multiplayer_overlay.name = "MultiplayerOverlay"
+	multiplayer_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	multiplayer_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(multiplayer_overlay)
+	_multiplayer_overlay = multiplayer_overlay
+	# 联机组队背景遮罩；使用与其他局外面板一致的深色透明层。
+	var multiplayer_dim: ColorRect = ColorRect.new()
+	multiplayer_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UI_STYLE_GUIDE.apply_overlay_dim(multiplayer_dim)
+	multiplayer_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	multiplayer_overlay.add_child(multiplayer_dim)
+	# 联机组队面板；固定 960×620 像素，左侧房间发现、右侧队伍名册。
+	var multiplayer_panel: Control = MULTIPLAYER_PANEL_SCRIPT.new() as Control
+	if multiplayer_panel == null:
+		multiplayer_overlay.visible = false
+		return
+	multiplayer_panel.name = "MultiplayerLobbyPanel"
+	multiplayer_panel.anchor_left = 0.5
+	multiplayer_panel.anchor_top = 0.5
+	multiplayer_panel.anchor_right = 0.5
+	multiplayer_panel.anchor_bottom = 0.5
+	multiplayer_panel.offset_left = -480.0
+	multiplayer_panel.offset_top = -310.0
+	multiplayer_panel.offset_right = 480.0
+	multiplayer_panel.offset_bottom = 310.0
+	multiplayer_panel.connect("closed", Callable(self, "_on_multiplayer_closed"))
+	multiplayer_overlay.add_child(multiplayer_panel)
+	_multiplayer_panel = multiplayer_panel
+	multiplayer_overlay.visible = false
 
 
 func _build_encyclopedia_overlay() -> void:

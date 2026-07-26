@@ -1600,7 +1600,7 @@ func _set_inventory_visible(visible: bool) -> void:
 
 	# 背包暂停规则；打开时立即暂停战斗，关闭时只有其他暂停型界面仍显示才继续保持暂停。
 	var should_keep_paused: bool = visible or _pause_overlay.visible or _is_character_showcase_visible() or (_supply_extraction_overlay != null and _supply_extraction_overlay.visible)
-	get_tree().paused = should_keep_paused
+	_set_battle_tree_paused(should_keep_paused)
 
 	_refresh_combat_input_state()
 
@@ -1640,7 +1640,7 @@ func _set_character_showcase_visible(visible: bool) -> void:
 			_character_showcase_view.call("focus_default_control")
 	else:
 		_character_showcase_view.visible = false
-	get_tree().paused = visible
+	_set_battle_tree_paused(visible)
 	_refresh_combat_input_state()
 
 
@@ -2390,7 +2390,7 @@ func _open_supply_extraction_panel() -> void:
 	_set_large_map_visible(false)
 	_supply_extraction_overlay.visible = true
 	_supply_extraction_panel.call("present")
-	get_tree().paused = true
+	_set_battle_tree_paused(true)
 	_refresh_combat_input_state()
 
 
@@ -2571,7 +2571,7 @@ func _set_pause_menu_visible(visible: bool) -> void:
 	_test_settings_panel.visible = false
 	_character_switch_panel.visible = false
 	_sync_mode_controls()
-	get_tree().paused = visible
+	_set_battle_tree_paused(visible)
 	if visible:
 		_developer_sequence_index = 0
 		if _inventory_panel.visible:
@@ -3755,16 +3755,28 @@ func _set_death_overlay_visible(visible: bool) -> void:
 		_show_pause_key_binding_page(false)
 		_test_settings_panel.visible = false
 		_character_switch_panel.visible = false
-		get_tree().paused = true
+		_set_battle_tree_paused(true)
 		_refresh_combat_input_state()
 		_death_return_main_menu_button.grab_focus()
 	else:
 		_refresh_combat_input_state()
 
 
+func _set_battle_tree_paused(should_pause: bool) -> void:
+	## 统一写入场景树暂停状态；联机战斗中任何界面都不暂停世界，队友与主机敌人持续运行，战斗输入仍由各界面既有逻辑关闭。
+	get_tree().paused = should_pause and not _is_network_combat_active()
+
+
+func _is_network_combat_active() -> bool:
+	## 返回当前是否处于联机战斗；由联机会话服务提供，服务缺失或未联机时视为单机并保持原暂停行为。
+	# 联机会话服务节点；自动加载常驻，独立场景运行 HUD 时可能不存在。
+	var network_session: Node = get_tree().root.get_node_or_null("NetworkSession")
+	return network_session != null and network_session.has_method("is_combat_session_active") and bool(network_session.call("is_combat_session_active"))
+
+
 func _return_to_main_menu() -> void:
 	get_tree().paused = false
-	# 全局转场服务；战斗结算确认后使用统一 0.3 秒黑屏过渡返回主菜单。
+	# 全局转场服务；战斗结算确认后使用统一 0.3 秒黑屏过渡返回主菜单。返回主菜单必须无条件解除暂停，因此不经过联机暂停守卫。
 	var scene_transition: Node = get_tree().root.get_node_or_null("SceneTransition")
 	if scene_transition != null and scene_transition.has_method("change_scene_to_file"):
 		scene_transition.call("change_scene_to_file", main_menu_scene_path)

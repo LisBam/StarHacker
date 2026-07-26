@@ -296,6 +296,14 @@ var _simulation_active: bool = true
 var _collision_shapes: Array[CollisionShape2D] = []
 ## 当前是否正在死亡动画中；默认 false，生命归零后置为 true，阻止重复受伤、攻击或重复派发死亡结算。
 var _is_dying: bool = false
+## 网络傀儡模式开关；默认 false，联机客户端复制主机敌人时置 true，此后本节点停止全部 AI、移动与本地生命结算，只保留视觉、碰撞与受击转发。
+var _network_puppet_active: bool = false
+## 网络傀儡伤害转发回调；参数为 (怪物节点, 最终伤害, 是否暴击, 冲击力, 击退方向)，由战斗同步器在进入傀儡模式时注入。
+var _network_puppet_damage_handler: Callable = Callable()
+## 网络傀儡目标位置；取值由主机状态快照驱动，_process 中向它平滑插值。
+var _network_puppet_target_position: Vector2 = Vector2.ZERO
+## 网络傀儡是否已收到首个位置快照；默认 false，未收到前保持生成位置不参与插值。
+var _network_puppet_has_state: bool = false
 
 
 func apply_spawn_variation(size_multiplier: float, attribute_multiplier: float) -> void:
@@ -332,6 +340,8 @@ func _ready() -> void:
 	refresh_ai_configuration()
 	_cache_collision_shapes()
 	_ai_update_remaining = _random.randf_range(0.0, maxf(ai_update_interval, 0.016))
+	# 普通帧处理默认关闭；_process 仅服务联机傀儡的位置插值，单机与主机敌人不产生逐帧空转开销。
+	set_process(_network_puppet_active)
 	health_changed.emit(current_health, max_health)
 
 
@@ -400,6 +410,94 @@ func is_simulation_active() -> bool:
 	return _simulation_active
 
 
+func enter_network_puppet_mode(damage_handler: Callable) -> void:
+	## 把当前怪物切换为联机傀儡；停用物理帧 AI，仅保留主机快照插值、外观、碰撞与受击转发。
+	## 傀儡不注入索敌目标，因此不会派发遇敌信号，客户端图鉴解锁由玩家自身攻击命中后的主机权威链路保证不受影响。
+	_network_puppet_active = true
+	_network_puppet_damage_handler = damage_handler
+	set_physics_process(false)
+	set_process(true)
+
+
+func is_network_puppet() -> bool:
+	## 返回当前怪物是否为联机傀儡；主机敌人扫描与调试工具通过该接口过滤复制对象。
+	return _network_puppet_active
+
+
+func _process(delta: float) -> void:
+	# 傀儡专用帧处理；普通怪物在 _ready 中关闭本回调，不产生额外开销。
+	if not _network_puppet_active or _is_dying or not _network_puppet_has_state:
+		return
+	# 本帧与快照目标的距离；超过硬同步阈值直接落位，避免长时间飞行追赶造成的错位感。
+	var distance_to_target: float = global_position.distance_to(_network_puppet_target_position)
+	if distance_to_target > 260.0:
+		global_position = _network_puppet_target_position
+		return
+	global_position = global_position.lerp(_network_puppet_target_position, clampf(12.0 * delta, 0.0, 1.0))
+
+
+func apply_network_puppet_state(target_position: Vector2, authoritative_health: float) -> void:
+	## 应用一条主机敌人状态快照；位置进入插值目标，生命直接采用主机权威值。
+	if not _network_puppet_active or _is_dying:
+		return
+	_network_puppet_target_position = target_position
+	if not _network_puppet_has_state:
+		# 首个快照直接落位；生成消息与首条快照之间的时间差不产生视觉滑移。
+		global_position = target_position
+		_network_puppet_has_state = true
+	if not is_equal_approx(current_health, authoritative_health):
+		current_health = clampf(authoritative_health, 0.0, max_health)
+		health_changed.emit(current_health, max_health)
+
+
+func play_network_puppet_death() -> void:
+	## 播放傀儡死亡表现；复用原版死亡动画流程，客户端未连接死亡信号，因此不会重复触发掉落或人口结算。
+	if not _network_puppet_active or _is_dying:
+		return
+	current_health = 0.0
+	_begin_death_sequence()
+
+
+func receive_network_final_damage(final_damage: float, is_critical: bool, impact_force: float, knockback_direction: Vector2, attacker: Node2D) -> void:
+	## 主机权威敌人接收队友已完成公式结算的最终伤害；跳过二次攻防计算，直接执行护盾、生命、飘字、仇恨与击退。
+	if _network_puppet_active or final_damage <= 0.0 or current_health <= 0.0 or _is_dying:
+		return
+	if _is_valid_combat_target(attacker):
+		# 攻击方化身与当前目标的距离比较；沿用受伤仇恨“更近才切换”的规则，避免远程队友把仇恨从近身玩家身上抢走。
+		var attacker_distance_squared: float = global_position.distance_squared_to(attacker.global_position)
+		# 当前目标距离平方；目标无效时视为无穷远，任何有效攻击方都可建立仇恨。
+		var current_target_distance_squared: float = global_position.distance_squared_to(_target.global_position) if _is_valid_combat_target(_target) else INF
+		if attacker_distance_squared < current_target_distance_squared:
+			_damage_retaliation_target = attacker
+			set_target(attacker)
+	# 护盾结算后的生命伤害；与本地受击共用同一护盾溢出规则。
+	var health_damage: float = float(_shield_component.call("absorb_damage", final_damage)) if _shield_component != null and _shield_component.has_method("absorb_damage") else final_damage
+	current_health = clampf(current_health - health_damage, 0.0, max_health)
+	health_changed.emit(current_health, max_health)
+	DAMAGE_NUMBER_POPUP_SCRIPT.spawn_damage_number(get_tree().current_scene, global_position, final_damage, is_critical, get_instance_id())
+	if impact_force > 0.0 and not knockback_direction.is_zero_approx():
+		_apply_impact_distance(knockback_direction.normalized(), impact_force)
+	if current_health <= 0.0:
+		_begin_death_sequence()
+	else:
+		_spawn_hit_effect()
+
+
+func _forward_network_puppet_damage(damage: float, source: Node) -> void:
+	## 傀儡受击转发；在受击端完成与本地敌人一致的攻防与暴击结算，随后把最终伤害交给同步器发往主机。
+	if damage <= 0.0 or current_health <= 0.0 or _is_dying or not _network_puppet_damage_handler.is_valid():
+		return
+	# 伤害结算结果；使用与本地受击完全相同的公式与来源兼容规则，保证联机与单机数值一致。
+	var damage_result: Dictionary = COMBAT_DAMAGE_CALCULATOR_SCRIPT.calculate_damage(damage, _get_source_combat_value(source, "get_attack_power", 100.0), defense_power, _get_source_combat_value(source, "get_critical_chance", 0.0), _get_source_combat_value(source, "get_critical_damage_multiplier", 1.5))
+	# 最终伤害；本地立即显示飘字提供打击反馈，权威生命变化由主机快照回传。
+	var final_damage: float = float(damage_result.get("damage", 0))
+	if final_damage <= 0.0:
+		return
+	DAMAGE_NUMBER_POPUP_SCRIPT.spawn_damage_number(get_tree().current_scene, global_position, final_damage, bool(damage_result.get("is_critical", false)), get_instance_id())
+	_spawn_hit_effect()
+	_network_puppet_damage_handler.call(self, final_damage, bool(damage_result.get("is_critical", false)), _get_source_impact_force(source), _get_source_knockback_direction(source))
+
+
 func _cache_collision_shapes() -> void:
 	_collision_shapes.clear()
 	# 后代节点列表；取值为怪物全部子孙节点，默认只缓存 CollisionShape2D 供休眠时切换。
@@ -451,7 +549,11 @@ func _refresh_combat_target() -> void:
 			set_target(_damage_retaliation_target)
 		return
 	_damage_retaliation_target = null
-	var player_candidate: Node2D = _primary_target if _is_valid_combat_target(_primary_target) else _find_first_valid_target_in_group(PLAYER_COMBAT_TARGET_GROUP)
+	# 玩家阵营候选目标；联机时玩家组同时包含本地玩家与远程队友化身，统一取视野内最近者；单机组内只有一名玩家，行为与旧实现一致。
+	var player_candidate: Node2D = _find_nearest_valid_target_in_group(PLAYER_COMBAT_TARGET_GROUP)
+	if player_candidate == null and _is_valid_combat_target(_primary_target):
+		# 视野外保底候选；保持旧实现中长期玩家引用参与距离校验的语义，供脱战判定沿用原路径。
+		player_candidate = _primary_target
 	if _is_target_in_acquisition_range(player_candidate):
 		_primary_target = player_candidate
 		if _target != player_candidate:
@@ -694,6 +796,10 @@ func _get_resolved_attack_cooldown() -> float:
 
 
 func apply_damage(damage: float, source: Node) -> void:
+	if _network_puppet_active:
+		# 傀儡受击不做本地结算；伤害公式在受击端完成后转发主机，由主机权威敌人落账。
+		_forward_network_puppet_damage(damage, source)
+		return
 	if damage <= 0.0 or current_health <= 0.0 or _is_dying:
 		return
 

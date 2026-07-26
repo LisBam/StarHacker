@@ -30,6 +30,10 @@ const NETWORK_DAMAGE_PROXY_SCRIPT: Script = preload("res://scripts/game/network_
 const ENEMY_PROJECTILE_SCENE: PackedScene = preload("res://scenes/projectiles/enemy_projectile.tscn")
 ## 远程弹体视觉场景路径白名单前缀；只允许实例化弹体目录下的场景，防止异常消息加载任意资源。
 const REMOTE_PROJECTILE_PATH_PREFIX: String = "res://scenes/projectiles/"
+## 全局窗口样式指南；观战切换按钮复用主要按钮语义配色，与局外面板保持一致。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+## 观战镜头跟随速率；数值越大跟随越紧，默认 8 在化身插值之上再叠加一层平滑形成柔和观战移动。
+const SPECTATOR_CAMERA_FOLLOW_RATE: float = 8.0
 
 ## 联机会话服务缓存；由初始化时从 AutoLoad 解析，本节点全部收发都经过它。
 var _network_session: Node = null
@@ -97,6 +101,18 @@ var _toast_container: VBoxContainer = null
 var _remote_projectile_scene_cache: Dictionary = {}
 ## 本机是否已广播离场事件；离场事件只广播一次，撤离与退出共用。
 var _departure_broadcasted: bool = false
+## 观战模式是否激活；本机死亡且仍有存活队友时置 true，期间死亡结算被推迟。
+var _spectator_active: bool = false
+## 当前观战目标成员 peer_id；0 表示无目标，目标死亡或离场时自动切换。
+var _spectator_target_peer_id: int = 0
+## 观战镜头节点；懒创建并复用，观战期间设为当前相机并平滑跟随目标化身。
+var _spectator_camera: Camera2D = null
+## 观战界面画布层；承载目标横幅、左右切换箭头与结算退出按钮，懒创建并按观战状态显隐。
+var _spectator_layer: CanvasLayer = null
+## 观战目标横幅标签；显示当前被观战成员的昵称与角色。
+var _spectator_banner_label: Label = null
+## 观战结束回调；由战斗 HUD 在推迟死亡结算时注入，观战结束后调用以恢复原死亡结算流程。
+var _spectator_finished_callback: Callable = Callable()
 
 
 func initialize(game_world: Node2D, player: Node2D, monster_parent: Node, monster_simulation_manager: Node) -> void:
@@ -157,6 +173,7 @@ func _process(delta: float) -> void:
 			_enemy_state_remaining = ENEMY_STATE_INTERVAL
 			_host_scan_and_broadcast_enemies()
 	_update_pending_pickups(delta)
+	_update_spectator_state(delta)
 
 
 # ---------------------------------------------------------------------------
@@ -886,6 +903,199 @@ func _remove_local_chest_by_key(chest_key: String) -> void:
 func _build_chest_key(chest_position: Vector2) -> String:
 	## 把宝箱世界位置量化为稳定字符串键；各端由同种子生成的同一宝箱得到相同键。
 	return "%.1f_%.1f" % [chest_position.x, chest_position.y]
+
+
+# ---------------------------------------------------------------------------
+# 死亡观战
+# ---------------------------------------------------------------------------
+
+func try_begin_spectator_mode(finished_callback: Callable) -> bool:
+	## 尝试进入死亡观战；仅当仍有存活队友时接管视角并返回 true，调用方（战斗 HUD）据此推迟死亡结算。
+	## 观战期间目标死亡或离场会自动切换，全部队友倒下、离场或玩家点击“结算退出”后调用回调恢复原死亡结算流程。
+	if _spectator_active or _network_session == null:
+		return false
+	# 首个观战目标；没有任何存活队友时不进入观战，调用方立即执行原结算。
+	var initial_target_peer_id: int = _find_alive_spectator_target(0, 1)
+	if initial_target_peer_id <= 0:
+		return false
+	_spectator_finished_callback = finished_callback
+	_spectator_active = true
+	_build_spectator_ui()
+	_spectator_layer.visible = true
+	if _spectator_camera == null:
+		_spectator_camera = Camera2D.new()
+		_spectator_camera.name = "SpectatorCamera"
+		_spectator_camera.zoom = _get_player_camera_zoom()
+		add_child(_spectator_camera)
+	_set_spectator_target(initial_target_peer_id)
+	_spectator_camera.make_current()
+	return true
+
+
+func is_spectator_active() -> bool:
+	## 返回观战模式是否进行中；供调试工具与验证脚本查询。
+	return _spectator_active
+
+
+func _update_spectator_state(delta: float) -> void:
+	## 观战逐帧维护；复核目标有效性、自动切换与镜头平滑跟随，无人可观战时结束并交还结算。
+	if not _spectator_active:
+		return
+	# 当前目标化身；目标死亡、离场或节点失效时自动切到下一名存活队友。
+	var target_avatar: Node2D = _remote_avatars.get(_spectator_target_peer_id) as Node2D
+	if not _is_spectator_target_valid(_spectator_target_peer_id):
+		# 下一个存活目标；返回 0 表示全员倒下或离场，观战结束。
+		var next_target_peer_id: int = _find_alive_spectator_target(_spectator_target_peer_id, 1)
+		if next_target_peer_id <= 0:
+			_end_spectator_mode()
+			return
+		_set_spectator_target(next_target_peer_id)
+		target_avatar = _remote_avatars.get(_spectator_target_peer_id) as Node2D
+	if _spectator_camera != null and target_avatar != null and is_instance_valid(target_avatar):
+		_spectator_camera.global_position = _spectator_camera.global_position.lerp(target_avatar.global_position, clampf(SPECTATOR_CAMERA_FOLLOW_RATE * delta, 0.0, 1.0))
+
+
+func _is_spectator_target_valid(peer_id: int) -> bool:
+	## 判断成员是否仍可被观战；要求化身有效、未离场且远端状态未死亡。
+	if peer_id <= 0 or _departed_peer_ids.has(peer_id):
+		return false
+	# 目标化身节点；断线成员的化身已由名册回调移除。
+	var avatar: Node = _remote_avatars.get(peer_id) as Node
+	return avatar != null and is_instance_valid(avatar) and avatar.has_method("is_dead") and not bool(avatar.call("is_dead"))
+
+
+func _find_alive_spectator_target(from_peer_id: int, direction: int) -> int:
+	## 按 peer_id 升序在存活队友之间循环查找观战目标；from_peer_id 为 0 或已失效时返回首个存活者，无人存活返回 0。
+	# 存活成员有序列表；顺序稳定保证左右切换在各次调用间一致。
+	var alive_peer_ids: Array[int] = []
+	# 化身 peer_id 有序副本；字典键顺序不稳定，先排序再过滤。
+	var sorted_peer_ids: Array = _remote_avatars.keys()
+	sorted_peer_ids.sort()
+	for peer_id in sorted_peer_ids:
+		if _is_spectator_target_valid(int(peer_id)):
+			alive_peer_ids.append(int(peer_id))
+	if alive_peer_ids.is_empty():
+		return 0
+	# 当前目标在存活列表中的下标；-1 表示当前目标已失效，直接取首个存活者。
+	var current_index: int = alive_peer_ids.find(from_peer_id)
+	if current_index < 0:
+		return alive_peer_ids[0]
+	return alive_peer_ids[wrapi(current_index + direction, 0, alive_peer_ids.size())]
+
+
+func _set_spectator_target(peer_id: int) -> void:
+	## 切换观战目标；镜头直接落位到新目标避免跨越半张地图的长镜头漂移，横幅同步刷新昵称与角色。
+	_spectator_target_peer_id = peer_id
+	# 新目标化身；有效时镜头立即对位。
+	var target_avatar: Node2D = _remote_avatars.get(peer_id) as Node2D
+	if _spectator_camera != null and target_avatar != null and is_instance_valid(target_avatar):
+		_spectator_camera.global_position = target_avatar.global_position
+	if _spectator_banner_label != null and _network_session != null:
+		_spectator_banner_label.text = "观战中：%s·%s" % [str(_network_session.call("get_peer_display_name", peer_id)), _get_character_display_name(str(_network_session.call("get_peer_character_id", peer_id)))]
+
+
+func _end_spectator_mode() -> void:
+	## 结束观战；恢复本地玩家相机、隐藏观战界面并调用结算回调交还死亡结算流程。
+	if not _spectator_active:
+		return
+	_spectator_active = false
+	_spectator_target_peer_id = 0
+	if _spectator_layer != null:
+		_spectator_layer.visible = false
+	# 本地玩家相机；结算界面不依赖相机，但恢复当前相机可避免结算背景停留在他人位置。
+	if _player != null and is_instance_valid(_player):
+		var player_camera: Camera2D = _player.get_node_or_null("Camera2D") as Camera2D
+		if player_camera != null:
+			player_camera.make_current()
+	# 结算回调副本；先清空成员变量再调用，防止回调内部重入观战状态。
+	var finished_callback: Callable = _spectator_finished_callback
+	_spectator_finished_callback = Callable()
+	if finished_callback.is_valid():
+		finished_callback.call()
+
+
+func _build_spectator_ui() -> void:
+	## 懒构建观战界面；顶部目标横幅、屏幕两侧切换箭头与底部“结算退出”按钮，构建一次后按观战状态显隐。
+	if _spectator_layer != null:
+		return
+	_spectator_layer = CanvasLayer.new()
+	_spectator_layer.name = "SpectatorLayer"
+	# 观战层级；低于事件提示层，高于普通战斗 HUD。
+	_spectator_layer.layer = 54
+	add_child(_spectator_layer)
+	# 观战根控件；铺满屏幕但不拦截鼠标，只有按钮自身可交互。
+	var spectator_root: Control = Control.new()
+	spectator_root.name = "SpectatorRoot"
+	spectator_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	spectator_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_spectator_layer.add_child(spectator_root)
+	_spectator_banner_label = Label.new()
+	_spectator_banner_label.name = "SpectatorBanner"
+	_spectator_banner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_spectator_banner_label.add_theme_font_size_override("font_size", 20)
+	_spectator_banner_label.add_theme_color_override("font_color", Color(0.62, 0.88, 1.0, 1.0))
+	# 横幅定位；位于屏幕顶部中央、事件提示下方。
+	_spectator_banner_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_spectator_banner_label.position = Vector2(-220.0, 108.0)
+	_spectator_banner_label.custom_minimum_size = Vector2(440.0, 0.0)
+	_spectator_banner_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	spectator_root.add_child(_spectator_banner_label)
+	# 左切换箭头；位于屏幕左边缘垂直居中，切换到上一名存活队友。
+	var previous_button: Button = Button.new()
+	previous_button.name = "SpectatePreviousButton"
+	previous_button.text = "◀"
+	previous_button.custom_minimum_size = Vector2(64.0, 96.0)
+	previous_button.set_anchors_preset(Control.PRESET_CENTER_LEFT)
+	previous_button.position = Vector2(24.0, -48.0)
+	previous_button.add_theme_font_size_override("font_size", 26)
+	UI_STYLE_GUIDE.apply_primary_button(previous_button)
+	previous_button.pressed.connect(_on_spectator_switch_pressed.bind(-1))
+	spectator_root.add_child(previous_button)
+	# 右切换箭头；位于屏幕右边缘垂直居中，切换到下一名存活队友。
+	var next_button: Button = Button.new()
+	next_button.name = "SpectateNextButton"
+	next_button.text = "▶"
+	next_button.custom_minimum_size = Vector2(64.0, 96.0)
+	next_button.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+	next_button.position = Vector2(-88.0, -48.0)
+	next_button.add_theme_font_size_override("font_size", 26)
+	UI_STYLE_GUIDE.apply_primary_button(next_button)
+	next_button.pressed.connect(_on_spectator_switch_pressed.bind(1))
+	spectator_root.add_child(next_button)
+	# 结算退出按钮；主动结束观战并立即执行推迟的死亡结算。
+	var settle_button: Button = Button.new()
+	settle_button.name = "SpectateSettleButton"
+	settle_button.text = "结算退出"
+	settle_button.custom_minimum_size = Vector2(160.0, 44.0)
+	settle_button.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	settle_button.position = Vector2(-80.0, -132.0)
+	UI_STYLE_GUIDE.apply_danger_button(settle_button)
+	settle_button.pressed.connect(_on_spectator_settle_pressed)
+	spectator_root.add_child(settle_button)
+	_spectator_layer.visible = false
+
+
+func _on_spectator_switch_pressed(direction: int) -> void:
+	## 左右箭头回调；在存活队友之间循环切换观战目标，无其他存活者时保持当前目标。
+	# 下一个观战目标；只有一名存活队友时返回其本身，切换等效无操作。
+	var next_target_peer_id: int = _find_alive_spectator_target(_spectator_target_peer_id, direction)
+	if next_target_peer_id > 0 and next_target_peer_id != _spectator_target_peer_id:
+		_set_spectator_target(next_target_peer_id)
+
+
+func _on_spectator_settle_pressed() -> void:
+	## “结算退出”回调；玩家主动放弃观战，立即恢复死亡结算流程。
+	_end_spectator_mode()
+
+
+func _get_player_camera_zoom() -> Vector2:
+	## 返回本地玩家战斗相机缩放；观战镜头沿用同一视野比例，相机缺失时回退项目默认 0.95。
+	if _player != null and is_instance_valid(_player):
+		# 玩家相机节点；战斗场景固定挂在玩家预制体下。
+		var player_camera: Camera2D = _player.get_node_or_null("Camera2D") as Camera2D
+		if player_camera != null:
+			return player_camera.zoom
+	return Vector2(0.95, 0.95)
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,8 @@ const BATTLE_ROYALE_SPAWN_MIN_SPACING: float = 1600.0
 const BATTLE_ROYALE_SPAWN_ATTEMPT_COUNT: int = 48
 ## 大逃杀出生点障碍安全半径；默认 40 像素，大于玩家 18 像素碰撞半径以保留贴墙间隙。
 const BATTLE_ROYALE_SPAWN_CLEARANCE_RADIUS: float = 40.0
+## 联机每名额外成员的敌人人口倍率；默认 1.5，实际倍率为该值的（成员数-1）次幂，作用于开局布怪、人口曲线目标与同时活跃敌人上限。
+const NETWORK_POPULATION_MULTIPLIER_PER_EXTRA_PLAYER: float = 1.5
 ## 宝箱高品质掉落概率；普通、中级、高级和极品分别使用 10%、30%、55% 和 75%，极品另保证至少 5 件高品质物品。
 const CHEST_HIGH_QUALITY_CHANCES: Dictionary = {"common": 0.10, "medium": 0.30, "high": 0.55, "supreme": 0.75}
 ## 宝箱武器类别权重；默认 0.25 表示每个掉落槽有 25% 概率选择武器。
@@ -379,6 +381,8 @@ var _has_network_extraction_position: bool = false
 var _network_battle_royale_active: bool = false
 ## 联机全员出生点表；键为 peer_id，值为世界坐标，大逃杀模式下由共享随机流确定性推导，组队模式为空。
 var _network_spawn_positions: Dictionary = {}
+## 联机敌人人口倍率；默认 1.0，开局按成员数量解析为 1.5 的（成员数-1）次幂并在本局内固定，仅主机的人口逻辑消费。
+var _network_population_multiplier: float = 1.0
 
 ## 玩家节点缓存；默认按 player_path 获取，允许为空并以世界原点作为生成中心。
 @onready var _player: Node2D = get_node_or_null(player_path) as Node2D
@@ -433,6 +437,9 @@ func _ready() -> void:
 				_monster_simulation_manager.connect("virtual_monster_died", Callable(self, "_on_monster_died"))
 			if _monster_simulation_manager.has_signal("monster_encountered") and not _monster_simulation_manager.is_connected("monster_encountered", Callable(self, "_on_monster_encountered")):
 				_monster_simulation_manager.connect("monster_encountered", Callable(self, "_on_monster_encountered"))
+			if _network_combat_active:
+				# 联机同时活跃敌人上限；随人口倍率同步放大，避免多名玩家分散活动时全局真实节点名额成为各自周边密度瓶颈。
+				_monster_simulation_manager.set("max_materialized_monsters", _apply_network_population_scale(int(_monster_simulation_manager.get("max_materialized_monsters"))))
 		_spawn_monster_batch()
 	_monster_replenish_remaining = monster_replenish_interval
 	if _network_combat_active:
@@ -524,6 +531,7 @@ func _resolve_network_combat_session() -> void:
 	_network_is_host = false
 	_network_battle_royale_active = false
 	_network_spawn_positions.clear()
+	_network_population_multiplier = 1.0
 	_network_extraction_random = null
 	# 联机会话服务；由自动加载提供，缺失或战斗会话未激活时保持单机流程。
 	var network_session: Node = get_tree().root.get_node_or_null("NetworkSession")
@@ -534,6 +542,9 @@ func _resolve_network_combat_session() -> void:
 	_network_combat_active = true
 	_network_is_host = bool(network_session.call("is_session_host"))
 	_network_battle_royale_active = network_session.has_method("is_battle_royale_mode") and bool(network_session.call("is_battle_royale_mode"))
+	# 本局成员数量；开局时刻的名册规模决定人口倍率，中途离场不缩减本局人口目标。
+	var member_count: int = (network_session.call("get_roster_snapshot") as Array).size()
+	_network_population_multiplier = pow(NETWORK_POPULATION_MULTIPLIER_PER_EXTRA_PLAYER, maxf(float(member_count - 1), 0.0))
 	# 共享地图种子；非零时覆盖检查器种子，_prepare_map_seed 将据此产生确定性世界。
 	var shared_seed: int = int(network_session.call("get_shared_map_seed"))
 	if shared_seed != 0:
@@ -2327,8 +2338,8 @@ func _on_loot_chest_removed(chest: Node) -> void:
 
 
 func _spawn_monster_batch(requested_count: int = -1) -> void:
-	# 实际生成数量；负值使用开局配置，补充刷新会传入当前缺口对应的批次数量。
-	var resolved_spawn_count: int = monster_spawn_count if requested_count < 0 else requested_count
+	# 实际生成数量；负值使用开局配置（联机按成员数量倍率放大），补充刷新会传入当前缺口对应的批次数量。
+	var resolved_spawn_count: int = _apply_network_population_scale(monster_spawn_count) if requested_count < 0 else requested_count
 	if not _has_monster_scene_available() or resolved_spawn_count <= 0:
 		return
 
@@ -2535,12 +2546,19 @@ func _get_target_monster_population() -> int:
 	if _survival_time_seconds <= first_milestone_time:
 		# 第一阶段比例；取值 0 到 1，控制人口从 200 连续增长到 1200。
 		var first_stage_ratio: float = clampf(_survival_time_seconds / first_milestone_time, 0.0, 1.0)
-		return roundi(lerpf(float(initial_population), float(monster_population_five_minute_count), first_stage_ratio))
+		return _apply_network_population_scale(roundi(lerpf(float(initial_population), float(monster_population_five_minute_count), first_stage_ratio)))
 	if _survival_time_seconds <= second_milestone_time:
 		# 第二阶段比例；取值 0 到 1，控制人口从 1200 连续增长到 3200。
 		var second_stage_ratio: float = clampf((_survival_time_seconds - first_milestone_time) / (second_milestone_time - first_milestone_time), 0.0, 1.0)
-		return roundi(lerpf(float(monster_population_five_minute_count), float(monster_population_ten_minute_count), second_stage_ratio))
-	return maxi(monster_population_ten_minute_count, 0)
+		return _apply_network_population_scale(roundi(lerpf(float(monster_population_five_minute_count), float(monster_population_ten_minute_count), second_stage_ratio)))
+	return _apply_network_population_scale(maxi(monster_population_ten_minute_count, 0))
+
+
+func _apply_network_population_scale(base_population: int) -> int:
+	## 按联机成员数量缩放敌人人口；每多一名成员整体乘 1.5，单机、训练场与单人房间返回原值。
+	if not _network_combat_active or _network_population_multiplier <= 1.0:
+		return base_population
+	return roundi(float(base_population) * _network_population_multiplier)
 
 
 func _on_monster_encountered(monster_id: String) -> void:

@@ -3007,6 +3007,17 @@ func _on_player_died() -> void:
 		# 训练场不进入正式结算；下一空闲帧恢复玩家生命并重新开放输入，避免死亡标记永久锁死 HUD。
 		call_deferred("_revive_training_player")
 		return
+	# 联机观战分支；仍有存活队友时由战斗同步器接管视角并推迟死亡结算，观战结束后经回调恢复原结算流程，单机无同步器时直接结算。
+	var network_combat_sync: Node = get_tree().get_first_node_in_group("network_combat_sync")
+	if network_combat_sync != null and network_combat_sync.has_method("try_begin_spectator_mode") and bool(network_combat_sync.call("try_begin_spectator_mode", Callable(self, "_show_deferred_death_settlement"))):
+		return
+	_show_failure_settlement("角色死亡", 1.0 - clampf(failure_backpack_loss_ratio, 0.0, 1.0), 1.0 - clampf(failure_equipment_loss_ratio, 0.0, 1.0))
+
+
+func _show_deferred_death_settlement() -> void:
+	## 观战结束回调；执行被推迟的死亡结算，参数与即时死亡结算完全一致，重复结算由结算完成标记保护。
+	if _is_training_mode or not _is_player_dead:
+		return
 	_show_failure_settlement("角色死亡", 1.0 - clampf(failure_backpack_loss_ratio, 0.0, 1.0), 1.0 - clampf(failure_equipment_loss_ratio, 0.0, 1.0))
 
 

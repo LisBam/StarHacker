@@ -40,6 +40,8 @@ const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 const PROGRESS_SLIDER_VISUAL_SCRIPT: Script = preload("res://scripts/ui/progress_slider_visual.gd")
 ## UI 风格选择组件；暂停设置复用其选项构建、服务绑定、即时保存与全局刷新逻辑。
 const UI_STYLE_SELECTOR_SCRIPT: Script = preload("res://scripts/ui/ui_style_selector.gd")
+## 横幅通知开关组件；暂停设置复用其开关构建、服务绑定与即时保存逻辑。
+const BANNER_NOTIFICATION_TOGGLE_SCRIPT: Script = preload("res://scripts/ui/banner_notification_toggle.gd")
 ## 主动技能栏脚本；动态显示三个技能槽的实际按键、名称和冷却，不接管技能输入状态机。
 const ACTIVE_SKILL_BAR_SCRIPT: Script = preload("res://scripts/ui/active_skill_bar.gd")
 ## 局内共享槽位视图；左侧技能栏和右侧纯展示武器栏直接复用同一视觉组件。
@@ -353,6 +355,8 @@ var _pause_key_binding_back_button: Button
 var _pause_settings_home_controls: Array[Control] = []
 ## 暂停设置 UI 风格选择组件；默认运行时插入主音量下方并与主菜单共享同一持久化服务。
 var _pause_ui_style_selector: Control
+## 暂停设置横幅通知开关组件；默认运行时插入 UI 风格行下方并与主菜单共享同一持久化服务。
+var _pause_banner_notification_toggle: Control
 ## 暂停设置存档传输控件；默认运行时创建，导出仅包含各服务已经落盘的持久化状态。
 ## 删除功能补充：删除会丢弃本局未落盘内存变化，并通过重启恢复到首次启动默认状态。
 var _pause_save_transfer_control: Control
@@ -2052,6 +2056,15 @@ func _build_pause_key_binding_navigation() -> void:
 		_pause_settings_content.move_child(ui_style_selector, pause_master_volume_row.get_index() + 1)
 		_pause_ui_style_selector = ui_style_selector
 
+	# 暂停设置横幅通知开关组件；放在 UI 风格行之后，与主菜单设置共享同一横幅通知服务状态。
+	var banner_notification_toggle: Control = BANNER_NOTIFICATION_TOGGLE_SCRIPT.new() as Control
+	if banner_notification_toggle != null:
+		banner_notification_toggle.name = "PauseBannerNotificationToggle"
+		_pause_settings_content.add_child(banner_notification_toggle)
+		if _pause_ui_style_selector != null:
+			_pause_settings_content.move_child(banner_notification_toggle, _pause_ui_style_selector.get_index() + 1)
+		_pause_banner_notification_toggle = banner_notification_toggle
+
 	# 按键绑定入口按钮；取值为 Button，默认放在暂停设置首页用于进入独立按键绑定页。
 	var key_binding_button: Button = Button.new()
 	key_binding_button.name = "PauseKeyBindingPageButton"
@@ -2073,6 +2086,7 @@ func _build_pause_key_binding_navigation() -> void:
 		get_node("Root/PauseOverlay/PauseSettingsPanel/PauseSettingsMargin/PauseSettingsContent/PauseSettingsTitle") as Control,
 		get_node("Root/PauseOverlay/PauseSettingsPanel/PauseSettingsMargin/PauseSettingsContent/PauseMasterVolumeRow") as Control,
 		_pause_ui_style_selector,
+		_pause_banner_notification_toggle,
 		_pause_key_binding_button,
 		_pause_save_transfer_control,
 		get_node("Root/PauseOverlay/PauseSettingsPanel/PauseSettingsMargin/PauseSettingsContent/PauseSettingsSpacer") as Control,

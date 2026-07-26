@@ -3,6 +3,7 @@ class_name LeveragePositionDialog
 
 ## 杠杆开仓弹窗只负责方向、杠杆倍数与整数保证金的输入和费用预览，不直接读取行情、余额或存档服务。
 ## 宿主负责传入实时价格与可用证券币并持续刷新，确认后由股市服务按点击瞬间的实时行情执行最终原子开仓。
+## 加仓模式补充；present_add 复用同一界面为现有仓位追加保证金，方向与倍数锁定为仓位配置，预览展示合并后新均价与新强平价。
 
 signal leverage_confirmed(direction: int, leverage: int, margin: int)
 
@@ -58,6 +59,12 @@ var _description_label: Label
 var _result_label: Label
 ## 界面是否已经初始化；默认 false，公开展示接口会通过幂等初始化保证控件可用。
 var _interface_initialized: bool = false
+## 当前是否为加仓模式；默认 false 表示常规开仓，加仓模式锁定方向与倍数并把输入金额视为追加保证金。
+var _is_add_mode: bool = false
+## 加仓模式的现有仓位保证金；默认 0.0，仅加仓模式使用，用于预览合并后总保证金。
+var _position_margin: float = 0.0
+## 加仓模式的现有仓位开仓均价；默认 0.0，仅加仓模式使用，用于按现价本地估算现有浮动盈亏。
+var _position_entry_price: float = 0.0
 
 
 func _ready() -> void:
@@ -79,13 +86,43 @@ func present_open(stock_display_name: String, current_price: float, available_ba
 		_multipliers.clear()
 		for multiplier in multipliers:
 			_multipliers.append(int(multiplier))
+	_is_add_mode = false
+	_position_margin = 0.0
+	_position_entry_price = 0.0
 	_selected_direction = DIRECTION_LONG
 	_selected_leverage = _multipliers[0]
 	_rebuild_multiplier_buttons()
 	_apply_direction_selection()
+	_set_selection_locked(false)
 	title = "杠杆开仓 · %s" % stock_display_name
 	get_ok_button().text = "确认开仓"
 	# 保证金输入重置；范围按当前余额与选中倍数收紧，默认停在最低保证金。
+	_refresh_margin_range(true)
+	_refresh_preview()
+	popup_centered(Vector2i(dialog_width, dialog_height))
+
+
+func present_add(stock_display_name: String, position: Dictionary, current_price: float, available_balance: float, fee_ratio: float, minimum_margin: int, liquidation_loss_ratio: float) -> void:
+	## 展示杠杆加仓界面；方向与倍数锁定为现有仓位配置，输入金额为追加保证金，最终合并由股市服务按确认瞬间行情执行。
+	_ensure_interface_initialized()
+	_stock_display_name = stock_display_name
+	_current_price = maxf(current_price, 0.01)
+	_available_balance = maxf(available_balance, 0.0)
+	_fee_ratio = clampf(fee_ratio, 0.0, 1.0)
+	_minimum_margin = maxi(minimum_margin, 1)
+	_liquidation_loss_ratio = clampf(liquidation_loss_ratio, 0.0, 1.0)
+	_is_add_mode = true
+	_position_margin = maxf(float(position.get("margin", 0.0)), 0.0)
+	_position_entry_price = maxf(float(position.get("entry_price", 0.0)), 0.01)
+	_selected_direction = DIRECTION_SHORT if int(position.get("direction", DIRECTION_LONG)) < 0 else DIRECTION_LONG
+	# 现有仓位倍数；加仓不允许修改倍数，界面只做锁定展示。
+	_selected_leverage = maxi(int(position.get("leverage", _multipliers[0])), 1)
+	_rebuild_multiplier_buttons()
+	_apply_direction_selection()
+	_set_selection_locked(true)
+	title = "杠杆加仓 · %s" % stock_display_name
+	get_ok_button().text = "确认加仓"
+	# 追加保证金输入重置；范围按当前余额与锁定倍数收紧，默认停在最低追加额。
 	_refresh_margin_range(true)
 	_refresh_preview()
 	popup_centered(Vector2i(dialog_width, dialog_height))
@@ -251,6 +288,14 @@ func _apply_multiplier_selection() -> void:
 		(_multiplier_buttons[multiplier] as Button).set_pressed_no_signal(int(multiplier) == _selected_leverage)
 
 
+func _set_selection_locked(locked: bool) -> void:
+	## 切换方向与倍数按钮的锁定状态；加仓模式沿用现有仓位配置，只保留追加保证金输入可交互。
+	for direction in _direction_buttons.keys():
+		(_direction_buttons[direction] as Button).disabled = locked
+	for multiplier in _multiplier_buttons.keys():
+		(_multiplier_buttons[multiplier] as Button).disabled = locked
+
+
 func _apply_dialog_visual_style() -> void:
 	## 应用半透明深色窗口样式；规格与证券转账弹窗一致，保持股市弹窗视觉统一。
 	var dialog_theme: Theme = UI_STYLE_GUIDE.create_theme()
@@ -339,15 +384,30 @@ func _refresh_margin_range(reset_to_minimum: bool) -> void:
 
 func _refresh_preview() -> void:
 	## 刷新说明与费用预览；余额不足最低保证金时禁用确认按钮，最终成交仍由股市服务重新校验。
+	## 加仓模式补充；加仓时预览合并后总保证金、新开仓均价与新强平价，公式与股市服务的盈亏守恒合并完全一致。
 	_description_label.text = "%s · 现价 %.2f 证券币 · 可用 %.2f 证券币" % [_stock_display_name, _current_price, _available_balance]
-	# 当前选择保证金；预览与确认信号使用同一取整结果。
+	# 当前选择保证金；预览与确认信号使用同一取整结果，加仓模式下代表追加保证金。
 	var margin: int = clampi(roundi(_margin_spin_box.value), _minimum_margin, maxi(_get_current_maximum_margin(), _minimum_margin))
-	# 当前名义本金；保证金乘选中倍数。
+	# 当前名义本金；保证金乘选中倍数，加仓模式下代表追加名义本金。
 	var notional: float = float(margin) * float(_selected_leverage)
-	# 当前开仓总花费；含名义本金手续费。
+	# 当前开仓总花费；含名义本金手续费，加仓模式下为追加保证金加追加名义本金手续费。
 	var total_cost: float = _calculate_total_cost(margin)
 	# 预计强平价；按当前实时价估算，最终以确认瞬间的实际开仓价为准。
 	var direction_sign: float = -1.0 if _selected_direction < 0 else 1.0
+	if _is_add_mode:
+		# 现有仓位浮动盈亏；与股市服务同一公式，按现价和现有均价本地估算。
+		var previous_profit: float = snappedf(direction_sign * (_current_price / _position_entry_price - 1.0) * _position_margin * float(_selected_leverage), 0.01)
+		# 合并后保证金；现有保证金加追加保证金。
+		var merged_margin: float = _position_margin + float(margin)
+		# 合并后名义本金；保证金增加后按锁定倍数放大。
+		var merged_notional: float = merged_margin * float(_selected_leverage)
+		# 合并后新开仓均价；由浮动盈亏守恒反解，与服务合并公式一致。
+		var merged_entry_price: float = maxf(snappedf(_current_price / (1.0 + previous_profit / (direction_sign * merged_notional)), 0.01), 0.01)
+		# 合并后预计强平价；公式与开仓一致，只是换用新均价。
+		var merged_liquidation_price: float = maxf(snappedf(merged_entry_price * (1.0 - direction_sign * _liquidation_loss_ratio / float(_selected_leverage)), 0.01), 0.0)
+		_result_label.text = "追加保证金 %d · 手续费 %.2f · 总花费 %.2f\n加仓后保证金 %.0f · 新均价 %.2f · 新强平价 %.2f" % [margin, total_cost - float(margin), total_cost, merged_margin, merged_entry_price, merged_liquidation_price]
+		get_ok_button().disabled = total_cost > _available_balance + 0.0001
+		return
 	# 强平触发价格变化率；强平亏损线除以杠杆倍数。
 	var liquidation_price: float = maxf(snappedf(_current_price * (1.0 - direction_sign * _liquidation_loss_ratio / float(_selected_leverage)), 0.01), 0.0)
 	_result_label.text = "名义本金 %.2f · 手续费 %.2f · 总花费 %.2f\n预计强平价 %.2f（浮亏达保证金 %.0f%% 强制平仓）" % [notional, total_cost - float(margin), total_cost, liquidation_price, _liquidation_loss_ratio * 100.0]

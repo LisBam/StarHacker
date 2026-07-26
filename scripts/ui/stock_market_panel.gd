@@ -18,6 +18,8 @@ const COMMON_CONFIRMATION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/comm
 const SECURITIES_TRANSFER_DIALOG_SCRIPT: Script = preload("res://scripts/ui/securities_transfer_dialog.gd")
 ## 杠杆开仓弹窗脚本；负责方向、倍数与整数保证金输入和费用预览，最终成交由股市服务原子校验。
 const LEVERAGE_POSITION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/leverage_position_dialog.gd")
+## 记录列表弹窗脚本；交易历史记录与通知中心共用同一滚动文本列表窗口。
+const STOCK_RECORD_LIST_DIALOG_SCRIPT: Script = preload("res://scripts/ui/stock_record_list_dialog.gd")
 ## 全局窗口样式指南；为股市基准界面补充统一按钮、输入、滚动和内部面板主题。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 标准股票卡片尺寸；固定 160×72，与项目物品卡片规范一致。
@@ -71,7 +73,16 @@ var _leverage_close_button: Button
 ## 杠杆持仓卡片按钮表；键为稳定股票标识，值为长期复用的透明按钮宿主，无仓位时只隐藏不释放。
 var _leverage_buttons: Dictionary = {}
 ## 杠杆开仓弹窗；同一实例复用全部股票的开仓输入，实际建仓由股市服务执行。
+## 加仓复用补充；选中股票已有杠杆仓位时同一弹窗实例切换为加仓模式，追加保证金由股市服务合并。
 var _leverage_dialog: LeveragePositionDialog
+## 通知按钮；位于标题栏关闭按钮左侧，点击后打开强平等重要通知的通知中心窗口。
+var _notification_button: Button
+## 历史记录按钮；位于底部“全部持仓”标题上方，点击后打开交易历史记录窗口。
+var _trade_history_button: Button
+## 记录列表弹窗；交易历史与通知中心复用同一实例，按打开入口填充不同标题与内容。
+var _record_list_dialog: StockRecordListDialog
+## 记录弹窗当前展示模式；取值 trade、notification 或空字符串，用于新记录到达时只刷新对应视图。
+var _record_dialog_mode: String = ""
 ## 顶部事件滚动提示；收到事件信号后显示并在 3 秒内线性淡出。
 var _event_banner: Label
 ## 数量选择弹窗；同一实例在买入和卖出模式间复用。
@@ -152,6 +163,12 @@ func _build_interface() -> void:
 	_event_banner.add_theme_color_override("font_color", Color(1.0, 0.80, 0.30, 1.0))
 	_event_banner.visible = false
 	title_row.add_child(_event_banner)
+	# 标题栏通知按钮；位于关闭按钮左侧，打开通知中心查看强平等重要通知记录。
+	_notification_button = Button.new()
+	_notification_button.text = "通知"
+	_notification_button.custom_minimum_size = Vector2(90.0, 36.0)
+	_notification_button.pressed.connect(_on_notification_button_pressed)
+	title_row.add_child(_notification_button)
 	# 标题栏关闭按钮；关闭面板但不停止后台行情刷新。
 	var close_button: Button = Button.new()
 	close_button.text = "关闭"
@@ -275,6 +292,15 @@ func _build_interface() -> void:
 	_leverage_close_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_leverage_close_button.pressed.connect(_on_leverage_close_pressed)
 	leverage_row.add_child(_leverage_close_button)
+	# 历史记录按钮行；位于“全部持仓”标题上方，左对齐提供交易历史入口。
+	var trade_history_row: HBoxContainer = HBoxContainer.new()
+	root_content.add_child(trade_history_row)
+	# 历史记录按钮；打开交易历史窗口查看买卖、杠杆与资金转账记录。
+	_trade_history_button = Button.new()
+	_trade_history_button.text = "历史记录"
+	_trade_history_button.custom_minimum_size = Vector2(110.0, 30.0)
+	_trade_history_button.pressed.connect(_on_trade_history_button_pressed)
+	trade_history_row.add_child(_trade_history_button)
 	# 持仓区标题；位于主体与横向持仓列表之间。
 	var holdings_title: Label = Label.new()
 	holdings_title.text = "全部持仓"
@@ -325,6 +351,11 @@ func _build_interface() -> void:
 	_leverage_dialog.connect("leverage_confirmed", Callable(self, "_on_leverage_position_confirmed"))
 	_leverage_dialog.canceled.connect(_on_trade_canceled)
 	add_child(_leverage_dialog)
+	_record_list_dialog = STOCK_RECORD_LIST_DIALOG_SCRIPT.new() as StockRecordListDialog
+	# 记录弹窗关闭回调；确认与取消都只清空展示模式，不影响任何交易挂起状态。
+	_record_list_dialog.confirmed.connect(_on_record_dialog_closed)
+	_record_list_dialog.canceled.connect(_on_record_dialog_closed)
+	add_child(_record_list_dialog)
 
 
 func _connect_services() -> void:
@@ -345,6 +376,12 @@ func _connect_services() -> void:
 		if _stock_market_service.has_signal("leverage_position_closed"):
 			# 杠杆仓位关闭信号；主动与强制平仓统一在顶部横幅展示结算说明。
 			_stock_market_service.connect("leverage_position_closed", Callable(self, "_on_leverage_position_closed"))
+		if _stock_market_service.has_signal("trade_records_changed"):
+			# 交易记录变化信号；交易历史窗口打开期间实时追加最新记录。
+			_stock_market_service.connect("trade_records_changed", Callable(self, "_on_trade_records_changed"))
+		if _stock_market_service.has_signal("notification_records_changed"):
+			# 通知记录变化信号；通知中心窗口打开期间实时追加最新通知。
+			_stock_market_service.connect("notification_records_changed", Callable(self, "_on_notification_records_changed"))
 	if _global_inventory != null:
 		if _global_inventory.has_signal("coins_changed"):
 			_global_inventory.connect("coins_changed", Callable(self, "_queue_refresh_all"))
@@ -581,7 +618,15 @@ func _refresh_selected_stock() -> void:
 	# 杠杆最低保证金门槛；服务统一配置，开仓按钮与弹窗滑条共用同一下限。
 	var leverage_minimum_margin: int = int(_stock_market_service.call("get_leverage_minimum_margin")) if _stock_market_service.has_method("get_leverage_minimum_margin") else 0
 	if _leverage_open_button != null:
-		_leverage_open_button.disabled = not leverage_position.is_empty() or leverage_maximum_margin < leverage_minimum_margin or leverage_minimum_margin <= 0
+		# 加仓复用补充；无仓位时保持开仓入口，已有仓位时同一按钮切换为加仓入口并按现有倍数评估追加保证金可支付性。
+		if leverage_position.is_empty():
+			_leverage_open_button.text = "杠杆开仓"
+			_leverage_open_button.disabled = leverage_maximum_margin < leverage_minimum_margin or leverage_minimum_margin <= 0
+		else:
+			_leverage_open_button.text = "杠杆加仓"
+			# 现有倍数下可支付的最大追加保证金；余额连最低追加额都不够时禁用加仓入口。
+			var leverage_add_maximum_margin: int = int(_stock_market_service.call("get_maximum_leverage_margin", int(leverage_position.get("leverage", 1))))
+			_leverage_open_button.disabled = leverage_add_maximum_margin < leverage_minimum_margin or leverage_minimum_margin <= 0
 	if _leverage_close_button != null:
 		_leverage_close_button.disabled = leverage_position.is_empty()
 
@@ -731,16 +776,22 @@ func _on_sell_pressed() -> void:
 
 func _on_leverage_open_pressed() -> void:
 	## 打开杠杆开仓弹窗；缓存当前选中股票为交易目标，弹窗内的价格与余额随每秒行情持续刷新。
+	## 加仓复用补充；选中股票已有杠杆仓位时同一入口改为打开加仓弹窗，方向与倍数锁定为现有仓位配置。
 	if _stock_market_service == null or not _stock_market_service.has_method("get_leverage_open_quote"):
 		return
+	# 待交易股票静态定义；弹窗只使用稳定显示名称，成交价以确认瞬间实时行情为准。
+	var definition: Dictionary = _stock_definitions_cache.get(_selected_stock_id, {}) as Dictionary
 	if bool(_stock_market_service.call("has_leverage_position", _selected_stock_id)):
-		_show_event_banner("该股票已有杠杆仓位，请先平仓")
+		# 现有仓位快照；加仓弹窗需要方向、倍数、保证金与开仓均价做本地合并预览。
+		var position: Dictionary = _stock_market_service.call("get_leverage_position", _selected_stock_id) as Dictionary
+		_pending_trade_type = "leverage_add"
+		_pending_stock_id = _selected_stock_id
+		_pending_unit_price = float(_stock_market_service.call("get_current_price", _pending_stock_id))
+		_leverage_dialog.present_add(str(definition.get("name", "股票")), position, _pending_unit_price, float(_stock_market_service.call("get_securities_balance")), float(_stock_market_service.call("get_leverage_fee_ratio")), int(_stock_market_service.call("get_leverage_minimum_margin")), float(_stock_market_service.call("get_leverage_liquidation_loss_ratio")))
 		return
 	_pending_trade_type = "leverage_open"
 	_pending_stock_id = _selected_stock_id
 	_pending_unit_price = float(_stock_market_service.call("get_current_price", _pending_stock_id))
-	# 待开仓股票静态定义；弹窗只使用稳定显示名称，成交价以确认瞬间实时行情为准。
-	var definition: Dictionary = _stock_definitions_cache.get(_pending_stock_id, {}) as Dictionary
 	_leverage_dialog.present_open(str(definition.get("name", "股票")), _pending_unit_price, float(_stock_market_service.call("get_securities_balance")), float(_stock_market_service.call("get_leverage_fee_ratio")), int(_stock_market_service.call("get_leverage_minimum_margin")), float(_stock_market_service.call("get_leverage_liquidation_loss_ratio")), _stock_market_service.call("get_leverage_multipliers") as Array)
 
 
@@ -760,11 +811,17 @@ func _on_leverage_close_pressed() -> void:
 
 func _on_leverage_position_confirmed(direction: int, leverage: int, margin: int) -> void:
 	## 执行杠杆开仓；服务按确认瞬间的实时价格与余额原子校验，失败时证券币保持不变。
+	## 加仓复用补充；挂起类型为加仓时改走加仓接口，服务沿用现有方向与倍数，仅合并追加保证金。
 	if _stock_market_service == null or _pending_stock_id.is_empty():
 		return
-	# 开仓结果；统一读取服务返回消息，在顶部短暂提示成功或失败原因。
-	var open_result: Dictionary = _stock_market_service.call("request_leverage_open", _pending_stock_id, direction, leverage, margin) as Dictionary
-	_show_event_banner(str(open_result.get("message", "杠杆开仓已处理")))
+	if _pending_trade_type == "leverage_add":
+		# 加仓结果；统一读取服务返回消息，在顶部短暂提示成功或失败原因。
+		var add_result: Dictionary = _stock_market_service.call("request_leverage_add", _pending_stock_id, margin) as Dictionary
+		_show_event_banner(str(add_result.get("message", "杠杆加仓已处理")))
+	else:
+		# 开仓结果；统一读取服务返回消息，在顶部短暂提示成功或失败原因。
+		var open_result: Dictionary = _stock_market_service.call("request_leverage_open", _pending_stock_id, direction, leverage, margin) as Dictionary
+		_show_event_banner(str(open_result.get("message", "杠杆开仓已处理")))
 	_pending_trade_type = ""
 	_pending_stock_id = ""
 	_pending_quantity = 0
@@ -899,8 +956,14 @@ func _refresh_pending_trade_dialog() -> void:
 	# 当前永久星穹；买入数量上限和二次确认支付状态都按该余额实时复核。
 	# 证券币余额规则；旧永久星穹说明仅保留历史注释兼容，交易弹窗只使用证券币余额。
 	var available_coins: float = float(_stock_market_service.call("get_securities_balance"))
-	if _pending_trade_type == "leverage_open":
-		# 杠杆开仓弹窗实时刷新；同步实时价格与可用余额，保证金上限与强平价预览随之更新。
+	if _pending_trade_type == "leverage_open" or _pending_trade_type == "leverage_add":
+		# 加仓强平保护；加仓弹窗打开期间仓位被强制平仓时立即关闭弹窗并清理挂起状态，防止对已消失仓位执行加仓。
+		if _pending_trade_type == "leverage_add" and not bool(_stock_market_service.call("has_leverage_position", _pending_stock_id)):
+			if _leverage_dialog != null and _leverage_dialog.visible:
+				_leverage_dialog.hide()
+			_on_trade_canceled()
+			return
+		# 杠杆开仓弹窗实时刷新；同步实时价格与可用余额，保证金上限与强平价预览随之更新，加仓模式共用同一刷新入口。
 		if _leverage_dialog != null and _leverage_dialog.visible:
 			_leverage_dialog.update_market(_pending_unit_price, available_coins)
 		return
@@ -960,6 +1023,77 @@ func _show_active_event_if_available() -> void:
 		_show_event_banner(str(active_event.get("message", "市场出现新变化")))
 
 
+func _on_trade_history_button_pressed() -> void:
+	## 打开交易历史窗口；展示买卖、杠杆、强平与资金转账记录，索引 0 为最新记录。
+	if _record_list_dialog == null:
+		return
+	_record_dialog_mode = "trade"
+	_record_list_dialog.present_records("交易历史记录", _format_trade_record_lines(), "暂时没有交易记录")
+
+
+func _on_notification_button_pressed() -> void:
+	## 打开通知中心窗口；展示强平等重要通知记录，索引 0 为最新记录。
+	if _record_list_dialog == null:
+		return
+	_record_dialog_mode = "notification"
+	_record_list_dialog.present_records("通知中心", _format_notification_record_lines(), "暂时没有通知")
+
+
+func _on_record_dialog_closed() -> void:
+	## 记录窗口关闭回调；清空展示模式，后续新记录不再触发无效的原位刷新。
+	_record_dialog_mode = ""
+
+
+func _on_trade_records_changed() -> void:
+	## 交易记录变化回调；交易历史窗口打开时原位刷新，未打开时不做任何工作。
+	if _record_dialog_mode != "trade" or _record_list_dialog == null or not _record_list_dialog.visible:
+		return
+	_record_list_dialog.update_records(_format_trade_record_lines(), "暂时没有交易记录")
+
+
+func _on_notification_records_changed() -> void:
+	## 通知记录变化回调；通知中心窗口打开时原位刷新，未打开时不做任何工作。
+	if _record_dialog_mode != "notification" or _record_list_dialog == null or not _record_list_dialog.visible:
+		return
+	_record_list_dialog.update_records(_format_notification_record_lines(), "暂时没有通知")
+
+
+func _format_trade_record_lines() -> Array[String]:
+	## 把服务交易记录转换为带时间前缀与语义色的富文本行；强平记录红色警示，其余记录白色正文。
+	# 富文本行列表；顺序与服务记录一致，索引 0 为最新记录。
+	var lines: Array[String] = []
+	if _stock_market_service == null or not _stock_market_service.has_method("get_trade_records"):
+		return lines
+	# 服务交易记录副本；每项包含时间文本、类型标识与说明文本。
+	var records: Array = _stock_market_service.call("get_trade_records") as Array
+	for record_value in records:
+		if not (record_value is Dictionary):
+			continue
+		# 单条交易记录；缺失字段按空文本安全降级。
+		var record: Dictionary = record_value as Dictionary
+		# 记录正文颜色；强平记录使用红色提醒风险，其余记录保持白色。
+		var record_color: String = "red" if str(record.get("type", "")) == "leverage_liquidation" else "white"
+		lines.append("[color=gray]%s[/color]  [color=%s]%s[/color]" % [str(record.get("time_text", "")), record_color, str(record.get("message", ""))])
+	return lines
+
+
+func _format_notification_record_lines() -> Array[String]:
+	## 把服务通知记录转换为带时间前缀的富文本行；通知统一使用琥珀色正文突出重要性。
+	# 富文本行列表；顺序与服务记录一致，索引 0 为最新通知。
+	var lines: Array[String] = []
+	if _stock_market_service == null or not _stock_market_service.has_method("get_notification_records"):
+		return lines
+	# 服务通知记录副本；每项包含时间文本与说明文本。
+	var records: Array = _stock_market_service.call("get_notification_records") as Array
+	for record_value in records:
+		if not (record_value is Dictionary):
+			continue
+		# 单条通知记录；缺失字段按空文本安全降级。
+		var record: Dictionary = record_value as Dictionary
+		lines.append("[color=gray]%s[/color]  [color=#ffcc4d]%s[/color]" % [str(record.get("time_text", "")), str(record.get("message", ""))])
+	return lines
+
+
 func _on_close_pressed() -> void:
 	closed.emit()
 
@@ -967,7 +1101,7 @@ func _on_close_pressed() -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not is_visible_in_tree() or not (event is InputEventKey):
 		return
-	if (_quantity_dialog != null and _quantity_dialog.visible) or (_confirmation_dialog != null and _confirmation_dialog.visible) or (_securities_transfer_dialog != null and _securities_transfer_dialog.visible) or (_leverage_dialog != null and _leverage_dialog.visible):
+	if (_quantity_dialog != null and _quantity_dialog.visible) or (_confirmation_dialog != null and _confirmation_dialog.visible) or (_securities_transfer_dialog != null and _securities_transfer_dialog.visible) or (_leverage_dialog != null and _leverage_dialog.visible) or (_record_list_dialog != null and _record_list_dialog.visible):
 		return
 	# 键盘事件；只处理首次按下的 ESC，长按重复不会连续发送关闭信号。
 	var key_event: InputEventKey = event as InputEventKey

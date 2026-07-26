@@ -18,6 +18,8 @@ const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 const TAB_AVAILABLE: String = "available"
 ## 已持有资产页标识；资产按单台产出从高到低展示并提供出售入口。
 const TAB_OWNED: String = "owned"
+## 算力合同页标识；展示进行中合同状态与全部可签订合同类型。
+const TAB_CONTRACTS: String = "contracts"
 ## 充值操作标识；数量弹窗输入整数永久星穹并按 1:10000 即时兑换。
 const ACTION_RECHARGE: String = "recharge"
 ## 提现操作标识；数量弹窗输入整数到账星穹并实时显示算力币成本和手续费。
@@ -26,6 +28,14 @@ const ACTION_WITHDRAW: String = "withdraw"
 const ACTION_SELL: String = "sell"
 ## 购买操作标识；数量弹窗输入资产台数并在二次确认后按官方单价批量购买。
 const ACTION_BUY: String = "buy"
+## 合同签订操作标识；数量弹窗输入到期到账星穹并实时显示需锁定的算力币。
+const ACTION_CONTRACT: String = "contract"
+## 固件升级操作标识；单次固定提升 1 级，跳过数量弹窗直接进入二次确认。
+const ACTION_UPGRADE: String = "upgrade"
+## 超频操作标识；免费启动但会进入长散热冷却，跳过数量弹窗直接进入二次确认。
+const ACTION_OVERCLOCK: String = "overclock"
+## 超频与合同倒计时轮询间隔；默认 0.25 秒，配合文本变化守卫以低成本刷新按钮与状态文字。
+const STATUS_POLL_INTERVAL_SECONDS: float = 0.25
 
 ## 面板固定尺寸；默认 1080×640，适配 1280×720 主菜单并保留四周遮罩空间。
 @export var panel_size: Vector2 = Vector2(1080.0, 640.0)
@@ -68,6 +78,12 @@ var _last_production_text: String = ""
 var _last_rendered_balance: int = -1
 ## 资产卡片重建是否已排队；默认 false，同帧多个服务信号合并为一次延迟重建。
 var _assets_rebuild_queued: bool = false
+## 倒计时轮询累计秒数；默认 0，达到轮询间隔后刷新超频按钮与合同倒计时文字。
+var _status_poll_accumulator: float = 0.0
+## 上次超频按钮文本；默认空字符串，轮询刷新时文本未变化则跳过按钮重写。
+var _last_overclock_button_text: String = ""
+## 上次合同倒计时文本；默认空字符串，轮询刷新时文本未变化则跳过标签重写。
+var _last_contract_countdown_text: String = ""
 
 ## 余额文本；显示整数或 K/M/B 两位小数缩写，实际余额始终保持整数。
 var _balance_label: Label
@@ -83,6 +99,12 @@ var _buff_container: VBoxContainer
 var _available_tab_button: Button
 ## 已持有页按钮；切换模式并同步按下状态。
 var _owned_tab_button: Button
+## 算力合同页按钮；切换模式并同步按下状态。
+var _contracts_tab_button: Button
+## 超频按钮；位于产出状态区下方，按当前超频快照显示可用、进行中或散热倒计时。
+var _overclock_button: Button
+## 进行中合同倒计时标签；仅合同页存在进行中合同时有效，页面重建时重新捕获引用。
+var _contract_countdown_label: Label
 ## 资产卡片流式容器；根据面板宽度自动换行并保持居中。
 var _asset_container: HFlowContainer
 ## 收益进度条；底部按秒从 0 填充到 1 后循环重置。
@@ -117,6 +139,12 @@ func _process(delta: float) -> void:
 	if _production_progress != null and not is_equal_approx(float(_production_progress.value), _progress_elapsed_seconds):
 		# 进度条写入守卫；值未变化时跳过属性赋值，避免暂停或极端帧率下的重复重绘请求。
 		_production_progress.value = _progress_elapsed_seconds
+	# 倒计时轮询；超频按钮与合同倒计时按固定间隔拉取服务快照，文本未变化时不产生任何控件写入。
+	_status_poll_accumulator += maxf(delta, 0.0)
+	if _status_poll_accumulator >= STATUS_POLL_INTERVAL_SECONDS:
+		_status_poll_accumulator = 0.0
+		_refresh_overclock_button()
+		_refresh_contract_countdown()
 
 
 func present() -> void:
@@ -132,6 +160,27 @@ func present() -> void:
 	_refresh_all(false)
 	_animate_balance_to(current_balance)
 	_animate_cards_in()
+	_present_offline_income_report()
+
+
+func _present_offline_income_report() -> void:
+	## 展示启动时补发的离线收益报告；服务侧一次离线只产生一份报告，取走后不会重复弹出。
+	if _service == null or not _service.has_method("take_offline_income_report"):
+		return
+	# 待展示报告；为空表示本次启动没有离线补发或已经展示过。
+	var report: Dictionary = _service.call("take_offline_income_report") as Dictionary
+	if report.is_empty():
+		return
+	# 原始离线秒数；超出上限时在报告中说明封顶规则，帮助玩家理解补发金额。
+	var raw_seconds: int = int(report.get("raw_offline_seconds", 0))
+	# 参与补发的有效离线秒数；已按 8 小时上限截断。
+	var counted_seconds: int = int(report.get("offline_seconds", 0))
+	# 报告正文；离线时长、折算比例与到账金额逐行展示。
+	var message: String = "离线时长：%s" % _format_hour_minute_duration(raw_seconds)
+	if raw_seconds > counted_seconds:
+		message += "（超出 8 小时上限的部分不计）"
+	message += "\n离线期间按在线基础产出的 25%% 折算\n本次到账：+%s 算力币" % _format_integer_value(int(report.get("earned", 0)))
+	_message_dialog.present_information("离线收益报告", message)
 
 
 func _connect_services() -> void:
@@ -147,6 +196,12 @@ func _connect_services() -> void:
 		_service.connect("assets_changed", Callable(self, "_on_assets_changed"))
 	if _service.has_signal("buffs_changed"):
 		_service.connect("buffs_changed", Callable(self, "_refresh_buffs"))
+	if _service.has_signal("overclock_changed"):
+		_service.connect("overclock_changed", Callable(self, "_refresh_overclock_button"))
+	if _service.has_signal("contract_changed"):
+		_service.connect("contract_changed", Callable(self, "_on_contract_changed"))
+	if _service.has_signal("contract_completed"):
+		_service.connect("contract_completed", Callable(self, "_on_contract_completed"))
 
 
 func _build_interface() -> void:
@@ -213,6 +268,14 @@ func _build_header(root: VBoxContainer) -> void:
 	production_box.add_child(_production_label)
 	_buff_container = VBoxContainer.new()
 	production_box.add_child(_buff_container)
+	# 超频按钮；位于产出与增益下方右对齐，点击后经二次确认启动 300 秒 1.5 倍产出并进入 1800 秒散热。
+	_overclock_button = Button.new()
+	_overclock_button.custom_minimum_size = Vector2(186.0, 32.0)
+	_overclock_button.size_flags_horizontal = Control.SIZE_SHRINK_END
+	UI_STYLE_GUIDE.apply_primary_button(_overclock_button)
+	_overclock_button.pressed.connect(Callable(self, "_open_direct_confirmation").bind(ACTION_OVERCLOCK, ""))
+	production_box.add_child(_overclock_button)
+	_refresh_overclock_button()
 	# 关闭按钮；关闭后 UI 和动画停止，服务转入后台低频结算。
 	var close_button: Button = Button.new()
 	close_button.custom_minimum_size = Vector2(90.0, 36.0)
@@ -239,6 +302,12 @@ func _build_tabs(root: VBoxContainer) -> void:
 	_owned_tab_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_owned_tab_button.pressed.connect(Callable(self, "_switch_tab").bind(TAB_OWNED))
 	tabs.add_child(_owned_tab_button)
+	_contracts_tab_button = Button.new()
+	_contracts_tab_button.text = "算力合同"
+	_contracts_tab_button.toggle_mode = true
+	_contracts_tab_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_contracts_tab_button.pressed.connect(Callable(self, "_switch_tab").bind(TAB_CONTRACTS))
+	tabs.add_child(_contracts_tab_button)
 
 
 func _build_asset_area(root: VBoxContainer) -> void:
@@ -277,7 +346,7 @@ func _build_footer(root: VBoxContainer) -> void:
 	rule_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	rule_label.add_theme_font_size_override("font_size", 13)
 	UI_STYLE_GUIDE.apply_secondary_label(rule_label)
-	rule_label.text = "1星穹 = 10000算力币  |  提现手续费10%"
+	rule_label.text = "1星穹 = 10000算力币  |  提现手续费10%  |  算力合同费率2%-8%"
 	operations.add_child(rule_label)
 	var withdraw_button: Button = Button.new()
 	withdraw_button.custom_minimum_size = Vector2(180.0, 42.0)
@@ -380,6 +449,7 @@ func _refresh_buffs() -> void:
 func _refresh_tabs() -> void:
 	_available_tab_button.set_pressed_no_signal(_active_tab == TAB_AVAILABLE)
 	_owned_tab_button.set_pressed_no_signal(_active_tab == TAB_OWNED)
+	_contracts_tab_button.set_pressed_no_signal(_active_tab == TAB_CONTRACTS)
 
 
 func _switch_tab(tab_id: String) -> void:
@@ -397,8 +467,14 @@ func _rebuild_assets() -> void:
 	_assets_rebuild_queued = false
 	if _asset_container == null:
 		return
+	# 合同倒计时引用清理；旧标签随子节点释放，避免轮询刷新访问已销毁控件。
+	_contract_countdown_label = null
+	_last_contract_countdown_text = ""
 	for child in _asset_container.get_children():
 		child.queue_free()
+	if _active_tab == TAB_CONTRACTS:
+		_rebuild_contracts()
+		return
 	# 资产定义副本；两个标签页都保持官方成长阶梯顺序，便于玩家在购买与持有页面建立稳定位置记忆。
 	var definitions: Array = _service.call("get_asset_definitions") as Array if _service != null and _service.has_method("get_asset_definitions") else []
 	for raw_definition in definitions:
@@ -414,6 +490,126 @@ func _rebuild_assets() -> void:
 		empty_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		empty_label.text = "尚未持有算力资产" if _active_tab == TAB_OWNED else "暂无可展示资产"
 		_asset_container.add_child(empty_label)
+
+
+func _rebuild_contracts() -> void:
+	## 重建算力合同页；进行中合同卡片置于首位，随后按定义顺序展示全部可签订合同类型。
+	# 进行中合同快照；为空表示当前没有合同，可签订卡片据此决定按钮可用状态。
+	var active_snapshot: Dictionary = _service.call("get_active_contract_snapshot") as Dictionary if _service != null and _service.has_method("get_active_contract_snapshot") else {}
+	if not active_snapshot.is_empty():
+		_asset_container.add_child(_create_active_contract_card(active_snapshot))
+	# 合同定义副本；卡片只读取快照，签订时服务仍会再次校验余额与合同占用。
+	var definitions: Array = _service.call("get_contract_definitions") as Array if _service != null and _service.has_method("get_contract_definitions") else []
+	for raw_definition in definitions:
+		# 单个合同定义；包含稳定标识、名称、在线时长、兑付比例和说明。
+		var definition: Dictionary = raw_definition as Dictionary
+		_asset_container.add_child(_create_contract_card(definition, not active_snapshot.is_empty()))
+
+
+func _create_active_contract_card(snapshot: Dictionary) -> Control:
+	# 进行中合同卡片；使用激活样式突出显示，倒计时标签由固定间隔轮询刷新。
+	var card: PanelContainer = PanelContainer.new()
+	card.name = "ActiveContractCard"
+	card.custom_minimum_size = Vector2(318.0, 146.0)
+	var style: StyleBoxFlat = StyleBoxFlat.new()
+	# 卡片背景与边框；进行中合同使用与运行资产一致的亮色语义。
+	style.bg_color = UI_STYLE_GUIDE.get_section_background_color()
+	style.border_color = UI_STYLE_GUIDE.get_accent_muted_color()
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(6)
+	card.add_theme_stylebox_override("panel", style)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_bottom", 10)
+	card.add_child(margin)
+	var content: VBoxContainer = VBoxContainer.new()
+	content.add_theme_constant_override("separation", 4)
+	margin.add_child(content)
+	var name_label: Label = Label.new()
+	name_label.add_theme_font_size_override("font_size", 17)
+	name_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_accent_color())
+	name_label.text = "进行中：%s" % str(snapshot.get("name", "算力合同"))
+	content.add_child(name_label)
+	var detail_label: Label = Label.new()
+	detail_label.add_theme_font_size_override("font_size", 12)
+	detail_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
+	detail_label.text = "锁定 %s 算力币  |  到期到账 %s 星穹" % [_format_integer_value(int(snapshot.get("locked_compute", 0))), _format_integer_value(int(snapshot.get("gold_amount", 0)))]
+	content.add_child(detail_label)
+	# 倒计时标签；文本由轮询按剩余整数秒刷新，绿色与产出收益语义保持一致。
+	_contract_countdown_label = Label.new()
+	_contract_countdown_label.add_theme_font_size_override("font_size", 14)
+	_contract_countdown_label.add_theme_color_override("font_color", Color(0.46, 0.92, 0.72, 1.0))
+	content.add_child(_contract_countdown_label)
+	_refresh_contract_countdown()
+	var spacer: Control = Control.new()
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content.add_child(spacer)
+	var note_label: Label = Label.new()
+	note_label.add_theme_font_size_override("font_size", 11)
+	note_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
+	note_label.text = "合同仅消耗在线时间，中途不可撤销"
+	content.add_child(note_label)
+	return card
+
+
+func _create_contract_card(definition: Dictionary, contract_occupied: bool) -> Control:
+	# 可签订合同卡片；结构与资产卡片一致，按钮在已有进行中合同时统一禁用。
+	var card: PanelContainer = PanelContainer.new()
+	card.name = str(definition.get("id", "ContractCard"))
+	card.custom_minimum_size = Vector2(318.0, 146.0)
+	# 卡片可用状态；仅受合同占用影响，余额不足在点击时由弹窗流程提示。
+	var card_active: bool = not contract_occupied
+	var style: StyleBoxFlat = StyleBoxFlat.new()
+	# 卡片背景与边框；被占用时复用锁定资产的暗色停机语义。
+	style.bg_color = UI_STYLE_GUIDE.get_section_background_color() if card_active else Color(UI_STYLE_GUIDE.get_item_card_background_color(), 0.62)
+	style.border_color = UI_STYLE_GUIDE.get_accent_muted_color() if card_active else Color(UI_STYLE_GUIDE.get_section_border_color(), 0.55)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(6)
+	card.add_theme_stylebox_override("panel", style)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_bottom", 10)
+	card.add_child(margin)
+	var content: VBoxContainer = VBoxContainer.new()
+	content.add_theme_constant_override("separation", 4)
+	margin.add_child(content)
+	var name_label: Label = Label.new()
+	name_label.add_theme_font_size_override("font_size", 17)
+	name_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_accent_color() if card_active else UI_STYLE_GUIDE.get_disabled_text_color())
+	name_label.text = str(definition.get("name", "算力合同"))
+	content.add_child(name_label)
+	# 卡片说明文字色；与资产卡片一致，占用状态降低透明度弱化不可操作内容。
+	var card_detail_color: Color = UI_STYLE_GUIDE.get_secondary_text_color() if card_active else Color(UI_STYLE_GUIDE.get_secondary_text_color(), 0.72)
+	var detail_label: Label = Label.new()
+	detail_label.add_theme_font_size_override("font_size", 12)
+	detail_label.add_theme_color_override("font_color", card_detail_color)
+	# 合同费率百分比；由兑付比例换算，向下保留整数位便于与提现 10% 直接对比。
+	var fee_percent: int = int(round((1.0 - float(definition.get("payout_ratio", 0.0))) * 100.0))
+	detail_label.text = "在线 %s  |  费率 %d%%" % [_format_hour_minute_duration(int(definition.get("duration_seconds", 0))), fee_percent]
+	content.add_child(detail_label)
+	var description_label: Label = Label.new()
+	description_label.add_theme_font_size_override("font_size", 11)
+	description_label.add_theme_color_override("font_color", card_detail_color)
+	description_label.text = str(definition.get("description", ""))
+	content.add_child(description_label)
+	var spacer: Control = Control.new()
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content.add_child(spacer)
+	var action_button: Button = Button.new()
+	action_button.custom_minimum_size = Vector2(0.0, 32.0)
+	if contract_occupied:
+		action_button.text = "已有进行中合同"
+		action_button.disabled = true
+	else:
+		action_button.text = "签订合同"
+		UI_STYLE_GUIDE.apply_primary_button(action_button)
+		action_button.pressed.connect(Callable(self, "_open_quantity_dialog").bind(ACTION_CONTRACT, str(definition.get("id", ""))))
+	content.add_child(action_button)
+	return card
 
 
 func _create_asset_card(definition: Dictionary, quantity: int) -> Control:
@@ -457,9 +653,11 @@ func _create_asset_card(definition: Dictionary, quantity: int) -> Control:
 	income_float_area.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	name_row.add_child(income_float_area)
 	# 单台收益发射器；实际持有量为 0 时保持静默，持有 N 台时每秒逻辑发射 N 次。
+	# 固件升级补充；飘字显示固件加成后向下取整的单台收益，仅影响视觉数值，真实结算仍按类别整体取整。
+	var effective_unit_production: int = int(_service.call("get_asset_effective_unit_production", asset_id)) if _service != null and _service.has_method("get_asset_effective_unit_production") else int(definition.get("production", 0))
 	var income_emitter: Control = MINING_INCOME_FLOAT_EMITTER_SCRIPT.new() as Control
 	income_emitter.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	income_emitter.call("configure", quantity, int(definition.get("production", 0)), _show_exact_values)
+	income_emitter.call("configure", quantity, effective_unit_production, _show_exact_values)
 	income_float_area.add_child(income_emitter)
 	# 卡片说明文字色；取当前风格次要文字色，锁定卡片降低透明度以弱化未运行内容。
 	var card_detail_color: Color = UI_STYLE_GUIDE.get_secondary_text_color() if card_active else Color(UI_STYLE_GUIDE.get_secondary_text_color(), 0.72)
@@ -469,7 +667,11 @@ func _create_asset_card(definition: Dictionary, quantity: int) -> Control:
 	if _active_tab == TAB_AVAILABLE:
 		detail_label.text = "单价 %s  |  单台 +%s/秒" % [_format_integer_value(int(definition.get("price", 0))), _format_integer_value(int(definition.get("production", 0)))]
 	else:
-		detail_label.text = "持有 %s 台  |  本类 +%s/秒" % [_format_integer_value(quantity), _format_integer_value(quantity * int(definition.get("production", 0)))]
+		# 本类实际总产出；由服务按“单台基础×数量×固件倍率”整体向下取整，与真实结算完全一致。
+		var type_production: int = int(_service.call("get_asset_type_production", asset_id)) if _service != null and _service.has_method("get_asset_type_production") else quantity * int(definition.get("production", 0))
+		# 当前固件等级；已持有页始终展示，帮助玩家对比不同资产线的升级进度。
+		var owned_upgrade_level: int = int(_service.call("get_asset_upgrade_level", asset_id)) if _service != null and _service.has_method("get_asset_upgrade_level") else 0
+		detail_label.text = "持有 %s 台  |  Lv.%d  |  本类 +%s/秒" % [_format_integer_value(quantity), owned_upgrade_level, _format_integer_value(type_production)]
 	content.add_child(detail_label)
 	var description_label: Label = Label.new()
 	description_label.add_theme_font_size_override("font_size", 11)
@@ -486,16 +688,39 @@ func _create_asset_card(definition: Dictionary, quantity: int) -> Control:
 		action_button.disabled = not unlocked
 		UI_STYLE_GUIDE.apply_primary_button(action_button)
 		action_button.pressed.connect(Callable(self, "_open_quantity_dialog").bind(ACTION_BUY, asset_id))
+		content.add_child(action_button)
 	else:
 		if quantity > 0:
+			# 操作按钮行；固件升级与出售并排等宽，升级达到最大等级后左侧按钮禁用。
+			var action_row: HBoxContainer = HBoxContainer.new()
+			action_row.add_theme_constant_override("separation", 8)
+			content.add_child(action_row)
+			# 下一级升级费用；0 表示已达最大等级，此时不再提供升级入口。
+			var upgrade_cost: int = int(_service.call("get_asset_upgrade_cost", asset_id)) if _service != null and _service.has_method("get_asset_upgrade_cost") else 0
+			# 当前固件等级；用于升级按钮的等级跨度文案。
+			var upgrade_level: int = int(_service.call("get_asset_upgrade_level", asset_id)) if _service != null and _service.has_method("get_asset_upgrade_level") else 0
+			# 固件升级按钮；单次固定提升 1 级，点击后跳过数量弹窗直接进入二次确认。
+			var upgrade_button: Button = Button.new()
+			upgrade_button.custom_minimum_size = Vector2(0.0, 32.0)
+			upgrade_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			if upgrade_cost > 0:
+				upgrade_button.text = "固件 Lv.%d→%d" % [upgrade_level, upgrade_level + 1]
+				UI_STYLE_GUIDE.apply_primary_button(upgrade_button)
+				upgrade_button.pressed.connect(Callable(self, "_open_direct_confirmation").bind(ACTION_UPGRADE, asset_id))
+			else:
+				upgrade_button.text = "固件已满级"
+				upgrade_button.disabled = true
+			action_row.add_child(upgrade_button)
+			action_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			action_button.text = "出售"
 			UI_STYLE_GUIDE.apply_danger_button(action_button)
 			action_button.pressed.connect(Callable(self, "_open_quantity_dialog").bind(ACTION_SELL, asset_id))
+			action_row.add_child(action_button)
 		else:
 			# 未持有提示；已持有页只表达资产所有权状态，具体解锁门槛统一留在可购买资产页展示。
 			action_button.text = "未购买"
 			action_button.disabled = true
-	content.add_child(action_button)
+			content.add_child(action_button)
 	if asset_id == _pending_startup_asset_id:
 		_pending_startup_asset_id = ""
 		_play_startup_animation(card)
@@ -522,6 +747,23 @@ func _open_quantity_dialog(action: String, asset_id: String) -> void:
 			_clear_pending_transaction()
 			return
 		_quantity_dialog.present_mining_transaction(ACTION_WITHDRAW, "星穹提现", maximum_gold, 10000, 0.60, 0.10, _show_exact_values)
+	elif action == ACTION_CONTRACT:
+		# 合同占用校验；服务同一时间只允许一份进行中合同，占用时直接提示而不打开数量弹窗。
+		if _service != null and _service.has_method("has_active_contract") and bool(_service.call("has_active_contract")):
+			_show_message("已有进行中合同，需等待当前合同交付")
+			_clear_pending_transaction()
+			return
+		# 当前合同定义；用于读取名称与兑付比例，签订时服务仍按当前定义重新计算。
+		var contract_definition: Dictionary = _get_contract_definition(asset_id)
+		# 最大可签订星穹；使用服务精确公式，避免按单星穹成本近似造成大额签订上限偏差。
+		var maximum_contract_gold: int = int(_service.call("get_maximum_contract_gold", asset_id)) if _service != null and _service.has_method("get_maximum_contract_gold") else 0
+		if contract_definition.is_empty() or maximum_contract_gold <= 0:
+			_show_message("算力币余额不足，最低签订 1 星穹")
+			_clear_pending_transaction()
+			return
+		# 合同费率损耗；换算为提现同款“1 - 费率”形式传入数量弹窗，复用整体反推预览公式。
+		var contract_fee_ratio: float = 1.0 - clampf(float(contract_definition.get("payout_ratio", 0.0)), 0.01, 1.0)
+		_quantity_dialog.present_mining_transaction(ACTION_CONTRACT, str(contract_definition.get("name", "算力合同")), maximum_contract_gold, 10000, 0.60, contract_fee_ratio, _show_exact_values)
 	else:
 		# 当前资产定义；数量窗口读取官方单价，确认时服务仍按当前定义重新计算。
 		var definition: Dictionary = _get_asset_definition(asset_id)
@@ -547,6 +789,18 @@ func _on_quantity_confirmed(quantity: int) -> void:
 	_confirmation_dialog.present_adaptive("确认%s" % action_name, message, "确认%s" % action_name, "取消", true)
 
 
+func _open_direct_confirmation(action: String, asset_id: String) -> void:
+	## 打开无数量选择的二次确认；固件升级与超频单次只有一种结果，跳过滑条数量弹窗。
+	_dialog_action = action
+	_dialog_asset_id = asset_id
+	# 固定数量；直接确认操作不涉及数量选择，保持确认回调的统一数量约定。
+	_pending_quantity = 1
+	# 确认正文；与数量弹窗流程共用同一构建入口，展示费用与生效说明。
+	var message: String = _build_transaction_confirmation_message()
+	var action_name: String = _get_action_display_name()
+	_confirmation_dialog.present_adaptive("确认%s" % action_name, message, "确认%s" % action_name, "取消", true)
+
+
 func _confirm_quantity_action() -> void:
 	if _service == null:
 		return
@@ -561,6 +815,12 @@ func _confirm_quantity_action() -> void:
 		result = _service.call("buy_asset", _dialog_asset_id, quantity) as Dictionary
 	elif _dialog_action == ACTION_SELL:
 		result = _service.call("sell_asset", _dialog_asset_id, quantity) as Dictionary
+	elif _dialog_action == ACTION_CONTRACT:
+		result = _service.call("start_contract", _dialog_asset_id, quantity) as Dictionary
+	elif _dialog_action == ACTION_UPGRADE:
+		result = _service.call("upgrade_asset", _dialog_asset_id) as Dictionary
+	elif _dialog_action == ACTION_OVERCLOCK:
+		result = _service.call("activate_overclock") as Dictionary
 	if not bool(result.get("success", false)):
 		_show_message(str(result.get("message", "操作失败")))
 		_clear_pending_transaction()
@@ -569,6 +829,12 @@ func _confirm_quantity_action() -> void:
 		_show_floating_feedback("资产变现 +%s 算力币" % _format_integer_value(int(result.get("returned", 0))))
 	elif _dialog_action == ACTION_RECHARGE:
 		_show_floating_feedback("充值到账 +%s 算力币" % _format_integer_value(int(result.get("compute_coins", 0))))
+	elif _dialog_action == ACTION_CONTRACT:
+		_show_floating_feedback("合同签订 锁定 -%s 算力币" % _format_integer_value(int(result.get("locked", 0))))
+	elif _dialog_action == ACTION_UPGRADE:
+		_show_floating_feedback("固件升级 -%s 算力币" % _format_integer_value(int(result.get("cost", 0))))
+	elif _dialog_action == ACTION_OVERCLOCK:
+		_show_floating_feedback("超频启动 产出 ×1.5")
 	else:
 		if _dialog_action == ACTION_BUY:
 			_pending_startup_asset_id = _dialog_asset_id
@@ -730,6 +996,84 @@ func _get_asset_definition(asset_id: String) -> Dictionary:
 	return {}
 
 
+func _get_contract_definition(contract_id: String) -> Dictionary:
+	## 从服务公开定义中查找指定合同类型；返回副本，UI 不修改静态配置。
+	var definitions: Array = _service.call("get_contract_definitions") as Array if _service != null and _service.has_method("get_contract_definitions") else []
+	for raw_definition in definitions:
+		var definition: Dictionary = raw_definition as Dictionary
+		if str(definition.get("id", "")) == contract_id:
+			return definition
+	return {}
+
+
+func _refresh_overclock_button() -> void:
+	## 按超频快照刷新按钮文案与可用状态；文本和状态都未变化时不写入控件属性。
+	if _overclock_button == null or _service == null or not _service.has_method("get_overclock_snapshot"):
+		return
+	# 超频状态快照；包含生效、散热剩余时间与可用标志。
+	var snapshot: Dictionary = _service.call("get_overclock_snapshot") as Dictionary
+	# 目标按钮文案；三种状态分别为可用、超频进行中和散热冷却中。
+	var button_text: String = "超频 ×1.5（300秒）"
+	# 目标禁用状态；超频进行中与散热期间都不可再次点击。
+	var button_disabled: bool = false
+	if bool(snapshot.get("active", false)):
+		button_text = "超频中 %s" % _format_duration(float(snapshot.get("remaining_seconds", 0.0)))
+		button_disabled = true
+	elif float(snapshot.get("cooldown_remaining_seconds", 0.0)) > 0.0:
+		button_text = "散热中 %s" % _format_duration(float(snapshot.get("cooldown_remaining_seconds", 0.0)))
+		button_disabled = true
+	if button_text == _last_overclock_button_text and _overclock_button.disabled == button_disabled:
+		return
+	_last_overclock_button_text = button_text
+	_overclock_button.text = button_text
+	_overclock_button.disabled = button_disabled
+
+
+func _refresh_contract_countdown() -> void:
+	## 按进行中合同快照刷新倒计时标签；标签只在合同页存在进行中合同时有效。
+	if _contract_countdown_label == null or not is_instance_valid(_contract_countdown_label):
+		return
+	if _service == null or not _service.has_method("get_active_contract_snapshot"):
+		return
+	# 进行中合同快照；为空表示合同刚完成，页面重建由合同状态信号负责。
+	var snapshot: Dictionary = _service.call("get_active_contract_snapshot") as Dictionary
+	if snapshot.is_empty():
+		return
+	# 目标倒计时文本；按剩余整数秒生成，未变化时跳过标签重写。
+	var countdown_text: String = "剩余在线 %s" % _format_duration(float(snapshot.get("remaining_seconds", 0.0)))
+	if countdown_text == _last_contract_countdown_text:
+		return
+	_last_contract_countdown_text = countdown_text
+	_contract_countdown_label.text = countdown_text
+
+
+func _on_contract_changed() -> void:
+	## 合同签订、完成或异常回退后重建当前页面；非合同页重建同样安全，只刷新资产卡片。
+	_queue_assets_rebuild()
+
+
+func _on_contract_completed(gold_amount: int) -> void:
+	## 合同到期交付回调；面板可见时播放到账反馈，实际星穹已由服务直接发放。
+	if not visible:
+		return
+	_show_floating_feedback("合同交付 +%d 星穹" % gold_amount)
+
+
+func _format_hour_minute_duration(total_seconds: int) -> String:
+	## 把秒数格式化为“X小时X分”样式的中文时长；用于合同时长与离线报告，不用于逐秒倒计时。
+	if total_seconds < 60:
+		return "%d秒" % maxi(total_seconds, 0)
+	# 完整小时数；离线报告最长展示到数十小时，不换算为天。
+	var hours: int = total_seconds / 3600
+	# 剩余分钟数；不足 1 分钟的秒数直接舍去，保持报告文本简洁。
+	var minutes: int = (total_seconds % 3600) / 60
+	if hours <= 0:
+		return "%d分钟" % minutes
+	if minutes <= 0:
+		return "%d小时" % hours
+	return "%d小时%d分" % [hours, minutes]
+
+
 func _build_transaction_confirmation_message() -> String:
 	## 构建股市同款二次确认正文；金额使用矿场服务公开公式，确认后服务仍会最终复核。
 	var quantity: int = maxi(_pending_quantity, 1)
@@ -738,6 +1082,19 @@ func _build_transaction_confirmation_message() -> String:
 	if _dialog_action == ACTION_WITHDRAW:
 		var cost: int = int(_service.call("get_withdrawal_cost", quantity))
 		return "提现到账：%d 星穹\n需要：%s 算力币\n手续费：%s 算力币\n当前余额：%s 算力币" % [quantity, _format_integer_value(cost), _format_integer_value(cost - quantity * 10000), _format_integer_value(_get_real_balance())]
+	if _dialog_action == ACTION_CONTRACT:
+		# 合同定义与锁定成本；均按服务当前公式计算，签订时服务仍会最终复核余额与占用。
+		var contract_definition: Dictionary = _get_contract_definition(_dialog_asset_id)
+		var locked_cost: int = int(_service.call("get_contract_cost", _dialog_asset_id, quantity)) if _service.has_method("get_contract_cost") else 0
+		return "%s\n到期到账：%d 星穹\n立即锁定：%s 算力币\n在线 %s 后自动交付，中途不可撤销" % [str(contract_definition.get("name", "算力合同")), quantity, _format_integer_value(locked_cost), _format_hour_minute_duration(int(contract_definition.get("duration_seconds", 0)))]
+	if _dialog_action == ACTION_OVERCLOCK:
+		return "超频后 300 秒内全部产出 ×1.5\n结束后进入 1800 秒散热冷却\n超频免费且仅消耗在线时间"
+	if _dialog_action == ACTION_UPGRADE:
+		# 固件升级预览；展示等级跨度、费用与升级后的本类产出，费用按官方价乘当前等级倍率。
+		var upgrade_definition: Dictionary = _get_asset_definition(_dialog_asset_id)
+		var upgrade_level: int = int(_service.call("get_asset_upgrade_level", _dialog_asset_id)) if _service.has_method("get_asset_upgrade_level") else 0
+		var upgrade_cost: int = int(_service.call("get_asset_upgrade_cost", _dialog_asset_id)) if _service.has_method("get_asset_upgrade_cost") else 0
+		return "%s 固件 Lv.%d→%d\n需要：%s 算力币\n本类产出加成：+10%%（升级后共 +%d%%）\n固件永久生效，出售资产不回退等级" % [str(upgrade_definition.get("name", "算力资产")), upgrade_level, upgrade_level + 1, _format_integer_value(upgrade_cost), (upgrade_level + 1) * 10]
 	var definition: Dictionary = _get_asset_definition(_dialog_asset_id)
 	var asset_name: String = str(definition.get("name", "算力资产"))
 	if _dialog_action == ACTION_SELL:
@@ -755,6 +1112,12 @@ func _get_action_display_name() -> String:
 		return "提现"
 	if _dialog_action == ACTION_SELL:
 		return "出售"
+	if _dialog_action == ACTION_CONTRACT:
+		return "签订"
+	if _dialog_action == ACTION_UPGRADE:
+		return "升级"
+	if _dialog_action == ACTION_OVERCLOCK:
+		return "超频"
 	return "购买"
 
 

@@ -67,17 +67,23 @@ custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
 text = "骇入"
 
-[node name="TrainingButton" type="Button" parent="Center" unique_id=1854936454]
+[node name="ModeRow" type="HBoxContainer" parent="Center" unique_id=1799050982]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="TrainingButton" type="Button" parent="Center/ModeRow" unique_id=1854936454]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
+size_flags_horizontal = 3
 text = "训练场"
 
-[node name="MultiplayerButton" type="Button" parent="Center"]
+[node name="MultiplayerButton" type="Button" parent="Center/ModeRow" unique_id=1473342656]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
-text = "联机组队"
+size_flags_horizontal = 3
+text = "联机"
 
 [node name="SettingsButton" type="Button" parent="Center" unique_id=1647714624]
 unique_name_in_owner = true

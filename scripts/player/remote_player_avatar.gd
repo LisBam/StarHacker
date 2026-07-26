@@ -7,6 +7,8 @@ class_name RemotePlayerAvatar
 
 ## 玩家物理层掩码；化身与本地玩家同层，保证敌方弹体扫掠射线可以命中队友。
 const PLAYER_PHYSICS_LAYER: int = 1
+## 怪物物理层掩码；大逃杀互伤开启后化身额外加入该层，使本机玩家的弹体（掩码含第 2 层）与近战可以命中它。
+const MONSTER_PHYSICS_LAYER: int = 2
 ## 玩家战斗目标组名；与本地玩家一致，敌人索敌协议按该组扫描全部玩家阵营单位。
 const PLAYER_COMBAT_TARGET_GROUP: StringName = &"player_combat_target"
 ## 化身碰撞半径；与玩家本体 18 像素保持一致，保证敌人攻击距离手感相同。
@@ -38,6 +40,10 @@ var _remote_max_health: float = 100.0
 var _remote_current_shield: float = 0.0
 ## 远端死亡状态；死亡后化身灰化并从敌人索敌合法目标中自然剔除。
 var _remote_is_dead: bool = false
+## 玩家互伤开关；默认 false 表示组队模式（本机攻击穿过队友），大逃杀模式由同步器在入树前开启。
+var _pvp_combat_enabled: bool = false
+## 受击闪烁补间；重复受击时先终止旧补间，避免叠加导致亮度残留。
+var _hit_flash_tween: Tween = null
 ## 身体视觉节点；六边形轮廓与本地玩家一致，颜色按成员配色区分。
 var _body_polygon: Polygon2D = null
 ## 核心视觉节点；小菱形装饰与本地玩家一致。
@@ -57,8 +63,20 @@ func setup_avatar(peer_id: int, display_name: String, body_color: Color, damage_
 	_build_visuals(display_name, body_color)
 
 
+func set_pvp_combat_enabled(enabled: bool) -> void:
+	## 切换玩家互伤；大逃杀模式在化身入树前开启，使其同时位于玩家层与怪物层，被双方阵营的攻击命中。
+	_pvp_combat_enabled = enabled
+	if is_inside_tree():
+		_apply_collision_layer()
+
+
+func _apply_collision_layer() -> void:
+	## 按互伤开关应用碰撞层；组队模式只在玩家层（仅敌人可命中），大逃杀叠加怪物层（本机玩家攻击也可命中）。
+	collision_layer = PLAYER_PHYSICS_LAYER | (MONSTER_PHYSICS_LAYER if _pvp_combat_enabled else 0)
+
+
 func _ready() -> void:
-	collision_layer = PLAYER_PHYSICS_LAYER
+	_apply_collision_layer()
 	# 化身不主动移动也不阻挡任何对象；位置完全由远端状态驱动，碰撞掩码保持为空。
 	collision_mask = 0
 	add_to_group(PLAYER_COMBAT_TARGET_GROUP)
@@ -104,11 +122,23 @@ func update_remote_state(remote_position: Vector2, aim_angle: float, current_hea
 
 
 func apply_damage(damage: float, source: Node) -> void:
-	## 主机敌人命中化身的统一入口；不在本机结算，只把伤害与来源数值转发给所属客户端。
+	## 化身受击统一入口（组队模式来自主机敌人，大逃杀模式还包括本机玩家攻击）；不在本机结算，只把伤害与来源数值转发给所属客户端。
 	if _remote_is_dead or damage <= 0.0:
 		return
+	_play_hit_flash()
 	if _damage_forward_handler.is_valid():
 		_damage_forward_handler.call(_owner_peer_id, damage, source)
+
+
+func _play_hit_flash() -> void:
+	## 播放短促受击提亮；攻击方立即获得命中反馈，真实伤害由所属客户端按自身属性结算后经状态包回传血条。
+	if _body_polygon == null:
+		return
+	if _hit_flash_tween != null and _hit_flash_tween.is_valid():
+		_hit_flash_tween.kill()
+	_body_polygon.modulate = Color(1.7, 1.7, 1.7, 1.0)
+	_hit_flash_tween = create_tween()
+	_hit_flash_tween.tween_property(_body_polygon, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.14)
 
 
 func is_dead() -> bool:

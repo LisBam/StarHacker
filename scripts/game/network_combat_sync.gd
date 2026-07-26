@@ -194,10 +194,18 @@ func _create_remote_avatar(peer_id: int, member_profile: Dictionary, member_inde
 	# 化身标签文本；昵称加角色显示名，角色名从会话状态服务读取。
 	var avatar_label: String = "%s·%s" % [str(member_profile.get("name", "队友")), _get_character_display_name(str(member_profile.get("character_id", "stelle")))]
 	avatar.call("setup_avatar", peer_id, avatar_label, AVATAR_COLOR_PALETTE[member_index % AVATAR_COLOR_PALETTE.size()], Callable(self, "_on_avatar_damage_forward"))
+	# 大逃杀模式标记；开启化身互伤碰撞层，并把初始位置指向该成员的确定性出生点。
+	var battle_royale_active: bool = _game_world != null and _game_world.has_method("is_network_battle_royale") and bool(_game_world.call("is_network_battle_royale"))
+	if battle_royale_active:
+		avatar.call("set_pvp_combat_enabled", true)
 	# 化身挂载父节点；与本地玩家同级，保证世界坐标与绘制层级一致。
 	var avatar_parent: Node = _game_world if _game_world != null else self
 	avatar_parent.add_child(avatar)
-	avatar.global_position = _player.global_position if _player != null else Vector2.ZERO
+	# 化身初始位置；大逃杀使用成员出生点避免首包前显示在本机玩家脚下，组队模式沿用共同出生点。
+	if battle_royale_active and _game_world.has_method("get_network_spawn_position_for_peer"):
+		avatar.global_position = _game_world.call("get_network_spawn_position_for_peer", peer_id)
+	else:
+		avatar.global_position = _player.global_position if _player != null else Vector2.ZERO
 	_remote_avatars[peer_id] = avatar
 
 

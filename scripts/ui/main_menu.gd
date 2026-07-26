@@ -22,6 +22,8 @@ const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 const PROGRESS_SLIDER_VISUAL_SCRIPT: Script = preload("res://scripts/ui/progress_slider_visual.gd")
 ## UI 风格选择组件；主菜单设置复用其选项构建、服务绑定、即时保存与全局刷新逻辑。
 const UI_STYLE_SELECTOR_SCRIPT: Script = preload("res://scripts/ui/ui_style_selector.gd")
+## 横幅通知开关组件；主菜单设置复用其开关构建、服务绑定与即时保存逻辑。
+const BANNER_NOTIFICATION_TOGGLE_SCRIPT: Script = preload("res://scripts/ui/banner_notification_toggle.gd")
 ## 局外仓库面板脚本；默认在主菜单点击仓库按钮后动态创建并读取全局背包服务。
 const WAREHOUSE_PANEL_SCRIPT: Script = preload("res://scripts/ui/warehouse_panel.gd")
 ## 主菜单背包面板脚本；复用游戏内背包装备结构，局外丢弃会直接永久移除物品。
@@ -145,6 +147,8 @@ var _key_binding_back_button: Button
 var _settings_home_controls: Array[Control] = []
 ## 主菜单 UI 风格选择组件；默认运行时插入主音量下方并即时同步全局风格设置。
 var _ui_style_selector: Control
+## 主菜单横幅通知开关组件；默认运行时插入 UI 风格行下方并即时保存全局横幅设置。
+var _banner_notification_toggle: Control
 ## 主菜单存档传输控件；默认运行时插入设置首页，导入成功后由全局服务重启游戏。
 ## 删除功能补充：删除成功后同样由全局服务重启，并在其他业务服务读档前清理活动存档。
 var _save_transfer_control: Control
@@ -965,6 +969,16 @@ func _build_key_binding_navigation() -> void:
 		_settings_content.move_child(ui_style_selector, _master_volume_row.get_index() + 1)
 		_ui_style_selector = ui_style_selector
 
+	# 横幅通知开关组件；放在 UI 风格行之后，开关状态由横幅通知服务统一校验、保存和应用。
+	var banner_notification_toggle: Control = BANNER_NOTIFICATION_TOGGLE_SCRIPT.new() as Control
+	if banner_notification_toggle != null:
+		banner_notification_toggle.name = "MainMenuBannerNotificationToggle"
+		_settings_content.add_child(banner_notification_toggle)
+		# 开关插入锚点；UI 风格行缺失时回退到主音量行之后，保证设置首页顺序稳定。
+		var toggle_anchor_index: int = (_ui_style_selector.get_index() if _ui_style_selector != null else _master_volume_row.get_index()) + 1
+		_settings_content.move_child(banner_notification_toggle, toggle_anchor_index)
+		_banner_notification_toggle = banner_notification_toggle
+
 	# 按键绑定入口按钮；取值为 Button，默认放在设置首页用于进入独立按键绑定页面。
 	var key_binding_button: Button = Button.new()
 	key_binding_button.name = "KeyBindingPageButton"
@@ -986,6 +1000,7 @@ func _build_key_binding_navigation() -> void:
 		_settings_title_label,
 		_master_volume_row,
 		_ui_style_selector,
+		_banner_notification_toggle,
 		_key_binding_button,
 		_save_transfer_control,
 		_settings_spacer,

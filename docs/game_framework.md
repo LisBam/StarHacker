@@ -30,8 +30,9 @@
 | `DebugSettings` | 管理开发者调试选项 | `user://debug_settings.cfg` |
 | `GlobalInventory` | 拥有星穹、仓库、背包、装备槽、持仓、永久图鉴发现记录和战斗结算数据 | `user://global_inventory.json` |
 | `ShopService` | 生成普通商店与灰市库存，维护刷新状态 | `user://shop_state.json` |
-| `StockMarketService` | 维护行情、事件、证券币和对局行为影响 | `user://stock_market_state.json` |
+| `StockMarketService` | 维护行情、事件、证券币、杠杆合约、交易历史记录、通知记录和对局行为影响 | `user://stock_market_state.json` |
 | `MiningFarmService` | 维护算力币、矿场资产、在线收益和临时增益 | `user://mining_farm_state.json` |
+| `BannerNotificationService` | 屏幕顶端全局横幅通知：CanvasLayer 图层 `1200` 高于场景过渡层，`process_mode = ALWAYS` 战斗内外与暂停期间均可播放；持有横幅开关并订阅强平等业务信号，业务服务不反向依赖 | `user://banner_notification_settings.cfg` |
 | `SceneTransition` | 统一场景切换和黑屏过渡 | 无 |
 | `NetworkSession` | 局域网联机会话：建房、UDP 房间发现、加入、成员名册与准备、共享地图种子分发、统一开局与战斗消息中继；`process_mode = ALWAYS` 且跨场景保持连接，完整协议见 `docs/multiplayer.md` | 无 |
 
@@ -191,9 +192,9 @@ ContentCatalog 模板
 - `SaveLocationMigration` 脚本保留为历史实现参考，但未在 `project.godot` 注册且脚本内迁移调用已注释；启动时不会实例化该服务，也不会读取或复制同级旧项目目录文件。
 - 普通高频变化可合并写入；货币兑换、股票成交等跨资产操作应立即保存，缩短文件间状态不一致窗口。
 - 测试不得直接覆盖日常 `user://` 数据，具体隔离要求见 `docs/功能验证测试规范.md`。
-- 存档导出使用默认名 `Star_Hacker_save_<本地时间>.lisbamsave`，保存 `character_unlocks.json`、`input_bindings.cfg`、`ui_style_settings.cfg`、`debug_settings.cfg`、`global_inventory.json`、`shop_state.json`、`stock_market_state.json` 与 `mining_farm_state.json` 的原始字节；尚未生成的文件不写入归档。根元数据同时保存项目中文名与英文名，只用于人工识别，不参与兼容校验。
+- 存档导出使用默认名 `Star_Hacker_save_<本地时间>.lisbamsave`，保存 `character_unlocks.json`、`input_bindings.cfg`、`ui_style_settings.cfg`、`banner_notification_settings.cfg`、`debug_settings.cfg`、`global_inventory.json`、`shop_state.json`、`stock_market_state.json` 与 `mining_farm_state.json` 的原始字节；尚未生成的文件不写入归档。根元数据同时保存项目中文名与英文名，只用于人工识别，不参与兼容校验。
 - 存档导入只接受格式版本 1 与固定文件白名单。服务先完成 JSON、文件名和 Base64 内容校验，再写入同目录临时文件，完整备份当前存档后替换正式文件；归档中缺失的模块文件会按快照语义移除，成功后重启游戏统一加载。
-- 存档删除使用与导出、导入相同的八个文件白名单。服务先写入 `save_delete_pending_v1.marker`，再把全部现有活动存档改名到同目录 `.temp_delete` 路径；任一暂存失败时统一回滚，全部暂存成功后永久移除并立即重启。保护标记保留到下一次启动，`SaveArchiveService` 作为首个 AutoLoad 会在任何业务服务读档前再次删除活动文件、`.temp_import` 与 `.temp_delete` 残留，完成后移除标记，因此退出阶段的旧状态回写也不能恢复被删除存档。
+- 存档删除使用与导出、导入相同的九个文件白名单。服务先写入 `save_delete_pending_v1.marker`，再把全部现有活动存档改名到同目录 `.temp_delete` 路径；任一暂存失败时统一回滚，全部暂存成功后永久移除并立即重启。保护标记保留到下一次启动，`SaveArchiveService` 作为首个 AutoLoad 会在任何业务服务读档前再次删除活动文件、`.temp_import` 与 `.temp_delete` 残留，完成后移除标记，因此退出阶段的旧状态回写也不能恢复被删除存档。
 - 存档删除只清理当前项目用户目录中的活动白名单文件和内部临时文件，不删除玩家自行导出的 `.lisbamsave`，也不删除历史导入备份目录；这些外部或备份快照只有玩家主动导入时才会重新成为活动存档。
 - 战斗暂停设置导出只包含已经落盘的数据，不强制保存正式战斗中的临时背包、装备与耐久变化，继续遵守本局成功、失败或正常退出结算后统一持久化的所有权规则。
 - 战斗暂停设置删除会丢弃当前活动存档及尚未落盘的本局内存变化，不执行战斗结算；重启后全部服务按首次启动默认值初始化。

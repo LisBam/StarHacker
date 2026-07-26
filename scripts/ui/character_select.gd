@@ -176,6 +176,24 @@ func _select_character(character_id: String) -> void:
 	_selected_character_id = _normalize_character_id(character_id)
 	_set_button_states()
 	_refresh_character_detail()
+	_refresh_confirm_button_dispatch_lock()
+
+
+func _refresh_confirm_button_dispatch_lock() -> void:
+	## 按派遣状态刷新确认按钮；派遣中的角色可以浏览详情，但在委托结束前无法被确认上场。
+	if _confirm_button == null:
+		return
+	# 当前选择角色是否派遣中；派遣服务缺失时按未派遣处理，角色选择保持原有行为。
+	var dispatched: bool = _is_character_dispatched(_selected_character_id)
+	_confirm_button.disabled = dispatched
+	_confirm_button.text = "派遣中，无法上场" if dispatched else "确认选择"
+
+
+func _is_character_dispatched(character_id: String) -> bool:
+	## 查询指定角色是否处于派遣委托中；统一从派遣服务读取，本界面不保存派遣状态副本。
+	# 派遣服务；默认由自动加载提供，缺失时角色选择不施加任何派遣限制。
+	var dispatch_service: Node = get_tree().root.get_node_or_null("DispatchService")
+	return dispatch_service != null and dispatch_service.has_method("is_character_dispatched") and bool(dispatch_service.call("is_character_dispatched", character_id))
 
 
 func _set_button_states() -> void:
@@ -421,6 +439,9 @@ func _build_character_buttons() -> void:
 			_character_button_container.add_child(character_button)
 			_character_buttons[character_id] = character_button
 		character_button.text = str(profile.get("display_name", character_id))
+		# 派遣状态标注；派遣中的角色在列表名称后追加提示，按钮仍可点击查看详情。
+		if _is_character_dispatched(character_id):
+			character_button.text += "（派遣中）"
 
 
 func _setup_character_button_scroll() -> void:
@@ -463,6 +484,10 @@ func _on_silver_wolf_button_pressed() -> void:
 
 
 func _on_confirm_button_pressed() -> void:
+	# 派遣锁定复核；确认瞬间重新读取派遣服务实时状态，防止按钮状态过期导致派遣中角色上场。
+	if _is_character_dispatched(_selected_character_id):
+		_refresh_confirm_button_dispatch_lock()
+		return
 	_set_session_selected_character(_selected_character_id)
 	_change_scene_with_transition(_consume_return_scene_path())
 

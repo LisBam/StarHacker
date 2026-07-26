@@ -29,7 +29,8 @@ const SAVE_PATH: String = "user://stock_market_state.json"
 ## 版本 4 补充；新增支持两位小数的证券币余额，旧存档默认从 0.00 证券币开始。
 ## 版本 5 补充；新增杠杆合约仓位表，旧存档默认没有任何杠杆仓位。
 ## 版本 6 补充；新增交易历史记录与通知记录列表，旧存档默认从空记录开始。
-const SAVE_VERSION: int = 6
+## 版本 7 补充；新增“星海互助保险”稳定股票，旧存档缺失该股票时自动按初始价初始化行情。
+const SAVE_VERSION: int = 7
 ## 交易历史记录保留上限；默认 80 条，索引 0 为最新，超出后丢弃最旧记录，防止存档无限膨胀。
 const TRADE_RECORD_LIMIT: int = 80
 ## 通知记录保留上限；默认 50 条，索引 0 为最新，超出后丢弃最旧记录。
@@ -47,7 +48,8 @@ const REFRESH_RUNTIME: String = "runtime"
 ## 股市面板微行情刷新来源标识；面板打开时每秒产生可见小幅波动，不推进玩法周期或事件次数。
 const REFRESH_DISPLAY: String = "display"
 ## 股票稳定顺序；UI、存档迁移、行为统计和事件目标统一使用该顺序。
-const STOCK_IDS: Array[String] = ["quantum_arms", "astral_defense", "hacker_tech", "frontline_supply", "relic_exploration"]
+## 保险股补充；第六只股票“星海互助保险”与骇入保险系统联动，行为影响由保险服务累计后在正式结算取走。
+const STOCK_IDS: Array[String] = ["quantum_arms", "astral_defense", "hacker_tech", "frontline_supply", "relic_exploration", "astral_insurance"]
 ## 杠杆做多方向标识；价格上涨时杠杆仓位盈利，下跌时亏损。
 const LEVERAGE_LONG: int = 1
 ## 杠杆做空方向标识；价格下跌时杠杆仓位盈利，上涨时亏损。
@@ -64,6 +66,7 @@ const STOCK_DEFINITIONS: Dictionary = {
 	"hacker_tech": {"name": "骇客数字科技", "module": "强化石、锻造增幅系统", "base_price": 150.0, "volatility": 0.030},
 	"frontline_supply": {"name": "前线保障供应链", "module": "修复包、物资撤离补给", "base_price": 60.0, "volatility": 0.020},
 	"relic_exploration": {"name": "遗迹勘探开发", "module": "宝箱、稀有掉落与高价值物资", "base_price": 200.0, "volatility": 0.045},
+	"astral_insurance": {"name": "星海互助保险", "module": "骇入保险、死亡风险对冲", "base_price": 80.0, "volatility": 0.025},
 }
 ## 随机事件目录；duration_settlement 控制对局中枢强制次数，duration_refresh 控制全部刷新情绪或波动次数。
 const EVENT_DEFINITIONS: Array[Dictionary] = [
@@ -77,6 +80,8 @@ const EVENT_DEFINITIONS: Array[Dictionary] = [
 	{"id": "tech_bad", "message": "区域防火墙全面升级", "stock_id": "hacker_tech", "direction": -1, "duration_settlement": 2, "duration_refresh": 3},
 	{"id": "supply_bad", "message": "补给通道遭电磁破坏", "stock_id": "frontline_supply", "direction": -1, "duration_settlement": 2, "duration_refresh": 2},
 	{"id": "relic_bad", "message": "遗迹勘探发生安全事故", "stock_id": "relic_exploration", "direction": -1, "duration_settlement": 2, "duration_refresh": 3},
+	{"id": "insurance_good", "message": "全域安全骇入周报发布", "stock_id": "astral_insurance", "direction": 1, "duration_settlement": 2, "duration_refresh": 2},
+	{"id": "insurance_bad", "message": "高额连环理赔冲击拨备金", "stock_id": "astral_insurance", "direction": -1, "duration_settlement": 2, "duration_refresh": 2},
 	{"id": "global_bull", "message": "量子科技板块牛市行情", "stock_id": "", "direction": 1, "temporary_market": MARKET_BULL, "duration_settlement": 2, "duration_refresh": 2},
 	{"id": "global_bear", "message": "市场恐慌情绪蔓延", "stock_id": "", "direction": -1, "temporary_market": MARKET_BEAR, "duration_settlement": 2, "duration_refresh": 2},
 	{"id": "global_volatile", "message": "市场震荡整理", "stock_id": "", "direction": 0, "volatility_multiplier": 1.5, "duration_settlement": 0, "duration_refresh": 5},
@@ -671,6 +676,23 @@ func request_securities_withdrawal(securities_amount: int) -> Dictionary:
 	return {"success": true, "message": "提现成功，到账 %d 星穹" % received_coins, "securities": requested_amount, "fee": fee, "coins": received_coins}
 
 
+func deduct_securities(amount: float, reason: String) -> float:
+	## 银行贷款违约抵扣专用接口；直接按可用余额扣除证券币并写入交易记录，返回实际扣除金额。
+	## 该接口不经过提现手续费，只允许信誉级联结算等系统级流程调用，普通交易仍走既有买卖与提现入口。
+	if amount <= 0.0:
+		return 0.0
+	# 实际扣除金额；请求值与当前余额取小，账户不会因抵扣变为负数。
+	var deducted: float = _normalize_securities_amount(minf(amount, get_securities_balance()))
+	if deducted <= 0.0:
+		return 0.0
+	_securities_balance = _normalize_securities_amount(_securities_balance - deducted)
+	# 抵扣交易记录；说明文本携带调用方原因，供历史记录界面追溯资金去向。
+	_append_trade_record("bank_deduct", "%s：扣除 %.2f 证券币" % [reason, deducted])
+	_save_state()
+	securities_balance_changed.emit(_securities_balance)
+	return deducted
+
+
 func get_maximum_buy_quantity(stock_id: String) -> int:
 	# 当前整数成交价；必须大于 0 才可计算可买数量。
 	# 证券币成交规则；旧整数说明仅保留历史注释兼容，当前价格为两位小数证券币。
@@ -1045,12 +1067,19 @@ func _calculate_mean_reversion(deviation_ratio: float) -> float:
 
 
 func _calculate_behavior_impacts() -> Dictionary:
+	# 保险行为累计值；由保险服务在投保、理赔与安全撤离时累计，正式结算一次性取走后清零。
+	var insurance_impact: Dictionary = {}
+	# 保险服务；缺失时按零影响处理，行情与其余五只股票不受影响。
+	var insurance_service: Node = get_tree().root.get_node_or_null("InsuranceService")
+	if insurance_service != null and insurance_service.has_method("consume_market_impact"):
+		insurance_impact = insurance_service.call("consume_market_impact") as Dictionary
 	return {
 		"quantum_arms": clampf(floor(float(_run_metrics.get("shots", 0.0)) / 100.0) * 0.003 + floor(float(_run_metrics.get("weapon_durability", 0.0)) / 500.0) * 0.004 + float(_run_metrics.get("new_weapons", 0.0)) * 0.002 + floor(float(_run_metrics.get("extracted_weapon_value", 0.0)) / 800.0) * 0.003, -0.02, 0.02),
 		"astral_defense": clampf(floor(float(_run_metrics.get("damage_taken", 0.0)) / 100.0) * 0.005 + floor(float(_run_metrics.get("armor_durability", 0.0)) / 300.0) * 0.004 + floor(float(_run_metrics.get("dodges", 0.0)) / 20.0) * 0.002 + float(_run_metrics.get("broken_armor", 0.0)) * 0.003, -0.02, 0.02),
 		"hacker_tech": clampf(float(_run_metrics.get("enhancement_stones", 0.0)) * 0.002 + float(_run_metrics.get("shipped_enhancement_stones", 0.0)) * 0.003 + floor(float(_run_metrics.get("chests_opened", 0.0)) / 5.0) * 0.002 + float(_run_metrics.get("high_enhancement_stones", 0.0)) * 0.004, -0.02, 0.02),
 		"frontline_supply": clampf(float(_run_metrics.get("repair_kits_used", 0.0)) * 0.004 + floor(float(_run_metrics.get("shipped_value", 0.0)) / 500.0) * 0.003 + floor(float(_run_metrics.get("lost_value", 0.0)) / 300.0) * 0.005 + floor(float(_run_metrics.get("survival_seconds", 0.0)) / 120.0) * 0.002, -0.02, 0.02),
 		"relic_exploration": clampf(float(_run_metrics.get("chests_opened", 0.0)) * 0.002 + float(_run_metrics.get("high_quality_items", 0.0)) * 0.005 + floor(float(_run_metrics.get("extracted_value", 0.0)) / 1000.0) * 0.003 - floor(float(_run_metrics.get("lost_high_value", 0.0)) / 800.0) * 0.004, -0.02, 0.02),
+		"astral_insurance": clampf(floor(float(insurance_impact.get("premium_gold", 0)) / 100.0) * 0.003 + float(insurance_impact.get("safe_extractions", 0)) * 0.004 - floor(float(insurance_impact.get("claim_gold", 0)) / 200.0) * 0.005, -0.02, 0.02),
 	}
 
 

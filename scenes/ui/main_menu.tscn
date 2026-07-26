@@ -157,6 +157,30 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "矿场"
 
+[node name="InsuranceButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "保险"
+
+[node name="BankButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "银行"
+
+[node name="HideoutButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "据点"
+
+[node name="DispatchButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "派遣"
+
 [node name="EncyclopediaButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons" unique_id=1828126173]
 unique_name_in_owner = true
 layout_mode = 2

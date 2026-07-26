@@ -307,6 +307,8 @@ var _has_last_exploration_update_position: bool = false
 var _last_exploration_view_rect: Rect2 = Rect2()
 ## 是否已有上次摄像机探索矩形；默认 false，首次进入地图时强制记录当前真实视野。
 var _has_last_exploration_view_rect: bool = false
+## 上次绘制背景网格的窗口签名；按网格步长取整的可见格边界，默认极小值保证首帧必然重绘一次。
+var _last_grid_window_signature: Vector4i = Vector4i(-2147483648, -2147483648, -2147483648, -2147483648)
 ## 当前是否为训练场模式；默认 false 表示正式骇入，修改会影响 HUD 是否显示训练场设置。
 var _is_training_mode: bool = false
 ## 当前选择角色标识；取值为 stelle、caelus 或 silver_wolf，默认 stelle，用于角色切换和属性随机。
@@ -366,6 +368,8 @@ var _skill_map_markers: Dictionary = {}
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	# 清空伤害飘字的跨局静态追踪；上一局死亡目标的实例 ID 不会复用，进入新战斗时统一释放残留键。
+	DamageNumberPopup.reset_tracking()
 	_random.randomize()
 	_merge_automatically_discovered_content()
 	_apply_session_state()
@@ -398,6 +402,7 @@ func _process(delta: float) -> void:
 	_update_extraction_state(delta)
 	_update_supply_extraction_state(delta)
 	_update_explored_cells_if_needed(delta)
+	_update_background_grid_redraw()
 	_update_monster_replenishment(delta)
 	if _monster_simulation_manager != null and _monster_simulation_manager.has_method("update"):
 		_monster_simulation_manager.call("update", delta)
@@ -412,16 +417,51 @@ func _draw() -> void:
 
 	# 有效背景网格尺寸；最低为 1 像素，异常检查器数据不会导致零步长循环。
 	var resolved_background_grid_cell_size: float = maxf(background_grid_cell_size, 1.0)
-	# 当前网格线偏移；从地图负方向边界内的首个整格倍数开始，逐格绘制到正方向边界。
-	var grid_line_offset: float = ceilf(-half_size / resolved_background_grid_cell_size) * resolved_background_grid_cell_size
-	while grid_line_offset <= half_size:
-		draw_line(Vector2(grid_line_offset, -half_size), Vector2(grid_line_offset, half_size), grid_color, 1.0)
-		draw_line(Vector2(-half_size, grid_line_offset), Vector2(half_size, grid_line_offset), grid_color, 1.0)
-		grid_line_offset += resolved_background_grid_cell_size
+	# 网格绘制窗口；默认只覆盖玩家相机可见范围外扩一格并夹取到地图内，避免每帧提交覆盖全图的数百条线段命令。
+	var grid_window: Rect2 = _get_background_grid_draw_window(play_area, resolved_background_grid_cell_size)
+	# 纵向网格线偏移；从窗口左边界内的首个整格倍数开始，逐格绘制到窗口右边界。
+	var vertical_line_offset: float = ceilf(grid_window.position.x / resolved_background_grid_cell_size) * resolved_background_grid_cell_size
+	while vertical_line_offset <= grid_window.end.x:
+		draw_line(Vector2(vertical_line_offset, grid_window.position.y), Vector2(vertical_line_offset, grid_window.end.y), grid_color, 1.0)
+		vertical_line_offset += resolved_background_grid_cell_size
+	# 横向网格线偏移；从窗口上边界内的首个整格倍数开始，逐格绘制到窗口下边界。
+	var horizontal_line_offset: float = ceilf(grid_window.position.y / resolved_background_grid_cell_size) * resolved_background_grid_cell_size
+	while horizontal_line_offset <= grid_window.end.y:
+		draw_line(Vector2(grid_window.position.x, horizontal_line_offset), Vector2(grid_window.end.x, horizontal_line_offset), grid_color, 1.0)
+		horizontal_line_offset += resolved_background_grid_cell_size
 
 	# 地图边框颜色；取值来自 axis_color，默认用于网格地图边界提示。
 	var border_color: Color = axis_color
 	draw_rect(play_area, border_color, false, 2.0)
+
+
+func _get_background_grid_draw_window(play_area: Rect2, grid_cell_size: float) -> Rect2:
+	# 背景网格绘制窗口；玩家相机存在时取其世界视野外扩一格，缺失时回退整张地图保持原有表现。
+	if _player_camera == null or not is_instance_valid(_player_camera):
+		return play_area
+	# 相机世界视野；外扩一格避免相机移动时网格线在屏幕边缘出现迟到绘制。
+	var camera_view_rect: Rect2 = _get_player_camera_world_view_rect().grow(grid_cell_size)
+	return camera_view_rect.intersection(play_area)
+
+
+func _update_background_grid_redraw() -> void:
+	# 玩家相机缺失时背景按全图绘制，无需跟随相机刷新。
+	if _player_camera == null or not is_instance_valid(_player_camera):
+		return
+	# 有效网格步长；与绘制阶段保持一致，保证签名与实际线位对齐。
+	var grid_cell_size: float = maxf(background_grid_cell_size, 1.0)
+	# 当前相机世界视野；用于计算按网格步长取整的可见格边界。
+	var camera_view_rect: Rect2 = _get_player_camera_world_view_rect()
+	# 当前网格窗口签名；只有相机跨过网格线或视野尺寸变化时签名才变化，从而触发一次背景重绘。
+	var window_signature: Vector4i = Vector4i(
+		int(floorf(camera_view_rect.position.x / grid_cell_size)),
+		int(floorf(camera_view_rect.position.y / grid_cell_size)),
+		int(ceilf(camera_view_rect.end.x / grid_cell_size)),
+		int(ceilf(camera_view_rect.end.y / grid_cell_size))
+	)
+	if window_signature != _last_grid_window_signature:
+		_last_grid_window_signature = window_signature
+		queue_redraw()
 
 
 func _prepare_map_seed() -> void:
@@ -457,13 +497,23 @@ func get_map_half_size() -> float:
 func get_minimap_obstacle_rects(include_loot_chests: bool = true) -> Array[Rect2]:
 	# 障碍矩形副本；局部小地图可排除宝箱，完整地图仍可按已探索规则显示其建筑占位。
 	var result: Array[Rect2] = []
+	# 宝箱矩形查找表；提前构建一次，避免在循环体内反复重建 values() 数组造成 O(n²) 扫描。
+	var loot_chest_rect_lookup: Dictionary = {}
+	if not include_loot_chests:
+		for loot_chest_rect in _loot_chest_obstacle_rects.values():
+			loot_chest_rect_lookup[loot_chest_rect] = true
 	# 障碍矩形遍历项；取值为世界坐标 Rect2，默认逐项复制到返回数组。
 	for obstacle_rect in _environment_obstacle_rects:
-		if not include_loot_chests and obstacle_rect in _loot_chest_obstacle_rects.values():
+		if not include_loot_chests and loot_chest_rect_lookup.has(obstacle_rect):
 			continue
 		result.append(obstacle_rect)
 
 	return result
+
+
+func get_minimap_obstacle_rects_readonly() -> Array[Rect2]:
+	# 障碍矩形内部数组引用；供敌人战术选点等高频只读调用方使用，禁止调用方修改返回数组。
+	return _environment_obstacle_rects
 
 
 func get_minimap_obstacle_version() -> int:
@@ -483,6 +533,16 @@ func get_explored_cells() -> Array[Vector2i]:
 
 func get_explored_cells_version() -> int:
 	return _explored_cells_version
+
+
+func get_explored_cells_readonly() -> Dictionary:
+	# 已探索格子内部字典引用；键为 Vector2i 格坐标，供小地图等高频只读调用方直接查询，禁止调用方修改。
+	return _explored_cells
+
+
+func has_explored_cell(cell: Vector2i) -> bool:
+	# 单格探索状态查询；避免调用方为一次判断复制整张探索格列表。
+	return _explored_cells.has(cell)
 
 
 func get_exploration_cell_size() -> float:
@@ -1382,9 +1442,10 @@ func _should_update_explored_cells() -> bool:
 	if _exploration_update_remaining <= 0.0:
 		return true
 
-	# 当前摄像机世界视野；相机缩放或窗口尺寸改变会改变矩形大小，因此不等待玩家移动阈值即可刷新探索。
-	var current_view_rect: Rect2 = _get_player_camera_world_view_rect()
-	if not _has_last_exploration_view_rect or current_view_rect.size != _last_exploration_view_rect.size:
+	# 当前摄像机世界视野尺寸；相机缩放或窗口尺寸改变会改变该值，因此不等待玩家移动阈值即可刷新探索。
+	# 只计算尺寸而非完整矩形，使计时等待期的每帧检查不再读取相机屏幕中心位置。
+	var current_view_size: Vector2 = _get_player_camera_world_view_size()
+	if not _has_last_exploration_view_rect or current_view_size != _last_exploration_view_rect.size:
 		return true
 
 	# 本次探索刷新距离阈值；取值至少为 0，默认让玩家快速移动时不等待固定计时器。
@@ -1441,6 +1502,19 @@ func _update_explored_cells(force_update: bool) -> void:
 
 	if explored_cells_changed:
 		_explored_cells_version += 1
+
+
+func _get_player_camera_world_view_size() -> Vector2:
+	# 摄像机世界视野尺寸；只做视口尺寸与缩放的除法，供每帧变化检测使用，不读取相机屏幕中心。
+	if _player_camera != null and is_instance_valid(_player_camera):
+		# 当前视口；其可见尺寸与相机缩放共同决定玩家屏幕实际覆盖的世界范围。
+		var current_viewport: Viewport = _player_camera.get_viewport()
+		if current_viewport != null:
+			# 安全相机缩放；每轴至少 0.001，避免异常配置导致除零或无限视野。
+			var camera_zoom: Vector2 = Vector2(maxf(absf(_player_camera.zoom.x), 0.001), maxf(absf(_player_camera.zoom.y), 0.001))
+			return current_viewport.get_visible_rect().size / camera_zoom
+	# 摄像机缺失回退；与完整矩形接口的回退分支保持同一探索半径语义。
+	return Vector2.ONE * maxf(exploration_radius, 0.0) * 2.0
 
 
 func _get_player_camera_world_view_rect() -> Rect2:
@@ -2443,6 +2517,8 @@ func _get_scattered_drop_position(center_position: Vector2) -> Vector2:
 	var scatter_attempt_count: int = 8
 	# 标准化散落半径；取值至少为 0，默认控制丢弃武器离玩家多远。
 	var scatter_radius: float = maxf(dropped_weapon_scatter_radius, 0.0)
+	# 场上掉落物快照；一次散布最多 8 次尝试共用同一份列表，避免每次尝试重复分配组查询数组。
+	var existing_drop_nodes: Array[Node] = get_tree().get_nodes_in_group("item_drops")
 	for _attempt_index in range(scatter_attempt_count):
 		# 散落角度；取值为 0 到 TAU 的随机弧度，默认让丢弃落点不完全固定。
 		var scatter_angle: float = _random.randf_range(0.0, TAU)
@@ -2450,20 +2526,22 @@ func _get_scattered_drop_position(center_position: Vector2) -> Vector2:
 		var scatter_distance: float = _random.randf_range(scatter_radius * 0.45, scatter_radius)
 		# 候选位置；取值为中心点加随机偏移并夹到地图内。
 		var candidate_position: Vector2 = _clamp_position_to_map(center_position + Vector2.RIGHT.rotated(scatter_angle) * scatter_distance)
-		if not _is_position_blocked_by_environment(candidate_position, 18.0) and not _is_position_near_existing_drop(candidate_position):
+		if not _is_position_blocked_by_environment(candidate_position, 18.0) and not _is_position_near_existing_drop(candidate_position, existing_drop_nodes):
 			return candidate_position
 
 	return _clamp_position_to_map(center_position)
 
 
-func _is_position_near_existing_drop(candidate_position: Vector2) -> bool:
+func _is_position_near_existing_drop(candidate_position: Vector2, existing_drop_nodes: Array[Node]) -> bool:
 	# 最小分离距离；取值至少为 0，关闭时允许多个物品完全重叠以兼容旧调试配置。
 	var minimum_separation: float = maxf(dropped_item_minimum_separation, 0.0)
 	if minimum_separation <= 0.0:
 		return false
+	# 最小分离距离平方；与平方距离比较等价于原距离判断，省去每个掉落物一次开方。
+	var minimum_separation_squared: float = minimum_separation * minimum_separation
 	# 已有掉落物遍历项；只检查仍在场景树中且拥有二维位置的有效节点。
-	for drop_node in get_tree().get_nodes_in_group("item_drops"):
-		if drop_node is Node2D and is_instance_valid(drop_node) and (drop_node as Node2D).global_position.distance_to(candidate_position) < minimum_separation:
+	for drop_node in existing_drop_nodes:
+		if drop_node is Node2D and is_instance_valid(drop_node) and (drop_node as Node2D).global_position.distance_squared_to(candidate_position) < minimum_separation_squared:
 			return true
 	return false
 

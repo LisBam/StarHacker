@@ -56,6 +56,8 @@ const QUANTITY_OPERATION_NONE: String = ""
 const QUANTITY_OPERATION_SALE: String = "sale"
 ## 数量弹窗移动操作标识；确认后把选择数量从仓库或背包原子拆分到另一容器。
 const QUANTITY_OPERATION_TRANSFER: String = "transfer"
+## 搜索防抖等待时间；默认 0.2 秒，输入停止后才执行一次完整的仓库与背包列表重建。
+const SEARCH_DEBOUNCE_SECONDS: float = 0.2
 
 ## 面板最小尺寸；默认 960x620，适配当前 1280x720 主菜单并保留边缘空间。
 @export var panel_minimum_size: Vector2 = Vector2(960.0, 620.0)
@@ -176,6 +178,8 @@ var _refresh_pending: bool = false
 var _warehouse_item_loader: ProgressiveItemLoader
 ## 背包新卡片渐进加载器；与仓库任务独立，展开模式下可同时逐帧补齐上下两个区域。
 var _backpack_item_loader: ProgressiveItemLoader
+## 搜索防抖计时器；单次触发，文本变化时重置计时并在停止输入后统一重建一次，清空搜索框时立即刷新。
+var _search_debounce_timer: Timer
 
 
 func _ready() -> void:
@@ -312,6 +316,12 @@ func _build_storage_interface() -> void:
 	_storage_search_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_storage_search_edit.text_changed.connect(_on_storage_search_changed)
 	query_bar.add_child(_storage_search_edit)
+	# 搜索防抖计时器初始化；常驻面板子节点，超时回调直接复用原有仓库与背包统一重建入口。
+	_search_debounce_timer = Timer.new()
+	_search_debounce_timer.one_shot = true
+	_search_debounce_timer.wait_time = SEARCH_DEBOUNCE_SECONDS
+	_search_debounce_timer.timeout.connect(_rebuild_storage_content)
+	add_child(_search_debounce_timer)
 	_storage_sort_option = OptionButton.new()
 	_storage_sort_option.custom_minimum_size = Vector2(142.0, 36.0)
 	_storage_sort_option.add_item("获得时间")
@@ -771,7 +781,13 @@ func _on_quick_unequip_requested(equipment_location: String) -> void:
 
 
 func _on_storage_search_changed(_new_text: String) -> void:
-	_rebuild_storage_content()
+	# 搜索防抖处理；清空搜索框立即重建保证响应感，其余输入重置 0.2 秒计时并在停止输入后统一重建一次。
+	if _search_debounce_timer == null or _new_text.strip_edges().is_empty():
+		if _search_debounce_timer != null:
+			_search_debounce_timer.stop()
+		_rebuild_storage_content()
+		return
+	_search_debounce_timer.start()
 
 
 func _on_storage_sort_selected(item_index: int) -> void:

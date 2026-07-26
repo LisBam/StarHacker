@@ -20,6 +20,8 @@ var _particle_directions: Array[Vector2] = []
 var _particle_distance_factors: Array[float] = []
 ## 局部随机数生成器；默认每个特效独立随机化，修改会影响碎片分布。
 var _random: RandomNumberGenerator = RandomNumberGenerator.new()
+## 特效脚本静态缓存；首次生成特效时加载一次后跨实例复用，避免每次受击都执行运行时资源路径查找。
+static var _cached_effect_script: Script = null
 
 
 static func spawn_burst(parent_node: Node, burst_position: Vector2, burst_color: Color, burst_radius: float, burst_duration: float, burst_particle_count: int) -> Node2D:
@@ -27,7 +29,10 @@ static func spawn_burst(parent_node: Node, burst_position: Vector2, burst_color:
 		return null
 
 	# 特效脚本资源；取值为当前脚本路径，默认用于避免跨脚本依赖全局类名缓存。
-	var effect_script: Script = load("res://scripts/effects/combat_burst_effect.gd") as Script
+	# 当前实现改为读取静态缓存；只有首次生成时执行一次 load，后续密集受击特效直接复用同一脚本资源。
+	if _cached_effect_script == null:
+		_cached_effect_script = load("res://scripts/effects/combat_burst_effect.gd") as Script
+	var effect_script: Script = _cached_effect_script
 	if effect_script == null:
 		return null
 
@@ -73,7 +78,7 @@ func _draw() -> void:
 	var current_radius: float = lerpf(max_radius * 0.18, max_radius, progress)
 	# 当前颜色；取值为 effect_color 叠加透明度，默认用于圆环和碎片。
 	var draw_color: Color = Color(effect_color.r, effect_color.g, effect_color.b, effect_color.a * alpha)
-	draw_arc(Vector2.ZERO, current_radius, 0.0, TAU, 32, draw_color, 2.0)
+	draw_arc(Vector2.ZERO, current_radius, 0.0, TAU, 16, draw_color, 2.0)
 	draw_circle(Vector2.ZERO, max_radius * 0.16 * alpha, draw_color)
 
 	# 碎片索引；取值为 0 到碎片数量减 1，默认逐个绘制飞散短线。

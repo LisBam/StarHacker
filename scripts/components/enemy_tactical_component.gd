@@ -1,3 +1,5 @@
+## 敌人战术组件全局类名；供宿主聚合脚本与其他系统做类型化引用，不改变节点运行行为。
+class_name EnemyTacticalComponent
 extends Node
 
 ## 敌人战术组件只读取本怪物的感知线索并生成二维搜查与伏击目标。
@@ -173,13 +175,20 @@ func _pull_local_intelligence() -> void:
 	if _perception_component == null or not _perception_component.has_method("get_tactical_intelligence"):
 		return
 
+	if _perception_component.has_method("get_tactical_intelligence_revision"):
+		# 感知情报当前版本号；取值单调递增，先经轻量接口比对，与已处理版本一致或更旧时完全跳过情报字典构造与解析。
+		var current_intelligence_revision: int = int(_perception_component.call("get_tactical_intelligence_revision"))
+		if current_intelligence_revision <= _last_local_intelligence_revision:
+			return
+
 	# 感知组件原始情报；取值为 Dictionary 或其他 Variant，默认只处理结构化字典。
+	# 补充说明：感知接口每次调用都构造全新字典且自身不保留引用，这里直接使用返回值，无需深拷贝。
 	var raw_report: Variant = _perception_component.call("get_tactical_intelligence")
 	if not (raw_report is Dictionary):
 		return
 
 	# 本地情报报告；取值包含版本、来源、目标和消失线索，空字典表示当前没有新情报。
-	var report: Dictionary = raw_report.duplicate(true)
+	var report: Dictionary = raw_report
 	if report.is_empty():
 		return
 
@@ -189,7 +198,7 @@ func _pull_local_intelligence() -> void:
 		return
 
 	_last_local_intelligence_revision = report_revision
-	_intelligence = report.duplicate(true)
+	_intelligence = report
 	_has_intelligence = true
 	_reset_tactical_route()
 
@@ -314,6 +323,8 @@ func _resolve_navigable_destination(anchor_position: Vector2, desired_destinatio
 	if desired_offset.is_zero_approx():
 		return anchor_position
 
+	# 剩余完整验证预算；默认 2，限制单次旋转重试中触发含 A* 完整验证的候选数量，预算耗尽后剩余候选只做射线粗筛。
+	var full_validation_budget: int = 2
 	# 战术候选索引；取值为 0 到尝试次数减一，左右交替旋转并逐步收缩半径寻找可行点。
 	for attempt_index in range(tactical_destination_attempts):
 		# 尝试侧向符号；取值 -1 或 1，相邻尝试交替搜索墙体两侧路线。
@@ -323,7 +334,13 @@ func _resolve_navigable_destination(anchor_position: Vector2, desired_destinatio
 		# 尝试半径倍率；取值最低 0.45，越后续的候选越靠近锚点以提高可达概率。
 		var attempt_radius_multiplier: float = maxf(1.0 - float(attempt_index) * 0.08, 0.45)
 		# 替代候选点；取值为旋转并收缩后的偏移，交给移动组件验证导航可达性。
+		# 补充说明：先做低成本射线粗筛，射线通畅即等价于完整验证通过；射线受阻时才消耗预算执行含 A* 的完整验证。
 		var alternative_destination: Vector2 = anchor_position + desired_offset.rotated(attempt_angle) * attempt_radius_multiplier
+		if _is_destination_ray_clear(alternative_destination):
+			return alternative_destination
+		if full_validation_budget <= 0:
+			continue
+		full_validation_budget -= 1
 		if _is_destination_navigable(alternative_destination):
 			return alternative_destination
 
@@ -357,13 +374,18 @@ func _get_best_wall_corner_destination(reference_position: Vector2, anchor_posit
 			continue
 		# 墙角候选点；取值为原始角点沿外侧推出 wall_corner_clearance。
 		var corner_destination: Vector2 = raw_corner + corner_outward_direction.normalized() * wall_corner_clearance
-		if not _is_destination_navigable(corner_destination):
+		# 射线粗筛：先用低成本中心线射线过滤墙角候选，避免对每个候选都触发全图 A*；全部射线受阻时按原兜底返回参考位置。
+		if not _is_destination_ray_clear(corner_destination):
 			continue
 		# 墙角评分；取值为候选到参考位置距离，并加入职能序号微小偏置以分散同类单位。
 		var corner_score: float = corner_destination.distance_to(reference_position) + absf(float(_role_slot_index) * 4.0)
 		if corner_score < best_score:
 			best_score = corner_score
 			best_destination = corner_destination
+
+	# 最优墙角完整验证：仅对通过射线粗筛的最优候选执行一次含 A* 的完整可导航验证，失败时退回参考位置兜底。
+	if best_score < INF and not _is_destination_navigable(best_destination):
+		return reference_position
 
 	return best_destination
 
@@ -375,7 +397,8 @@ func _find_nearest_wall_rect(reference_position: Vector2) -> Rect2:
 		return Rect2()
 
 	# 原始障碍矩形数组；取值来自地图共享缓存，默认只处理 Rect2 元素。
-	var raw_rects: Variant = obstacle_provider.call("get_minimap_obstacle_rects")
+	# 补充说明：优先使用只读内部引用接口避免每次战术选点复制整份矩形数组；本函数只遍历读取该数组，禁止修改（只读契约）。
+	var raw_rects: Variant = obstacle_provider.call("get_minimap_obstacle_rects_readonly") if obstacle_provider.has_method("get_minimap_obstacle_rects_readonly") else obstacle_provider.call("get_minimap_obstacle_rects")
 	if not (raw_rects is Array):
 		return Rect2()
 
@@ -425,6 +448,14 @@ func _is_destination_navigable(destination: Vector2) -> bool:
 	if _movement_component == null or not _movement_component.has_method("is_destination_navigable"):
 		return true
 	return bool(_movement_component.call("is_destination_navigable", destination))
+
+
+## 目的地射线粗筛；只做中心线射线检测不触发 A*，射线通畅时与完整可导航验证结果等价。
+func _is_destination_ray_clear(destination: Vector2) -> bool:
+	if _movement_component == null or not _movement_component.has_method("is_destination_ray_clear"):
+		# 兜底行为：移动组件缺少射线粗筛接口时退回完整可导航验证，保持战术选点结果与旧逻辑一致。
+		return _is_destination_navigable(destination)
+	return bool(_movement_component.call("is_destination_ray_clear", destination))
 
 
 func _get_escape_direction(anchor_position: Vector2) -> Vector2:

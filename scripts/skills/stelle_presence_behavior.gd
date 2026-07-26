@@ -22,6 +22,8 @@ var _passive_skill_component: Node
 var _refresh_remaining: float = 0.0
 ## 当前属性倍率来源标识；默认空字符串，配置后使用技能稳定 ID，角色切换时据此精确移除本被动加成。
 var _source_id: String = ""
+## 视野计数去重表；键为目标实例 ID、值为 true，成员级复用并在每次刷新前清空，避免每次统计都分配新字典。
+var _counted_instance_ids: Dictionary = {}
 
 
 func configure(caster: Node2D, stats_component: Node, skill_data: Resource, passive_skill_component: Node) -> void:
@@ -58,7 +60,7 @@ func _update_presence_bonus() -> void:
 	# 当前相机世界视野矩形；使用真实缩放和窗口尺寸，装备视野变化会自然扩大计数区域。
 	var view_rect: Rect2 = _get_camera_world_view_rect()
 	# 已计数实例集合；单位和宝箱误入多个组时只计算一次。
-	var counted_instance_ids: Dictionary = {}
+	_counted_instance_ids.clear()
 	# 合法目标数量；默认 0，每个当前视野内的其他单位或宝箱增加 1。
 	var target_count: int = 0
 	for raw_group in [_skill_data.get("unit_group"), _skill_data.get("chest_group")]:
@@ -73,9 +75,9 @@ func _update_presence_bonus() -> void:
 				continue
 			# 目标实例编号；用于跨单位组与宝箱组去重。
 			var target_instance_id: int = target.get_instance_id()
-			if counted_instance_ids.has(target_instance_id) or not view_rect.has_point(target.global_position):
+			if _counted_instance_ids.has(target_instance_id) or not view_rect.has_point(target.global_position):
 				continue
-			counted_instance_ids[target_instance_id] = true
+			_counted_instance_ids[target_instance_id] = true
 			target_count += 1
 	# 每目标倍率；默认 0.02，负数按 0 处理，异常资源不会把被动变成减益。
 	var ratio_per_target: float = maxf(float(_skill_data.get("bonus_ratio_per_target")), 0.0)

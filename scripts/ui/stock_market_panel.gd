@@ -20,6 +20,8 @@ const SECURITIES_TRANSFER_DIALOG_SCRIPT: Script = preload("res://scripts/ui/secu
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 标准股票卡片尺寸；固定 160×72，与项目物品卡片规范一致。
 const CARD_SIZE: Vector2 = Vector2(160.0, 72.0)
+## 面板微行情刷新来源标识；与 StockMarketService.REFRESH_DISPLAY 保持一致，用于跳过每秒的大盘缓存更新。
+const REFRESH_SOURCE_DISPLAY: String = "display"
 ## 面板目标尺寸；默认 1040×620，宿主应按该尺寸居中放置。
 @export var panel_minimum_size: Vector2 = Vector2(1040.0, 620.0)
 ## 事件提示显示时长；默认 3 秒，结束后线性淡出。
@@ -80,6 +82,14 @@ var _pending_quantity: int = 0
 var _pending_unit_price: float = 0.0
 ## 事件提示补间；新事件到来时停止旧补间并从完全可见重新开始。
 var _event_tween: Tween
+## 全量刷新是否已排队；默认 false，参照仓库面板模式把同帧多路信号合并为一次统一刷新。
+var _refresh_queued: bool = false
+## 调试设置服务缓存；启动时查找一次，避免每秒行情刷新反复 get_node_or_null 查询。
+var _debug_settings: Node
+## 股票静态目录缓存；启动时从服务深复制一份名称与模块信息，每秒刷新不再重复请求静态副本。
+var _stock_definitions_cache: Dictionary = {}
+## 大盘显示名称缓存；默认震荡市，只在首次打开、切换选中股票、非微行情刷新与事件触发时读取完整市场快照更新。
+var _cached_market_state_name: String = "震荡市"
 
 
 func _ready() -> void:
@@ -89,6 +99,7 @@ func _ready() -> void:
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
 	_build_interface()
 	_connect_services()
+	_refresh_market_snapshot_cache()
 	_refresh_all()
 	_show_active_event_if_available()
 
@@ -150,6 +161,7 @@ func _build_interface() -> void:
 	if _stock_market_service != null and _stock_market_service.has_method("get_stock_definitions"):
 		# 股票目录；由服务返回静态副本，UI 只据此建立稳定标识按钮。
 		var definitions: Dictionary = _stock_market_service.call("get_stock_definitions") as Dictionary
+		_stock_definitions_cache = definitions
 		for stock_id in definitions.keys():
 			# 单只股票按钮；内部承载标准卡片并绑定当前稳定股票标识。
 			var stock_button: Button = _create_stock_card_button(str(stock_id))
@@ -277,18 +289,23 @@ func _build_interface() -> void:
 func _connect_services() -> void:
 	if _stock_market_service != null:
 		if _stock_market_service.has_signal("market_changed"):
-			_stock_market_service.connect("market_changed", Callable(self, "_refresh_all"))
+			# 行情变化信号；改为置位合并标志后延迟统一刷新，一次交易触发的多路信号只做一次全量刷新。
+			_stock_market_service.connect("market_changed", Callable(self, "_queue_refresh_all"))
+		if _stock_market_service.has_signal("market_refreshed"):
+			# 行情刷新来源信号；非微行情刷新可能切换大盘或消耗事件，届时更新一次大盘名称缓存。
+			_stock_market_service.connect("market_refreshed", Callable(self, "_on_market_refreshed"))
 		if _stock_market_service.has_signal("event_announced"):
-			_stock_market_service.connect("event_announced", Callable(self, "_show_event_banner"))
+			_stock_market_service.connect("event_announced", Callable(self, "_on_event_announced"))
 		if _stock_market_service.has_signal("securities_balance_changed"):
 			_stock_market_service.connect("securities_balance_changed", Callable(self, "_on_securities_balance_changed"))
 	if _global_inventory != null:
 		if _global_inventory.has_signal("coins_changed"):
-			_global_inventory.connect("coins_changed", Callable(self, "_refresh_all"))
+			_global_inventory.connect("coins_changed", Callable(self, "_queue_refresh_all"))
 		if _global_inventory.has_signal("stock_holdings_changed"):
-			_global_inventory.connect("stock_holdings_changed", Callable(self, "_refresh_all"))
+			_global_inventory.connect("stock_holdings_changed", Callable(self, "_queue_refresh_all"))
 	# 调试信息服务；开关变化后立即切换股票卡片和行情摘要中的开发计算字段。
 	var debug_settings: Node = get_tree().root.get_node_or_null("DebugSettings")
+	_debug_settings = debug_settings
 	if debug_settings != null and debug_settings.has_signal("debug_information_visibility_changed"):
 		debug_settings.connect("debug_information_visibility_changed", Callable(self, "_on_debug_information_visibility_changed"))
 
@@ -299,7 +316,45 @@ func _on_debug_information_visibility_changed(_visible: bool) -> void:
 
 func _on_securities_balance_changed(_balance: float) -> void:
 	## 证券币账户变化后刷新余额、买入上限与已打开交易弹窗，不直接读取信号参数作为唯一状态源。
+	## 合并刷新补充：改为置位合并标志，与同帧其他行情或资产信号共享一次统一全量刷新。
+	_queue_refresh_all()
+
+
+func _queue_refresh_all() -> void:
+	## 合并全量刷新入口；参照仓库面板模式，同帧内 market_changed、coins_changed、stock_holdings_changed 与 securities_balance_changed 只触发一次刷新。
+	if _refresh_queued:
+		return
+	_refresh_queued = true
+	call_deferred("_flush_queued_refresh")
+
+
+func _flush_queued_refresh() -> void:
+	## 执行单次合并全量刷新；期间若已发生交易或选中切换触发的直接刷新，标志会被消化并跳过重复工作。
+	if not _refresh_queued:
+		return
 	_refresh_all()
+
+
+func _on_market_refreshed(refresh_source: String) -> void:
+	## 行情刷新来源回调；每秒微行情不更新大盘缓存，正式结算与局外刷新才重新读取完整市场快照。
+	if refresh_source == REFRESH_SOURCE_DISPLAY:
+		return
+	_refresh_market_snapshot_cache()
+
+
+func _on_event_announced(message: String) -> void:
+	## 随机事件回调；事件可能附带临时大盘状态，先更新大盘名称缓存，再展示既有顶部滚动提示。
+	_refresh_market_snapshot_cache()
+	_show_event_banner(message)
+
+
+func _refresh_market_snapshot_cache() -> void:
+	## 低频更新大盘显示名称缓存；深复制全市场快照的成本只在首次打开、切换选中股票、非微行情刷新与事件触发时产生。
+	if _stock_market_service == null or not _stock_market_service.has_method("get_market_snapshot"):
+		return
+	# 全市场快照；仅在低频路径读取，每秒微行情刷新只消费缓存名称。
+	var market_snapshot: Dictionary = _stock_market_service.call("get_market_snapshot") as Dictionary
+	_cached_market_state_name = str(market_snapshot.get("market_state_name", "震荡市"))
 
 
 func _create_stock_card_button(stock_id: String) -> Button:
@@ -342,6 +397,8 @@ func _create_holding_card_button(stock_id: String) -> Button:
 
 
 func _refresh_all() -> void:
+	# 任何直接全量刷新都消化当前挂起的合并刷新；同帧稍后的延迟回调据此跳过重复刷新。
+	_refresh_queued = false
 	if _stock_market_service == null:
 		_buy_button.disabled = true
 		_sell_button.disabled = true
@@ -355,7 +412,7 @@ func _refresh_all() -> void:
 
 func _refresh_stock_card(stock_id: String) -> void:
 	# 股票快照；包含静态名称、当前价格、最近涨跌和调试字段。
-	var snapshot: Dictionary = _stock_market_service.call("get_stock_snapshot", stock_id) as Dictionary
+	# 轻量刷新补充：正式路径改用服务轻量只读接口与静态目录缓存，仅调试模式才读取深复制完整快照。
 	# 股票按钮；通过稳定标识找到创建时缓存的宿主。
 	var button: Button = _stock_buttons.get(stock_id) as Button
 	if button == null:
@@ -363,18 +420,24 @@ func _refresh_stock_card(stock_id: String) -> void:
 	# 标准卡片；负责统一三行排版、选中边框和交互动效。
 	var card: Control = button.get_node_or_null("Card") as Control
 	# 最近涨跌比例；正值上涨、负值下跌、零值持平。
-	var change_ratio: float = float(snapshot.get("last_change_ratio", 0.0))
+	var change_ratio: float = float(_stock_market_service.call("get_stock_change_ratio", stock_id))
+	# 当前两位小数价格；来自轻量只读接口，不复制任何行情字典。
+	var current_price: float = float(_stock_market_service.call("get_stock_price", stock_id))
+	# 股票静态定义缓存；提供稳定显示名称，不随每秒行情变化。
+	var definition: Dictionary = _stock_definitions_cache.get(stock_id, {}) as Dictionary
 	# 涨跌富文本颜色名；与强化收益着色规则一致。
 	var color_name: String = "green" if change_ratio > 0.0 else ("red" if change_ratio < 0.0 else "white")
 	# 卡片底部摘要；正式模式只显示涨跌幅，调试模式追加中枢和偏离。
 	var detail: String = "[color=%s]%+.2f%%[/color]" % [color_name, change_ratio * 100.0]
 	if _is_debug_information_visible():
+		# 调试完整快照；仅调试模式读取单股深复制行情，正式玩家的每秒刷新不再复制字典。
+		var snapshot: Dictionary = _stock_market_service.call("get_stock_snapshot", stock_id) as Dictionary
 		# 调试卡片摘要；在标准卡片有限宽度内展示中枢与偏离率，完整字段保留在中部摘要。
 		var center: float = float(snapshot.get("center", 0.0))
 		# 中枢偏离率；当前价相对动态价值中枢的百分比，仅调试模式可见。
 		var deviation_ratio: float = (float(snapshot.get("price", 0.0)) / center - 1.0) if center > 0.0 else 0.0
 		detail += "  中枢%.1f 偏离%+.1f%%" % [center, deviation_ratio * 100.0]
-	card.call("configure", null, 1, str(snapshot.get("name", "股票")), detail, "%.2f 证券币" % float(snapshot.get("price", 0.0)))
+	card.call("configure", null, 1, str(definition.get("name", "股票")), detail, "%.2f 证券币" % current_price)
 	card.call("set_visual_state", stock_id == _selected_stock_id, false)
 
 
@@ -389,9 +452,11 @@ func _refresh_selected_stock() -> void:
 	var color_name: String = "green" if change_ratio > 0.0 else ("red" if change_ratio < 0.0 else "white")
 	_selected_title_label.text = "%s · %s" % [str(snapshot.get("name", "股票")), str(snapshot.get("module", ""))]
 	# 全市场快照；提供有效大盘名称和调试运行累计进度。
-	var market_snapshot: Dictionary = _stock_market_service.call("get_market_snapshot") as Dictionary
-	_selected_summary_label.text = "当前价 %.2f 证券币    [color=%s]%+.2f%%[/color]    大盘：%s" % [float(snapshot.get("price", 0.0)), color_name, change_ratio * 100.0, str(market_snapshot.get("market_state_name", "震荡市"))]
+	# 大盘缓存补充：每秒微行情不再深复制全市场快照，大盘名称改读低频更新的缓存，调试分支才读取完整快照。
+	_selected_summary_label.text = "当前价 %.2f 证券币    [color=%s]%+.2f%%[/color]    大盘：%s" % [float(snapshot.get("price", 0.0)), color_name, change_ratio * 100.0, _cached_market_state_name]
 	if _is_debug_information_visible():
+		# 调试全市场快照；仅调试模式读取完整深复制，用于展示运行累计进度等开发字段。
+		var market_snapshot: Dictionary = _stock_market_service.call("get_market_snapshot") as Dictionary
 		# 调试中枢；取值为当前长期合理价格线，仅用于开发者验证均值回归。
 		var debug_center: float = float(snapshot.get("center", 0.0))
 		# 调试偏离率；当前价格相对中枢的比例，用于验证分段回归力度。
@@ -437,7 +502,8 @@ func _refresh_holdings() -> void:
 	# 可见持仓数量；用于控制空状态提示，不依赖容器子节点总数。
 	var visible_holding_count: int = 0
 	# 股票静态目录；按服务稳定顺序筛选非空持仓并建立底部卡片。
-	var definitions: Dictionary = _stock_market_service.call("get_stock_definitions") as Dictionary
+	# 目录缓存补充：改读启动时缓存的静态副本，每秒刷新不再向服务重复请求深复制目录。
+	var definitions: Dictionary = _stock_definitions_cache
 	for stock_id in definitions.keys():
 		# 当前遍历股票持仓；数量为 0 时不创建空卡片。
 		var holding: Dictionary = _get_holding(str(stock_id))
@@ -455,11 +521,12 @@ func _refresh_holdings() -> void:
 			continue
 		visible_holding_count += 1
 		# 当前遍历股票快照；提供名称和最新价格。
-		var snapshot: Dictionary = _stock_market_service.call("get_stock_snapshot", str(stock_id)) as Dictionary
+		# 轻量刷新补充：名称改读静态目录缓存，价格改用轻量只读接口，不再每秒复制持仓股票的完整行情。
+		var holding_definition: Dictionary = definitions.get(stock_id, {}) as Dictionary
 		# 当前遍历加权成本；包含买入手续费。
 		var average_cost: float = float(holding.get("average_cost", 0.0))
 		# 当前遍历最新价格；用于计算持仓市值。
-		var current_price: float = float(snapshot.get("price", 0.0))
+		var current_price: float = float(_stock_market_service.call("get_stock_price", str(stock_id)))
 		# 当前遍历浮动盈亏金额；展示为取整星穹。
 		var profit: float = (current_price - average_cost) * quantity
 		# 当前遍历浮动盈亏比例；零成本时保持 0。
@@ -470,7 +537,7 @@ func _refresh_holdings() -> void:
 		# 原位复用补充：首次持有时创建按钮，后续每秒行情刷新继续使用同一节点和当前缩放状态。
 		# 持仓标准卡片；通过空资源模式展示价格、数量、成本和盈亏。
 		var card: Control = host.get_node_or_null("Card") as Control
-		card.call("configure", null, 1, "%s · %d股" % [str(snapshot.get("name", "股票")), quantity], "成本 %.2f  [color=%s]%+.2f / %+.2f%%[/color]" % [average_cost, profit_color, profit, profit_ratio * 100.0], "%.2f 证券币" % current_price)
+		card.call("configure", null, 1, "%s · %d股" % [str(holding_definition.get("name", "股票")), quantity], "成本 %.2f  [color=%s]%+.2f / %+.2f%%[/color]" % [average_cost, profit_color, profit, profit_ratio * 100.0], "%.2f 证券币" % current_price)
 		card.call("set_visual_state", str(stock_id) == _selected_stock_id, false)
 	if visible_holding_count == 0:
 		# 空持仓提示；在没有任何股票时替代卡片列表。
@@ -487,12 +554,14 @@ func _get_holding(stock_id: String) -> Dictionary:
 
 func _is_debug_information_visible() -> bool:
 	# 调试设置服务；缺失时保持正式玩家视图，避免泄露价值中枢和概率参数。
-	var debug_settings: Node = get_tree().root.get_node_or_null("DebugSettings")
-	return debug_settings != null and debug_settings.has_method("is_debug_information_visible") and bool(debug_settings.call("is_debug_information_visible"))
+	# 节点缓存补充：改用启动时缓存的服务引用，每秒行情刷新不再重复执行节点树查询。
+	return _debug_settings != null and _debug_settings.has_method("is_debug_information_visible") and bool(_debug_settings.call("is_debug_information_visible"))
 
 
 func _on_stock_selected(stock_id: String) -> void:
 	_selected_stock_id = stock_id
+	# 选中股票变化属于低频路径；此时同步更新一次大盘名称缓存，再执行完整刷新。
+	_refresh_market_snapshot_cache()
 	_refresh_all()
 
 

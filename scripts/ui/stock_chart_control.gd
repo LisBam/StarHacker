@@ -22,6 +22,8 @@ const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 var _history: PackedFloat32Array = PackedFloat32Array()
 ## 当前涨跌方向；取值 -1、0、1，决定折线使用红色、白色或绿色。
 var _trend_direction: int = 0
+## 行情图面板样式缓存；默认空引用，首次绘制时创建并跨帧复用，主题切换通知会置空以按新风格重建。
+var _panel_style_cache: StyleBoxFlat
 
 
 func _ready() -> void:
@@ -33,25 +35,30 @@ func _ready() -> void:
 func _notification(what: int) -> void:
 	# 主题变化通知；UI 风格切换会刷新宿主主题，此时重绘使行情图底板立即使用新风格取色。
 	if what == NOTIFICATION_THEME_CHANGED:
+		_panel_style_cache = null
 		queue_redraw()
 
 
 func configure_history(history: Array, trend_direction: int) -> void:
 	_history = PackedFloat32Array()
-	for raw_price in history:
-		_history.append(maxf(float(raw_price), 0.0))
+	# 预分配历史容量；resize 后按索引赋值，避免每秒刷新逐项 append 反复扩容。
+	_history.resize(history.size())
+	for history_index in range(history.size()):
+		_history[history_index] = maxf(float(history[history_index]), 0.0)
 	_trend_direction = clampi(trend_direction, -1, 1)
 	queue_redraw()
 
 
 func _draw() -> void:
 	# 行情图面板样式；集中配置透明背景、白边和圆角，修改只影响折线图承载区域。
-	var panel_style: StyleBoxFlat = StyleBoxFlat.new()
-	panel_style.bg_color = Color(UI_STYLE_GUIDE.get_input_background_color(), background_alpha)
-	panel_style.border_color = Color(1.0, 1.0, 1.0, 0.92)
-	panel_style.set_border_width_all(int(border_width))
-	panel_style.set_corner_radius_all(int(corner_radius))
-	draw_style_box(panel_style, Rect2(Vector2.ZERO, size))
+	# 样式缓存补充：样式盒改为成员缓存并跨帧复用，主题切换会置空缓存并在下一次绘制按新风格重建。
+	if _panel_style_cache == null:
+		_panel_style_cache = StyleBoxFlat.new()
+		_panel_style_cache.bg_color = Color(UI_STYLE_GUIDE.get_input_background_color(), background_alpha)
+		_panel_style_cache.border_color = Color(1.0, 1.0, 1.0, 0.92)
+		_panel_style_cache.set_border_width_all(int(border_width))
+		_panel_style_cache.set_corner_radius_all(int(corner_radius))
+	draw_style_box(_panel_style_cache, Rect2(Vector2.ZERO, size))
 	# 内部绘图矩形；扣除统一留白后作为网格和折线的归一化坐标区域。
 	var inner_rect: Rect2 = Rect2(Vector2(chart_padding, chart_padding), size - Vector2.ONE * chart_padding * 2.0)
 	if inner_rect.size.x <= 0.0 or inner_rect.size.y <= 0.0:

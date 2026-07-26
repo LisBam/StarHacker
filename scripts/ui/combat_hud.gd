@@ -174,6 +174,14 @@ var _input_component: Node
 var _ranged_attack_component: Node
 ## 近战攻击组件缓存；默认从玩家子节点 MeleeAttackComponent 获取，允许为空但近战槽无法显示冷却覆盖。
 var _melee_attack_component: Node
+## 远程攻击组件是否提供冷却比例接口；组件注入时缓存 has_method 结果，每帧冷却遮罩刷新不再重复做方法名字符串查找。
+var _ranged_component_has_cooldown_ratio: bool = false
+## 远程攻击组件是否提供冷却总时长接口；组件注入时缓存，供高射速武器判断是否隐藏快速闪烁遮罩。
+var _ranged_component_has_cooldown_duration: bool = false
+## 近战攻击组件是否提供冷却比例接口；组件注入时缓存，每帧冷却遮罩刷新不再重复做方法名字符串查找。
+var _melee_component_has_cooldown_ratio: bool = false
+## 近战攻击组件是否提供冷却总时长接口；组件注入时缓存，供高攻速近战判断是否隐藏快速闪烁遮罩。
+var _melee_component_has_cooldown_duration: bool = false
 ## 主动技能组件缓存；默认从玩家子节点 ActiveSkillComponent 获取，允许为空但不会显示角色主动技能或冷却。
 var _active_skill_component: Node
 ## 主动技能栏缓存；默认运行时创建在屏幕左下角，三个技能槽按技能一、二、三顺序显示。
@@ -293,7 +301,8 @@ var _nearby_drop_refresh_remaining: float = 0.0
 ## 战斗状态刷新剩余时间；取值大于等于 0，默认 0 表示下一帧立即同步计时、人口和撤离提示。
 var _combat_status_refresh_remaining: float = 0.0
 ## 当前掉落物列表签名；元素为实例、名称和位置组成的字符串，默认用于判断列表内容是否需要重建。
-var _nearby_drop_signature: Array[String] = []
+## 签名结构补充：现为每个掉落物一条 [实例编号, 显示名称, 取整X, 取整Y] 数组条目，比较语义不变且不再产生字符串格式化分配。
+var _nearby_drop_signature: Array = []
 ## 最近一次附近掉落物刷新结果；元素按距离从近到远排列，仅在同一批 UI 与宝箱优先级检查中复用，不作为物品所有权来源。
 var _nearby_drop_cache: Array[Node2D] = []
 ## 当前正在长按开启的宝箱；默认 null，周围存在掉落物、松开 F、离开范围或打开其他面板时会立即取消并重置进度。
@@ -302,6 +311,10 @@ var _active_loot_chest: Node2D
 var _active_loot_chest_opening: bool = false
 ## 当前宝箱开启请求是否已经完成首次同步；默认 false，新目标即使处于未按住状态也必须先显示交互提示。
 var _has_active_loot_chest_opening_state: bool = false
+## 上一帧拾取键是否处于按住状态；默认 false，用于识别长按起始帧，只有该帧执行即时全量场景组补查。
+var _pickup_action_held_last_frame: bool = false
+## 物理键兜底判定缓存；键为动作名字符串，值为布尔判定结果，InputBindings 的 bindings_changed 信号触发时整体失效并重算。
+var _physical_fallback_cache: Dictionary = {}
 ## 物资撤离全屏遮罩；默认运行时创建并隐藏，打开时阻止其余 HUD 鼠标交互。
 var _supply_extraction_overlay: Control
 ## 物资撤离面板实例；默认运行时创建一次并复用，显示背包、装备、星穹和剩余送回价值。
@@ -500,6 +513,10 @@ func _ready() -> void:
 	_build_supply_extraction_overlay()
 	_build_character_showcase_view()
 	_build_combat_developer_overlay()
+	# 输入绑定服务；绑定变更信号触发时清空物理键兜底缓存，改键、单项恢复与全部恢复都会让下一次输入判定重算。
+	var input_bindings_service: Node = get_tree().root.get_node_or_null("InputBindings")
+	if input_bindings_service != null and input_bindings_service.has_signal("bindings_changed") and not input_bindings_service.is_connected("bindings_changed", Callable(self, "_on_input_bindings_changed")):
+		input_bindings_service.connect("bindings_changed", Callable(self, "_on_input_bindings_changed"))
 	_refresh_all()
 	_refresh_combat_status()
 	_set_inventory_visible(false)
@@ -517,20 +534,30 @@ func _process(delta: float) -> void:
 		_refresh_combat_status()
 	_drop_list_combat_suppression_remaining = maxf(_drop_list_combat_suppression_remaining - delta, 0.0)
 	_nearby_drop_refresh_remaining = maxf(_nearby_drop_refresh_remaining - delta, 0.0)
+	# 本帧拾取键按住状态；统一读取一次，供批量刷新分支与长按复核分支共用。
+	var pickup_action_held: bool = _is_pickup_action_held()
+	# 本帧是否为长按起始帧；只有从未按住转为按住的第一帧才执行即时全量场景组补查，持续期间复用批量缓存。
+	var pickup_press_started: bool = pickup_action_held and not _pickup_action_held_last_frame
+	_pickup_action_held_last_frame = pickup_action_held
 	if _nearby_drop_refresh_remaining <= 0.0:
 		_nearby_drop_refresh_remaining = maxf(nearby_drop_refresh_interval, 0.01)
 		_refresh_nearby_drop_panel()
 		# 宝箱目标选择与掉落物优先级共用同一次分批刷新，长按开始后宝箱自身仍按帧推进精确开启进度。
 		_update_loot_chest_interaction(true)
 	elif _active_loot_chest != null and is_instance_valid(_active_loot_chest):
-		if _is_pickup_action_held():
+		if pickup_action_held:
 			# 长按期间继续逐帧复核新出现的地面掉落物，保证掉落物优先级不会因批量刷新而延迟。
-			_update_loot_chest_interaction()
+			# 长按复核优化补充：仅按下第一帧执行全量场景组扫描，持续期间基于 0.12 秒批量缓存与当前宝箱距离做轻量复核。
+			if pickup_press_started:
+				_update_loot_chest_interaction()
+			else:
+				_update_loot_chest_interaction_from_cache()
 		else:
 			# 松开按键会在当前帧停止进度，未按住期间不重复扫描节点组。
 			_refresh_active_loot_chest_state(false)
-	elif _is_pickup_action_held():
+	elif pickup_press_started:
 		# 玩家在两次批量刷新之间按下拾取键时立即补做一次目标选择，避免交互开始产生可感知延迟。
+		# 补查频率补充：仅长按起始帧执行本分支，持续按住且无宝箱目标时等待下一次 0.12 秒批量刷新接管目标选择。
 		_update_loot_chest_interaction()
 
 	_refresh_combat_input_state()
@@ -617,6 +644,11 @@ func _bind_player_components() -> void:
 	_input_component = _player.get_node_or_null("InputComponent")
 	_ranged_attack_component = _player.get_node_or_null("RangedAttackComponent")
 	_melee_attack_component = _player.get_node_or_null("MeleeAttackComponent")
+	# 攻击组件冷却接口判定缓存；注入时一次性完成 has_method 查询，每帧遮罩刷新直接使用布尔分支加动态调用。
+	_ranged_component_has_cooldown_ratio = _ranged_attack_component != null and _ranged_attack_component.has_method("get_cooldown_ratio")
+	_ranged_component_has_cooldown_duration = _ranged_attack_component != null and _ranged_attack_component.has_method("get_cooldown_duration")
+	_melee_component_has_cooldown_ratio = _melee_attack_component != null and _melee_attack_component.has_method("get_cooldown_ratio")
+	_melee_component_has_cooldown_duration = _melee_attack_component != null and _melee_attack_component.has_method("get_cooldown_duration")
 	_active_skill_component = _player.get_node_or_null(active_skill_component_path)
 
 	if _stats_component != null:
@@ -1012,9 +1044,9 @@ func _on_inventory_armor_item_selected(_item_resource: Resource, armor_slot: Str
 
 func _refresh_cooldown_overlays() -> void:
 	# 远程冷却比例；取值为 0 到 1，默认从远程攻击组件读取，修改会影响远程槽白色 CD 遮罩。
-	var ranged_cooldown_ratio: float = _get_component_cooldown_ratio(_ranged_attack_component)
+	var ranged_cooldown_ratio: float = _get_component_cooldown_ratio(_ranged_attack_component, _ranged_component_has_cooldown_ratio)
 	# 本次远程冷却总时长；高射速武器不显示快速闪烁的遮罩，但实际攻击冷却保持不变。
-	var ranged_cooldown_duration: float = _get_component_cooldown_duration(_ranged_attack_component)
+	var ranged_cooldown_duration: float = _get_component_cooldown_duration(_ranged_attack_component, _ranged_component_has_cooldown_duration)
 	if ranged_cooldown_duration <= cooldown_overlay_minimum_duration:
 		ranged_cooldown_ratio = 0.0
 	if ranged_cooldown_ratio <= 0.0:
@@ -1028,9 +1060,9 @@ func _refresh_cooldown_overlays() -> void:
 
 	if _melee_slot_control != null:
 		# 近战冷却比例；取值为 0 到 1，默认从近战攻击组件读取，修改会影响近战槽白色 CD 遮罩。
-		var melee_slot_cooldown_ratio: float = _get_component_cooldown_ratio(_melee_attack_component)
+		var melee_slot_cooldown_ratio: float = _get_component_cooldown_ratio(_melee_attack_component, _melee_component_has_cooldown_ratio)
 		# 本次近战冷却总时长；高攻速近战不显示快速闪烁的遮罩，但实际攻击冷却保持不变。
-		var melee_cooldown_duration: float = _get_component_cooldown_duration(_melee_attack_component)
+		var melee_cooldown_duration: float = _get_component_cooldown_duration(_melee_attack_component, _melee_component_has_cooldown_duration)
 		if melee_cooldown_duration <= cooldown_overlay_minimum_duration:
 			melee_slot_cooldown_ratio = 0.0
 		_melee_slot_control.call("set_cooldown_ratio", melee_slot_cooldown_ratio)
@@ -1285,7 +1317,8 @@ func _refresh_nearby_drop_panel() -> void:
 
 	_nearby_drop_list.visible = true
 	# 新掉落物列表签名；元素为掉落物实例、名称和位置，默认用于判断是否需要重建按钮节点。
-	var next_signature: Array[String] = _get_nearby_drop_signature(nearby_drops)
+	# 签名结构补充：条目为可直接比较的数组，整体相等比较逐项进行，判定语义与原字符串签名一致。
+	var next_signature: Array = _get_nearby_drop_signature(nearby_drops)
 	if _nearby_drop_panel.visible and _nearby_drop_signature == next_signature:
 		return
 
@@ -1366,6 +1399,29 @@ func _update_loot_chest_interaction(use_refreshed_drop_cache: bool = false) -> v
 	# 最近宝箱；进入范围后立即显示提示，只有实际按住拾取键时才切换为进度条并推进开启。
 	var nearest_chest: Node2D = _get_nearest_interactable_loot_chest()
 	_set_active_loot_chest(nearest_chest, nearest_chest != null and _is_pickup_action_held())
+
+
+func _update_loot_chest_interaction_from_cache() -> void:
+	## 长按持续期间的轻量复核；不再扫描 item_drops 与 loot_chests 场景组，掉落物优先级基于最近一次 0.12 秒批量缓存，当前宝箱的有效性与交互范围仍逐帧校验。
+	if not _can_pickup_nearby_drops():
+		_set_active_loot_chest(null, false)
+		return
+	# 缓存掉落物遍历项；批量缓存中仍存活的掉落物保持拾取优先级，已被拾取释放的节点不会错误打断宝箱开启。
+	for cached_drop in _nearby_drop_cache:
+		if cached_drop != null and is_instance_valid(cached_drop):
+			_set_active_loot_chest(null, false)
+			return
+	if _active_loot_chest == null or not is_instance_valid(_active_loot_chest):
+		_set_active_loot_chest(null, false)
+		return
+	# 当前宝箱交互半径；与全量扫描使用相同的宝箱配置读取规则，接口缺失时回退 HUD 拾取距离。
+	var active_chest_interaction_distance: float = float(_active_loot_chest.call("get_interaction_radius")) if _active_loot_chest.has_method("get_interaction_radius") else nearby_drop_pickup_range
+	# 玩家到当前宝箱距离平方；玩家缺失时按无穷大处理，离开交互范围的当前帧立即取消开启进度，保持原有范围语义。
+	var active_chest_distance_squared: float = _active_loot_chest.global_position.distance_squared_to((_player as Node2D).global_position) if _player != null else INF
+	if active_chest_distance_squared > active_chest_interaction_distance * active_chest_interaction_distance:
+		_set_active_loot_chest(null, false)
+		return
+	_refresh_active_loot_chest_state(true)
 
 
 func _get_nearest_interactable_loot_chest() -> Node2D:
@@ -1493,15 +1549,17 @@ func _apply_nearby_drop_panel_display_mode() -> void:
 	_nearby_drop_panel.offset_bottom = panel_height * 0.5
 
 
-func _get_nearby_drop_signature(drop_nodes: Array[Node2D]) -> Array[String]:
+func _get_nearby_drop_signature(drop_nodes: Array[Node2D]) -> Array:
 	# 掉落物列表签名；元素为实例、名称和位置组成的字符串，默认用于判断 UI 列表是否需要重建。
-	var signature: Array[String] = []
+	# 签名结构补充：改为可比较的数组条目，消除每 0.12 秒批量刷新为每个掉落物执行的字符串格式化分配。
+	var signature: Array = []
 	# 签名遍历项；取值为当前附近掉落物节点，默认按显示顺序写入。
 	for drop_node in drop_nodes:
 		# 掉落物显示名；取值来自按钮文本，默认用于武器资源变化时触发列表重建。
 		var drop_display_name: String = _get_drop_button_text(drop_node)
 		# 掉落物签名文本；取值包含实例、名称和固定世界位置，默认避免相同实例内容变化时列表不刷新。
-		var drop_signature: String = "%d:%s:%d:%d" % [
+		# 签名条目补充：以 [实例编号, 显示名称, 取整X, 取整Y] 数组承载相同判定信息，逐项比较代替字符串拼接。
+		var drop_signature: Array = [
 			int(drop_node.get_instance_id()),
 			drop_display_name,
 			roundi(drop_node.global_position.x),
@@ -2225,13 +2283,24 @@ func _is_pickup_event(key_event: InputEventKey) -> bool:
 
 
 func _should_use_physical_fallback(action_name: StringName) -> bool:
-	if not InputMap.has_action(action_name):
-		return true
+	# 兜底判定缓存键；动作名转字符串，同一动作在绑定未变更期间直接复用上次判定，避免每帧 action_get_events 分配数组。
+	var fallback_cache_key: String = String(action_name)
+	if _physical_fallback_cache.has(fallback_cache_key):
+		return bool(_physical_fallback_cache[fallback_cache_key])
+	# 本次兜底判定结果；沿用原有三段规则，动作缺失兜底、已有事件不兜底、空事件按显式解绑状态决定。
+	var fallback_result: bool = true
+	if InputMap.has_action(action_name):
+		if not InputMap.action_get_events(action_name).is_empty():
+			fallback_result = false
+		else:
+			fallback_result = not _is_action_explicitly_unbound(action_name)
+	_physical_fallback_cache[fallback_cache_key] = fallback_result
+	return fallback_result
 
-	if not InputMap.action_get_events(action_name).is_empty():
-		return false
 
-	return not _is_action_explicitly_unbound(action_name)
+func _on_input_bindings_changed() -> void:
+	## 绑定变更回调；清空物理键兜底判定缓存，下一次输入判定按最新 InputMap 事件与显式解绑状态重算。
+	_physical_fallback_cache.clear()
 
 
 func _is_action_explicitly_unbound(action_name: StringName) -> bool:
@@ -2625,15 +2694,17 @@ func _refresh_pause_master_volume_label(value: float) -> void:
 	_pause_master_volume_value_label.text = "%d%%" % roundi(value)
 
 
-func _get_component_cooldown_ratio(component: Node) -> float:
-	if component == null or not component.has_method("get_cooldown_ratio"):
+func _get_component_cooldown_ratio(component: Node, component_has_cooldown_ratio: bool) -> float:
+	# 接口判定来源补充：has_method 结果已在组件注入处缓存为布尔参数，每帧刷新不再做方法名字符串查找。
+	if component == null or not component_has_cooldown_ratio:
 		return 0.0
 
 	return clampf(float(component.call("get_cooldown_ratio")), 0.0, 1.0)
 
 
-func _get_component_cooldown_duration(component: Node) -> float:
-	if component == null or not component.has_method("get_cooldown_duration"):
+func _get_component_cooldown_duration(component: Node, component_has_cooldown_duration: bool) -> float:
+	# 接口判定来源补充：has_method 结果已在组件注入处缓存为布尔参数，每帧刷新不再做方法名字符串查找。
+	if component == null or not component_has_cooldown_duration:
 		return 0.0
 
 	return maxf(float(component.call("get_cooldown_duration")), 0.0)

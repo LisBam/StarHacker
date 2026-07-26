@@ -19,7 +19,8 @@ var _weapon_used_in_window: bool = false
 
 
 func _ready() -> void:
-	set_process(true)
+	# 初始无统计窗口和触发冷却，保持空闲不逐帧处理；受伤入口开启计时时会恢复 process。
+	set_process(false)
 
 
 func configure(caster: Node2D, stats_component: Node, skill_data: Resource, _passive_skill_component: Node) -> void:
@@ -34,11 +35,13 @@ func configure(caster: Node2D, stats_component: Node, skill_data: Resource, _pas
 
 func _process(delta: float) -> void:
 	_cooldown_remaining = maxf(_cooldown_remaining - maxf(delta, 0.0), 0.0)
-	if _window_remaining <= 0.0:
-		return
-	_window_remaining = maxf(_window_remaining - maxf(delta, 0.0), 0.0)
-	if _window_remaining <= 0.0:
-		_reset_window()
+	if _window_remaining > 0.0:
+		_window_remaining = maxf(_window_remaining - maxf(delta, 0.0), 0.0)
+		if _window_remaining <= 0.0:
+			_reset_window()
+	if _window_remaining <= 0.0 and _cooldown_remaining <= 0.0:
+		# 统计窗口与触发冷却均已结束，进入空闲并停止逐帧处理；下一次受伤会重新恢复。
+		set_process(false)
 
 
 func _on_damage_received(_damage: float, _source: Node) -> void:
@@ -49,12 +52,16 @@ func _on_damage_received(_damage: float, _source: Node) -> void:
 		_window_remaining = maxf(float(_skill_data.get("tracking_window")), 0.01)
 		_hit_count = 0
 		_weapon_used_in_window = false
+		# 统计窗口计时启动，恢复逐帧处理；空闲停用期间窗口无法自行倒计时。
+		set_process(true)
 	_hit_count += 1
 	if _hit_count < maxi(int(_skill_data.get("required_hit_count")), 1):
 		return
 	if not _weapon_used_in_window:
 		_grant_shield()
 		_cooldown_remaining = maxf(float(_skill_data.get("trigger_cooldown")), 0.0)
+		# 触发冷却计时启动，恢复逐帧处理；窗口随后重置为 0，冷却仍需继续递减。
+		set_process(true)
 	_reset_window()
 
 

@@ -68,6 +68,18 @@ var _cooldown_labels: Array[Label] = []
 var _slot_views: Array[Control] = []
 ## 技能栏动态刷新累计时间；默认 0，达到固定间隔后统一刷新三个槽位并重新计时。
 var _dynamic_refresh_elapsed: float = 0.0
+## 组件是否提供剩余冷却接口；configure 注入时缓存 has_method 结果，20Hz 冷却刷新不再逐槽做方法名字符串查找。
+var _component_has_cooldown_remaining: bool = false
+## 组件是否提供后续段剩余窗口接口；configure 注入时缓存，决定青蓝后续段遮罩数据来源是否可用。
+var _component_has_follow_up_remaining: bool = false
+## 组件是否提供冷却暂停状态接口；configure 注入时缓存，用于延迟开始阶段隐藏冷却数字。
+var _component_has_cooldown_paused: bool = false
+## 组件是否提供技能资源读取接口；configure 注入时缓存，冷却路径的发动条件刷新复用该判定。
+var _component_has_skill_resource: bool = false
+## 组件是否提供发动条件判定接口；configure 注入时缓存，禁用滤镜刷新不再逐槽查找方法名。
+var _component_has_activation_condition: bool = false
+## 每个技能槽上次冷却遮罩状态编码；元素为 int，由量化剩余秒数、可见、后续段与文本标志组成，-1 表示尚未写入，编码未变化时完全跳过文本格式化与遮罩写入。
+var _last_cooldown_display_states: Array[int] = []
 
 
 func _ready() -> void:
@@ -82,6 +94,12 @@ func _ready() -> void:
 func configure(active_skill_component: Node) -> void:
 	## 注入主动技能组件并重建固定槽位；角色切换只刷新资源，不需要重建整个战斗 HUD。
 	_active_skill_component = active_skill_component
+	# 组件方法判定缓存；注入时一次性完成全部高频 has_method 查询，后续 20Hz 冷却刷新只做布尔分支。
+	_component_has_cooldown_remaining = _active_skill_component != null and _active_skill_component.has_method("get_cooldown_remaining")
+	_component_has_follow_up_remaining = _active_skill_component != null and _active_skill_component.has_method("get_follow_up_remaining")
+	_component_has_cooldown_paused = _active_skill_component != null and _active_skill_component.has_method("is_cooldown_paused")
+	_component_has_skill_resource = _active_skill_component != null and _active_skill_component.has_method("get_skill_resource")
+	_component_has_activation_condition = _active_skill_component != null and _active_skill_component.has_method("is_skill_activation_condition_met")
 	_rebuild_slots()
 	refresh()
 
@@ -126,6 +144,8 @@ func _rebuild_slots() -> void:
 	_cooldown_overlays.clear()
 	_cooldown_labels.clear()
 	_slot_views.clear()
+	# 冷却遮罩状态编码缓存清理；槽位重建后全部恢复为未写入状态，保证新槽位第一次刷新必然写入遮罩。
+	_last_cooldown_display_states.clear()
 	# 技能槽数量；默认三个，组件公开其他数量时按其实际值创建。
 	var slot_count: int = int(_active_skill_component.call("get_slot_count")) if _active_skill_component != null and _active_skill_component.has_method("get_slot_count") else fallback_slot_count
 	for slot_index in range(maxi(slot_count, 0)):
@@ -141,6 +161,8 @@ func _add_shared_skill_slot(_slot_index: int) -> void:
 	slot_view.custom_minimum_size = slot_minimum_size
 	add_child(slot_view)
 	_slot_views.append(slot_view)
+	# 冷却遮罩状态编码占位；-1 表示该槽尚未写入过遮罩，与槽位视图数组保持同下标对应。
+	_last_cooldown_display_states.append(-1)
 
 
 func _refresh_shared_slot_content() -> void:
@@ -220,38 +242,56 @@ func _add_skill_slot(_slot_index: int) -> void:
 
 func _refresh_cooldowns() -> void:
 	if not _slot_views.is_empty():
+		# 冷却文本量化倍率；循环外读取一次供全部槽位复用，与显示小数位保持同一精度。
+		var quantize_scale: float = _get_cooldown_quantize_scale()
 		for slot_index in range(_slot_views.size()):
 			# 当前剩余冷却；组件缺失或无效槽按 0 处理。
-			var shared_cooldown_remaining: float = float(_active_skill_component.call("get_cooldown_remaining", slot_index)) if _active_skill_component != null and _active_skill_component.has_method("get_cooldown_remaining") else 0.0
+			var shared_cooldown_remaining: float = float(_active_skill_component.call("get_cooldown_remaining", slot_index)) if _active_skill_component != null and _component_has_cooldown_remaining else 0.0
 			# 后续段剩余窗口；大于零时使用青蓝遮罩，表示当前槽仍可继续释放。
-			var shared_follow_up_remaining: float = float(_active_skill_component.call("get_follow_up_remaining", slot_index)) if _active_skill_component != null and _active_skill_component.has_method("get_follow_up_remaining") else 0.0
+			var shared_follow_up_remaining: float = float(_active_skill_component.call("get_follow_up_remaining", slot_index)) if _active_skill_component != null and _component_has_follow_up_remaining else 0.0
 			# 冷却是否仍处于延迟开始阶段；暂停只隐藏普通冷却数字，后续段窗口仍正常显示自己的可释放倒计时。
-			var shared_cooldown_paused: bool = bool(_active_skill_component.call("is_cooldown_paused", slot_index)) if _active_skill_component != null and _active_skill_component.has_method("is_cooldown_paused") else false
+			var shared_cooldown_paused: bool = bool(_active_skill_component.call("is_cooldown_paused", slot_index)) if _active_skill_component != null and _component_has_cooldown_paused else false
 			# 遮罩剩余时间；后续段优先于普通冷却显示。
 			var display_remaining: float = shared_follow_up_remaining if shared_follow_up_remaining > 0.0 else shared_cooldown_remaining
-			# 遮罩颜色；后续段使用原青蓝色，普通冷却使用原黑色。
-			var display_color: Color = follow_up_overlay_color if shared_follow_up_remaining > 0.0 else cooldown_overlay_color
-			# 遮罩文字；只在剩余时间大于零时显示一位小数秒数。
-			var display_text: String = "%ss" % String.num(display_remaining, cooldown_decimal_places) if display_remaining > 0.0 and (shared_follow_up_remaining > 0.0 or not shared_cooldown_paused) else ""
-			_slot_views[slot_index].call("set_state_overlay", display_remaining > 0.0, display_color, display_text)
+			# 后续段激活状态；决定遮罩颜色与文本分支，并参与遮罩状态编码比较。
+			var follow_up_active: bool = shared_follow_up_remaining > 0.0
+			# 遮罩文本显示条件；与原有文字分支完全一致，后续段激活或普通冷却未暂停时才显示秒数。
+			var overlay_text_visible: bool = display_remaining > 0.0 and (follow_up_active or not shared_cooldown_paused)
+			# 本帧遮罩状态编码；量化剩余秒数与可见、后续段、文本三个标志合并，任一变化才继续执行格式化与遮罩写入。
+			var display_state: int = roundi(display_remaining * quantize_scale) * 8 + (4 if display_remaining > 0.0 else 0) + (2 if follow_up_active else 0) + (1 if overlay_text_visible else 0)
+			# 上次遮罩状态编码；-1 表示尚未写入，编码一致时完全跳过冷却文本格式化与 set_state_overlay 调用。
+			var last_display_state: int = _last_cooldown_display_states[slot_index] if slot_index < _last_cooldown_display_states.size() else -1
+			if last_display_state != display_state:
+				if slot_index < _last_cooldown_display_states.size():
+					_last_cooldown_display_states[slot_index] = display_state
+				# 遮罩颜色；后续段使用原青蓝色，普通冷却使用原黑色。
+				var display_color: Color = follow_up_overlay_color if follow_up_active else cooldown_overlay_color
+				# 遮罩文字；只在剩余时间大于零时显示一位小数秒数。
+				var display_text: String = "%ss" % String.num(display_remaining, cooldown_decimal_places) if overlay_text_visible else ""
+				_slot_views[slot_index].call("set_state_overlay", display_remaining > 0.0, display_color, display_text)
 			# 发动条件状态；逐帧读取使伤害累计达到阈值时无需重建技能栏即可移除禁用滤镜。
-			var skill_data: Resource = _active_skill_component.call("get_skill_resource", slot_index) as Resource if _active_skill_component != null and _active_skill_component.has_method("get_skill_resource") else null
-			var activation_condition_met: bool = bool(_active_skill_component.call("is_skill_activation_condition_met", slot_index)) if skill_data != null and _active_skill_component != null and _active_skill_component.has_method("is_skill_activation_condition_met") else skill_data != null
+			var skill_data: Resource = _active_skill_component.call("get_skill_resource", slot_index) as Resource if _active_skill_component != null and _component_has_skill_resource else null
+			var activation_condition_met: bool = bool(_active_skill_component.call("is_skill_activation_condition_met", slot_index)) if skill_data != null and _active_skill_component != null and _component_has_activation_condition else skill_data != null
 			_slot_views[slot_index].call("set_disabled_state", skill_data != null and not activation_condition_met)
 		return
 	for slot_index in range(_cooldown_overlays.size()):
 		# 当前剩余冷却；组件缺失或无效槽按 0 处理。
-		var cooldown_remaining: float = float(_active_skill_component.call("get_cooldown_remaining", slot_index)) if _active_skill_component != null and _active_skill_component.has_method("get_cooldown_remaining") else 0.0
+		var cooldown_remaining: float = float(_active_skill_component.call("get_cooldown_remaining", slot_index)) if _active_skill_component != null and _component_has_cooldown_remaining else 0.0
 		# 后续段剩余窗口；大于零时优先显示剩余秒数，提醒玩家技能槽当前仍可再次触发。
-		var follow_up_remaining: float = float(_active_skill_component.call("get_follow_up_remaining", slot_index)) if _active_skill_component != null and _active_skill_component.has_method("get_follow_up_remaining") else 0.0
+		var follow_up_remaining: float = float(_active_skill_component.call("get_follow_up_remaining", slot_index)) if _active_skill_component != null and _component_has_follow_up_remaining else 0.0
 		# 冷却暂停状态；延迟进入冷却时继续表明技能不可用，但不提前展示尚未开始递减的秒数。
-		var cooldown_paused: bool = bool(_active_skill_component.call("is_cooldown_paused", slot_index)) if _active_skill_component != null and _active_skill_component.has_method("is_cooldown_paused") else false
+		var cooldown_paused: bool = bool(_active_skill_component.call("is_cooldown_paused", slot_index)) if _active_skill_component != null and _component_has_cooldown_paused else false
 		_cooldown_overlays[slot_index].visible = cooldown_remaining > 0.0 or follow_up_remaining > 0.0
 		_cooldown_overlays[slot_index].color = follow_up_overlay_color if follow_up_remaining > 0.0 else cooldown_overlay_color
 		if follow_up_remaining > 0.0:
 			_cooldown_labels[slot_index].text = "%ss" % String.num(follow_up_remaining, cooldown_decimal_places)
 		else:
 			_cooldown_labels[slot_index].text = "%ss" % String.num(cooldown_remaining, cooldown_decimal_places) if cooldown_remaining > 0.0 and not cooldown_paused else ""
+
+
+func _get_cooldown_quantize_scale() -> float:
+	## 返回冷却文本量化倍率；按检查器保留小数位换算，默认一位小数对应 10 倍，守卫精度始终与显示精度一致，显示语义不变。
+	return pow(10.0, float(clampi(cooldown_decimal_places, 0, 3)))
 
 
 func _get_action_display_text(action_name: StringName) -> String:

@@ -308,20 +308,23 @@ func _filter_unlocked_content_paths(content_paths: PackedStringArray) -> PackedS
 	## 过滤扩展包内容并保持原路径顺序；基础内容不绑定扩展包，因此始终保留。
 	# 可用内容路径；每次查询实时读取 SessionState，使角色解锁后无需重启目录服务。
 	var unlocked_paths: PackedStringArray = PackedStringArray()
+	# 会话状态服务快照；整次过滤只在循环外解析一次根节点，循环内不再对每条路径重复执行节点查找。
+	var resolved_session_state: Node = get_tree().root.get_node_or_null("SessionState")
 	for content_path in content_paths:
-		if _is_content_path_unlocked(content_path):
+		if _is_content_path_unlocked(content_path, resolved_session_state):
 			unlocked_paths.append(content_path)
 	return unlocked_paths
 
 
-func _is_content_path_unlocked(content_path: String) -> bool:
+func _is_content_path_unlocked(content_path: String, session_state_override: Node = null) -> bool:
 	## 判断单个内容路径是否可用；未登记路径属于基础内容，扩展包路径必须由所属角色解锁。
+	## 批量过滤补充：调用方可传入已解析的会话状态实例避免循环内重复查找，未传入时保持原实时查询行为不变。
 	# 扩展包标识；空值表示该内容没有专属归属限制。
 	var pack_id: String = str(_content_pack_id_by_resource_path.get(content_path, ""))
 	if pack_id.is_empty():
 		return true
 	# 会话状态服务；正常项目运行时统一持有永久角色解锁列表。
-	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
+	var session_state: Node = session_state_override if session_state_override != null else get_tree().root.get_node_or_null("SessionState")
 	if session_state != null and session_state.has_method("is_content_pack_unlocked"):
 		return bool(session_state.call("is_content_pack_unlocked", pack_id))
 	# 所属角色档案；隔离加载 ContentCatalog 时按角色默认解锁字段回退，避免启动顺序造成内容暂时消失。
@@ -335,7 +338,5 @@ func _resource_has_property(content_resource: Resource, property_name: String) -
 	if content_resource == null:
 		return false
 	# 属性描述；Godot 资源通过属性列表公开脚本导出字段，先检查可避免误放资源触发无效 get 错误。
-	for property_info in content_resource.get_property_list():
-		if str((property_info as Dictionary).get("name", "")) == property_name:
-			return true
-	return false
+	# 性能补充：in 运算符按属性名直接查询对象，与逐条遍历 get_property_list 匹配 name 字段的语义等价且无需构建完整属性数组。
+	return property_name in content_resource

@@ -2,6 +2,9 @@ extends Node
 
 ## 同协舞灯在 10 秒状态内监听玩家与附近友方的伤害事件，并按每单位独立 0.5 秒间隔治疗伤害发起者自身。
 
+## 友方连接刷新间隔；固定 0.3 秒，状态期间新召唤的友方最迟延迟该时长接入监听，避免每帧全量扫描友方组。
+const FRIENDLY_REFRESH_INTERVAL: float = 0.3
+
 ## 当前施法者；默认 null，始终属于有效友方并作为范围中心。
 var _caster: Node2D
 ## 玩家战斗属性组件；默认 null，用于读取玩家生命上限和执行治疗。
@@ -16,6 +19,8 @@ var _remaining_duration: float = 0.0
 var _unit_trigger_cooldowns: Dictionary = {}
 ## 已连接的友方单位表；键为实例 ID、值为节点引用，动态召唤的友方会在状态期间补充连接。
 var _connected_friendlies: Dictionary = {}
+## 友方连接刷新计时；累计状态期间经过的秒数，达到刷新间隔后归零并触发一次友方组扫描，避免逐帧组数组分配。
+var _friendly_refresh_accumulated: float = 0.0
 
 
 func _ready() -> void:
@@ -47,6 +52,7 @@ func execute(_context: Dictionary) -> bool:
 		return false
 	_remaining_duration = maxf(float(_skill_data.get("effect_duration")), 0.01)
 	_unit_trigger_cooldowns.clear()
+	_friendly_refresh_accumulated = 0.0
 	_refresh_friendly_connections()
 	set_process(true)
 	return true
@@ -54,9 +60,12 @@ func execute(_context: Dictionary) -> bool:
 
 func _process(delta: float) -> void:
 	_remaining_duration = maxf(_remaining_duration - maxf(delta, 0.0), 0.0)
-	for raw_id in _unit_trigger_cooldowns.keys():
+	for raw_id in _unit_trigger_cooldowns:
 		_unit_trigger_cooldowns[raw_id] = maxf(float(_unit_trigger_cooldowns[raw_id]) - maxf(delta, 0.0), 0.0)
-	_refresh_friendly_connections()
+	_friendly_refresh_accumulated += maxf(delta, 0.0)
+	if _friendly_refresh_accumulated >= FRIENDLY_REFRESH_INTERVAL:
+		_friendly_refresh_accumulated = 0.0
+		_refresh_friendly_connections()
 	if _remaining_duration <= 0.0:
 		set_process(false)
 
@@ -69,9 +78,18 @@ func _refresh_friendly_connections() -> void:
 			continue
 		unit.connect("damage_dealt", Callable(self, "_on_friendly_damage_dealt").bind(unit))
 		_connected_friendlies[unit.get_instance_id()] = unit
-	for raw_id in _connected_friendlies.keys():
+	# 失效连接收集容器；默认 null 表示没有需要清理的离树友方，仅在确实需要移除时才创建数组，避免每次刷新固定分配。
+	var invalid_unit_ids: Variant = null
+	for raw_id in _connected_friendlies:
 		if not is_instance_valid(_connected_friendlies[raw_id]):
-			_connected_friendlies.erase(raw_id)
+			if invalid_unit_ids == null:
+				invalid_unit_ids = []
+			invalid_unit_ids.append(raw_id)
+	if invalid_unit_ids == null:
+		return
+	# 失效连接遍历项；迭代结束后统一移除，避免在字典迭代过程中直接 erase。
+	for invalid_unit_id in invalid_unit_ids:
+		_connected_friendlies.erase(invalid_unit_id)
 
 
 func _on_projectile_fired(projectile: Node2D) -> void:

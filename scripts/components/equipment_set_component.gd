@@ -6,6 +6,8 @@ class_name EquipmentSetComponent
 
 ## 固定防具部位顺序；与 GlobalInventory 和 EquipmentComponent 保持一致，套装只统计头部、躯干、腿部与脚部。
 const ARMOR_SLOT_IDS: Array[String] = ["head", "body", "legs", "feet"]
+## 附近掉落物触发缓存有效窗口；单位毫秒，0.12 秒对移速倍率与受击免伤精度足够，用于消除逐物理帧的掉落物组全量扫描。
+const NEARBY_DROP_EFFECTS_CACHE_WINDOW_MSEC: int = 120
 
 ## 装备组件路径；默认指向同级 EquipmentComponent，运行时通常不修改，替换玩家组件结构时可在检查器中调整。
 @export var equipment_component_path: NodePath = ^"../EquipmentComponent"
@@ -20,6 +22,10 @@ var _first_lethal_recovery_consumed: bool = false
 var _active_set_states_cache: Dictionary = {}
 ## 当前已达到门槛的附近掉落物效果缓存；每项保存半径与攻防比例，装备变化时重建，空数组可让无对应套装的玩家直接跳过掉落物组扫描。
 var _nearby_drop_effects_cache: Array[Dictionary] = []
+## 附近掉落物触发结果节流缓存；保存最近一次 item_drops 组扫描得到的触发效果，移速与受击查询在窗口内共用同一结果。
+var _triggered_drop_effects_cache: Array[Dictionary] = []
+## 附近掉落物触发缓存采样时间戳；单位毫秒，默认 -1 表示尚未采样，窗口过期或装备变化后下一次查询会重新扫描。
+var _triggered_drop_effects_cache_timestamp_msec: int = -1
 
 
 func _ready() -> void:
@@ -277,6 +283,11 @@ func _get_triggered_nearby_drop_effects(player_position: Vector2, movement_direc
 	var triggered_effects: Array[Dictionary] = []
 	if _nearby_drop_effects_cache.is_empty():
 		return triggered_effects
+	# 当前毫秒时间戳；用于判断节流缓存是否仍处于有效窗口内，窗口过期后强制重新扫描保证效果不会永久失效。
+	var current_time_msec: int = Time.get_ticks_msec()
+	if _triggered_drop_effects_cache_timestamp_msec >= 0 and current_time_msec - _triggered_drop_effects_cache_timestamp_msec < NEARBY_DROP_EFFECTS_CACHE_WINDOW_MSEC:
+		# 命中节流窗口；直接返回最近一次扫描结果，0.12 秒精度对移速与受击倍率足够且不改变数值语义。
+		return _triggered_drop_effects_cache
 	# 标准移动方向；零向量已由调用方过滤，归一化后只比较朝向点积是否大于零。
 	var normalized_movement_direction: Vector2 = movement_direction.normalized()
 	# 当前防具套装状态；统一排除损坏部件并按稳定 set_id 聚合。
@@ -299,6 +310,9 @@ func _get_triggered_nearby_drop_effects(player_position: Vector2, movement_direc
 			if normalized_movement_direction.dot(drop_offset) > 0.0:
 				triggered_effects.append(effect)
 				break
+	# 写入节流缓存；本次完整扫描结果连同时间戳一起保存，窗口内的移速与受击查询直接复用。
+	_triggered_drop_effects_cache = triggered_effects
+	_triggered_drop_effects_cache_timestamp_msec = current_time_msec
 	return triggered_effects
 
 
@@ -308,6 +322,9 @@ func _refresh_active_set_cache() -> void:
 	var armor_equipment: Dictionary = _get_armor_equipment_resources()
 	_active_set_states_cache = collect_active_set_states(armor_equipment)
 	_nearby_drop_effects_cache.clear()
+	# 节流缓存同步失效；装备变化后立即作废最近扫描结果，防止换装或部件损坏后的窗口期内沿用旧触发效果。
+	_triggered_drop_effects_cache = []
+	_triggered_drop_effects_cache_timestamp_msec = -1
 	for raw_set_state in _active_set_states_cache.values():
 		# 当前套装状态；提供套装资源与有效件数，异常资源安全跳过。
 		# 当前套装状态；包含权威套装资源和有效穿戴件数，异常类型安全跳过。

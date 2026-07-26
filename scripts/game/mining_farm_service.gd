@@ -67,6 +67,8 @@ var _settlement_accumulator_seconds: float = 0.0
 var _panel_open: bool = false
 ## 是否已有存档等待执行；默认 false，用于合并频繁的逐秒收益写盘。
 var _save_queued: bool = false
+## 战斗期间是否有矿场存档被挂起；默认 false，战斗中 _queue_save 只置位该标志不落盘，战斗结束、关闭窗口或服务退出时统一补写。
+var _combat_save_pending: bool = false
 ## 全局库存服务缓存；默认从 Autoload 获取，只用于永久星穹的原子扣除和增加。
 var _global_inventory: Node
 
@@ -79,6 +81,9 @@ func _ready() -> void:
 		_save_state()
 	_connect_stock_market_service()
 	_refresh_unlocks()
+	# 战斗状态信号；与股市服务使用同一机制监听 GlobalInventory 的正式对局边界，战斗结束时统一补写挂起存档。
+	if _global_inventory != null and _global_inventory.has_signal("run_state_changed"):
+		_global_inventory.connect("run_state_changed", Callable(self, "_on_run_state_changed"))
 	set_process(true)
 
 
@@ -101,6 +106,9 @@ func _process(delta: float) -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_save_state()
+	elif what == NOTIFICATION_EXIT_TREE and (_save_queued or _combat_save_pending):
+		# 服务退出兜底；主菜单 get_tree().quit() 等不发送窗口关闭通知的退出路径也会补写尚未落盘的矿场状态。
 		_save_state()
 
 
@@ -377,6 +385,10 @@ func _initialize_default_state() -> void:
 
 
 func _queue_save() -> void:
+	if _is_combat_run_active():
+		# 战斗期间挂起写盘；余额与资产仍在内存按原周期实时结算，磁盘写入统一延迟到战斗结束、关闭窗口或服务退出。
+		_combat_save_pending = true
+		return
 	if _save_queued:
 		return
 	_save_queued = true
@@ -390,6 +402,17 @@ func _flush_queued_save() -> void:
 	_save_state()
 
 
+func _on_run_state_changed() -> void:
+	## 正式对局边界回调；战斗结束且存在挂起存档时统一落盘一次，战斗开始不执行任何磁盘操作。
+	if not _is_combat_run_active() and _combat_save_pending:
+		_save_state()
+
+
+func _is_combat_run_active() -> bool:
+	## 查询当前是否处于正式战斗局；与股市服务使用同一 GlobalInventory 状态源，服务缺失时按局外处理。
+	return _global_inventory != null and _global_inventory.has_method("is_combat_run_active") and bool(_global_inventory.call("is_combat_run_active"))
+
+
 func _flush_linked_saves() -> void:
 	_save_queued = false
 	_save_state()
@@ -399,6 +422,8 @@ func _flush_linked_saves() -> void:
 
 
 func _save_state() -> void:
+	# 任何真实落盘都会消化战斗期间的挂起标志；战斗结束、关闭窗口与联动保存共用该出口。
+	_combat_save_pending = false
 	# 存档数据；全部货币和资产数量均保存为整数，在线增益只保存剩余在线时长而不保存系统时间戳。
 	var save_data: Dictionary = {
 		"version": SAVE_VERSION,
@@ -413,6 +438,7 @@ func _save_state() -> void:
 	var file: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if file != null:
 		file.store_string(JSON.stringify(save_data))
+		file.close()
 
 
 func _load_state() -> bool:

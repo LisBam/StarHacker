@@ -29,6 +29,10 @@ class_name WeaponDurabilityBar
 
 ## 当前显示的武器资源；默认 null 表示隐藏耐久填充，配置后只读取耐久接口。
 var _weapon_resource: Resource
+## 上次请求重绘时的可见状态；默认 false，refresh 与 configure 在可见性和耐久比例都未变化时跳过重绘请求。
+var _last_drawn_visible: bool = false
+## 上次请求重绘时的耐久显示比例；默认 -1 表示尚未记录，任何真实比例都会触发首次重绘。
+var _last_drawn_durability_ratio: float = -1.0
 
 
 func _ready() -> void:
@@ -61,12 +65,29 @@ func _apply_layout() -> void:
 func configure(weapon_resource: Resource) -> void:
 	_weapon_resource = weapon_resource
 	visible = _has_durability_attributes(_weapon_resource)
+	# 重绘守卫补充：可见性与耐久比例都未变化时跳过 queue_redraw，避免高频配置重复产生绘制项。
+	if not _should_request_redraw():
+		return
 	queue_redraw()
 
 
 func refresh() -> void:
 	visible = _has_durability_attributes(_weapon_resource)
+	# 重绘守卫补充：大厅与战斗 HUD 的 20Hz 耐久轮询在状态未变化时不再逐次请求重绘。
+	if not _should_request_redraw():
+		return
 	queue_redraw()
+
+
+func _should_request_redraw() -> bool:
+	## 重绘守卫；比较可见状态与耐久显示比例，两者都未变化时返回 false 跳过重绘，变化时记录最新状态并放行。
+	# 本次耐久显示比例；隐藏状态固定取 -1，保证重新显示后的第一次刷新必然触发重绘。
+	var current_ratio: float = _get_durability_ratio() if visible else -1.0
+	if visible == _last_drawn_visible and is_equal_approx(current_ratio, _last_drawn_durability_ratio):
+		return false
+	_last_drawn_visible = visible
+	_last_drawn_durability_ratio = current_ratio
+	return true
 
 
 func _draw() -> void:
@@ -121,14 +142,8 @@ func _has_durability_attributes(item_resource: Resource) -> bool:
 	if item_resource == null:
 		return false
 	# 属性存在状态；通过属性列表识别真实声明，避免 Resource.get() 对不存在字段的空值产生误判。
-	var has_current_durability: bool = false
+	# 查找方式补充：改用 in 运算符对同样的 current_durability 属性名做对象属性查找，判定结果与原属性列表遍历一致且不再分配属性字典数组。
+	var has_current_durability: bool = "current_durability" in item_resource
 	# 最大耐久属性存在状态；必须与当前耐久同时存在才构成完整耐久模型。
-	var has_maximum_durability: bool = false
-	for property_info in item_resource.get_property_list():
-		# 属性名称；取值来自 Godot 资源属性字典，字符串比较可兼容脚本变量与导出变量。
-		var property_name: String = str((property_info as Dictionary).get("name", ""))
-		has_current_durability = has_current_durability or property_name == "current_durability"
-		has_maximum_durability = has_maximum_durability or property_name == "max_durability"
-		if has_current_durability and has_maximum_durability:
-			return true
-	return false
+	var has_maximum_durability: bool = "max_durability" in item_resource
+	return has_current_durability and has_maximum_durability

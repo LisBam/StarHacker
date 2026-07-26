@@ -171,7 +171,8 @@ func _on_content_availability_changed() -> void:
 
 func get_shop_entries() -> Array[Dictionary]:
 	ensure_automatic_refresh()
-	return _shop_stock.duplicate(true)
+	# 浅拷贝库存数组；商店与筛选界面只读取条目字段，资源引用在深拷贝下本就共享，改用浅拷贝避免每次打开商店复制全部条目字典。
+	return _shop_stock.duplicate()
 
 
 func get_gray_market_entries() -> Array[Dictionary]:
@@ -554,6 +555,7 @@ func _save_state() -> void:
 	var save_file: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if save_file != null:
 		save_file.store_string(JSON.stringify(save_data))
+		save_file.close()
 
 
 func _load_state() -> bool:

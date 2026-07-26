@@ -233,6 +233,18 @@ func get_current_price(stock_id: String) -> float:
 	return maxf(snappedf(float(state.get("price", 0.0)), 0.01), 0.01)
 
 
+func get_stock_price(stock_id: String) -> float:
+	## 轻量只读价格接口；复用当前价读取逻辑，直接访问内部行情状态且不做任何深复制，供股市面板每秒刷新股票卡与价格文本。
+	return get_current_price(stock_id)
+
+
+func get_stock_change_ratio(stock_id: String) -> float:
+	## 轻量只读涨跌接口；返回最近一次刷新相对刷新前价格的实际变化比例，不复制任何行情字典。
+	# 单股运行时状态；只读取涨跌字段，不把内部字典引用返回给调用方。
+	var state: Dictionary = _stock_states.get(stock_id, {}) as Dictionary
+	return float(state.get("last_change_ratio", 0.0))
+
+
 func get_securities_balance() -> float:
 	## 返回证券币账户余额；统一标准化为非负两位小数，外部只能通过股市服务公开接口修改。
 	return _normalize_securities_amount(_securities_balance)
@@ -933,6 +945,7 @@ func _save_state() -> void:
 	var save_file: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if save_file != null:
 		save_file.store_string(JSON.stringify(save_data))
+		save_file.close()
 
 
 func _load_state() -> bool:

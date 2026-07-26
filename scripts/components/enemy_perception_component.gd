@@ -1,3 +1,5 @@
+## 敌人感知组件全局类名；供宿主聚合脚本与其他系统做类型化引用，不改变节点运行行为。
+class_name EnemyPerceptionComponent
 extends Node
 
 ## 敌人感知组件独立维护视野检测、玩家记忆、遮挡搜查和反复卡视野脱战状态。
@@ -716,6 +718,11 @@ func _reset_target_search() -> void:
 	_target_search_wait_remaining = 0.0
 
 
+## 情报版本轻量查询；只返回当前版本号整数，供战术组件在版本未变化时完全跳过情报字典构造。
+func get_tactical_intelligence_revision() -> int:
+	return _intelligence_revision
+
+
 func get_tactical_intelligence() -> Dictionary:
 	if _last_intelligence_timestamp_msec <= 0 or not _has_last_known_target_position:
 		return {}
@@ -733,7 +740,8 @@ func get_tactical_intelligence() -> Dictionary:
 		"escape_direction": _last_escape_direction,
 		"loss_count": _line_of_sight_loss_count,
 		"alert_state": _target_ai_state,
-		"medium_hotspots": _medium_hotspots.duplicate(true),
+		# 中期热点只读契约：直接传内部数组引用避免每次深拷贝；战术组件当前不读取该键，调用方禁止修改数组及其中字典。
+		"medium_hotspots": _medium_hotspots,
 		"long_term_region_center": _long_term_region_center,
 		"long_term_region_radius": long_term_region_radius
 	}

@@ -32,6 +32,8 @@ const SACRIFICE_SLOT_COUNT: int = 5
 const FORGE_ANIMATION_DURATION: float = 1.35
 ## 锻造动画旋转圈数；默认 1.5 圈，兼顾可读性和等待时长。
 const FORGE_ANIMATION_ROTATIONS: float = 1.5
+## 搜索防抖等待时间；默认 0.2 秒，输入停止后才执行一次锻造候选列表重建。
+const SEARCH_DEBOUNCE_SECONDS: float = 0.2
 
 ## 锻造面板最小尺寸；默认 960×650，在主菜单 720 高窗口中保留外层遮罩边距。
 @export var panel_minimum_size: Vector2 = Vector2(960.0, 650.0)
@@ -128,6 +130,8 @@ var _refresh_queued: bool = false
 var _refresh_pending: bool = false
 ## 锻造候选渐进加载器；只负责下半区普通背包或仓库列表，固定装备槽继续同步显示。
 var _item_loader: ProgressiveItemLoader
+## 搜索防抖计时器；单次触发，文本变化时重置计时并在停止输入后统一重建一次，清空搜索框时立即刷新。
+var _search_debounce_timer: Timer
 
 
 func _ready() -> void:
@@ -273,6 +277,12 @@ func _build_interface() -> void:
 	_search_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_search_edit.text_changed.connect(_on_search_changed)
 	query_bar.add_child(_search_edit)
+	# 搜索防抖计时器初始化；常驻面板子节点，超时回调直接复用原有锻造候选重建入口。
+	_search_debounce_timer = Timer.new()
+	_search_debounce_timer.one_shot = true
+	_search_debounce_timer.wait_time = SEARCH_DEBOUNCE_SECONDS
+	_search_debounce_timer.timeout.connect(_rebuild_inventory_items)
+	add_child(_search_debounce_timer)
 	_sort_option = OptionButton.new()
 	_sort_option.custom_minimum_size = Vector2(130.0, 34.0)
 	_sort_option.add_item("获得时间")
@@ -940,7 +950,13 @@ func _on_subcategory_pressed(category_name: String) -> void:
 
 
 func _on_search_changed(_new_text: String) -> void:
-	_rebuild_inventory_items()
+	# 搜索防抖处理；清空搜索框立即重建保证响应感，其余输入重置 0.2 秒计时并在停止输入后统一重建一次。
+	if _search_debounce_timer == null or _new_text.strip_edges().is_empty():
+		if _search_debounce_timer != null:
+			_search_debounce_timer.stop()
+		_rebuild_inventory_items()
+		return
+	_search_debounce_timer.start()
 
 
 func _on_sort_selected(item_index: int) -> void:

@@ -3,6 +3,7 @@ class_name MiningIncomeFloatEmitter
 
 ## 矿场资产收益飘字发射器按持有数量生成独立的单台收益文字。
 ## 每台资产每秒对应一次逻辑发射，数量越多，发射间隔越短；组件只负责视觉，不参与真实收益结算。
+## 频率上限补充：持有数量超过每秒飘字上限时按上限速率发射，超出的逻辑发射直接丢弃，仅影响视觉密度不影响任何收益数值。
 
 ## 单个飘字持续时间；默认 0.85 秒，控制文字从出现到完全消失的总时长。
 @export_range(0.20, 3.0, 0.05) var float_duration_seconds: float = 0.85
@@ -12,6 +13,10 @@ class_name MiningIncomeFloatEmitter
 @export_range(0.0, 60.0, 1.0) var horizontal_spread: float = 14.0
 ## 单帧最大生成标签数量；默认 12，用于界面恢复显示或低帧率积压时保护 UI 节点创建开销，不改变真实收益或单次飘字数值。
 @export_range(1, 128, 1) var maximum_spawns_per_frame: int = 12
+## 每卡每秒最大飘字数量；默认 8，持有量超过该值时按上限速率发射，超出的逻辑发射直接丢弃，只影响视觉不影响真实收益。
+@export_range(1, 64, 1) var maximum_floats_per_second: int = 8
+## 等待队列硬上限倍率；默认 2，积压逻辑次数最多保留单帧上限的该倍数，防止低帧率下形成永久消化不完的队列。
+@export_range(1, 8, 1) var pending_spawn_limit_multiplier: int = 2
 ## 飘字字体大小；默认 12，与资产名称后的紧凑收益反馈保持协调。
 @export_range(8, 28, 1) var float_font_size: int = 12
 ## 飘字颜色；默认亮绿色，和矿场全局收益反馈使用相同收益语义。
@@ -51,12 +56,17 @@ func _process(delta: float) -> void:
 	if _asset_quantity <= 0 or _unit_income_per_second <= 0 or not is_visible_in_tree():
 		return
 	# 本帧新增逻辑发射量；每个资产单位每秒增加 1，使数量与飘字速度保持线性关系。
-	_spawn_accumulator += maxf(delta, 0.0) * float(_asset_quantity)
+	# 频率上限补充：持有量超过每秒飘字上限时按上限速率发射，超出的逻辑飘字直接丢弃，真实收益结算不受影响。
+	# 本帧有效发射速率；取持有量与每秒飘字上限的较小值。
+	var effective_spawn_rate: float = minf(float(_asset_quantity), float(maxi(maximum_floats_per_second, 1)))
+	_spawn_accumulator += maxf(delta, 0.0) * effective_spawn_rate
 	# 本帧应发射数量；只取完整单位，余下小数留到后续帧继续累计。
 	var requested_spawns: int = int(floor(_spawn_accumulator))
 	if requested_spawns > 0:
 		_spawn_accumulator -= float(requested_spawns)
 		_pending_logical_spawns += requested_spawns
+		# 等待队列硬上限；积压最多保留单帧上限的固定倍数，超出部分直接丢弃以防长期积压。
+		_pending_logical_spawns = mini(_pending_logical_spawns, maxi(maximum_spawns_per_frame, 1) * maxi(pending_spawn_limit_multiplier, 1))
 	# 等待队列刷新；即使本帧没有新增逻辑次数，也会在后续帧继续按创建上限消化积压。
 	_flush_pending_spawns()
 

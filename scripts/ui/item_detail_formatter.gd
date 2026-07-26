@@ -258,10 +258,8 @@ static func _resource_has_property(content_resource: Resource, property_name: St
 	if content_resource == null:
 		return false
 	# 属性描述遍历项；统一检查脚本导出字段与内置属性名。
-	for property_info in content_resource.get_property_list():
-		if str((property_info as Dictionary).get("name", "")) == property_name:
-			return true
-	return false
+	# 性能补充：in 运算符按属性名直接查询对象，与逐条遍历 get_property_list 匹配 name 字段的语义等价且无需构建完整属性数组。
+	return property_name in content_resource
 
 
 static func create_tooltip_control(item_resource: Resource, quantity: int = 1, value_label: String = "价值", total_value_override: int = -1) -> Control:

@@ -49,6 +49,12 @@ var _active_combo_weapon: Resource
 var _deviation_random: RandomNumberGenerator = RandomNumberGenerator.new()
 ## 枪口空间查询复用圆形；初始使用引擎默认半径，每次攻击查询前同步 muzzle_block_check_radius，避免每颗弹体重复分配 Shape2D 资源。
 var _muzzle_block_shape: CircleShape2D = CircleShape2D.new()
+## 枪口形状查询复用参数；对象跨攻击复用，每次查询前只刷新形状、变换与掩码字段，避免每颗弹体重复分配查询参数对象。
+var _muzzle_block_query: PhysicsShapeQueryParameters2D = PhysicsShapeQueryParameters2D.new()
+## 持有者属性组件缓存；首次读取时按节点名解析一次并复用，替代每颗弹体重复执行的字符串路径查找。
+var _owner_stats_component: Node = null
+## 属性组件是否已完成解析；默认 false，首次读取后置 true，解析失败时不再逐弹体重复查找。
+var _owner_stats_component_resolved: bool = false
 
 ## 枪口节点缓存；默认按 muzzle_path 解析，允许为空并走备用距离，修改会影响弹体出生位置来源。
 @onready var _muzzle: Node2D = get_node_or_null(muzzle_path) as Node2D
@@ -177,12 +183,20 @@ func _fire_round(direction: Vector2, weapon_data: Resource) -> bool:
 		projectile_offsets = _build_scatter_deviation_offsets_degrees(scatter_count, deviation_degrees)
 	else:
 		projectile_offsets.append(_deviation_random.randf_range(-deviation_degrees, deviation_degrees))
+	# 本轮弹体父节点；同轮全部弹体挂载到同一父节点，提升到循环外只解析一次避免逐弹体节点查找。
+	var projectile_parent: Node = _resolve_projectile_parent()
+	# 本轮是否使用共享枪口出生点；枪口节点有效时全部散射弹体共用同一出生位置，阻挡检测与弹体方向无关。
+	var uses_shared_spawn_position: bool = is_instance_valid(_muzzle)
+	# 本轮共享阻挡结果；共享出生点成立时线段起终点固定且检测形状为圆形不受旋转影响，因此只需按瞄准方向预计算一次。
+	var shared_spawn_blocked: bool = uses_shared_spawn_position and _is_spawn_blocked(direction, _muzzle.global_position)
 	for projectile_offset in projectile_offsets:
 		# 本颗弹体方向；散射武器使用分层随机偏移，普通武器使用完整区间随机偏移。
 		var resolved_direction: Vector2 = direction.rotated(deg_to_rad(projectile_offset))
 		# 本颗弹体出生位置；枪口或备用位置被墙体阻挡时只跳过该颗弹体。
 		var spawn_position: Vector2 = _get_spawn_position(resolved_direction)
-		if _is_spawn_blocked(resolved_direction, spawn_position):
+		# 本颗弹体阻挡状态；共享出生点直接复用本轮预计算结果，只有无枪口兜底出生点随方向变化时才保留逐弹体检测。
+		var spawn_blocked: bool = shared_spawn_blocked if uses_shared_spawn_position else _is_spawn_blocked(resolved_direction, spawn_position)
+		if spawn_blocked:
 			continue
 		# 本颗弹体实例；资源异常时跳过，不影响同轮其他散射弹体继续生成。
 		var projectile_scene_resource: PackedScene = weapon_data.get_meta("active_projectile_scene") as PackedScene
@@ -205,7 +219,6 @@ func _fire_round(direction: Vector2, weapon_data: Resource) -> bool:
 			projectile.call("set_damage_instigator", owner)
 		projectile.global_position = spawn_position
 		projectile.global_rotation = resolved_direction.angle()
-		var projectile_parent: Node = _resolve_projectile_parent()
 		projectile_parent.add_child(projectile)
 		projectile.global_position = spawn_position
 		projectile.global_rotation = resolved_direction.angle()
@@ -319,7 +332,8 @@ func _is_muzzle_area_blocked(direction: Vector2, spawn_position: Vector2) -> boo
 	# 枪口检测朝向；取值来自攻击方向，默认只用于构建 Transform2D。
 	var check_rotation: float = direction.angle() if not direction.is_zero_approx() else 0.0
 	# 枪口形状查询参数；取值为枪口圆形和环境掩码，默认用于阻止墙内生成弹体。
-	var query: PhysicsShapeQueryParameters2D = PhysicsShapeQueryParameters2D.new()
+	# 当前局部变量引用组件私有查询参数；对象本体跨攻击复用，每次只刷新字段值以避免连续射击时产生短生命周期对象。
+	var query: PhysicsShapeQueryParameters2D = _muzzle_block_query
 	query.shape = circle_shape
 	query.transform = Transform2D(check_rotation, spawn_position)
 	query.collision_mask = muzzle_block_collision_mask
@@ -392,13 +406,21 @@ func _get_weapon_packed_scene(weapon_data: Resource, property_name: StringName, 
 	return fallback_scene
 
 
+func _get_owner_stats_component() -> Node:
+	## 返回缓存的持有者属性组件；只在首次读取或缓存节点被释放后重新解析一次，替代每颗弹体的字符串节点查找。
+	if not _owner_stats_component_resolved or (_owner_stats_component != null and not is_instance_valid(_owner_stats_component)):
+		_owner_stats_component = owner.get_node_or_null("StatsComponent") if owner != null else null
+		_owner_stats_component_resolved = true
+	return _owner_stats_component
+
+
 func _get_owner_attack_power() -> float:
 	# 玩家属性组件；缺失时使用 100 保持原始伤害。
-	var stats_component: Node = owner.get_node_or_null("StatsComponent") if owner != null else null
+	var stats_component: Node = _get_owner_stats_component()
 	return float(stats_component.call("get_attack_power")) if stats_component != null and stats_component.has_method("get_attack_power") else 100.0
 
 
 func _get_stats_float(method_name: String, fallback_value: float) -> float:
 	# 玩家属性组件；用于读取装备提供的暴击附加值。
-	var stats_component: Node = owner.get_node_or_null("StatsComponent") if owner != null else null
+	var stats_component: Node = _get_owner_stats_component()
 	return float(stats_component.call(method_name)) if stats_component != null and stats_component.has_method(method_name) else fallback_value

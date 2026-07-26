@@ -103,13 +103,8 @@ func set_market_display_active(active: bool) -> void:
 
 
 func _build_interface() -> void:
-	# 面板主体样式；深色不透明背景、蓝灰边框和圆角与其他局外面板保持一致。
-	var panel_style: StyleBoxFlat = StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.035, 0.05, 0.065, 0.98)
-	panel_style.border_color = Color(0.26, 0.38, 0.46, 1.0)
-	panel_style.set_border_width_all(2)
-	panel_style.set_corner_radius_all(8)
-	add_theme_stylebox_override("panel", panel_style)
+	# 面板主体样式；统一取样式指南主窗口样式并自动登记，UI 风格切换时立即刷新背景与描边。
+	UI_STYLE_GUIDE.apply_window_panel(self)
 	# 外层边距；为标题、三栏主体和持仓区提供统一安全留白。
 	var outer_margin: MarginContainer = MarginContainer.new()
 	outer_margin.add_theme_constant_override("margin_left", 16)
@@ -127,7 +122,7 @@ func _build_interface() -> void:
 	# 面板标题；固定显示股市世界观名称并占据剩余横向空间。
 	var title_label: Label = Label.new()
 	title_label.text = "量子证券交易中心"
-	title_label.add_theme_font_size_override("font_size", 22)
+	UI_STYLE_GUIDE.apply_title_label(title_label, 25)
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_row.add_child(title_label)
 	_event_banner = Label.new()
@@ -139,7 +134,7 @@ func _build_interface() -> void:
 	# 标题栏关闭按钮；关闭面板但不停止后台行情刷新。
 	var close_button: Button = Button.new()
 	close_button.text = "关闭"
-	close_button.custom_minimum_size = Vector2(90.0, 34.0)
+	close_button.custom_minimum_size = Vector2(90.0, 36.0)
 	close_button.pressed.connect(_on_close_pressed)
 	title_row.add_child(close_button)
 	# 主体三栏；左侧股票列表、中部行情图、右侧交易区固定在同一行。
@@ -243,7 +238,7 @@ func _build_interface() -> void:
 	# 持仓区标题；位于主体与横向持仓列表之间。
 	var holdings_title: Label = Label.new()
 	holdings_title.text = "全部持仓"
-	holdings_title.add_theme_font_size_override("font_size", 17)
+	holdings_title.add_theme_font_size_override("font_size", 18)
 	root_content.add_child(holdings_title)
 	# 持仓横向滚动容器；五只股票同时持仓时仍可访问全部标准卡片。
 	var holdings_scroll: ScrollContainer = ScrollContainer.new()

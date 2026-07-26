@@ -128,7 +128,7 @@ func _draw() -> void:
 	# 滑块阴影；扩大 2 像素并保持低透明度，增强与轨道重叠处的层次。
 	draw_circle(Vector2(handle_x, center_y), active_handle_radius + 2.0, Color(0.0, 0.0, 0.0, 0.42))
 	draw_circle(Vector2(handle_x, center_y), active_handle_radius, resolved_handle_border_color if _slider.editable else resolved_disabled_progress_color)
-	draw_circle(Vector2(handle_x, center_y), maxf(active_handle_radius - 3.0, 1.0), resolved_handle_fill_color if _slider.editable else Color(0.62, 0.66, 0.68, 1.0))
+	draw_circle(Vector2(handle_x, center_y), maxf(active_handle_radius - 3.0, 1.0), resolved_handle_fill_color if _slider.editable else resolved_disabled_progress_color)
 
 
 func _get_value_ratio() -> float:

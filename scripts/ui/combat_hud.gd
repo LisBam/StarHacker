@@ -484,6 +484,7 @@ func _ready() -> void:
 	UI_STYLE_GUIDE.apply_overlay_dim(get_node("Root/PauseOverlay/PauseDim") as ColorRect)
 	UI_STYLE_GUIDE.apply_overlay_dim(get_node("Root/DeathOverlay/DeathDim") as ColorRect)
 	UI_STYLE_GUIDE.apply_title_label(_death_title_label)
+	UI_STYLE_GUIDE.apply_title_label(_character_name_label)
 	UI_STYLE_GUIDE.apply_primary_button(_death_return_main_menu_button)
 	UI_STYLE_GUIDE.apply_danger_button(_return_main_menu_button)
 	PROGRESS_SLIDER_VISUAL_SCRIPT.install(_pause_master_volume_slider)
@@ -1080,7 +1081,6 @@ func _build_combat_status_panel() -> void:
 	survival_timer_label.text = "00:00"
 	survival_timer_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	survival_timer_label.add_theme_font_size_override("font_size", 24)
-	survival_timer_label.add_theme_color_override("font_color", Color(0.82, 0.96, 1.0, 1.0))
 	status_container.add_child(survival_timer_label)
 	_survival_timer_label = survival_timer_label
 
@@ -3327,23 +3327,7 @@ func _restore_combat_stone_return_view() -> void:
 
 
 func _apply_danger_button_style(button: Button) -> void:
-	if button == null:
-		return
-	# 普通危险按钮样式；红色背景用于明确取消当前强化选择状态。
-	var normal_style: StyleBoxFlat = StyleBoxFlat.new()
-	normal_style.bg_color = Color(0.42, 0.08, 0.10, 0.96)
-	normal_style.border_color = Color(0.95, 0.24, 0.28, 1.0)
-	normal_style.set_border_width_all(2)
-	# 悬停危险按钮样式；提高亮度提供可点击反馈。
-	var hover_style: StyleBoxFlat = normal_style.duplicate() as StyleBoxFlat
-	hover_style.bg_color = Color(0.58, 0.10, 0.13, 1.0)
-	# 按下危险按钮样式；使用更深红色表示按钮已经触发。
-	var pressed_style: StyleBoxFlat = normal_style.duplicate() as StyleBoxFlat
-	pressed_style.bg_color = Color(0.30, 0.04, 0.06, 1.0)
-	button.add_theme_stylebox_override("normal", normal_style)
-	button.add_theme_stylebox_override("hover", hover_style)
-	button.add_theme_stylebox_override("pressed", pressed_style)
-	button.add_theme_color_override("font_color", Color(1.0, 0.92, 0.92, 1.0))
+	UI_STYLE_GUIDE.apply_danger_button(button)
 
 
 func _on_inventory_drop_area_drop_received(drop_data: Dictionary) -> void:

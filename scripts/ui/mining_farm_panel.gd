@@ -96,6 +96,10 @@ func _ready() -> void:
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
 	_build_interface()
 	_connect_services()
+	# UI 风格服务；资产卡片和空增益提示使用手动取色，监听切换信号后立即重刷而不等待下次重建。
+	var ui_style_settings: Node = get_tree().root.get_node_or_null("UiStyleSettings")
+	if ui_style_settings != null and ui_style_settings.has_signal("ui_style_changed") and not ui_style_settings.is_connected("ui_style_changed", Callable(self, "_on_ui_style_changed")):
+		ui_style_settings.connect("ui_style_changed", Callable(self, "_on_ui_style_changed"))
 	set_process(false)
 	_refresh_all(false)
 
@@ -137,13 +141,8 @@ func _connect_services() -> void:
 
 
 func _build_interface() -> void:
-	# 面板样式；深蓝黑背景与项目物品悬浮窗保持同一视觉语汇。
-	var panel_style: StyleBoxFlat = StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.025, 0.045, 0.065, 0.98)
-	panel_style.border_color = Color(0.30, 0.68, 0.82, 0.92)
-	panel_style.set_border_width_all(2)
-	panel_style.set_corner_radius_all(8)
-	add_theme_stylebox_override("panel", panel_style)
+	# 面板样式；统一取样式指南主窗口样式并自动登记，UI 风格切换时立即刷新背景与描边。
+	UI_STYLE_GUIDE.apply_window_panel(self)
 	# 外边距；为标题、卡片和底部按钮提供统一留白。
 	var margin: MarginContainer = MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 22)
@@ -175,7 +174,7 @@ func _build_header(root: VBoxContainer) -> void:
 	header.add_child(balance_box)
 	_balance_label = Label.new()
 	_balance_label.add_theme_font_size_override("font_size", 31)
-	_balance_label.add_theme_color_override("font_color", Color(0.70, 0.92, 1.0, 1.0))
+	UI_STYLE_GUIDE.apply_title_label(_balance_label)
 	# 余额标题行；余额左侧保持主视觉，右侧放置具体数值开关且不挤压产出状态栏。
 	var balance_title_row: HBoxContainer = HBoxContainer.new()
 	balance_title_row.add_theme_constant_override("separation", 12)
@@ -188,7 +187,7 @@ func _build_header(root: VBoxContainer) -> void:
 	balance_title_row.add_child(_exact_value_check_box)
 	_gold_equivalent_label = Label.new()
 	_gold_equivalent_label.add_theme_font_size_override("font_size", 13)
-	_gold_equivalent_label.add_theme_color_override("font_color", Color(0.66, 0.72, 0.78, 1.0))
+	UI_STYLE_GUIDE.apply_secondary_label(_gold_equivalent_label)
 	balance_box.add_child(_gold_equivalent_label)
 	_floating_feedback_layer = Control.new()
 	_floating_feedback_layer.custom_minimum_size = Vector2(0.0, 34.0)
@@ -207,9 +206,8 @@ func _build_header(root: VBoxContainer) -> void:
 	production_box.add_child(_buff_container)
 	# 关闭按钮；关闭后 UI 和动画停止，服务转入后台低频结算。
 	var close_button: Button = Button.new()
-	close_button.custom_minimum_size = Vector2(58.0, 26.0)
+	close_button.custom_minimum_size = Vector2(90.0, 36.0)
 	close_button.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	close_button.add_theme_font_size_override("font_size", 12)
 	close_button.text = "关闭"
 	close_button.pressed.connect(_close_panel)
 	header.add_child(close_button)
@@ -269,7 +267,7 @@ func _build_footer(root: VBoxContainer) -> void:
 	rule_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	rule_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	rule_label.add_theme_font_size_override("font_size", 13)
-	rule_label.add_theme_color_override("font_color", Color(0.68, 0.74, 0.80, 1.0))
+	UI_STYLE_GUIDE.apply_secondary_label(rule_label)
 	rule_label.text = "1星穹 = 10000算力币  |  提现手续费10%"
 	operations.add_child(rule_label)
 	var withdraw_button: Button = Button.new()
@@ -334,7 +332,7 @@ func _refresh_buffs() -> void:
 		var empty_label: Label = Label.new()
 		empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		empty_label.text = "当前无临时增益"
-		empty_label.add_theme_color_override("font_color", Color(0.48, 0.54, 0.60, 1.0))
+		empty_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_disabled_text_color())
 		_buff_container.add_child(empty_label)
 		return
 	for raw_buff in buffs:
@@ -398,8 +396,9 @@ func _create_asset_card(definition: Dictionary, quantity: int) -> Control:
 	# 卡片激活状态；可购买页按永久解锁判断，已持有页只有数量大于 0 时显示运行中的亮色样式。
 	var card_active: bool = unlocked if _active_tab == TAB_AVAILABLE else quantity > 0
 	var style: StyleBoxFlat = StyleBoxFlat.new()
-	style.bg_color = Color(0.055, 0.085, 0.115, 0.96) if card_active else Color(0.05, 0.055, 0.065, 0.88)
-	style.border_color = Color(0.24, 0.55, 0.68, 0.88) if card_active else Color(0.25, 0.27, 0.30, 0.70)
+	# 卡片背景与边框；激活时取当前风格子分区色与弱强调描边，锁定时改用物品卡片底色并降低透明度表达停机状态。
+	style.bg_color = UI_STYLE_GUIDE.get_section_background_color() if card_active else Color(UI_STYLE_GUIDE.get_item_card_background_color(), 0.62)
+	style.border_color = UI_STYLE_GUIDE.get_accent_muted_color() if card_active else Color(UI_STYLE_GUIDE.get_section_border_color(), 0.55)
 	style.set_border_width_all(2)
 	style.set_corner_radius_all(6)
 	card.add_theme_stylebox_override("panel", style)
@@ -418,7 +417,7 @@ func _create_asset_card(definition: Dictionary, quantity: int) -> Control:
 	content.add_child(name_row)
 	var name_label: Label = Label.new()
 	name_label.add_theme_font_size_override("font_size", 17)
-	name_label.add_theme_color_override("font_color", Color(0.74, 0.92, 1.0, 1.0) if card_active else Color(0.48, 0.50, 0.54, 1.0))
+	name_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_accent_color() if card_active else UI_STYLE_GUIDE.get_disabled_text_color())
 	name_label.text = str(definition.get("name", "未知资产"))
 	name_row.add_child(name_label)
 	# 飘字承载区；固定宽度避免高频收益文字推动名称行布局。
@@ -431,9 +430,11 @@ func _create_asset_card(definition: Dictionary, quantity: int) -> Control:
 	income_emitter.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	income_emitter.call("configure", quantity, int(definition.get("production", 0)), _show_exact_values)
 	income_float_area.add_child(income_emitter)
+	# 卡片说明文字色；取当前风格次要文字色，锁定卡片降低透明度以弱化未运行内容。
+	var card_detail_color: Color = UI_STYLE_GUIDE.get_secondary_text_color() if card_active else Color(UI_STYLE_GUIDE.get_secondary_text_color(), 0.72)
 	var detail_label: Label = Label.new()
 	detail_label.add_theme_font_size_override("font_size", 12)
-	detail_label.add_theme_color_override("font_color", Color(0.67, 0.72, 0.77, 1.0))
+	detail_label.add_theme_color_override("font_color", card_detail_color)
 	if _active_tab == TAB_AVAILABLE:
 		detail_label.text = "单价 %s  |  单台 +%s/秒" % [_format_integer_value(int(definition.get("price", 0))), _format_integer_value(int(definition.get("production", 0)))]
 	else:
@@ -441,7 +442,7 @@ func _create_asset_card(definition: Dictionary, quantity: int) -> Control:
 	content.add_child(detail_label)
 	var description_label: Label = Label.new()
 	description_label.add_theme_font_size_override("font_size", 11)
-	description_label.add_theme_color_override("font_color", Color(0.52, 0.58, 0.64, 1.0))
+	description_label.add_theme_color_override("font_color", card_detail_color)
 	description_label.text = str(definition.get("description", ""))
 	content.add_child(description_label)
 	var spacer: Control = Control.new()
@@ -567,6 +568,12 @@ func _on_production_changed(_production: int) -> void:
 
 
 func _on_assets_changed() -> void:
+	_rebuild_assets()
+
+
+func _on_ui_style_changed(_style_id: String) -> void:
+	## UI 风格切换后立即重建增益列表和资产卡片，刷新其中手动取色的背景、边框与文字。
+	_refresh_buffs()
 	_rebuild_assets()
 
 

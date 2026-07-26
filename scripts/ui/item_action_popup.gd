@@ -6,6 +6,9 @@ class_name ItemActionPopup
 
 signal action_pressed(action_id: int)
 
+## 全局窗口样式指南；弹窗背景、按钮状态与危险变体统一读取当前 UI 风格，保证黑蓝与黑白双风格即时切换。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+
 ## 弹窗固定宽度；默认 104 像素，比上一版进一步缩短横向长度，减少对相邻物品卡片的遮挡。
 @export_range(92.0, 480.0, 1.0) var popup_width: float = 104.0
 ## 单个功能按钮最小高度；默认 27 像素，比上一版提高 50%，增强文字可读性和点击稳定性。
@@ -30,6 +33,10 @@ var _button_tweens: Dictionary = {}
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_build_interface()
+	# UI 风格服务；弹窗实例被宿主长期持有复用，监听切换信号后立即重建背景，隐藏期间同样生效。
+	var ui_style_settings: Node = get_tree().root.get_node_or_null("UiStyleSettings")
+	if ui_style_settings != null and ui_style_settings.has_signal("ui_style_changed") and not ui_style_settings.is_connected("ui_style_changed", Callable(self, "_on_ui_style_changed")):
+		ui_style_settings.connect("ui_style_changed", Callable(self, "_on_ui_style_changed"))
 
 
 func clear_actions() -> void:
@@ -82,14 +89,8 @@ func present_at(screen_position: Vector2) -> void:
 
 func _build_interface() -> void:
 	# 弹窗背景；深蓝灰底、亮边框和圆角用于与物品卡片保持同一视觉语言。
-	var popup_style: StyleBoxFlat = StyleBoxFlat.new()
-	popup_style.bg_color = Color(0.035, 0.055, 0.075, 0.98)
-	popup_style.border_color = Color(0.38, 0.72, 0.86, 0.95)
-	popup_style.set_border_width_all(2)
-	popup_style.set_corner_radius_all(6)
-	popup_style.shadow_color = Color(0.0, 0.0, 0.0, 0.48)
-	popup_style.shadow_size = 5
-	add_theme_stylebox_override("panel", popup_style)
+	# 风格化补充：底色与描边现读取当前 UI 风格窗口色板，构建集中在 _apply_popup_panel_style() 以支持切换后重建。
+	_apply_popup_panel_style()
 	# 外层边距；防止功能按钮紧贴弹窗边框，并为缩放动效保留少量空间。
 	var margin: MarginContainer = MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 6)
@@ -97,39 +98,37 @@ func _build_interface() -> void:
 	margin.add_theme_constant_override("margin_right", 6)
 	margin.add_theme_constant_override("margin_bottom", 6)
 	add_child(margin)
+	# 统一主题继承；弹窗根控件安装完整控件主题并自动登记，风格切换时全部功能按钮即时刷新。
+	UI_STYLE_GUIDE.apply_screen_theme(margin)
 	# 操作列表；功能按钮仅纵向排列，避免不同界面自行决定尺寸或间距。
 	_action_list = VBoxContainer.new()
 	_action_list.add_theme_constant_override("separation", 3)
 	margin.add_child(_action_list)
 
 
+func _apply_popup_panel_style() -> void:
+	## 按当前 UI 风格重建弹窗背景；宿主长期持有的复用实例在风格切换后再次调用即可恢复一致外观。
+	# 弹窗背景样式；底色与描边读取当前风格窗口色板，透明度保留原弹窗轻浮层意图，圆角与阴影维持原布局。
+	var popup_style: StyleBoxFlat = StyleBoxFlat.new()
+	popup_style.bg_color = Color(UI_STYLE_GUIDE.get_window_background_color(), 0.98)
+	popup_style.border_color = Color(UI_STYLE_GUIDE.get_window_border_color(), 0.95)
+	popup_style.set_border_width_all(2)
+	popup_style.set_corner_radius_all(6)
+	popup_style.shadow_color = Color(0.0, 0.0, 0.0, 0.48)
+	popup_style.shadow_size = 5
+	add_theme_stylebox_override("panel", popup_style)
+
+
+func _on_ui_style_changed(_style_id: String) -> void:
+	## 响应全局 UI 风格切换；弹窗无论当前可见与否都立即重建背景，下次显示即为新风格。
+	_apply_popup_panel_style()
+
+
 func _apply_button_styles(action_button: Button, destructive: bool) -> void:
-	# 正常颜色；危险操作使用柔和暗红，其余操作使用冷色深蓝，均保持白色文字可读性。
-	var normal_color: Color = Color(0.24, 0.075, 0.09, 0.98) if destructive else Color(0.075, 0.14, 0.19, 0.98)
-	# 悬停颜色；在正常色基础上提高亮度，配合轻微缩放明确当前指向操作。
-	var hover_color: Color = Color(0.42, 0.105, 0.13, 1.0) if destructive else Color(0.105, 0.25, 0.33, 1.0)
-	# 按压颜色；降低亮度用于确认鼠标按下状态。
-	var pressed_color: Color = Color(0.18, 0.045, 0.06, 1.0) if destructive else Color(0.045, 0.105, 0.145, 1.0)
-	action_button.add_theme_stylebox_override("normal", _create_button_style(normal_color, Color(0.35, 0.62, 0.72, 0.85)))
-	action_button.add_theme_stylebox_override("hover", _create_button_style(hover_color, Color(0.62, 0.9, 1.0, 1.0)))
-	action_button.add_theme_stylebox_override("pressed", _create_button_style(pressed_color, Color(0.75, 0.94, 1.0, 1.0)))
-	action_button.add_theme_stylebox_override("disabled", _create_button_style(Color(0.08, 0.09, 0.1, 0.82), Color(0.25, 0.27, 0.29, 0.72)))
-	action_button.add_theme_color_override("font_color", Color(0.92, 0.97, 1.0, 1.0))
-	action_button.add_theme_color_override("font_hover_color", Color.WHITE)
-	action_button.add_theme_color_override("font_pressed_color", Color.WHITE)
-	action_button.add_theme_color_override("font_disabled_color", Color(0.5, 0.53, 0.56, 0.9))
-
-
-func _create_button_style(background_color: Color, border_color: Color) -> StyleBoxFlat:
-	# 按钮样式；四种交互状态共享圆角、边框宽度和内部留白，仅颜色发生变化。
-	var button_style: StyleBoxFlat = StyleBoxFlat.new()
-	button_style.bg_color = background_color
-	button_style.border_color = border_color
-	button_style.set_border_width_all(1)
-	button_style.set_corner_radius_all(5)
-	button_style.content_margin_left = 6.0
-	button_style.content_margin_right = 6.0
-	return button_style
+	## 按钮不再自建 StyleBox 状态机；normal、hover、pressed、disabled 与 focus 全部继承统一主题并随风格切换自动刷新。
+	# 破坏性操作；丢弃、销毁类按钮启用统一暗红危险变体，该语义色在黑白风格下保持不变。
+	if destructive:
+		UI_STYLE_GUIDE.apply_danger_button(action_button)
 
 
 func _on_button_mouse_entered(action_button: Button) -> void:

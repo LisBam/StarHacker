@@ -226,7 +226,7 @@ func _build_interface() -> void:
 	var preview_title: Label = Label.new()
 	preview_title.text = "锻造预览"
 	preview_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	preview_title.add_theme_font_size_override("font_size", 19)
+	preview_title.add_theme_font_size_override("font_size", 18)
 	preview_content.add_child(preview_title)
 	_preview_label = Label.new()
 	_preview_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -354,7 +354,7 @@ func _build_interface() -> void:
 	_equipment_title = Label.new()
 	_equipment_title.text = "装备栏"
 	_equipment_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_equipment_title.add_theme_font_size_override("font_size", 16)
+	_equipment_title.add_theme_font_size_override("font_size", 18)
 	equipment_columns.add_child(_equipment_title)
 	# 装备栏滚动区；装备数量超过当前可见高度时仅滚动左栏，不影响右侧背包浏览位置。
 	var equipment_scroll: ScrollContainer = ScrollContainer.new()

@@ -4,6 +4,9 @@ class_name StockChartControl
 ## 股票折线图只负责把价格历史绘制为透明深色行情区域，不读取服务或处理交易。
 ## 宿主通过 configure_history() 传入最多 30 个价格，控件会自动归一化并保留上下边距。
 
+## 全局窗口样式指南；行情图底板随当前 UI 风格取色，红绿白折线保持涨跌语义不受影响。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+
 ## 行情图背景透明度；默认 0.68，与通用悬浮信息框保持一致。
 @export_range(0.0, 1.0, 0.01) var background_alpha: float = 0.68
 ## 行情图白色边框宽度；默认 2 像素，与设计规范一致。
@@ -27,6 +30,12 @@ func _ready() -> void:
 	queue_redraw()
 
 
+func _notification(what: int) -> void:
+	# 主题变化通知；UI 风格切换会刷新宿主主题，此时重绘使行情图底板立即使用新风格取色。
+	if what == NOTIFICATION_THEME_CHANGED:
+		queue_redraw()
+
+
 func configure_history(history: Array, trend_direction: int) -> void:
 	_history = PackedFloat32Array()
 	for raw_price in history:
@@ -38,7 +47,7 @@ func configure_history(history: Array, trend_direction: int) -> void:
 func _draw() -> void:
 	# 行情图面板样式；集中配置透明背景、白边和圆角，修改只影响折线图承载区域。
 	var panel_style: StyleBoxFlat = StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.025, 0.04, 0.055, background_alpha)
+	panel_style.bg_color = Color(UI_STYLE_GUIDE.get_input_background_color(), background_alpha)
 	panel_style.border_color = Color(1.0, 1.0, 1.0, 0.92)
 	panel_style.set_border_width_all(int(border_width))
 	panel_style.set_corner_radius_all(int(corner_radius))

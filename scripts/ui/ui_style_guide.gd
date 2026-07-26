@@ -333,6 +333,41 @@ static func get_secondary_text_color() -> Color:
 	return _resolve_style_color(SECONDARY_TEXT_COLOR, BLACK_WHITE_SECONDARY_TEXT_COLOR)
 
 
+## 返回当前风格的弱强调色；用于普通控件边框、次级选中和悬停描边，不用于业务语义提示。
+static func get_accent_muted_color() -> Color:
+	return _resolve_style_color(ACCENT_MUTED_COLOR, BLACK_WHITE_ACCENT_MUTED_COLOR)
+
+
+## 返回当前风格的输入框背景色；也用于行情图等需要下沉表面的通用绘图区域。
+static func get_input_background_color() -> Color:
+	return _resolve_style_color(INPUT_BACKGROUND_COLOR, BLACK_WHITE_INPUT_BACKGROUND_COLOR)
+
+
+## 返回当前风格的技能徽章统一描边色；徽章底色仍由主动、被动、CD 与能耗各自的语义常量决定。
+static func get_character_skill_badge_border_color() -> Color:
+	return _resolve_style_color(CHARACTER_SKILL_BADGE_BORDER_COLOR, Color(0.96, 0.96, 0.96, 0.72))
+
+
+## 返回当前风格的悬停详情与工具提示背景色；与统一主题中的 TooltipPanel 保持同一表面。
+static func get_tooltip_background_color() -> Color:
+	return _resolve_style_color(Color(0.025, 0.04, 0.055, 0.96), BLACK_WHITE_TOOLTIP_BACKGROUND_COLOR)
+
+
+## 返回当前风格的悬停详情与工具提示边框色；两套风格共用高对比白描边保证浮层边界清晰。
+static func get_tooltip_border_color() -> Color:
+	return Color(1.0, 1.0, 1.0, 0.88)
+
+
+## 返回当前风格的分栏拖动条背景色；用于仓库等界面的可拖动分隔控件。
+static func get_split_handle_background_color() -> Color:
+	return _resolve_style_color(Color(0.08, 0.11, 0.14, 0.96), Color(0.10, 0.10, 0.10, 0.96))
+
+
+## 返回当前风格的分栏拖动条中心线颜色；悬停或拖动时应改用通用强调色提高反馈。
+static func get_split_handle_line_color() -> Color:
+	return _resolve_style_color(Color(0.42, 0.78, 0.90, 0.92), Color(0.62, 0.62, 0.62, 0.92))
+
+
 ## 返回当前风格的技能卡片高亮背景；徽章类别色仍由业务组件单独决定。
 static func get_character_skill_card_highlight_color() -> Color:
 	return _resolve_style_color(CHARACTER_SKILL_CARD_HIGHLIGHT_COLOR, Color(0.16, 0.16, 0.16, 0.98))

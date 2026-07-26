@@ -140,7 +140,7 @@ func _build_interface() -> void:
 	var title_label: Label = Label.new()
 	title_label.text = "商店"
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title_label.add_theme_font_size_override("font_size", 26)
+	title_label.add_theme_font_size_override("font_size", 25)
 	UI_STYLE_GUIDE.apply_title_label(title_label)
 	header.add_child(title_label)
 	_coins_label = Label.new()
@@ -150,7 +150,7 @@ func _build_interface() -> void:
 	# 关闭按钮；返回主菜单并保留当前商店库存状态。
 	var close_button: Button = Button.new()
 	close_button.text = "关闭商店"
-	close_button.custom_minimum_size = Vector2(116.0, 38.0)
+	close_button.custom_minimum_size = Vector2(116.0, 36.0)
 	close_button.pressed.connect(_on_close_pressed)
 	header.add_child(close_button)
 	# 通道栏；普通商店和灰市互斥切换，共用下方分类与商品区域。

@@ -13,6 +13,8 @@ signal repair_kit_drop_received(repair_kit_resource: Resource, source_location: 
 
 ## 统一物品详情格式化器；用于在战斗装备栏与背包中显示带颜色的基础值和强化值。
 const ITEM_DETAIL_FORMATTER: Script = preload("res://scripts/ui/item_detail_formatter.gd")
+## 全局窗口样式指南；槽位背景与选中、普通边框统一读取当前 UI 风格卡片色板，不接管绿色目标高亮等业务语义色。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 通用物品卡片视图；战斗装备栏与背包武器必须和仓库、锻造、商店使用同一固定尺寸模板。
 const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
 ## 全局存储拖拽协议标识；与 StorageItemControl 一致，用于识别从背包拖入的强化石。
@@ -175,8 +177,9 @@ func refresh_durability() -> void:
 
 func _draw() -> void:
 	# 槽位背景矩形；取值覆盖控件完整尺寸，默认用于绘制稳定底色，修改会影响武器槽视觉边界。
+	# 风格化补充：底色实时读取当前风格标准物品卡片背景，黑蓝与黑白切换后重绘即生效。
 	var background_rect: Rect2 = Rect2(Vector2.ZERO, size)
-	draw_rect(background_rect, Color(0.06, 0.075, 0.09, 0.92), true)
+	draw_rect(background_rect, UI_STYLE_GUIDE.get_item_card_background_color(), true)
 	if is_enhancement_target_highlight:
 		draw_rect(background_rect, Color(0.16, 0.52, 0.24, 0.34), true)
 
@@ -188,7 +191,8 @@ func _draw() -> void:
 		draw_rect(cooldown_rect, Color(1.0, 1.0, 1.0, 0.42), true)
 
 	# 边框颜色；取值根据选中状态决定，默认选中槽更亮，修改会影响当前武器辨识度。
-	var border_color: Color = Color(0.52, 1.0, 0.62, 1.0) if is_enhancement_target_highlight else (Color(0.55, 0.92, 1.0, 1.0) if is_selected else Color(0.22, 0.30, 0.36, 1.0))
+	# 风格化补充：绿色强化目标高亮为业务语义色保持原样，选中与普通边框读取当前风格强调色与卡片边框色。
+	var border_color: Color = Color(0.52, 1.0, 0.62, 1.0) if is_enhancement_target_highlight else (UI_STYLE_GUIDE.get_accent_color() if is_selected else UI_STYLE_GUIDE.get_item_card_border_color())
 	draw_rect(background_rect, border_color, false, 2.0)
 
 
@@ -257,6 +261,10 @@ func _drop_data(_at_position: Vector2, data: Variant) -> void:
 
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_THEME_CHANGED:
+		# 主题切换刷新；槽位背景与边框在绘制阶段实时读取当前风格色板，收到通知后只需请求重绘。
+		queue_redraw()
+		return
 	if what != NOTIFICATION_DRAG_END:
 		return
 

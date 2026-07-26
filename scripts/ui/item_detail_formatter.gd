@@ -4,6 +4,8 @@ class_name ItemDetailFormatter
 ## 物品详情格式化器集中生成仓库、背包、装备栏和结算界面的统一悬停信息。
 ## 武器强化数值使用 RichTextLabel BBCode 着色，同时保留纯文本版本作为系统无富文本环境的兜底。
 
+## 全局窗口样式指南；悬停详情框的背景与边框实时读取当前 UI 风格，保证黑白简约风下不残留深蓝表面。
+const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 装备套装组件脚本；悬停详情调用其纯统计接口，保证激活颜色与实际套装效果使用同一有效件数规则。
 const EQUIPMENT_SET_COMPONENT_SCRIPT: Script = preload("res://scripts/components/equipment_set_component.gd")
 ## 库存限制配置；悬停数量上限必须与背包、仓库和地面掉落保持一致。
@@ -18,8 +20,10 @@ const NEUTRAL_COLOR: String = "#d8e8ee"
 ## 未触发套装颜色；默认中灰色，用于低于两件或四件门槛的套装效果文本。
 const INACTIVE_SET_COLOR: String = "#8a9298"
 ## 悬停信息背景颜色；默认深蓝黑且透明度为 0.68，比系统默认背景更通透。
+## 样式接管补充：悬停背景现由样式指南 get_tooltip_background_color() 按当前风格实时提供，本常量不再被引用，仅为历史兼容保留。
 const TOOLTIP_BACKGROUND_COLOR: Color = Color(0.025, 0.04, 0.055, 0.68)
 ## 悬停信息边框颜色；默认接近纯白，用于在半透明背景外形成清晰轮廓。
+## 样式接管补充：悬停边框现由样式指南 get_tooltip_border_color() 按当前风格实时提供，本常量不再被引用，仅为历史兼容保留。
 const TOOLTIP_BORDER_COLOR: Color = Color(1.0, 1.0, 1.0, 0.92)
 ## 悬停信息边框宽度；默认 2 像素，保证半透明背景在亮色场景中仍有清晰边界。
 const TOOLTIP_BORDER_WIDTH: int = 2
@@ -280,9 +284,10 @@ static func create_tooltip_control(item_resource: Resource, quantity: int = 1, v
 	# 悬停背景框；使用较低透明度和一圈白色边框统一仓库、背包、装备栏与结算详情样式。
 	var tooltip_panel: PanelContainer = PanelContainer.new()
 	# 悬停背景样式；圆角和双像素边框提高半透明背景在不同场景亮度下的可辨识度。
+	# 风格实时读取补充；悬停框每次悬停重新创建，取色时直接调用样式指南即可跟随当前 UI 风格，无需监听切换信号。
 	var tooltip_style: StyleBoxFlat = StyleBoxFlat.new()
-	tooltip_style.bg_color = TOOLTIP_BACKGROUND_COLOR
-	tooltip_style.border_color = TOOLTIP_BORDER_COLOR
+	tooltip_style.bg_color = UI_STYLE_GUIDE.get_tooltip_background_color()
+	tooltip_style.border_color = UI_STYLE_GUIDE.get_tooltip_border_color()
 	tooltip_style.set_border_width_all(TOOLTIP_BORDER_WIDTH)
 	tooltip_style.set_corner_radius_all(TOOLTIP_CORNER_RADIUS)
 	tooltip_panel.add_theme_stylebox_override("panel", tooltip_style)

@@ -176,6 +176,8 @@ var _developer_menu: Control
 var _developer_sequence_index: int = 0
 ## 上一次向大厅报告的面板可见状态；默认 false，宿主模式每帧只在状态实际变化时派发一次信号。
 var _last_reported_modal_visibility: bool = false
+## 设置面板聚焦遮罩；运行时创建并跟随设置面板显示，使设置页与其他局外面板拥有一致的暗化背景。
+var _settings_dim_overlay: ColorRect = null
 
 
 func _ready() -> void:
@@ -184,8 +186,10 @@ func _ready() -> void:
 	UI_STYLE_GUIDE.apply_primary_button(_start_button)
 	UI_STYLE_GUIDE.apply_danger_button(_quit_button)
 	UI_STYLE_GUIDE.apply_title_label(get_node("Center/Title") as Label)
+	UI_STYLE_GUIDE.apply_muted_accent_label(get_node("Center/EnglishTitle") as Label)
 	UI_STYLE_GUIDE.apply_title_label(_settings_title_label)
 	UI_STYLE_GUIDE.apply_screen_background(_background)
+	_build_settings_dim_overlay()
 	UI_STYLE_GUIDE.apply_primary_button(_switch_lobby_menu_button)
 	PROGRESS_SLIDER_VISUAL_SCRIPT.install(_master_volume_slider)
 	_master_bus_index = AudioServer.get_bus_index("Master")
@@ -220,6 +224,27 @@ func _ready() -> void:
 	set_process(lobby_host_mode)
 	if not lobby_host_mode:
 		_start_button.grab_focus()
+
+
+func _build_settings_dim_overlay() -> void:
+	## 在设置面板下方插入全屏聚焦遮罩，避免主菜单中心按钮透过半透明设置窗口产生残影。
+	_settings_dim_overlay = ColorRect.new()
+	_settings_dim_overlay.name = "SettingsDimOverlay"
+	_settings_dim_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	# 遮罩拦截鼠标；设置页打开期间阻止误点背后的主菜单与底部功能入口。
+	_settings_dim_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	_settings_dim_overlay.visible = _settings_panel.visible
+	add_child(_settings_dim_overlay)
+	# 插入到设置面板之前的绘制顺序；遮罩位于设置窗口下方、其余界面上方。
+	move_child(_settings_dim_overlay, _settings_panel.get_index())
+	UI_STYLE_GUIDE.apply_overlay_dim(_settings_dim_overlay)
+	_settings_panel.visibility_changed.connect(_on_settings_panel_visibility_changed)
+
+
+func _on_settings_panel_visibility_changed() -> void:
+	## 设置面板显示状态变化时同步遮罩；任意入口开关设置页都无需单独维护遮罩状态。
+	if _settings_dim_overlay != null:
+		_settings_dim_overlay.visible = _settings_panel.visible
 
 
 func _process(_delta: float) -> void:

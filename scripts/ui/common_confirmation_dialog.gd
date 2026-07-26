@@ -15,8 +15,10 @@ const DIALOG_OUTER_FRAME_SCRIPT: Script = preload("res://scripts/ui/dialog_outer
 ## 默认背景透明度；与物品悬浮信息浮窗一致使用 0.68，突出内容同时保留场景上下文。
 @export_range(0.0, 1.0, 0.01) var background_alpha: float = 0.68
 ## 白色边框宽度；默认 2 像素，与物品悬浮信息浮窗保持一致。
+## 样式接管补充：内容面板边框现由样式指南 create_dialog_panel_style() 统一生成，本参数不再参与面板构建，仅为场景兼容保留。
 @export_range(1, 6, 1) var border_width: int = 2
 ## 圆角半径；默认 6 像素，与物品悬浮信息浮窗保持一致。
+## 样式接管补充：内容面板圆角现由样式指南 create_dialog_panel_style() 统一生成，本参数不再参与面板构建，仅为场景兼容保留。
 @export_range(0, 24, 1) var corner_radius: int = 6
 ## 自适应弹窗最小宽度；默认 280 像素，可稳定容纳两个 96 像素操作按钮，运行时无需动态修改。
 @export_range(240, 480, 1) var adaptive_minimum_width: int = 280
@@ -141,13 +143,9 @@ func _reset_message_layout() -> void:
 
 func _apply_standard_style() -> void:
 	# 弹窗面板样式；颜色、透明度、白边和圆角直接对齐物品悬浮信息浮窗。
-	var panel_style: StyleBoxFlat = StyleBoxFlat.new()
-	panel_style.bg_color = Color(UI_STYLE_GUIDE.get_window_background_color(), background_alpha)
-	panel_style.border_color = Color(1.0, 1.0, 1.0, 0.92)
 	# 全局窗口边框补充；通用确认窗口使用青蓝描边与其他窗口对齐，白边说明保留为历史兼容注释。
-	panel_style.border_color = UI_STYLE_GUIDE.get_window_border_color()
-	panel_style.set_border_width_all(border_width)
-	panel_style.set_corner_radius_all(corner_radius)
+	# 统一样式补充；内容面板改由样式指南 create_dialog_panel_style() 生成 2 像素边框与 8 像素圆角，仅透明度沿用本弹窗导出参数。
+	var panel_style: StyleBoxFlat = UI_STYLE_GUIDE.create_dialog_panel_style(background_alpha)
 	panel_style.content_margin_left = 18.0
 	panel_style.content_margin_top = UI_STYLE_GUIDE.DIALOG_TITLE_HEIGHT + 14.0
 	panel_style.content_margin_right = 18.0
@@ -158,8 +156,8 @@ func _apply_standard_style() -> void:
 	dialog_theme.set_stylebox("panel", "ConfirmationDialog", panel_style)
 	theme = dialog_theme
 	UI_STYLE_GUIDE.apply_primary_button(get_ok_button())
-	get_ok_button().custom_minimum_size = Vector2(96.0, 34.0)
-	get_cancel_button().custom_minimum_size = Vector2(96.0, 34.0)
+	get_ok_button().custom_minimum_size = Vector2(96.0, 36.0)
+	get_cancel_button().custom_minimum_size = Vector2(96.0, 36.0)
 
 
 func _on_ui_style_changed(_style_id: String) -> void:

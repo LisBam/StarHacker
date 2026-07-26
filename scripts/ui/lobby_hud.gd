@@ -230,15 +230,19 @@ func _apply_visual_style() -> void:
 	UI_STYLE_GUIDE.apply_section_panel(_active_skill_panel)
 	UI_STYLE_GUIDE.apply_section_panel(_weapon_panel)
 	UI_STYLE_GUIDE.apply_title_label(_character_name_label, 12)
+	UI_STYLE_GUIDE.apply_title_label(_interaction_label)
+	# 语义进度条变体；保证黑白简约风切换时生命与能量条继续保留原业务颜色而不是变灰。
+	UI_STYLE_GUIDE.apply_semantic_progress_bar(_health_bar)
+	UI_STYLE_GUIDE.apply_semantic_progress_bar(_energy_bar)
 	# 生命填充样式；绿色属于生命业务语义色，不随通用黑白 UI 风格替换。
 	var health_fill_style: StyleBoxFlat = StyleBoxFlat.new()
 	health_fill_style.bg_color = Color(0.16, 0.82, 0.42, 0.96)
-	health_fill_style.set_corner_radius_all(3)
+	health_fill_style.set_corner_radius_all(4)
 	_health_bar.add_theme_stylebox_override("fill", health_fill_style)
 	# 能量填充样式；青蓝色属于能量业务语义色，不随通用黑白 UI 风格替换。
 	var energy_fill_style: StyleBoxFlat = StyleBoxFlat.new()
 	energy_fill_style.bg_color = Color(0.18, 0.62, 0.96, 0.96)
-	energy_fill_style.set_corner_radius_all(3)
+	energy_fill_style.set_corner_radius_all(4)
 	_energy_bar.add_theme_stylebox_override("fill", energy_fill_style)
 
 

@@ -52,6 +52,8 @@ var _core_polygon: Polygon2D = null
 var _aim_line: Line2D = null
 ## 昵称标签；显示成员昵称与角色名，始终保持水平不随化身旋转。
 var _name_label: Label = null
+## 头顶状态提示标签；显示“菜单中”等场景状态短语，空文本时隐藏，由大厅同步器按在场状态维护。
+var _status_note_label: Label = null
 ## 头顶信息条绘制节点；使用自定义绘制显示生命与护盾比例。
 var _status_bar: Node2D = null
 
@@ -141,6 +143,16 @@ func _play_hit_flash() -> void:
 	_hit_flash_tween.tween_property(_body_polygon, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.14)
 
 
+func set_status_note(note_text: String) -> void:
+	## 设置头顶状态提示文本；空字符串隐藏提示。联机大厅用它标注“菜单中”等不在场状态，战斗同步器不使用。
+	if _status_note_label == null:
+		return
+	if _status_note_label.text == note_text:
+		return
+	_status_note_label.text = note_text
+	_status_note_label.visible = not note_text.is_empty()
+
+
 func is_dead() -> bool:
 	## 返回远端玩家是否已死亡；敌人索敌合法性检查通过该接口跳过阵亡队友。
 	return _remote_is_dead
@@ -184,6 +196,17 @@ func _build_visuals(display_name: String, body_color: Color) -> void:
 	_name_label.position = Vector2(-70.0, -74.0)
 	_name_label.custom_minimum_size = Vector2(140.0, 0.0)
 	add_child(_name_label)
+	_status_note_label = Label.new()
+	_status_note_label.name = "StatusNoteLabel"
+	_status_note_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_status_note_label.add_theme_font_size_override("font_size", 12)
+	# 状态提示颜色；使用琥珀色与昵称区分，表达“成员在房间但不在当前场景”的临时状态。
+	_status_note_label.add_theme_color_override("font_color", Color(1.0, 0.80, 0.30, 0.95))
+	# 状态提示定位；位于昵称标签正上方，同宽居中，默认隐藏等待同步器写入文本。
+	_status_note_label.position = Vector2(-70.0, -92.0)
+	_status_note_label.custom_minimum_size = Vector2(140.0, 0.0)
+	_status_note_label.visible = false
+	add_child(_status_note_label)
 	_status_bar = Node2D.new()
 	_status_bar.name = "StatusBar"
 	_status_bar.position = STATUS_BAR_OFFSET

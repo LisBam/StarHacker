@@ -20,6 +20,8 @@ const SECURITIES_TRANSFER_DIALOG_SCRIPT: Script = preload("res://scripts/ui/secu
 const LEVERAGE_POSITION_DIALOG_SCRIPT: Script = preload("res://scripts/ui/leverage_position_dialog.gd")
 ## 记录列表弹窗脚本；交易历史记录与通知中心共用同一滚动文本列表窗口。
 const STOCK_RECORD_LIST_DIALOG_SCRIPT: Script = preload("res://scripts/ui/stock_record_list_dialog.gd")
+## 止盈止损设置弹窗脚本；负责目标类型选择与目标价输入，最终设置由股市服务原子校验。
+const STOCK_STOP_ORDER_DIALOG_SCRIPT: Script = preload("res://scripts/ui/stock_stop_order_dialog.gd")
 ## 全局窗口样式指南；为股市基准界面补充统一按钮、输入、滚动和内部面板主题。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 ## 标准股票卡片尺寸；固定 160×72，与项目物品卡片规范一致。
@@ -76,6 +78,10 @@ var _leverage_buttons: Dictionary = {}
 ## 杠杆开仓弹窗；同一实例复用全部股票的开仓输入，实际建仓由股市服务执行。
 ## 加仓复用补充；选中股票已有杠杆仓位时同一弹窗实例切换为加仓模式，追加保证金由股市服务合并。
 var _leverage_dialog: LeveragePositionDialog
+## 止盈止损按钮；位于标题栏通知按钮左侧，点击后为当前选中股票打开止盈止损设置弹窗。
+var _stop_order_button: Button
+## 止盈止损设置弹窗；同一实例复用全部股票的目标价输入，实际档案写入由股市服务执行。
+var _stop_order_dialog: StockStopOrderDialog
 ## 通知按钮；位于标题栏关闭按钮左侧，点击后打开强平等重要通知的通知中心窗口。
 var _notification_button: Button
 ## 历史记录按钮；位于底部“全部持仓”标题上方，点击后打开交易历史记录窗口。
@@ -164,6 +170,12 @@ func _build_interface() -> void:
 	_event_banner.add_theme_color_override("font_color", Color(1.0, 0.80, 0.30, 1.0))
 	_event_banner.visible = false
 	title_row.add_child(_event_banner)
+	# 标题栏止盈止损按钮；位于通知按钮左侧，为当前选中股票设置自动卖出与自动平仓目标价，不占用交易区布局行。
+	_stop_order_button = Button.new()
+	_stop_order_button.text = "止盈止损"
+	_stop_order_button.custom_minimum_size = Vector2(90.0, 36.0)
+	_stop_order_button.pressed.connect(_on_stop_order_button_pressed)
+	title_row.add_child(_stop_order_button)
 	# 标题栏通知按钮；位于关闭按钮左侧，打开通知中心查看强平等重要通知记录。
 	_notification_button = Button.new()
 	_notification_button.text = "通知"
@@ -357,6 +369,11 @@ func _build_interface() -> void:
 	_record_list_dialog.confirmed.connect(_on_record_dialog_closed)
 	_record_list_dialog.canceled.connect(_on_record_dialog_closed)
 	add_child(_record_list_dialog)
+	_stop_order_dialog = STOCK_STOP_ORDER_DIALOG_SCRIPT.new() as StockStopOrderDialog
+	_stop_order_dialog.connect("stop_order_confirmed", Callable(self, "_on_stop_order_confirmed"))
+	_stop_order_dialog.connect("stop_order_clear_requested", Callable(self, "_on_stop_order_clear_requested"))
+	_stop_order_dialog.canceled.connect(_on_trade_canceled)
+	add_child(_stop_order_dialog)
 
 
 func _connect_services() -> void:
@@ -383,6 +400,12 @@ func _connect_services() -> void:
 		if _stock_market_service.has_signal("notification_records_changed"):
 			# 通知记录变化信号；通知中心窗口打开期间实时追加最新通知。
 			_stock_market_service.connect("notification_records_changed", Callable(self, "_on_notification_records_changed"))
+		if _stock_market_service.has_signal("stop_orders_changed"):
+			# 止盈止损档案变化信号；设置、清除与触发消耗后与其他资产信号共享同帧一次统一刷新。
+			_stock_market_service.connect("stop_orders_changed", Callable(self, "_queue_refresh_all"))
+		if _stock_market_service.has_signal("stop_order_triggered"):
+			# 止盈止损触发信号；自动卖出与自动平仓的结算说明统一在顶部横幅展示。
+			_stock_market_service.connect("stop_order_triggered", Callable(self, "_on_stop_order_triggered"))
 	if _global_inventory != null:
 		if _global_inventory.has_signal("coins_changed"):
 			_global_inventory.connect("coins_changed", Callable(self, "_queue_refresh_all"))
@@ -630,6 +653,38 @@ func _refresh_selected_stock() -> void:
 			_leverage_open_button.disabled = leverage_add_maximum_margin < leverage_minimum_margin or leverage_minimum_margin <= 0
 	if _leverage_close_button != null:
 		_leverage_close_button.disabled = leverage_position.is_empty()
+	if _stop_order_button != null:
+		# 止盈止损入口可用性；当前股票既无现货持仓也无杠杆仓位时禁用，悬停提示展示已生效的目标价。
+		_stop_order_button.disabled = quantity <= 0 and leverage_position.is_empty()
+		_stop_order_button.tooltip_text = _build_stop_order_tooltip(quantity, leverage_position)
+
+
+func _build_stop_order_tooltip(spot_quantity: int, leverage_position: Dictionary) -> String:
+	## 构建止盈止损按钮的悬停摘要；逐行列出当前选中股票现货与杠杆档案的目标价，未设置时明确标注。
+	if _stock_market_service == null or not _stock_market_service.has_method("get_stop_order"):
+		return "为当前股票设置止盈止损"
+	# 现货档案；空字典表示未设置。
+	var spot_order: Dictionary = _stock_market_service.call("get_stop_order", _selected_stock_id, "spot") as Dictionary
+	# 杠杆档案；空字典表示未设置。
+	var leverage_order: Dictionary = _stock_market_service.call("get_stop_order", _selected_stock_id, "leverage") as Dictionary
+	# 摘要行列表；只展示当前实际存在的持仓目标。
+	var lines: Array[String] = ["当前股票止盈止损"]
+	if spot_quantity > 0:
+		lines.append("现货：%s" % _format_stop_order_line(spot_order))
+	if not leverage_position.is_empty():
+		lines.append("杠杆：%s" % _format_stop_order_line(leverage_order))
+	return "\n".join(lines)
+
+
+func _format_stop_order_line(order: Dictionary) -> String:
+	## 把一条止盈止损档案格式化为单行文本；未启用方向显示为“—”，整条未设置时返回“未设置”。
+	if order.is_empty():
+		return "未设置"
+	# 止盈目标价；0 表示该方向未启用。
+	var take_profit: float = float(order.get("take_profit", 0.0))
+	# 止损目标价；0 表示该方向未启用。
+	var stop_loss: float = float(order.get("stop_loss", 0.0))
+	return "止盈 %s / 止损 %s" % ["%.2f" % take_profit if take_profit > 0.0 else "—", "%.2f" % stop_loss if stop_loss > 0.0 else "—"]
 
 
 func _refresh_holdings() -> void:
@@ -835,6 +890,58 @@ func _on_leverage_position_closed(_stock_id: String, message: String) -> void:
 	_show_event_banner(message)
 
 
+func _on_stop_order_button_pressed() -> void:
+	## 打开止盈止损设置弹窗；缓存当前选中股票为设置目标，弹窗内的实时价格与持仓状态随每秒行情持续刷新。
+	if _stock_market_service == null or not _stock_market_service.has_method("get_stop_order"):
+		return
+	# 待设置股票静态定义；弹窗只使用稳定显示名称。
+	var definition: Dictionary = _stock_definitions_cache.get(_selected_stock_id, {}) as Dictionary
+	# 当前现货持股数量；与杠杆仓位共同决定弹窗内可选目标。
+	var holding_quantity: int = int(_get_holding(_selected_stock_id).get("quantity", 0))
+	# 当前杠杆仓位快照；空字典表示没有仓位。
+	var leverage_position: Dictionary = _stock_market_service.call("get_leverage_position", _selected_stock_id) as Dictionary
+	if holding_quantity <= 0 and leverage_position.is_empty():
+		_show_event_banner("当前股票没有现货持仓或杠杆仓位，无法设置止盈止损")
+		return
+	_pending_trade_type = "stop_order"
+	_pending_stock_id = _selected_stock_id
+	_pending_unit_price = float(_stock_market_service.call("get_current_price", _pending_stock_id))
+	_stop_order_dialog.present_stop_order(str(definition.get("name", "股票")), _pending_unit_price, holding_quantity, leverage_position, _stock_market_service.call("get_stop_order", _pending_stock_id, "spot") as Dictionary, _stock_market_service.call("get_stop_order", _pending_stock_id, "leverage") as Dictionary)
+
+
+func _on_stop_order_confirmed(kind: String, take_profit_price: float, stop_loss_price: float) -> void:
+	## 保存止盈止损设置；服务按确认瞬间的实时价格与持仓重新校验方向，失败时不修改任何档案。
+	if _stock_market_service == null or _pending_stock_id.is_empty():
+		return
+	# 设置结果；统一读取服务返回消息，在顶部短暂提示成功或失败原因。
+	var set_result: Dictionary = _stock_market_service.call("set_stop_order", _pending_stock_id, kind, take_profit_price, stop_loss_price) as Dictionary
+	_show_event_banner(str(set_result.get("message", "止盈止损已处理")))
+	_pending_trade_type = ""
+	_pending_stock_id = ""
+	_pending_quantity = 0
+	_pending_unit_price = 0.0
+	_refresh_all()
+
+
+func _on_stop_order_clear_requested(kind: String) -> void:
+	## 清除止盈止损设置；弹窗已自行关闭，这里执行真实清除并提示结果。
+	if _stock_market_service == null or _pending_stock_id.is_empty():
+		return
+	# 清除结果；档案不存在时同样提示成功，保证操作幂等。
+	var clear_result: Dictionary = _stock_market_service.call("clear_stop_order", _pending_stock_id, kind) as Dictionary
+	_show_event_banner(str(clear_result.get("message", "止盈止损已处理")))
+	_pending_trade_type = ""
+	_pending_stock_id = ""
+	_pending_quantity = 0
+	_pending_unit_price = 0.0
+	_refresh_all()
+
+
+func _on_stop_order_triggered(_stock_id: String, message: String) -> void:
+	## 止盈止损触发回调；自动卖出与自动平仓的结算说明统一在顶部横幅展示，档案信号会负责刷新界面。
+	_show_event_banner(message)
+
+
 func _build_leverage_close_message(quote: Dictionary) -> String:
 	## 构建杠杆平仓实时摘要；返回值可在每秒行情刷新时直接替换确认窗口正文。
 	# 平仓股票静态定义；正文使用稳定显示名称。
@@ -967,6 +1074,11 @@ func _refresh_pending_trade_dialog() -> void:
 		# 杠杆开仓弹窗实时刷新；同步实时价格与可用余额，保证金上限与强平价预览随之更新，加仓模式共用同一刷新入口。
 		if _leverage_dialog != null and _leverage_dialog.visible:
 			_leverage_dialog.update_market(_pending_unit_price, available_coins)
+		return
+	if _pending_trade_type == "stop_order":
+		# 止盈止损弹窗实时刷新；同步实时价格与持仓状态，方向校验与目标可用性随行情变化持续复核。
+		if _stop_order_dialog != null and _stop_order_dialog.visible:
+			_stop_order_dialog.update_market(_pending_unit_price, int(_get_holding(_pending_stock_id).get("quantity", 0)), _stock_market_service.call("get_leverage_position", _pending_stock_id) as Dictionary)
 		return
 	if _pending_trade_type == "leverage_close":
 		# 杠杆平仓确认实时刷新；净值、手续费与返还金额按实时行情覆盖正文。
@@ -1102,7 +1214,7 @@ func _on_close_pressed() -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not is_visible_in_tree() or not (event is InputEventKey):
 		return
-	if (_quantity_dialog != null and _quantity_dialog.visible) or (_confirmation_dialog != null and _confirmation_dialog.visible) or (_securities_transfer_dialog != null and _securities_transfer_dialog.visible) or (_leverage_dialog != null and _leverage_dialog.visible) or (_record_list_dialog != null and _record_list_dialog.visible):
+	if (_quantity_dialog != null and _quantity_dialog.visible) or (_confirmation_dialog != null and _confirmation_dialog.visible) or (_securities_transfer_dialog != null and _securities_transfer_dialog.visible) or (_leverage_dialog != null and _leverage_dialog.visible) or (_record_list_dialog != null and _record_list_dialog.visible) or (_stop_order_dialog != null and _stop_order_dialog.visible):
 		return
 	# 键盘事件；只处理首次按下的 ESC，长按重复不会连续发送关闭信号。
 	var key_event: InputEventKey = event as InputEventKey

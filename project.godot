@@ -35,6 +35,7 @@ DispatchService="*res://scripts/game/dispatch_service.gd"
 SceneTransition="*res://scripts/game/scene_transition.gd"
 NetworkSession="*res://scripts/game/network_session.gd"
 BannerNotificationService="*res://scripts/game/banner_notification_service.gd"
+NetworkRoomStatusOverlay="*res://scripts/game/network_room_status_overlay.gd"
 
 [display]
 

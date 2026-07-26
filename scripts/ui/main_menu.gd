@@ -371,6 +371,12 @@ func _on_quit_button_pressed() -> void:
 
 
 func _on_switch_lobby_menu_button_pressed() -> void:
+	## 左上角切换按钮；默认进入主大厅，身处联机房间（主机或已加入）时改为进入联机大厅，与房间成员保持在场互见。
+	# 联机会话服务；缺失或未入房时保持单机主大厅路径。
+	var network_session: Node = get_tree().root.get_node_or_null("NetworkSession")
+	if network_session != null and network_session.has_method("is_session_active") and bool(network_session.call("is_session_active")):
+		_change_scene_with_transition(multiplayer_lobby_scene_path)
+		return
 	_change_scene_with_transition(lobby_scene_path)
 
 
@@ -928,11 +934,8 @@ func _build_dispatch_overlay() -> void:
 
 
 func _on_multiplayer_button_pressed() -> void:
-	if not lobby_host_mode:
-		# 完整主菜单入口；点击“联机”先进入联机大厅，联机面板由大厅进场流程自动打开。
-		_settings_panel.visible = false
-		_change_scene_with_transition(multiplayer_lobby_scene_path)
-		return
+	## 打开联机面板；完整主菜单与大厅宿主共用同一遮罩入口，不再强制切换到联机大厅场景。
+	## 场景自由补充；入房后玩家可停留在主菜单，左上角“切换大厅/菜单”按钮负责在联机大厅与菜单之间往返。
 	if _multiplayer_overlay == null:
 		return
 	_settings_panel.visible = false

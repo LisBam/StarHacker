@@ -336,7 +336,7 @@ func _rebuild_mission_cards() -> void:
 
 
 func _create_mission_card(definition: Dictionary, dispatch_occupied: bool) -> Control:
-	# 委托卡片；固定 302×190 并以独立 PanelContainer 承载，三张卡片单行排列。
+	# 委托卡片；固定 302×190 并以独立 PanelContainer 承载，每行最多三张，超出后由流式容器自动换行并配合滚动容器展示。
 	var mission_id: String = str(definition.get("id", ""))
 	# 卡片可用状态；被占用或没有可派遣角色时使用暗色语义。
 	var card_active: bool = not dispatch_occupied and not _selected_character_id.is_empty()

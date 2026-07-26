@@ -20,6 +20,10 @@ signal leverage_position_liquidated(stock_id: String, message: String)
 signal trade_records_changed
 ## 通知记录变化信号；强平等重要通知写入后通知面板通知中心刷新。
 signal notification_records_changed
+## 止盈止损档案变化信号；设置、清除、触发消耗与持仓关闭清理后通知股市界面刷新入口状态。
+signal stop_orders_changed
+## 止盈止损触发信号；自动卖出或自动平仓完成后携带股票标识与结算说明，供面板提示与横幅通知服务低耦合联动。
+signal stop_order_triggered(stock_id: String, message: String)
 
 ## 股市全局状态存档路径；与商店状态同级独立保存，避免行情字段污染库存物品序列化结构。
 const SAVE_PATH: String = "user://stock_market_state.json"
@@ -30,7 +34,8 @@ const SAVE_PATH: String = "user://stock_market_state.json"
 ## 版本 5 补充；新增杠杆合约仓位表，旧存档默认没有任何杠杆仓位。
 ## 版本 6 补充；新增交易历史记录与通知记录列表，旧存档默认从空记录开始。
 ## 版本 7 补充；新增“星海互助保险”稳定股票，旧存档缺失该股票时自动按初始价初始化行情。
-const SAVE_VERSION: int = 7
+## 版本 8 补充；新增现货与杠杆的止盈止损档案表，旧存档默认没有任何止盈止损设置。
+const SAVE_VERSION: int = 8
 ## 交易历史记录保留上限；默认 80 条，索引 0 为最新，超出后丢弃最旧记录，防止存档无限膨胀。
 const TRADE_RECORD_LIMIT: int = 80
 ## 通知记录保留上限；默认 50 条，索引 0 为最新，超出后丢弃最旧记录。
@@ -50,6 +55,10 @@ const REFRESH_DISPLAY: String = "display"
 ## 股票稳定顺序；UI、存档迁移、行为统计和事件目标统一使用该顺序。
 ## 保险股补充；第六只股票“星海互助保险”与骇入保险系统联动，行为影响由保险服务累计后在正式结算取走。
 const STOCK_IDS: Array[String] = ["quantum_arms", "astral_defense", "hacker_tech", "frontline_supply", "relic_exploration", "astral_insurance"]
+## 止盈止损目标类型：现货持仓；触发时按当时全部持股数量以实时价格自动卖出。
+const STOP_ORDER_KIND_SPOT: String = "spot"
+## 止盈止损目标类型：杠杆仓位；触发时按当时实时价格执行全仓平仓，费用与主动平仓完全一致。
+const STOP_ORDER_KIND_LEVERAGE: String = "leverage"
 ## 杠杆做多方向标识；价格上涨时杠杆仓位盈利，下跌时亏损。
 const LEVERAGE_LONG: int = 1
 ## 杠杆做空方向标识；价格下跌时杠杆仓位盈利，上涨时亏损。
@@ -172,6 +181,8 @@ var _market_panel_open: bool = false
 var _securities_balance: float = 0.0
 ## 杠杆仓位表；键为股票标识，值包含方向、倍数、保证金和开仓价，每只股票最多同时持有一个杠杆仓位。
 var _leverage_positions: Dictionary = {}
+## 止盈止损档案表；键为股票标识，值为按目标类型（spot / leverage）分组的目标价字典，触发消耗或持仓清零后自动移除。
+var _stop_orders: Dictionary = {}
 ## 交易历史记录列表；每项包含时间、类型标识与说明文本，索引 0 为最新记录，随股市状态持久化。
 var _trade_records: Array = []
 ## 通知记录列表；保存强平等重要事件的时间与说明文本，索引 0 为最新记录，随股市状态持久化。
@@ -583,9 +594,171 @@ func clear_leverage_positions() -> int:
 	if cleared_count <= 0:
 		return 0
 	_leverage_positions.clear()
+	# 杠杆止盈止损档案清理；仓位被整体清空后对应档案全部失效，是否有档案被移除决定是否补发档案变化信号。
+	var stop_orders_removed: bool = false
+	for stock_id in _stop_orders.keys().duplicate():
+		stop_orders_removed = _discard_stop_order(str(stock_id), STOP_ORDER_KIND_LEVERAGE) or stop_orders_removed
 	_save_state()
 	leverage_positions_changed.emit()
+	if stop_orders_removed:
+		stop_orders_changed.emit()
 	return cleared_count
+
+
+func get_stop_order(stock_id: String, kind: String) -> Dictionary:
+	## 返回指定股票指定目标类型的止盈止损档案副本；未设置时返回空字典，价格字段为 0 表示该方向未启用。
+	# 股票档案分组；同一股票的现货与杠杆档案互相独立存放。
+	var orders: Dictionary = _stop_orders.get(stock_id, {}) as Dictionary
+	# 目标类型档案；仅字典结构视为有效档案。
+	var order: Variant = orders.get(kind)
+	return (order as Dictionary).duplicate(true) if order is Dictionary else {}
+
+
+func set_stop_order(stock_id: String, kind: String, take_profit_price: float, stop_loss_price: float) -> Dictionary:
+	## 设置指定股票的止盈止损目标价；价格为 0 表示该方向不启用，两个方向至少启用一项，成功后立即持久化。
+	## 方向约定；止盈价必须位于当前价的盈利方向、止损价必须位于亏损方向，现货与做多以涨为盈利、做空以跌为盈利。
+	if not stock_id in STOCK_IDS or not kind in [STOP_ORDER_KIND_SPOT, STOP_ORDER_KIND_LEVERAGE]:
+		return {"success": false, "message": "止盈止损参数无效"}
+	# 标准化目标价；统一保留两位小数，负数一律视为非法输入。
+	var take_profit: float = snappedf(take_profit_price, 0.01)
+	var stop_loss: float = snappedf(stop_loss_price, 0.01)
+	if take_profit < 0.0 or stop_loss < 0.0:
+		return {"success": false, "message": "目标价格不能为负数"}
+	if take_profit <= 0.0 and stop_loss <= 0.0:
+		return {"success": false, "message": "止盈价与止损价至少设置一项"}
+	if kind == STOP_ORDER_KIND_SPOT:
+		# 当前现货持股数量；没有持仓时不允许设置现货档案，避免留下永不清理的空目标。
+		var holding_quantity: int = 0
+		if _global_inventory != null and _global_inventory.has_method("get_stock_holding"):
+			holding_quantity = int((_global_inventory.call("get_stock_holding", stock_id) as Dictionary).get("quantity", 0))
+		if holding_quantity <= 0:
+			return {"success": false, "message": "当前没有现货持仓，无法设置"}
+	elif not _leverage_positions.has(stock_id):
+		return {"success": false, "message": "当前没有杠杆仓位，无法设置"}
+	# 盈利方向系数；现货与做多仓位为 +1（涨盈利），做空仓位为 -1（跌盈利）。
+	var profit_direction: float = 1.0
+	if kind == STOP_ORDER_KIND_LEVERAGE and int((_leverage_positions.get(stock_id) as Dictionary).get("direction", LEVERAGE_LONG)) < 0:
+		profit_direction = -1.0
+	# 当前实时价格；方向合法性以设置瞬间的实时行情为基准，触发判定使用后续每次刷新的实时价。
+	var price: float = get_current_price(stock_id)
+	if take_profit > 0.0 and (take_profit - price) * profit_direction <= 0.0:
+		return {"success": false, "message": "止盈价必须位于当前价（%.2f）的盈利方向" % price}
+	if stop_loss > 0.0 and (stop_loss - price) * profit_direction >= 0.0:
+		return {"success": false, "message": "止损价必须位于当前价（%.2f）的亏损方向" % price}
+	# 股票档案分组；写入或覆盖对应目标类型的档案后立即保存。
+	var orders: Dictionary = _stop_orders.get(stock_id, {}) as Dictionary
+	orders[kind] = {"take_profit": take_profit, "stop_loss": stop_loss}
+	_stop_orders[stock_id] = orders
+	_save_state()
+	stop_orders_changed.emit()
+	return {"success": true, "message": "止盈止损设置已保存"}
+
+
+func clear_stop_order(stock_id: String, kind: String) -> Dictionary:
+	## 清除指定股票指定目标类型的止盈止损档案；档案不存在时同样返回成功，保证界面清除操作幂等。
+	if not stock_id in STOCK_IDS or not kind in [STOP_ORDER_KIND_SPOT, STOP_ORDER_KIND_LEVERAGE]:
+		return {"success": false, "message": "止盈止损参数无效"}
+	if not _discard_stop_order(stock_id, kind):
+		return {"success": true, "message": "当前没有可清除的止盈止损设置"}
+	_save_state()
+	stop_orders_changed.emit()
+	return {"success": true, "message": "止盈止损设置已清除"}
+
+
+func _discard_stop_order(stock_id: String, kind: String) -> bool:
+	## 静默移除一条止盈止损档案并返回是否发生移除；触发消耗、清仓清理与界面清除共用，调用方负责保存与信号。
+	# 股票档案分组；不存在对应目标类型时无需任何修改。
+	var orders: Dictionary = _stop_orders.get(stock_id, {}) as Dictionary
+	if not orders.has(kind):
+		return false
+	orders.erase(kind)
+	if orders.is_empty():
+		_stop_orders.erase(stock_id)
+	else:
+		_stop_orders[stock_id] = orders
+	return true
+
+
+func _check_stop_orders() -> void:
+	## 检查全部止盈止损档案；任意来源的行情刷新改价后调用，实时价到达目标价时自动市价卖出或全仓平仓。
+	## 触发优先级；同一次刷新中强制平仓先于止盈止损执行，仓位被强平后对应杠杆档案由平仓结算路径统一清理。
+	if _stop_orders.is_empty():
+		return
+	# 档案是否发生消耗或兜底清理；任一变化在循环结束后统一保存并广播一次档案变化信号。
+	var orders_changed: bool = false
+	for stock_id_key in _stop_orders.keys().duplicate():
+		# 当前遍历股票标识；档案键在遍历中可能被移除，统一使用副本迭代。
+		var stock_id: String = str(stock_id_key)
+		# 当前股票档案分组；现货与杠杆档案在同一次刷新中独立判定。
+		var orders: Dictionary = _stop_orders.get(stock_id, {}) as Dictionary
+		# 当前实时价格；现货与杠杆触发共用同一份两位小数报价。
+		var price: float = get_current_price(stock_id)
+		if orders.has(STOP_ORDER_KIND_SPOT):
+			# 现货档案；持仓已被手动清空时静默移除，否则按目标价判定触发方向。
+			var spot_order: Dictionary = orders.get(STOP_ORDER_KIND_SPOT) as Dictionary
+			# 当前现货持股数量；库存服务缺失时按 0 处理并走档案清理分支。
+			var holding_quantity: int = 0
+			if _global_inventory != null and _global_inventory.has_method("get_stock_holding"):
+				holding_quantity = int((_global_inventory.call("get_stock_holding", stock_id) as Dictionary).get("quantity", 0))
+			if holding_quantity <= 0:
+				orders_changed = _discard_stop_order(stock_id, STOP_ORDER_KIND_SPOT) or orders_changed
+			else:
+				# 现货触发动作；止盈在价格达到目标上方触发，止损在价格跌破目标时触发，两者互斥。
+				var spot_action: String = _resolve_stop_order_action(spot_order, price, 1.0)
+				if not spot_action.is_empty():
+					_discard_stop_order(stock_id, STOP_ORDER_KIND_SPOT)
+					orders_changed = true
+					_execute_spot_stop_order(stock_id, spot_action, holding_quantity)
+		if orders.has(STOP_ORDER_KIND_LEVERAGE):
+			# 杠杆档案；仓位已不存在时静默移除（正常关闭路径已清理，此处为读档异常等情况兜底）。
+			var leverage_order: Dictionary = orders.get(STOP_ORDER_KIND_LEVERAGE) as Dictionary
+			if not _leverage_positions.has(stock_id):
+				orders_changed = _discard_stop_order(stock_id, STOP_ORDER_KIND_LEVERAGE) or orders_changed
+			else:
+				# 当前仓位盈利方向；做多以涨为盈利、做空以跌为盈利，触发比较随方向翻转。
+				var position_direction: float = -1.0 if int((_leverage_positions.get(stock_id) as Dictionary).get("direction", LEVERAGE_LONG)) < 0 else 1.0
+				# 杠杆触发动作；空字符串表示本次刷新未到达任何目标价。
+				var leverage_action: String = _resolve_stop_order_action(leverage_order, price, position_direction)
+				if not leverage_action.is_empty():
+					_discard_stop_order(stock_id, STOP_ORDER_KIND_LEVERAGE)
+					orders_changed = true
+					# 平仓结算结果；与主动平仓共用同一结算路径，通知记录由结算路径按前缀写入。
+					var settlement: Dictionary = _close_leverage_position(stock_id, "%s平仓" % leverage_action, false, "止盈止损通知：")
+					stop_order_triggered.emit(stock_id, str(settlement.get("message", "止盈止损平仓完成")))
+	if orders_changed:
+		_save_state()
+		stop_orders_changed.emit()
+
+
+func _resolve_stop_order_action(order: Dictionary, price: float, profit_direction: float) -> String:
+	## 判定一条档案在当前价格下触发的动作；返回“止盈”“止损”或空字符串，判定容差与其他证券币比较保持一致。
+	# 止盈目标价；0 表示该方向未启用。
+	var take_profit: float = float(order.get("take_profit", 0.0))
+	# 止损目标价；0 表示该方向未启用。
+	var stop_loss: float = float(order.get("stop_loss", 0.0))
+	if take_profit > 0.0 and (price - take_profit) * profit_direction >= -0.0001:
+		return "止盈"
+	if stop_loss > 0.0 and (price - stop_loss) * profit_direction <= 0.0001:
+		return "止损"
+	return ""
+
+
+func _execute_spot_stop_order(stock_id: String, action_label: String, quantity: int) -> void:
+	## 执行现货止盈止损自动卖出；复用统一卖出路径保证成交价、手续费、交易记录与均价结算与手动卖出完全一致。
+	# 市价卖出结果；卖出内部已完成持仓与余额的原子校验和持久化。
+	var sell_result: Dictionary = request_sell(stock_id, quantity)
+	# 结算股票定义；提示消息使用玩家可读的股票名称。
+	var definition: Dictionary = STOCK_DEFINITIONS.get(stock_id, {}) as Dictionary
+	if not bool(sell_result.get("success", false)):
+		# 卖出失败兜底；持仓服务异常时只写入通知说明，档案已被消耗不会反复触发。
+		_append_notification_record("止盈止损通知：%s%s触发，但自动卖出未能执行" % [str(definition.get("name", "股票")), action_label])
+		_save_state()
+		return
+	# 触发说明文本；随通知记录持久化，并经触发信号交给面板提示与横幅通知服务展示。
+	var message: String = "%s%s卖出 %d 股，单价 %.2f，到手 %.2f 证券币" % [str(definition.get("name", "股票")), action_label, quantity, float(sell_result.get("price", 0.0)), float(sell_result.get("total", 0.0))]
+	_append_notification_record("止盈止损通知：%s" % message)
+	_save_state()
+	stop_order_triggered.emit(stock_id, message)
 
 
 func get_trade_records() -> Array:
@@ -831,11 +1004,17 @@ func request_sell(stock_id: String, quantity: int, quoted_price: int = -1) -> Di
 		var sell_record_definition: Dictionary = STOCK_DEFINITIONS.get(stock_id, {}) as Dictionary
 		# 卖出交易记录；与本次持仓和余额保存同一路径落盘。
 		_append_trade_record("sell", "卖出 %s %d 股，单价 %.2f，到手 %.2f 证券币，盈亏 %+.2f" % [str(sell_record_definition.get("name", "股票")), quantity, price, proceeds, realized_profit])
+		# 现货止盈止损档案清理；持股清零后同股票的现货档案随之失效，手动清仓与自动触发卖出共用该清理。
+		var spot_stop_order_removed: bool = false
+		if _global_inventory.has_method("get_stock_holding") and int((_global_inventory.call("get_stock_holding", stock_id) as Dictionary).get("quantity", 0)) <= 0:
+			spot_stop_order_removed = _discard_stop_order(stock_id, STOP_ORDER_KIND_SPOT)
 		# 持仓立即保存；与下方证券币状态同一次成功路径落盘，缩短跨文件交易状态的不一致窗口。
 		if _global_inventory.has_method("flush_stock_holdings_save"):
 			_global_inventory.call("flush_stock_holdings_save")
 		_save_state()
 		securities_balance_changed.emit(_securities_balance)
+		if spot_stop_order_removed:
+			stop_orders_changed.emit()
 	# 卖出成功提示；附带按含费加权成本计算的本次已实现盈亏，帮助玩家直接确认这笔交易的赚亏。
 	var success_message: String = "卖出成功，盈亏 %+.2f 证券币" % realized_profit if average_cost > 0.0 else "卖出成功"
 	return {"success": success, "message": success_message if success else "持仓数量不足", "quantity": quantity, "price": price, "fee": fee, "total": proceeds, "realized_profit": realized_profit}
@@ -857,6 +1036,8 @@ func refresh_market(refresh_source: String = REFRESH_SETTLEMENT) -> void:
 		_refresh_stock(stock_id, refresh_source, float(behavior_impacts.get(stock_id, 0.0)))
 	# 杠杆强平检查；任意刷新来源改价后立即判定，强制平仓在结算路径内自行保存并广播信号。
 	_check_leverage_liquidations()
+	# 止盈止损检查；在强平判定之后执行，价格到达玩家目标价时自动卖出现货或平掉杠杆仓位。
+	_check_stop_orders()
 	if not is_display_refresh:
 		_consume_event_duration(refresh_source)
 	if is_settlement:
@@ -1362,9 +1543,10 @@ func _calculate_leverage_liquidation_price(position: Dictionary) -> float:
 	return maxf(snappedf(entry_price * (1.0 - direction * trigger_change_ratio), 0.01), 0.0)
 
 
-func _close_leverage_position(stock_id: String, action_label: String, is_forced: bool = false) -> Dictionary:
-	## 统一执行杠杆仓位结算；主动平仓与强制平仓共用，按实时价格计算净值、扣除平仓手续费、返还证券币并立即持久化。
+func _close_leverage_position(stock_id: String, action_label: String, is_forced: bool = false, notification_prefix: String = "") -> Dictionary:
+	## 统一执行杠杆仓位结算；主动平仓、止盈止损平仓与强制平仓共用，按实时价格计算净值、扣除平仓手续费、返还证券币并立即持久化。
 	## 强平通知补充；is_forced 为 true 时额外写入通知记录并广播强平专用信号，供通知中心与横幅通知服务联动。
+	## 止盈止损通知补充；notification_prefix 非空时按该前缀写入一条通知记录，触发信号由止盈止损检查路径负责广播。
 	# 待结算仓位；调用方必须先确认仓位存在。
 	var position: Dictionary = _leverage_positions.get(stock_id, {}) as Dictionary
 	# 结算实时价格；与玩家界面展示同源的两位小数报价。
@@ -1388,9 +1570,16 @@ func _close_leverage_position(stock_id: String, action_label: String, is_forced:
 	if is_forced:
 		# 强平通知记录；写入面板通知中心，随下方保存同一路径落盘。
 		_append_notification_record("强平通知：%s" % message)
+	elif not notification_prefix.is_empty():
+		# 止盈止损等自动结算通知记录；按调用方前缀写入面板通知中心，随下方保存同一路径落盘。
+		_append_notification_record("%s%s" % [notification_prefix, message])
+	# 杠杆止盈止损档案清理；仓位关闭后同股票的杠杆档案随之失效，主动、自动与强制平仓共用该清理。
+	var stop_order_removed: bool = _discard_stop_order(stock_id, STOP_ORDER_KIND_LEVERAGE)
 	_save_state()
 	securities_balance_changed.emit(_securities_balance)
 	leverage_positions_changed.emit()
+	if stop_order_removed:
+		stop_orders_changed.emit()
 	leverage_position_closed.emit(stock_id, message)
 	if is_forced:
 		# 强平专用信号；横幅通知服务据此在任何场景顶端提醒玩家。
@@ -1441,6 +1630,7 @@ func _save_state() -> void:
 		"runtime_accumulated_seconds": _runtime_accumulated_seconds,
 		"securities_balance": _normalize_securities_amount(_securities_balance),
 		"leverage_positions": _leverage_positions,
+		"stop_orders": _stop_orders,
 		"trade_records": _trade_records,
 		"notification_records": _notification_records,
 		"stock_states": _stock_states,
@@ -1495,6 +1685,31 @@ func _load_state() -> bool:
 				"entry_price": restored_entry_price,
 				"opened_settlement_count": maxi(int(position_data.get("opened_settlement_count", 0)), 0),
 			}
+	# 原始止盈止损档案表；版本 7 及更旧存档没有该字段，默认按无档案处理，价格字段异常的档案直接丢弃。
+	var raw_stop_orders: Variant = save_data.get("stop_orders", {})
+	_stop_orders.clear()
+	if raw_stop_orders is Dictionary:
+		for stop_stock_id in STOCK_IDS:
+			# 单股原始档案分组；仅字典结构参与恢复。
+			var raw_orders: Variant = (raw_stop_orders as Dictionary).get(stop_stock_id)
+			if not (raw_orders is Dictionary):
+				continue
+			# 恢复后的档案分组；逐目标类型校验，至少一个正数目标价才恢复该条档案。
+			var restored_orders: Dictionary = {}
+			for stop_kind in [STOP_ORDER_KIND_SPOT, STOP_ORDER_KIND_LEVERAGE]:
+				# 单条原始档案；缺失或结构异常时跳过。
+				var raw_order: Variant = (raw_orders as Dictionary).get(stop_kind)
+				if not (raw_order is Dictionary):
+					continue
+				# 恢复的止盈目标价；负数按未启用处理。
+				var restored_take_profit: float = maxf(snappedf(float((raw_order as Dictionary).get("take_profit", 0.0)), 0.01), 0.0)
+				# 恢复的止损目标价；负数按未启用处理。
+				var restored_stop_loss: float = maxf(snappedf(float((raw_order as Dictionary).get("stop_loss", 0.0)), 0.01), 0.0)
+				if restored_take_profit <= 0.0 and restored_stop_loss <= 0.0:
+					continue
+				restored_orders[stop_kind] = {"take_profit": restored_take_profit, "stop_loss": restored_stop_loss}
+			if not restored_orders.is_empty():
+				_stop_orders[stop_stock_id] = restored_orders
 	# 原始交易记录列表；版本 5 及更旧存档没有该字段，默认按空记录处理，超限部分直接丢弃最旧记录。
 	var raw_trade_records: Variant = save_data.get("trade_records", [])
 	_trade_records = (raw_trade_records as Array).duplicate(true) if raw_trade_records is Array else []

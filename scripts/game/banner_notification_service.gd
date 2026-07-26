@@ -89,6 +89,9 @@ func _connect_business_signals() -> void:
 	var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")
 	if stock_market_service != null and stock_market_service.has_signal("leverage_position_liquidated"):
 		stock_market_service.connect("leverage_position_liquidated", Callable(self, "_on_leverage_position_liquidated"))
+	if stock_market_service != null and stock_market_service.has_signal("stop_order_triggered"):
+		# 止盈止损触发信号；自动卖出或自动平仓可能发生在股市面板关闭期间，横幅保证玩家第一时间知晓。
+		stock_market_service.connect("stop_order_triggered", Callable(self, "_on_stop_order_triggered"))
 	# 保险服务；死亡理赔到账时提醒玩家赔付金额，避免结算界面之外错过入账。
 	var insurance_service: Node = get_tree().root.get_node_or_null("InsuranceService")
 	if insurance_service != null and insurance_service.has_signal("claim_paid"):
@@ -112,6 +115,11 @@ func _connect_business_signals() -> void:
 func _on_leverage_position_liquidated(_stock_id: String, message: String) -> void:
 	## 强平回调；把结算说明转成顶部横幅，固定前缀让玩家在任何场景都能第一时间识别风险来源。
 	show_banner("【强平通知】%s" % message)
+
+
+func _on_stop_order_triggered(_stock_id: String, message: String) -> void:
+	## 止盈止损触发回调；自动卖出或自动平仓的结算说明以固定前缀展示，与强平横幅同优先级。
+	show_banner("【止盈止损】%s" % message)
 
 
 func _on_insurance_claim_paid(_gold_amount: int, message: String) -> void:

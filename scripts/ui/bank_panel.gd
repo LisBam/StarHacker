@@ -30,6 +30,14 @@ const ACTION_LOAN: String = "loan"
 const ACTION_REPAY: String = "repay"
 ## 倒计时轮询间隔；默认 0.25 秒，配合文本变化守卫刷新利息进度与各类倒计时。
 const STATUS_POLL_INTERVAL_SECONDS: float = 0.25
+## 半宽卡片尺寸；活期与贷款页两卡并排，2 × 500 加 12 像素间距恰好填满 1012 像素卡片区宽度。
+const CARD_SIZE_HALF: Vector2 = Vector2(500.0, 430.0)
+## 三分卡片尺寸；定期页三档存单并排，3 × 328 加两道 12 像素间距填满卡片区宽度。
+const CARD_SIZE_THIRD: Vector2 = Vector2(328.0, 268.0)
+## 全宽卡片尺寸；进行中存单与利率机制说明横向占满整行，与其下方卡片行合计约 430 像素填满卡片区高度。
+const CARD_SIZE_WIDE: Vector2 = Vector2(1012.0, 150.0)
+## 贷款期限秒数；仅用于贷款倒计时进度条比例展示，真实期限由 BankService 常量决定。
+const LOAN_DURATION_SECONDS_FOR_DISPLAY: float = 7200.0
 
 ## 面板固定尺寸；默认 1080×640，与矿场面板一致，适配 1280×720 主菜单并保留四周遮罩空间。
 @export var panel_size: Vector2 = Vector2(1080.0, 640.0)
@@ -67,8 +75,10 @@ var _fixed_tab_button: Button
 var _loan_tab_button: Button
 ## 卡片流式容器；三个标签页共用同一容器并整体重建。
 var _card_container: HFlowContainer
-## 卡片区倒计时标签；进行中存单或贷款卡片内的剩余时间文本，页面重建时重新捕获引用。
+## 卡片区倒计时标签；活期计息、进行中存单或贷款卡片内的剩余时间文本，页面重建时重新捕获引用。
 var _countdown_label: Label
+## 卡片区进度条；活期计息进度、存单与贷款的时间进度共用同一引用，页面重建时重新捕获。
+var _card_progress_bar: ProgressBar
 ## 数量操作弹窗；存入、取出、定期与贷款共用同一紧凑组件。
 var _quantity_dialog: SellQuantityDialog
 ## 二次确认弹窗；完整展示操作、金额与利率后才执行真实交易。
@@ -243,6 +253,9 @@ func _refresh_coins(_amount: int = 0) -> void:
 	# 当前活期余额；银行服务缺失时显示 0。
 	var account_balance: int = int(_service.call("get_account_balance")) if _service != null and _service.has_method("get_account_balance") else 0
 	_coins_label.text = "当前星穹：%d  |  活期余额：%d" % [coins, account_balance]
+	# 资产总览联动；活期与贷款页的卡片展示授信基数分项，星穹变化后合并重建一次保持读数一致。
+	if visible and (_active_tab == TAB_DEMAND or _active_tab == TAB_LOAN):
+		_queue_cards_rebuild()
 
 
 func _refresh_status_bar() -> void:
@@ -282,13 +295,16 @@ func _rebuild_cards() -> void:
 	_cards_rebuild_queued = false
 	if _card_container == null or _service == null:
 		return
-	# 倒计时引用清理；旧标签随子节点释放，避免轮询刷新访问已销毁控件。
+	# 倒计时引用清理；旧标签与进度条随子节点释放，避免轮询刷新访问已销毁控件。
 	_countdown_label = null
+	_card_progress_bar = null
 	_last_countdown_text = ""
 	for child in _card_container.get_children():
 		child.queue_free()
 	if _active_tab == TAB_DEMAND:
+		# 活期页两卡并排；左侧账户操作卡，右侧资产与授信总览卡，共同填满卡片区。
 		_card_container.add_child(_create_demand_card())
+		_card_container.add_child(_create_asset_overview_card())
 	elif _active_tab == TAB_FIXED:
 		_rebuild_fixed_cards()
 	else:
@@ -296,23 +312,46 @@ func _rebuild_cards() -> void:
 
 
 func _create_demand_card() -> Control:
-	# 活期账户卡片；展示余额、利率说明与存取入口。
-	var card: PanelContainer = _create_card_base(true, Vector2(420.0, 190.0))
+	# 活期账户卡片；大字余额、计息进度条与存取入口纵向铺满半宽卡片，消除原小卡片外的大面积留白。
+	var card: PanelContainer = _create_card_base(true, CARD_SIZE_HALF)
 	var content: VBoxContainer = _get_card_content(card)
+	content.add_theme_constant_override("separation", 8)
 	var name_label: Label = Label.new()
 	name_label.add_theme_font_size_override("font_size", 17)
 	name_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_accent_color())
 	name_label.text = "活期账户"
 	content.add_child(name_label)
+	# 余额标题行；小号次要文字说明下方大数字的含义。
+	var balance_caption: Label = Label.new()
+	balance_caption.add_theme_font_size_override("font_size", 12)
+	balance_caption.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
+	balance_caption.text = "活期余额"
+	content.add_child(balance_caption)
+	# 余额大字；活期页核心读数使用 30 号主文字色，视觉重心从空白转移到账户状态。
+	var balance_label: Label = Label.new()
+	balance_label.add_theme_font_size_override("font_size", 30)
+	balance_label.text = "%d 星穹" % int(_service.call("get_account_balance"))
+	content.add_child(balance_label)
+	# 计息倒计时文本；由轮询按 0.25 秒刷新，绿色与收益语义一致。
+	_countdown_label = Label.new()
+	_countdown_label.add_theme_font_size_override("font_size", 14)
+	_countdown_label.add_theme_color_override("font_color", Color(0.46, 0.92, 0.72, 1.0))
+	content.add_child(_countdown_label)
+	# 计息进度条；展示本计息周期完成度，只做视觉提示不驱动真实结算。
+	_card_progress_bar = _create_card_progress_bar()
+	content.add_child(_card_progress_bar)
+	_refresh_card_countdown()
 	var detail_label: Label = Label.new()
-	detail_label.add_theme_font_size_override("font_size", 13)
+	detail_label.add_theme_font_size_override("font_size", 12)
 	detail_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
-	detail_label.text = "余额：%d 星穹\n每满 1 在线小时按当时余额结算 0.2%% 利息（向下取整）" % int(_service.call("get_account_balance"))
+	detail_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	detail_label.text = "每满 1 在线小时按结算瞬间余额发放 0.2% 利息（向下取整，不足 1 星穹时本周期无利息）；主菜单、局外面板、战斗与暂停都计入在线时间。"
 	content.add_child(detail_label)
 	var note_label: Label = Label.new()
 	note_label.add_theme_font_size_override("font_size", 11)
 	note_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
-	note_label.text = "存取均无手续费；活期余额同时计入贷款授信与违约抵扣顺序"
+	note_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	note_label.text = "存取均无手续费、随时到账；活期余额计入贷款授信基数，也是违约抵扣的第二顺位资产。"
 	content.add_child(note_label)
 	var spacer: Control = Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -322,14 +361,14 @@ func _create_demand_card() -> Control:
 	action_row.add_theme_constant_override("separation", 8)
 	content.add_child(action_row)
 	var deposit_button: Button = Button.new()
-	deposit_button.custom_minimum_size = Vector2(0.0, 32.0)
+	deposit_button.custom_minimum_size = Vector2(0.0, 36.0)
 	deposit_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	deposit_button.text = "存入"
 	UI_STYLE_GUIDE.apply_primary_button(deposit_button)
 	deposit_button.pressed.connect(Callable(self, "_open_amount_dialog").bind(ACTION_DEPOSIT, ""))
 	action_row.add_child(deposit_button)
 	var withdraw_button: Button = Button.new()
-	withdraw_button.custom_minimum_size = Vector2(0.0, 32.0)
+	withdraw_button.custom_minimum_size = Vector2(0.0, 36.0)
 	withdraw_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	withdraw_button.text = "取出"
 	withdraw_button.pressed.connect(Callable(self, "_open_amount_dialog").bind(ACTION_WITHDRAW, ""))
@@ -337,8 +376,70 @@ func _create_demand_card() -> Control:
 	return card
 
 
+func _create_asset_overview_card() -> Control:
+	# 资产与授信总览卡片；逐行列出授信基数五个分项与合计，让玩家不打开其他系统也能核对授信来源。
+	var card: PanelContainer = _create_card_base(true, CARD_SIZE_HALF)
+	var content: VBoxContainer = _get_card_content(card)
+	content.add_theme_constant_override("separation", 7)
+	var name_label: Label = Label.new()
+	name_label.add_theme_font_size_override("font_size", 17)
+	name_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_accent_color())
+	name_label.text = "资产与授信总览"
+	content.add_child(name_label)
+	# 资产分项明细；口径与授信估值完全一致，由银行服务统一提供。
+	var breakdown: Dictionary = _service.call("get_asset_breakdown") as Dictionary if _service.has_method("get_asset_breakdown") else {}
+	_append_overview_row(content, "局外星穹", "%d" % int(breakdown.get("coins", 0)))
+	_append_overview_row(content, "活期余额", "%d" % int(breakdown.get("account_balance", 0)))
+	_append_overview_row(content, "定期锁定本金", "%d" % int(breakdown.get("fixed_deposit_principal", 0)))
+	_append_overview_row(content, "证券币（整数部分）", "%d" % int(breakdown.get("securities_gold", 0)))
+	_append_overview_row(content, "算力币折算（10000:1）", "%d" % int(breakdown.get("compute_gold", 0)))
+	content.add_child(HSeparator.new())
+	_append_overview_row(content, "总资产估值", "%d 星穹" % int(breakdown.get("total", 0)), true)
+	_append_overview_row(content, "当前可用授信（总资产 50%）", "%d 星穹" % int(_service.call("get_maximum_loan_amount")), true)
+	var note_label: Label = Label.new()
+	note_label.add_theme_font_size_override("font_size", 11)
+	note_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
+	note_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	note_label.text = "证券币按整数部分 1:1、算力币按 10000:1 折算计入；股票现货与杠杆市值波动大，不计入授信基数。存在进行中贷款或信用冻结时可用授信为 0。"
+	content.add_child(note_label)
+	var spacer: Control = Control.new()
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content.add_child(spacer)
+	return card
+
+
+func _append_overview_row(parent: Control, title_text: String, value_text: String, emphasized: bool = false) -> void:
+	## 向总览卡片追加一行“名称靠左、数值靠右”的明细；强调行使用更大字号与主文字色。
+	# 明细行容器；名称扩展占位把数值推到右侧。
+	var row: HBoxContainer = HBoxContainer.new()
+	parent.add_child(row)
+	# 行名称；普通行使用次要文字色，强调行使用强调色。
+	var title_label: Label = Label.new()
+	title_label.add_theme_font_size_override("font_size", 14 if emphasized else 13)
+	title_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_accent_color() if emphasized else UI_STYLE_GUIDE.get_secondary_text_color())
+	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_label.text = title_text
+	row.add_child(title_label)
+	# 行数值；右对齐主文字色，强调行放大一号。
+	var value_label: Label = Label.new()
+	value_label.add_theme_font_size_override("font_size", 15 if emphasized else 13)
+	value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	value_label.text = value_text
+	row.add_child(value_label)
+
+
+func _create_card_progress_bar() -> ProgressBar:
+	## 创建卡片内通用进度条；固定 14 像素高、比例范围 0 到 1，样式跟随统一主题。
+	var progress_bar: ProgressBar = ProgressBar.new()
+	progress_bar.custom_minimum_size = Vector2(0.0, 14.0)
+	progress_bar.min_value = 0.0
+	progress_bar.max_value = 1.0
+	progress_bar.show_percentage = false
+	return progress_bar
+
+
 func _rebuild_fixed_cards() -> void:
-	## 重建定期存单页；进行中存单卡片置于首位，随后按定义顺序展示三档存单。
+	## 重建定期存单页；进行中存单以全宽卡片置于首位，三档存单并排铺满整行，无存单时以利率机制卡补满纵向空间。
 	# 进行中存单快照；为空表示当前没有存单，可签订卡片据此决定按钮可用状态。
 	var active_snapshot: Dictionary = _service.call("get_active_fixed_deposit_snapshot") as Dictionary if _service.has_method("get_active_fixed_deposit_snapshot") else {}
 	if not active_snapshot.is_empty():
@@ -351,11 +452,14 @@ func _rebuild_fixed_cards() -> void:
 		# 单档存单定义；包含稳定标识、名称、在线时长、基础利率与说明。
 		var definition: Dictionary = raw_definition as Dictionary
 		_card_container.add_child(_create_fixed_definition_card(definition, not active_snapshot.is_empty() or frozen))
+	if active_snapshot.is_empty():
+		# 利率机制卡；没有进行中存单时补充占据原空白区，集中解释利率公式与择时策略。
+		_card_container.add_child(_create_fixed_mechanism_card())
 
 
 func _create_active_fixed_card(snapshot: Dictionary) -> Control:
-	# 进行中存单卡片；使用亮色语义突出兑付倒计时。
-	var card: PanelContainer = _create_card_base(true, Vector2(318.0, 158.0))
+	# 进行中存单卡片；全宽横条突出兑付倒计时与时间进度。
+	var card: PanelContainer = _create_card_base(true, CARD_SIZE_WIDE)
 	var content: VBoxContainer = _get_card_content(card)
 	var name_label: Label = Label.new()
 	name_label.add_theme_font_size_override("font_size", 17)
@@ -363,28 +467,32 @@ func _create_active_fixed_card(snapshot: Dictionary) -> Control:
 	name_label.text = "进行中：%s" % str(snapshot.get("name", "定期存单"))
 	content.add_child(name_label)
 	var detail_label: Label = Label.new()
-	detail_label.add_theme_font_size_override("font_size", 12)
+	detail_label.add_theme_font_size_override("font_size", 13)
 	detail_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
-	detail_label.text = "本金 %d  |  锁定利率 %.2f%%\n到期本息 %d 星穹" % [int(snapshot.get("principal", 0)), float(snapshot.get("locked_rate", 0.0)) * 100.0, int(snapshot.get("payout", 0))]
+	detail_label.text = "本金 %d 星穹  |  锁定利率 %.2f%%  |  到期本息 %d 星穹（利息 +%d）" % [int(snapshot.get("principal", 0)), float(snapshot.get("locked_rate", 0.0)) * 100.0, int(snapshot.get("payout", 0)), int(snapshot.get("payout", 0)) - int(snapshot.get("principal", 0))]
 	content.add_child(detail_label)
 	# 倒计时标签；文本由轮询按剩余整数秒刷新，绿色与收益语义保持一致。
 	_countdown_label = Label.new()
 	_countdown_label.add_theme_font_size_override("font_size", 14)
 	_countdown_label.add_theme_color_override("font_color", Color(0.46, 0.92, 0.72, 1.0))
 	content.add_child(_countdown_label)
+	# 存单时间进度条；展示已完成的锁定时长比例，只做视觉提示。
+	_card_progress_bar = _create_card_progress_bar()
+	content.add_child(_card_progress_bar)
 	_refresh_card_countdown()
 	var note_label: Label = Label.new()
 	note_label.add_theme_font_size_override("font_size", 11)
 	note_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
-	note_label.text = "存单仅消耗在线时间，中途不可支取"
+	note_label.text = "存单仅消耗在线时间，中途不可支取；到期本息自动发放到局外星穹并播放银行横幅"
 	content.add_child(note_label)
 	return card
 
 
 func _create_fixed_definition_card(definition: Dictionary, entry_disabled: bool) -> Control:
-	# 可签订存单卡片；展示时长、基础利率与当前报价利率。
-	var card: PanelContainer = _create_card_base(not entry_disabled, Vector2(318.0, 158.0))
+	# 可签订存单卡片；三分宽度并排，报价利率放大显示并附带每千本金收益预览。
+	var card: PanelContainer = _create_card_base(not entry_disabled, CARD_SIZE_THIRD)
 	var content: VBoxContainer = _get_card_content(card)
+	content.add_theme_constant_override("separation", 6)
 	var deposit_id: String = str(definition.get("id", ""))
 	# 卡片文字色；占用或冻结时降低语义亮度。
 	var name_label: Label = Label.new()
@@ -392,22 +500,35 @@ func _create_fixed_definition_card(definition: Dictionary, entry_disabled: bool)
 	name_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_accent_color() if not entry_disabled else UI_STYLE_GUIDE.get_disabled_text_color())
 	name_label.text = str(definition.get("name", "定期存单"))
 	content.add_child(name_label)
-	var detail_label: Label = Label.new()
-	detail_label.add_theme_font_size_override("font_size", 12)
-	detail_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
-	# 当前报价利率；含大盘与金库倍率，签订瞬间重新读取并锁定。
-	detail_label.text = "在线 %s  |  基础 %.1f%%\n当前报价利率 %.2f%%" % [_format_hour_minute_duration(int(definition.get("duration_seconds", 0))), float(definition.get("base_rate", 0.0)) * 100.0, float(_service.call("get_quoted_fixed_rate", deposit_id)) * 100.0]
-	content.add_child(detail_label)
+	var duration_label: Label = Label.new()
+	duration_label.add_theme_font_size_override("font_size", 12)
+	duration_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
+	duration_label.text = "在线 %s  |  基础利率 %.1f%%" % [_format_hour_minute_duration(int(definition.get("duration_seconds", 0))), float(definition.get("base_rate", 0.0)) * 100.0]
+	content.add_child(duration_label)
+	# 当前报价利率；含大盘与金库倍率，签订瞬间重新读取并锁定，收益绿色放大显示。
+	var quoted_rate: float = float(_service.call("get_quoted_fixed_rate", deposit_id))
+	var rate_label: Label = Label.new()
+	rate_label.add_theme_font_size_override("font_size", 21)
+	rate_label.add_theme_color_override("font_color", Color(0.46, 0.92, 0.72, 1.0) if not entry_disabled else UI_STYLE_GUIDE.get_disabled_text_color())
+	rate_label.text = "当前报价 %.2f%%" % (quoted_rate * 100.0)
+	content.add_child(rate_label)
+	# 每千本金收益预览；用具体数字帮助玩家比较三档存单，公式与服务到期本息完全一致。
+	var preview_label: Label = Label.new()
+	preview_label.add_theme_font_size_override("font_size", 12)
+	preview_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
+	preview_label.text = "每 1000 本金到期本息 %d 星穹" % (1000 + int(floor(1000.0 * quoted_rate)))
+	content.add_child(preview_label)
 	var description_label: Label = Label.new()
 	description_label.add_theme_font_size_override("font_size", 11)
 	description_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
+	description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	description_label.text = str(definition.get("description", ""))
 	content.add_child(description_label)
 	var spacer: Control = Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_child(spacer)
 	var action_button: Button = Button.new()
-	action_button.custom_minimum_size = Vector2(0.0, 32.0)
+	action_button.custom_minimum_size = Vector2(0.0, 34.0)
 	if entry_disabled:
 		action_button.text = "已有进行中存单或信用冻结"
 		action_button.disabled = true
@@ -419,40 +540,76 @@ func _create_fixed_definition_card(definition: Dictionary, entry_disabled: bool)
 	return card
 
 
+func _create_fixed_mechanism_card() -> Control:
+	# 利率机制说明卡片；全宽横条集中解释利率公式、大盘倍率与择时策略，占据无存单时的纵向空白。
+	var card: PanelContainer = _create_card_base(true, CARD_SIZE_WIDE)
+	var content: VBoxContainer = _get_card_content(card)
+	var name_label: Label = Label.new()
+	name_label.add_theme_font_size_override("font_size", 17)
+	name_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_accent_color())
+	name_label.text = "利率机制"
+	content.add_child(name_label)
+	var detail_label: Label = Label.new()
+	detail_label.add_theme_font_size_override("font_size", 12)
+	detail_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
+	detail_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# 大盘利率说明；实时读取服务描述，提示玩家择时签订。
+	detail_label.text = "锁定利率 = 基础利率 × 大盘倍率 × 金库倍率，签订瞬间锁定，存续期间行情变化不再影响本息。\n大盘倍率：牛市 ×0.9、熊市 ×1.25、震荡 ×1.0（当前 %s）；据点星海金库每级利率相对 +4%%，满级 ×1.20。\n三档存单折算每在线小时收益率约 0.8%% / 0.9%% / 1.0%%，锁定越久效率越高；信用违约冻结期间无法签订新存单。" % str(_service.call("get_market_state_description"))
+	content.add_child(detail_label)
+	return card
+
+
 func _rebuild_loan_cards() -> void:
-	## 重建贷款页；进行中贷款展示还款入口，无贷款时展示授信与申请卡片。
+	## 重建贷款页；左侧为贷款状态卡（进行中还款或授信申请），右侧固定为扣款与违约规则卡，两卡并排填满卡片区。
 	# 进行中贷款快照；为空表示当前没有贷款。
 	var loan_snapshot: Dictionary = _service.call("get_loan_snapshot") as Dictionary if _service.has_method("get_loan_snapshot") else {}
 	if not loan_snapshot.is_empty():
 		_card_container.add_child(_create_active_loan_card(loan_snapshot))
-		return
-	_card_container.add_child(_create_loan_application_card())
+	else:
+		_card_container.add_child(_create_loan_application_card())
+	_card_container.add_child(_create_loan_rules_card())
 
 
 func _create_active_loan_card(snapshot: Dictionary) -> Control:
-	# 进行中贷款卡片；使用危险语义强调应还金额与自动扣款风险。
-	var card: PanelContainer = _create_card_base(true, Vector2(420.0, 190.0))
+	# 进行中贷款卡片；使用危险语义强调应还金额，扣款倒计时配合时间进度条持续提醒。
+	var card: PanelContainer = _create_card_base(true, CARD_SIZE_HALF)
 	var content: VBoxContainer = _get_card_content(card)
+	content.add_theme_constant_override("separation", 8)
 	var name_label: Label = Label.new()
 	name_label.add_theme_font_size_override("font_size", 17)
 	name_label.add_theme_color_override("font_color", Color(1.0, 0.62, 0.50, 1.0))
 	name_label.text = "进行中贷款"
 	content.add_child(name_label)
+	# 应还标题行；小号次要文字说明下方大数字的含义。
+	var repay_caption: Label = Label.new()
+	repay_caption.add_theme_font_size_override("font_size", 12)
+	repay_caption.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
+	repay_caption.text = "到期应还"
+	content.add_child(repay_caption)
+	# 应还大字；贷款页核心读数使用 30 号警示色，突出债务压力。
+	var repay_label: Label = Label.new()
+	repay_label.add_theme_font_size_override("font_size", 30)
+	repay_label.add_theme_color_override("font_color", Color(1.0, 0.80, 0.40, 1.0))
+	repay_label.text = "%d 星穹" % int(snapshot.get("repay_amount", 0))
+	content.add_child(repay_label)
 	var detail_label: Label = Label.new()
 	detail_label.add_theme_font_size_override("font_size", 13)
 	detail_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
-	detail_label.text = "本金 %d 星穹  |  应还 %d 星穹" % [int(snapshot.get("principal", 0)), int(snapshot.get("repay_amount", 0))]
+	detail_label.text = "本金 %d 星穹  |  利息 %d 星穹（×1.15 向上取整）" % [int(snapshot.get("principal", 0)), int(snapshot.get("repay_amount", 0)) - int(snapshot.get("principal", 0))]
 	content.add_child(detail_label)
 	# 倒计时标签；文本由轮询按剩余整数秒刷新。
 	_countdown_label = Label.new()
 	_countdown_label.add_theme_font_size_override("font_size", 14)
 	_countdown_label.add_theme_color_override("font_color", Color(1.0, 0.80, 0.40, 1.0))
 	content.add_child(_countdown_label)
+	# 贷款时间进度条；展示期限消耗比例，越接近满格越接近自动扣款。
+	_card_progress_bar = _create_card_progress_bar()
+	content.add_child(_card_progress_bar)
 	_refresh_card_countdown()
 	var note_label: Label = Label.new()
 	note_label.add_theme_font_size_override("font_size", 11)
 	note_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
-	note_label.text = "到期自动按 星穹→活期→算力币→证券币 顺序扣款；仍不足将信用违约并冻结银行信贷 6 小时"
+	note_label.text = "可随时从局外星穹一次性全额还清；提前还款不减免利息"
 	note_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(note_label)
 	var spacer: Control = Control.new()
@@ -460,7 +617,7 @@ func _create_active_loan_card(snapshot: Dictionary) -> Control:
 	content.add_child(spacer)
 	# 还款按钮；从局外星穹一次性全额还清。
 	var repay_button: Button = Button.new()
-	repay_button.custom_minimum_size = Vector2(0.0, 32.0)
+	repay_button.custom_minimum_size = Vector2(0.0, 36.0)
 	repay_button.text = "立即还清（%d 星穹）" % int(snapshot.get("repay_amount", 0))
 	UI_STYLE_GUIDE.apply_primary_button(repay_button)
 	repay_button.pressed.connect(_open_repay_confirmation)
@@ -469,10 +626,11 @@ func _create_active_loan_card(snapshot: Dictionary) -> Control:
 
 
 func _create_loan_application_card() -> Control:
-	# 贷款申请卡片；展示授信上限、利率与期限，冻结期间禁用并显示倒计时。
+	# 贷款申请卡片；授信构成逐行展示，冻结期间禁用并显示倒计时。
 	var frozen: bool = _service.has_method("is_default_frozen") and bool(_service.call("is_default_frozen"))
-	var card: PanelContainer = _create_card_base(not frozen, Vector2(420.0, 190.0))
+	var card: PanelContainer = _create_card_base(not frozen, CARD_SIZE_HALF)
 	var content: VBoxContainer = _get_card_content(card)
+	content.add_theme_constant_override("separation", 7)
 	var name_label: Label = Label.new()
 	name_label.add_theme_font_size_override("font_size", 17)
 	name_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_accent_color() if not frozen else UI_STYLE_GUIDE.get_disabled_text_color())
@@ -480,11 +638,12 @@ func _create_loan_application_card() -> Control:
 	content.add_child(name_label)
 	# 当前授信上限；按总资产估值的 50% 实时计算。
 	var maximum_amount: int = int(_service.call("get_maximum_loan_amount")) if _service.has_method("get_maximum_loan_amount") else 0
-	var detail_label: Label = Label.new()
-	detail_label.add_theme_font_size_override("font_size", 13)
-	detail_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
-	detail_label.text = "总资产估值：%d 星穹\n授信上限：%d 星穹（总资产 50%%）  |  利率 15%%  |  期限 2 在线小时" % [int(_service.call("get_total_asset_estimate")) if _service.has_method("get_total_asset_estimate") else 0, maximum_amount]
-	content.add_child(detail_label)
+	_append_overview_row(content, "总资产估值", "%d 星穹" % (int(_service.call("get_total_asset_estimate")) if _service.has_method("get_total_asset_estimate") else 0))
+	_append_overview_row(content, "授信上限（总资产 50%）", "%d 星穹" % maximum_amount, true)
+	content.add_child(HSeparator.new())
+	_append_overview_row(content, "利率", "15%（应还 = 本金 ×1.15 向上取整）")
+	_append_overview_row(content, "期限", "2 在线小时")
+	_append_overview_row(content, "还款方式", "随时提前全额还清 / 到期自动扣款")
 	# 冻结倒计时标签；冻结期间由轮询刷新剩余时间。
 	if frozen:
 		_countdown_label = Label.new()
@@ -492,11 +651,17 @@ func _create_loan_application_card() -> Control:
 		_countdown_label.add_theme_color_override("font_color", Color(1.0, 0.62, 0.50, 1.0))
 		content.add_child(_countdown_label)
 		_refresh_card_countdown()
+	var apply_note: Label = Label.new()
+	apply_note.add_theme_font_size_override("font_size", 11)
+	apply_note.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
+	apply_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	apply_note.text = "本金立即进入局外星穹；同一时间最多一笔贷款，放款瞬间会按最新总资产重新复核授信。"
+	content.add_child(apply_note)
 	var spacer: Control = Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_child(spacer)
 	var action_button: Button = Button.new()
-	action_button.custom_minimum_size = Vector2(0.0, 32.0)
+	action_button.custom_minimum_size = Vector2(0.0, 36.0)
 	if frozen:
 		action_button.text = "信用违约冻结中"
 		action_button.disabled = true
@@ -508,6 +673,45 @@ func _create_loan_application_card() -> Control:
 		UI_STYLE_GUIDE.apply_primary_button(action_button)
 		action_button.pressed.connect(Callable(self, "_open_amount_dialog").bind(ACTION_LOAN, ""))
 	content.add_child(action_button)
+	return card
+
+
+func _create_loan_rules_card() -> Control:
+	# 扣款与违约规则卡片；固定占据贷款页右半，集中展示级联扣款顺序与违约后果，避免关键风险藏在小字里。
+	var card: PanelContainer = _create_card_base(true, CARD_SIZE_HALF)
+	var content: VBoxContainer = _get_card_content(card)
+	content.add_theme_constant_override("separation", 8)
+	var name_label: Label = Label.new()
+	name_label.add_theme_font_size_override("font_size", 17)
+	name_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_accent_color())
+	name_label.text = "自动扣款与违约"
+	content.add_child(name_label)
+	var order_caption: Label = Label.new()
+	order_caption.add_theme_font_size_override("font_size", 12)
+	order_caption.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
+	order_caption.text = "到期未还清时按固定顺序级联抵扣剩余债务："
+	content.add_child(order_caption)
+	# 抵扣顺序行；四层资产按顺位逐行列出，比单行小字更易读。
+	_append_overview_row(content, "第一顺位", "局外星穹")
+	_append_overview_row(content, "第二顺位", "银行活期余额")
+	_append_overview_row(content, "第三顺位", "矿场算力币（10000:1）")
+	_append_overview_row(content, "第四顺位", "股市证券币（1:1）")
+	content.add_child(HSeparator.new())
+	var default_label: Label = Label.new()
+	default_label.add_theme_font_size_override("font_size", 12)
+	default_label.add_theme_color_override("font_color", Color(1.0, 0.62, 0.50, 1.0))
+	default_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	default_label.text = "四层抵扣后仍不足：剩余债务核销、触发信用违约，冻结银行信贷 6 在线小时，期间不能申请贷款与签订存单。"
+	content.add_child(default_label)
+	var note_label: Label = Label.new()
+	note_label.add_theme_font_size_override("font_size", 11)
+	note_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_secondary_text_color())
+	note_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	note_label.text = "算力币与证券币抵扣走系统级接口、不收取提现手续费，证券币抵扣会写入股市交易历史；贷款利率高于全部存单利率，借款用于资金周转而非存贷套利。"
+	content.add_child(note_label)
+	var spacer: Control = Control.new()
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content.add_child(spacer)
 	return card
 
 
@@ -542,23 +746,38 @@ func _get_card_content(card: PanelContainer) -> VBoxContainer:
 
 
 func _refresh_card_countdown() -> void:
-	## 按当前页面刷新卡片内倒计时标签；标签只在存单、贷款或冻结卡片中存在。
-	if _countdown_label == null or not is_instance_valid(_countdown_label) or _service == null:
+	## 按当前页面刷新卡片内倒计时标签与时间进度条；活期页显示距下次计息，定期与贷款页显示剩余在线时间。
+	if _service == null:
 		return
 	# 目标倒计时文本；按当前页面读取对应快照生成，未变化时跳过标签重写。
 	var countdown_text: String = ""
-	if _active_tab == TAB_FIXED:
+	# 目标进度比例；负数表示当前页面没有需要更新的进度条。
+	var progress_ratio: float = -1.0
+	if _active_tab == TAB_DEMAND:
+		# 计息周期进度；进度条展示完成度，文本展示剩余时间与按当前余额预估的利息。
+		var interest_ratio: float = float(_service.call("get_interest_progress_ratio")) if _service.has_method("get_interest_progress_ratio") else 0.0
+		countdown_text = "距下次计息 %s · 预计 +%d 星穹" % [_format_duration((1.0 - interest_ratio) * 3600.0), int(_service.call("get_demand_interest_preview")) if _service.has_method("get_demand_interest_preview") else 0]
+		progress_ratio = interest_ratio
+	elif _active_tab == TAB_FIXED:
 		# 存单快照；页面重建保证标签只在存单存在时被捕获。
 		var deposit_snapshot: Dictionary = _service.call("get_active_fixed_deposit_snapshot") as Dictionary
 		if not deposit_snapshot.is_empty():
 			countdown_text = "剩余在线 %s" % _format_duration(float(deposit_snapshot.get("remaining_seconds", 0.0)))
+			# 存单总时长；至少 1 秒防止除零，进度条展示已完成锁定时长比例。
+			var deposit_duration: float = maxf(float(int(deposit_snapshot.get("duration_seconds", 0))), 1.0)
+			progress_ratio = clampf(1.0 - float(deposit_snapshot.get("remaining_seconds", 0.0)) / deposit_duration, 0.0, 1.0)
 	elif _active_tab == TAB_LOAN:
 		# 贷款快照；无贷款时读取冻结剩余时间。
 		var loan_snapshot: Dictionary = _service.call("get_loan_snapshot") as Dictionary
 		if not loan_snapshot.is_empty():
 			countdown_text = "距自动扣款 %s" % _format_duration(float(loan_snapshot.get("remaining_seconds", 0.0)))
+			progress_ratio = clampf(1.0 - float(loan_snapshot.get("remaining_seconds", 0.0)) / LOAN_DURATION_SECONDS_FOR_DISPLAY, 0.0, 1.0)
 		elif _service.has_method("get_default_freeze_remaining_seconds"):
 			countdown_text = "冻结剩余 %s" % _format_duration(float(_service.call("get_default_freeze_remaining_seconds")))
+	if _card_progress_bar != null and is_instance_valid(_card_progress_bar) and progress_ratio >= 0.0:
+		_card_progress_bar.value = progress_ratio
+	if _countdown_label == null or not is_instance_valid(_countdown_label):
+		return
 	if countdown_text.is_empty() or countdown_text == _last_countdown_text:
 		return
 	_last_countdown_text = countdown_text

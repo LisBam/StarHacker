@@ -3,7 +3,8 @@ class_name NetworkLobbySync
 
 ## 联机大厅在场同步器让同一房间的成员在联机大厅内互相可见。
 ## 它只广播与消费带 lobby 场景上下文的玩家状态包，复用远程队友化身做纯展示；不涉及敌人、掉落、宝箱或任何伤害转发。
-## 成员离开大厅（返回菜单、进入战斗或断线）后停止发包，本机按在场超时自动移除其化身。
+## 在场语义；只要成员仍在房间名册中，其化身就常驻联机大厅——成员切到菜单等其他界面后停止发包，
+## 化身停在最后位置（尚未进过大厅时停在默认围观位）并在头顶显示“菜单中”，恢复发包后提示消失；只有退出房间或断线才移除化身。
 
 ## 队友化身脚本；与战斗同步器共用同一化身实现，大厅内不注入伤害转发回调。
 const REMOTE_PLAYER_AVATAR_SCRIPT: Script = preload("res://scripts/player/remote_player_avatar.gd")
@@ -16,8 +17,14 @@ const AVATAR_COLOR_PALETTE: Array[Color] = [
 ]
 ## 大厅状态广播间隔；单位秒，默认 0.05 即 20Hz，与战斗内队友状态同频。
 const LOBBY_STATE_INTERVAL: float = 0.05
-## 在场超时时长；单位秒，超过该时长未收到某成员的大厅状态包即移除其化身。
+## 在场超时时长；单位秒，超过该时长未收到某成员的大厅状态包即判定其不在大厅现场并显示“菜单中”提示。
 const PRESENCE_TIMEOUT_SECONDS: float = 1.6
+## 不在大厅现场时的头顶状态提示文本；成员身处菜单、角色页等其他界面时显示，回到大厅后自动清除。
+const MENU_STATUS_NOTE: String = "菜单中"
+## 默认围观位基准点；成员在房间但尚未发来大厅状态包时化身停放的世界坐标锚点，位于出生区上方。
+const DEFAULT_PRESENCE_POSITION: Vector2 = Vector2(0.0, -140.0)
+## 默认围观位横向间距；多名未在场成员按名册顺序横向排开，避免化身重叠。
+const DEFAULT_PRESENCE_SPACING: float = 72.0
 
 ## 联机会话服务缓存；初始化时解析，缺失时同步器保持空转。
 var _network_session: Node = null
@@ -50,6 +57,8 @@ func initialize(lobby_world: Node2D, player: Node2D) -> void:
 	if _player != null:
 		_player_stats_component = _player.get_node_or_null("StatsComponent")
 		_player_shield_component = _player.get_node_or_null("ShieldComponent")
+	# 进场名册补齐；本机进入联机大厅时房间可能早已建立，延迟一帧为全部既有成员创建常驻化身。
+	call_deferred("_sync_roster_avatars")
 
 
 func _exit_tree() -> void:
@@ -69,7 +78,7 @@ func _process(delta: float) -> void:
 	if _state_broadcast_remaining <= 0.0:
 		_state_broadcast_remaining = LOBBY_STATE_INTERVAL
 		_broadcast_local_lobby_state()
-	_prune_stale_avatars()
+	_refresh_presence_notes()
 
 
 func _broadcast_local_lobby_state() -> void:
@@ -139,19 +148,40 @@ func _ensure_lobby_avatar(peer_id: int) -> Node:
 		# 化身挂载父节点；优先大厅世界，保证与本地玩家同一坐标系。
 		var avatar_parent: Node = _lobby_world if _lobby_world != null else self
 		avatar_parent.add_child(avatar)
+		# 默认围观位；成员尚未发来大厅状态包时按名册序横向排开停放，首个状态包会直接落位到真实位置。
+		avatar.global_position = DEFAULT_PRESENCE_POSITION + Vector2(DEFAULT_PRESENCE_SPACING * float(member_index), 0.0)
 		_remote_avatars[peer_id] = avatar
 		return avatar
 	return null
 
 
-func _prune_stale_avatars() -> void:
-	## 在场超时清理；成员返回菜单、进入战斗或断线后停止发包，超时移除其大厅化身。
-	# 当前时刻秒数；与收包时间比较判断是否超时。
-	var current_seconds: float = Time.get_ticks_msec() * 0.001
-	for peer_id in _remote_avatars.keys().duplicate():
-		if current_seconds - float(_last_state_seconds.get(peer_id, 0.0)) <= PRESENCE_TIMEOUT_SECONDS:
+func _sync_roster_avatars() -> void:
+	## 按名册补齐全部远程成员的常驻化身；成员在房间但不在大厅时化身仍留在大厅并由在场提示标注状态。
+	if _network_session == null or not bool(_network_session.call("is_session_active")):
+		return
+	# 本机 peer_id；名册包含自己，本机由真实玩家节点表现，不创建化身。
+	var local_peer_id: int = int(_network_session.call("get_local_peer_id"))
+	for member_profile in (_network_session.call("get_roster_snapshot") as Array):
+		# 单个成员 peer_id；非法编号与本机编号直接跳过。
+		var member_peer_id: int = int((member_profile as Dictionary).get("peer_id", 0))
+		if member_peer_id <= 0 or member_peer_id == local_peer_id:
 			continue
-		_remove_lobby_avatar(int(peer_id))
+		_ensure_lobby_avatar(member_peer_id)
+
+
+func _refresh_presence_notes() -> void:
+	## 按最近状态包时间刷新化身在场提示；停止发包的成员化身保持在大厅并显示“菜单中”，恢复发包后提示自动消失。
+	# 当前时刻秒数；与收包时间比较判断成员是否仍在大厅现场。
+	var current_seconds: float = Time.get_ticks_msec() * 0.001
+	for peer_id in _remote_avatars.keys():
+		# 成员化身节点；可能已随场景清理，无效实例交由名册变化路径移除记录。
+		var avatar: Node = _remote_avatars[peer_id] as Node
+		if avatar == null or not is_instance_valid(avatar):
+			continue
+		# 成员是否在大厅现场；从未发包或超过在场超时都视为身处菜单等其他界面。
+		var present_in_lobby: bool = _last_state_seconds.has(peer_id) and current_seconds - float(_last_state_seconds.get(peer_id, 0.0)) <= PRESENCE_TIMEOUT_SECONDS
+		if avatar.has_method("set_status_note"):
+			avatar.call("set_status_note", "" if present_in_lobby else MENU_STATUS_NOTE)
 
 
 func _remove_lobby_avatar(peer_id: int) -> void:
@@ -165,7 +195,7 @@ func _remove_lobby_avatar(peer_id: int) -> void:
 
 
 func _on_roster_changed() -> void:
-	## 名册变化回调；移除已退出房间成员的大厅化身。
+	## 名册变化回调；移除已退出房间成员的大厅化身，并为新入房成员补建常驻化身。
 	if _network_session == null:
 		return
 	# 当前名册 peer_id 集合；不在集合中的化身立即移除。
@@ -175,6 +205,8 @@ func _on_roster_changed() -> void:
 	for avatar_peer_id in _remote_avatars.keys().duplicate():
 		if not roster_peer_ids.has(avatar_peer_id):
 			_remove_lobby_avatar(int(avatar_peer_id))
+	# 新成员补建；入房成员即使从未进入大厅也在本机大厅拥有常驻化身，未在场时由“菜单中”提示标注。
+	_sync_roster_avatars()
 
 
 func _on_disconnected_from_host(_reason: String) -> void:

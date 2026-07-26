@@ -32,6 +32,10 @@ const SAVE_FILE_NAMES: Array[String] = [
 	"shop_state.json",
 	"stock_market_state.json",
 	"mining_farm_state.json",
+	"hideout_state.json",
+	"insurance_state.json",
+	"bank_state.json",
+	"dispatch_state.json",
 ]
 
 

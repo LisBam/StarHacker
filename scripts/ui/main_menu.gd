@@ -36,6 +36,14 @@ const FORGE_PANEL_SCRIPT: Script = preload("res://scripts/ui/forge_panel.gd")
 const STOCK_MARKET_PANEL_SCRIPT: Script = preload("res://scripts/ui/stock_market_panel.gd")
 ## 矿场面板脚本；默认在主菜单点击矿场按钮后动态创建并读取全局矿场服务。
 const MINING_FARM_PANEL_SCRIPT: Script = preload("res://scripts/ui/mining_farm_panel.gd")
+## 保险面板脚本；默认在主菜单点击保险按钮后动态创建并读取全局保险服务。
+const INSURANCE_PANEL_SCRIPT: Script = preload("res://scripts/ui/insurance_panel.gd")
+## 银行面板脚本；默认在主菜单点击银行按钮后动态创建并读取全局银行服务。
+const BANK_PANEL_SCRIPT: Script = preload("res://scripts/ui/bank_panel.gd")
+## 据点面板脚本；默认在主菜单点击据点按钮后动态创建并读取全局据点服务。
+const HIDEOUT_PANEL_SCRIPT: Script = preload("res://scripts/ui/hideout_panel.gd")
+## 派遣面板脚本；默认在主菜单点击派遣按钮后动态创建并读取全局派遣服务。
+const DISPATCH_PANEL_SCRIPT: Script = preload("res://scripts/ui/dispatch_panel.gd")
 ## 图鉴面板脚本；默认在主菜单点击图鉴按钮后动态创建，并从内容目录和永久库存读取展示与解锁状态。
 const ENCYCLOPEDIA_PANEL_SCRIPT: Script = preload("res://scripts/ui/encyclopedia_panel.gd")
 ## 联机组队面板脚本；默认在主菜单点击联机组队按钮后动态创建，调用 NetworkSession 完成建房、发现、加入与统一开局。
@@ -62,6 +70,14 @@ const LOBBY_ACTION_FORGE: String = "forge"
 const LOBBY_ACTION_STOCK_MARKET: String = "stock_market"
 ## 大厅矿场动作标识；固定 mining_farm，复用主菜单矿场面板。
 const LOBBY_ACTION_MINING_FARM: String = "mining_farm"
+## 大厅保险动作标识；固定 insurance，复用主菜单保险面板。
+const LOBBY_ACTION_INSURANCE: String = "insurance"
+## 大厅银行动作标识；固定 bank，复用主菜单银行面板。
+const LOBBY_ACTION_BANK: String = "bank"
+## 大厅据点动作标识；固定 hideout，复用主菜单据点面板。
+const LOBBY_ACTION_HIDEOUT: String = "hideout"
+## 大厅派遣动作标识；固定 dispatch，复用主菜单派遣面板。
+const LOBBY_ACTION_DISPATCH: String = "dispatch"
 ## 大厅图鉴动作标识；固定 encyclopedia，复用主菜单图鉴面板。
 const LOBBY_ACTION_ENCYCLOPEDIA: String = "encyclopedia"
 ## 大厅联机组队动作标识；固定 multiplayer，复用主菜单联机组队面板。
@@ -105,6 +121,14 @@ const LOBBY_ACTION_QUIT: String = "quit"
 @onready var _stock_market_button: Button = %StockMarketButton
 ## 矿场按钮缓存；默认位于炒股按钮右侧，点击后打开常驻算力资产经营界面。
 @onready var _mining_farm_button: Button = %MiningFarmButton
+## 保险按钮缓存；默认位于矿场按钮右侧，点击后打开骇入保险投保与理赔界面。
+@onready var _insurance_button: Button = %InsuranceButton
+## 银行按钮缓存；默认位于保险按钮右侧，点击后打开活期、定期与贷款界面。
+@onready var _bank_button: Button = %BankButton
+## 据点按钮缓存；默认位于银行按钮右侧，点击后打开据点设施建设界面。
+@onready var _hideout_button: Button = %HideoutButton
+## 派遣按钮缓存；默认位于据点按钮右侧，点击后打开佣兵派遣委托界面。
+@onready var _dispatch_button: Button = %DispatchButton
 ## 图鉴按钮缓存；默认位于主菜单底部功能栏末位，点击后查看武器、装备与资源的永久收集状态。
 ## 怪物图鉴补充；同一入口还会展示按基础内容和扩展包分组的永久怪物遇敌收集状态。
 @onready var _encyclopedia_button: Button = %EncyclopediaButton
@@ -176,6 +200,22 @@ var _stock_market_panel: Control
 var _mining_farm_overlay: Control
 ## 矿场面板实例；关闭后复用，后台收益由独立 Autoload 服务继续低频结算。
 var _mining_farm_panel: Control
+## 保险全屏遮罩；默认运行时创建并隐藏，打开时阻止主菜单其他入口接收输入。
+var _insurance_overlay: Control
+## 保险面板实例；关闭后复用，保单结算由独立 Autoload 服务在战斗结束时自动执行。
+var _insurance_panel: Control
+## 银行全屏遮罩；默认运行时创建并隐藏，打开时阻止主菜单其他入口接收输入。
+var _bank_overlay: Control
+## 银行面板实例；关闭后复用，计息与倒计时由独立 Autoload 服务后台继续推进。
+var _bank_panel: Control
+## 据点全屏遮罩；默认运行时创建并隐藏，打开时阻止主菜单其他入口接收输入。
+var _hideout_overlay: Control
+## 据点面板实例；关闭后复用，建造倒计时由独立 Autoload 服务后台继续推进。
+var _hideout_panel: Control
+## 派遣全屏遮罩；默认运行时创建并隐藏，打开时阻止主菜单其他入口接收输入。
+var _dispatch_overlay: Control
+## 派遣面板实例；关闭后复用，委托倒计时由独立 Autoload 服务后台继续推进。
+var _dispatch_panel: Control
 ## 图鉴全屏遮罩；默认运行时创建并隐藏，显示时阻止主菜单其他入口接收鼠标输入。
 var _encyclopedia_overlay: Control
 ## 图鉴面板实例；关闭后复用，打开时从内容目录重新读取全部条目并同步永久发现状态。
@@ -221,6 +261,10 @@ func _ready() -> void:
 	_forge_button.pressed.connect(_on_forge_button_pressed)
 	_stock_market_button.pressed.connect(_on_stock_market_button_pressed)
 	_mining_farm_button.pressed.connect(_on_mining_farm_button_pressed)
+	_insurance_button.pressed.connect(_on_insurance_button_pressed)
+	_bank_button.pressed.connect(_on_bank_button_pressed)
+	_hideout_button.pressed.connect(_on_hideout_button_pressed)
+	_dispatch_button.pressed.connect(_on_dispatch_button_pressed)
 	_encyclopedia_button.pressed.connect(_on_encyclopedia_button_pressed)
 	_master_volume_slider.value_changed.connect(_on_master_volume_slider_value_changed)
 	_settings_back_button.pressed.connect(_on_settings_back_button_pressed)
@@ -232,6 +276,10 @@ func _ready() -> void:
 	_build_forge_overlay()
 	_build_stock_market_overlay()
 	_build_mining_farm_overlay()
+	_build_insurance_overlay()
+	_build_bank_overlay()
+	_build_hideout_overlay()
+	_build_dispatch_overlay()
 	_build_encyclopedia_overlay()
 	_build_multiplayer_overlay()
 	_build_developer_overlay()
@@ -347,6 +395,14 @@ func perform_lobby_action(action_id: String) -> bool:
 			_on_stock_market_button_pressed()
 		LOBBY_ACTION_MINING_FARM:
 			_on_mining_farm_button_pressed()
+		LOBBY_ACTION_INSURANCE:
+			_on_insurance_button_pressed()
+		LOBBY_ACTION_BANK:
+			_on_bank_button_pressed()
+		LOBBY_ACTION_HIDEOUT:
+			_on_hideout_button_pressed()
+		LOBBY_ACTION_DISPATCH:
+			_on_dispatch_button_pressed()
 		LOBBY_ACTION_ENCYCLOPEDIA:
 			_on_encyclopedia_button_pressed()
 		LOBBY_ACTION_MULTIPLAYER:
@@ -370,6 +426,10 @@ func is_modal_open() -> bool:
 		or (_forge_overlay != null and _forge_overlay.visible)
 		or (_stock_market_overlay != null and _stock_market_overlay.visible)
 		or (_mining_farm_overlay != null and _mining_farm_overlay.visible)
+		or (_insurance_overlay != null and _insurance_overlay.visible)
+		or (_bank_overlay != null and _bank_overlay.visible)
+		or (_hideout_overlay != null and _hideout_overlay.visible)
+		or (_dispatch_overlay != null and _dispatch_overlay.visible)
 		or (_encyclopedia_overlay != null and _encyclopedia_overlay.visible)
 		or (_multiplayer_overlay != null and _multiplayer_overlay.visible)
 		or (_developer_overlay != null and _developer_overlay.visible)
@@ -447,6 +507,42 @@ func _on_mining_farm_button_pressed() -> void:
 	_mining_farm_overlay.visible = true
 	if _mining_farm_panel != null and _mining_farm_panel.has_method("present"):
 		_mining_farm_panel.call("present")
+
+
+func _on_insurance_button_pressed() -> void:
+	if _insurance_overlay == null:
+		return
+	_settings_panel.visible = false
+	_insurance_overlay.visible = true
+	if _insurance_panel != null and _insurance_panel.has_method("refresh"):
+		_insurance_panel.call("refresh")
+
+
+func _on_bank_button_pressed() -> void:
+	if _bank_overlay == null:
+		return
+	_settings_panel.visible = false
+	_bank_overlay.visible = true
+	if _bank_panel != null and _bank_panel.has_method("refresh"):
+		_bank_panel.call("refresh")
+
+
+func _on_hideout_button_pressed() -> void:
+	if _hideout_overlay == null:
+		return
+	_settings_panel.visible = false
+	_hideout_overlay.visible = true
+	if _hideout_panel != null and _hideout_panel.has_method("refresh"):
+		_hideout_panel.call("refresh")
+
+
+func _on_dispatch_button_pressed() -> void:
+	if _dispatch_overlay == null:
+		return
+	_settings_panel.visible = false
+	_dispatch_overlay.visible = true
+	if _dispatch_panel != null and _dispatch_panel.has_method("refresh"):
+		_dispatch_panel.call("refresh")
 
 
 func _on_encyclopedia_button_pressed() -> void:
@@ -687,6 +783,150 @@ func _build_mining_farm_overlay() -> void:
 	mining_farm_overlay.visible = false
 
 
+func _build_insurance_overlay() -> void:
+	if _insurance_overlay != null:
+		return
+	# 保险遮罩；覆盖完整主菜单并拦截输入，关闭时只隐藏界面而不影响保单后台结算。
+	var insurance_overlay: Control = Control.new()
+	insurance_overlay.name = "InsuranceOverlay"
+	insurance_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	insurance_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(insurance_overlay)
+	_insurance_overlay = insurance_overlay
+	# 保险背景遮罩；使用与其他局外面板一致的深色透明层。
+	var insurance_dim: ColorRect = ColorRect.new()
+	insurance_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UI_STYLE_GUIDE.apply_overlay_dim(insurance_dim)
+	insurance_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	insurance_overlay.add_child(insurance_dim)
+	# 保险面板；固定 880×600 像素并由独立组件维护保单卡、统计与记录列表。
+	var insurance_panel: Control = INSURANCE_PANEL_SCRIPT.new() as Control
+	if insurance_panel == null:
+		insurance_overlay.visible = false
+		return
+	insurance_panel.name = "InsurancePanel"
+	insurance_panel.anchor_left = 0.5
+	insurance_panel.anchor_top = 0.5
+	insurance_panel.anchor_right = 0.5
+	insurance_panel.anchor_bottom = 0.5
+	insurance_panel.offset_left = -440.0
+	insurance_panel.offset_top = -300.0
+	insurance_panel.offset_right = 440.0
+	insurance_panel.offset_bottom = 300.0
+	insurance_panel.connect("closed", Callable(self, "_on_insurance_closed"))
+	insurance_overlay.add_child(insurance_panel)
+	_insurance_panel = insurance_panel
+	insurance_overlay.visible = false
+
+
+func _build_bank_overlay() -> void:
+	if _bank_overlay != null:
+		return
+	# 银行遮罩；覆盖完整主菜单并拦截输入，关闭时只隐藏界面而不停止后台计息。
+	var bank_overlay: Control = Control.new()
+	bank_overlay.name = "BankOverlay"
+	bank_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bank_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(bank_overlay)
+	_bank_overlay = bank_overlay
+	# 银行背景遮罩；使用与股市、矿场一致的深色透明层，使金融面板视觉并列。
+	var bank_dim: ColorRect = ColorRect.new()
+	bank_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UI_STYLE_GUIDE.apply_overlay_dim(bank_dim)
+	bank_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	bank_overlay.add_child(bank_dim)
+	# 银行面板；固定 1080×640 像素并由独立组件维护活期、定期与贷款页。
+	var bank_panel: Control = BANK_PANEL_SCRIPT.new() as Control
+	if bank_panel == null:
+		bank_overlay.visible = false
+		return
+	bank_panel.name = "BankPanel"
+	bank_panel.anchor_left = 0.5
+	bank_panel.anchor_top = 0.5
+	bank_panel.anchor_right = 0.5
+	bank_panel.anchor_bottom = 0.5
+	bank_panel.offset_left = -540.0
+	bank_panel.offset_top = -320.0
+	bank_panel.offset_right = 540.0
+	bank_panel.offset_bottom = 320.0
+	bank_panel.connect("closed", Callable(self, "_on_bank_closed"))
+	bank_overlay.add_child(bank_panel)
+	_bank_panel = bank_panel
+	bank_overlay.visible = false
+
+
+func _build_hideout_overlay() -> void:
+	if _hideout_overlay != null:
+		return
+	# 据点遮罩；覆盖完整主菜单并拦截输入，关闭时只隐藏界面而不停止后台建造。
+	var hideout_overlay: Control = Control.new()
+	hideout_overlay.name = "HideoutOverlay"
+	hideout_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hideout_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(hideout_overlay)
+	_hideout_overlay = hideout_overlay
+	# 据点背景遮罩；使用与其他局外面板一致的深色透明层。
+	var hideout_dim: ColorRect = ColorRect.new()
+	hideout_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UI_STYLE_GUIDE.apply_overlay_dim(hideout_dim)
+	hideout_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	hideout_overlay.add_child(hideout_dim)
+	# 据点面板；固定 1080×640 像素并由独立组件维护六座设施卡与建造队列。
+	var hideout_panel: Control = HIDEOUT_PANEL_SCRIPT.new() as Control
+	if hideout_panel == null:
+		hideout_overlay.visible = false
+		return
+	hideout_panel.name = "HideoutPanel"
+	hideout_panel.anchor_left = 0.5
+	hideout_panel.anchor_top = 0.5
+	hideout_panel.anchor_right = 0.5
+	hideout_panel.anchor_bottom = 0.5
+	hideout_panel.offset_left = -540.0
+	hideout_panel.offset_top = -320.0
+	hideout_panel.offset_right = 540.0
+	hideout_panel.offset_bottom = 320.0
+	hideout_panel.connect("closed", Callable(self, "_on_hideout_closed"))
+	hideout_overlay.add_child(hideout_panel)
+	_hideout_panel = hideout_panel
+	hideout_overlay.visible = false
+
+
+func _build_dispatch_overlay() -> void:
+	if _dispatch_overlay != null:
+		return
+	# 派遣遮罩；覆盖完整主菜单并拦截输入，关闭时只隐藏界面而不停止后台委托计时。
+	var dispatch_overlay: Control = Control.new()
+	dispatch_overlay.name = "DispatchOverlay"
+	dispatch_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dispatch_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(dispatch_overlay)
+	_dispatch_overlay = dispatch_overlay
+	# 派遣背景遮罩；使用与其他局外面板一致的深色透明层。
+	var dispatch_dim: ColorRect = ColorRect.new()
+	dispatch_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UI_STYLE_GUIDE.apply_overlay_dim(dispatch_dim)
+	dispatch_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	dispatch_overlay.add_child(dispatch_dim)
+	# 派遣面板；固定 1000×620 像素并由独立组件维护委托卡、角色行与派遣状态。
+	var dispatch_panel: Control = DISPATCH_PANEL_SCRIPT.new() as Control
+	if dispatch_panel == null:
+		dispatch_overlay.visible = false
+		return
+	dispatch_panel.name = "DispatchPanel"
+	dispatch_panel.anchor_left = 0.5
+	dispatch_panel.anchor_top = 0.5
+	dispatch_panel.anchor_right = 0.5
+	dispatch_panel.anchor_bottom = 0.5
+	dispatch_panel.offset_left = -500.0
+	dispatch_panel.offset_top = -310.0
+	dispatch_panel.offset_right = 500.0
+	dispatch_panel.offset_bottom = 310.0
+	dispatch_panel.connect("closed", Callable(self, "_on_dispatch_closed"))
+	dispatch_overlay.add_child(dispatch_panel)
+	_dispatch_panel = dispatch_panel
+	dispatch_overlay.visible = false
+
+
 func _on_multiplayer_button_pressed() -> void:
 	if not lobby_host_mode:
 		# 完整主菜单入口；点击“联机”先进入联机大厅，联机面板由大厅进场流程自动打开。
@@ -828,6 +1068,14 @@ func _open_developer_menu() -> void:
 		_mining_farm_overlay.visible = false
 	if _mining_farm_panel != null and _mining_farm_panel.has_method("_close_panel"):
 		_mining_farm_panel.call("_close_panel")
+	if _insurance_overlay != null:
+		_insurance_overlay.visible = false
+	if _bank_overlay != null:
+		_bank_overlay.visible = false
+	if _hideout_overlay != null:
+		_hideout_overlay.visible = false
+	if _dispatch_overlay != null:
+		_dispatch_overlay.visible = false
 	if _encyclopedia_overlay != null:
 		_encyclopedia_overlay.visible = false
 	_developer_overlay.visible = true
@@ -882,6 +1130,30 @@ func _on_mining_farm_closed() -> void:
 	if _mining_farm_overlay != null:
 		_mining_farm_overlay.visible = false
 	_mining_farm_button.grab_focus()
+
+
+func _on_insurance_closed() -> void:
+	if _insurance_overlay != null:
+		_insurance_overlay.visible = false
+	_insurance_button.grab_focus()
+
+
+func _on_bank_closed() -> void:
+	if _bank_overlay != null:
+		_bank_overlay.visible = false
+	_bank_button.grab_focus()
+
+
+func _on_hideout_closed() -> void:
+	if _hideout_overlay != null:
+		_hideout_overlay.visible = false
+	_hideout_button.grab_focus()
+
+
+func _on_dispatch_closed() -> void:
+	if _dispatch_overlay != null:
+		_dispatch_overlay.visible = false
+	_dispatch_button.grab_focus()
 
 
 func _on_encyclopedia_closed() -> void:

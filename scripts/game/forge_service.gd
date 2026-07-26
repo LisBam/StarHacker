@@ -117,7 +117,8 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 	# 耐久基础费用；只对实际能恢复的耐久收费，超过最大耐久的材料部分不产生费用。
 	var durability_base_cost: float = durability_restored * COST_PER_RESTORED_DURABILITY
 	# 最终费用；耐久与强化石基础费用相加后乘主武器价值倍率并向上取整。
-	var total_cost: int = maxi(ceili((durability_base_cost + float(stone_base_cost)) * cost_multiplier), 1)
+	# 据点折扣补充：精工车间每级降低 2% 总费用，预览与执行共用本公式因此扣款始终一致。
+	var total_cost: int = maxi(ceili((durability_base_cost + float(stone_base_cost)) * cost_multiplier * (1.0 - _get_hideout_forge_discount_ratio())), 1)
 	return {
 		"valid": true,
 		"forge_mode": FORGE_MODE_WEAPON,
@@ -138,6 +139,19 @@ func build_preview(main_entry: Dictionary, sacrifice_entries: Array[Dictionary])
 		"invalid_sacrifice_entries": [],
 		"cost": total_cost,
 	}
+
+
+func _get_hideout_forge_discount_ratio() -> float:
+	## 读取据点精工车间当前的锻造费用折扣比例；据点服务缺失时按无折扣处理，锻造仍可独立运行。
+	# 主循环场景树；锻造服务继承 RefCounted 而非场景节点，必须经引擎主循环访问 AutoLoad 所在根节点。
+	var scene_tree: SceneTree = Engine.get_main_loop() as SceneTree
+	if scene_tree == null or scene_tree.root == null:
+		return 0.0
+	# 据点服务；折扣上限由据点服务自身约束，此处只做非负与不超过 90% 的防御性钳制。
+	var hideout_service: Node = scene_tree.root.get_node_or_null("HideoutService")
+	if hideout_service != null and hideout_service.has_method("get_forge_discount_ratio"):
+		return clampf(float(hideout_service.call("get_forge_discount_ratio")), 0.0, 0.9)
+	return 0.0
 
 
 func execute_forge(main_entry: Dictionary, sacrifice_entries: Array[Dictionary]) -> Dictionary:

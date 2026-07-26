@@ -29,80 +29,108 @@ script = ExtResource("4_lobby_interaction")
 [node name="Interactables" type="Node2D" parent="."]
 
 [node name="CharacterInteractable" parent="Interactables" instance=ExtResource("5_lobby_interactable")]
-position = Vector2(-500, -250)
+position = Vector2(-665, -250)
 action_id = "character"
 display_name = "角色"
 body_color = Color(0.12, 0.08, 0.18, 1)
 border_color = Color(0.62, 0.42, 0.82, 1)
 
 [node name="BackpackInteractable" parent="Interactables" instance=ExtResource("5_lobby_interactable")]
-position = Vector2(-300, -250)
+position = Vector2(-475, -250)
 action_id = "backpack"
 display_name = "背包"
 
 [node name="WarehouseInteractable" parent="Interactables" instance=ExtResource("5_lobby_interactable")]
-position = Vector2(-100, -250)
+position = Vector2(-285, -250)
 action_id = "warehouse"
 display_name = "仓库"
 
 [node name="ShopInteractable" parent="Interactables" instance=ExtResource("5_lobby_interactable")]
-position = Vector2(100, -250)
+position = Vector2(-95, -250)
 action_id = "shop"
 display_name = "商店"
 body_color = Color(0.14, 0.11, 0.05, 1)
 border_color = Color(0.82, 0.64, 0.26, 1)
 
 [node name="ForgeInteractable" parent="Interactables" instance=ExtResource("5_lobby_interactable")]
-position = Vector2(300, -250)
+position = Vector2(95, -250)
 action_id = "forge"
 display_name = "锻造"
 body_color = Color(0.17, 0.07, 0.06, 1)
 border_color = Color(0.78, 0.36, 0.25, 1)
 
+[node name="InsuranceInteractable" parent="Interactables" instance=ExtResource("5_lobby_interactable")]
+position = Vector2(285, -250)
+action_id = "insurance"
+display_name = "保险"
+body_color = Color(0.05, 0.14, 0.12, 1)
+border_color = Color(0.30, 0.82, 0.66, 1)
+
+[node name="BankInteractable" parent="Interactables" instance=ExtResource("5_lobby_interactable")]
+position = Vector2(475, -250)
+action_id = "bank"
+display_name = "银行"
+body_color = Color(0.15, 0.12, 0.04, 1)
+border_color = Color(0.88, 0.72, 0.30, 1)
+
 [node name="EncyclopediaInteractable" parent="Interactables" instance=ExtResource("5_lobby_interactable")]
-position = Vector2(500, -250)
+position = Vector2(665, -250)
 action_id = "encyclopedia"
 display_name = "图鉴"
 body_color = Color(0.07, 0.11, 0.15, 1)
 border_color = Color(0.34, 0.58, 0.78, 1)
 
 [node name="HackInteractable" parent="Interactables" instance=ExtResource("5_lobby_interactable")]
-position = Vector2(-500, 10)
+position = Vector2(-665, 10)
 action_id = "hack"
 display_name = "骇入"
 body_color = Color(0.05, 0.18, 0.11, 1)
 border_color = Color(0.28, 0.88, 0.52, 1)
 
 [node name="TrainingInteractable" parent="Interactables" instance=ExtResource("5_lobby_interactable")]
-position = Vector2(-300, 10)
+position = Vector2(-475, 10)
 action_id = "training"
 display_name = "训练场"
 body_color = Color(0.06, 0.13, 0.19, 1)
 border_color = Color(0.28, 0.68, 0.92, 1)
 
 [node name="SettingsInteractable" parent="Interactables" instance=ExtResource("5_lobby_interactable")]
-position = Vector2(-100, 10)
+position = Vector2(-285, 10)
 action_id = "settings"
 display_name = "设置"
 body_color = Color(0.10, 0.10, 0.11, 1)
 border_color = Color(0.60, 0.64, 0.66, 1)
 
 [node name="StockMarketInteractable" parent="Interactables" instance=ExtResource("5_lobby_interactable")]
-position = Vector2(100, 10)
+position = Vector2(-95, 10)
 action_id = "stock_market"
 display_name = "炒股"
 body_color = Color(0.13, 0.07, 0.16, 1)
 border_color = Color(0.68, 0.38, 0.78, 1)
 
 [node name="MiningFarmInteractable" parent="Interactables" instance=ExtResource("5_lobby_interactable")]
-position = Vector2(300, 10)
+position = Vector2(95, 10)
 action_id = "mining_farm"
 display_name = "矿场"
 body_color = Color(0.14, 0.12, 0.05, 1)
 border_color = Color(0.80, 0.68, 0.28, 1)
 
+[node name="HideoutInteractable" parent="Interactables" instance=ExtResource("5_lobby_interactable")]
+position = Vector2(285, 10)
+action_id = "hideout"
+display_name = "据点"
+body_color = Color(0.13, 0.09, 0.05, 1)
+border_color = Color(0.80, 0.55, 0.30, 1)
+
+[node name="DispatchInteractable" parent="Interactables" instance=ExtResource("5_lobby_interactable")]
+position = Vector2(475, 10)
+action_id = "dispatch"
+display_name = "派遣"
+body_color = Color(0.08, 0.09, 0.17, 1)
+border_color = Color(0.52, 0.58, 0.92, 1)
+
 [node name="QuitInteractable" parent="Interactables" instance=ExtResource("5_lobby_interactable")]
-position = Vector2(500, 10)
+position = Vector2(665, 10)
 action_id = "quit"
 display_name = "退出游戏"
 body_color = Color(0.18, 0.055, 0.07, 1)

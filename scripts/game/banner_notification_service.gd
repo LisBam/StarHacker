@@ -89,11 +89,63 @@ func _connect_business_signals() -> void:
 	var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")
 	if stock_market_service != null and stock_market_service.has_signal("leverage_position_liquidated"):
 		stock_market_service.connect("leverage_position_liquidated", Callable(self, "_on_leverage_position_liquidated"))
+	# 保险服务；死亡理赔到账时提醒玩家赔付金额，避免结算界面之外错过入账。
+	var insurance_service: Node = get_tree().root.get_node_or_null("InsuranceService")
+	if insurance_service != null and insurance_service.has_signal("claim_paid"):
+		insurance_service.connect("claim_paid", Callable(self, "_on_insurance_claim_paid"))
+	# 银行服务；定期存单到期与贷款自动结算都可能发生在玩家没有打开银行面板时。
+	var bank_service: Node = get_tree().root.get_node_or_null("BankService")
+	if bank_service != null and bank_service.has_signal("deposit_matured"):
+		bank_service.connect("deposit_matured", Callable(self, "_on_bank_deposit_matured"))
+	if bank_service != null and bank_service.has_signal("loan_auto_settled"):
+		bank_service.connect("loan_auto_settled", Callable(self, "_on_bank_loan_auto_settled"))
+	# 派遣服务；委托到期自动交付时提醒玩家角色归队与报酬入账。
+	var dispatch_service: Node = get_tree().root.get_node_or_null("DispatchService")
+	if dispatch_service != null and dispatch_service.has_signal("dispatch_completed"):
+		dispatch_service.connect("dispatch_completed", Callable(self, "_on_dispatch_completed"))
+	# 据点服务；设施建成时提醒玩家新等级效果已经生效。
+	var hideout_service: Node = get_tree().root.get_node_or_null("HideoutService")
+	if hideout_service != null and hideout_service.has_signal("construction_completed"):
+		hideout_service.connect("construction_completed", Callable(self, "_on_hideout_construction_completed"))
 
 
 func _on_leverage_position_liquidated(_stock_id: String, message: String) -> void:
 	## 强平回调；把结算说明转成顶部横幅，固定前缀让玩家在任何场景都能第一时间识别风险来源。
 	show_banner("【强平通知】%s" % message)
+
+
+func _on_insurance_claim_paid(_gold_amount: int, message: String) -> void:
+	## 保险理赔回调；死亡赔付到账时用固定前缀提示，与死亡结算界面互不依赖。
+	show_banner("【保险理赔】%s" % message)
+
+
+func _on_bank_deposit_matured(_gold_amount: int, message: String) -> void:
+	## 定期到期回调；本息自动到账时提示，玩家无需守在银行面板等待兑付。
+	show_banner("【银行通知】%s" % message)
+
+
+func _on_bank_loan_auto_settled(message: String, defaulted: bool) -> void:
+	## 贷款自动结算回调；违约使用更醒目的前缀区分正常扣款与信用违约。
+	show_banner("【信用违约】%s" % message if defaulted else "【银行通知】%s" % message)
+
+
+func _on_dispatch_completed(_gold_amount: int, message: String) -> void:
+	## 派遣完成回调；委托交付与角色归队合并为一条横幅提示。
+	show_banner("【派遣归来】%s" % message)
+
+
+func _on_hideout_construction_completed(facility_id: String, new_level: int) -> void:
+	## 据点建成回调；提示设施新等级已生效，具体效果在据点面板查看。
+	# 据点服务；从服务定义中读取设施显示名，保持文案与面板一致。
+	var hideout_service: Node = get_tree().root.get_node_or_null("HideoutService")
+	# 建成设施显示名；服务缺失时使用通用文案兜底。
+	var facility_name: String = "据点设施"
+	if hideout_service != null and hideout_service.has_method("get_facility_definitions"):
+		for definition in hideout_service.call("get_facility_definitions") as Array:
+			if str((definition as Dictionary).get("id", "")) == facility_id:
+				facility_name = str((definition as Dictionary).get("name", "据点设施"))
+				break
+	show_banner("【据点建成】%s 已升级到 Lv.%d，新效果立即生效" % [facility_name, new_level])
 
 
 func _play_banner(message: String) -> void:

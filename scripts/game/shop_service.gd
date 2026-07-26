@@ -271,6 +271,11 @@ func _purchase_entry_from_array(entries: Array[Dictionary], stock_id: String, ch
 		var quantity: int = maxi(int(entry.get("quantity", 1)), 1)
 		# 商品价格；由刷新或失败记录时固定，购买时不重新抽取倍率。
 		var purchase_price: int = maxi(int(entry.get("price", 0)), 0)
+		# 据点折扣补充：补给中转站每级降低 1% 实付价格，挂牌价保持不变，实付按折后价向上取整。
+		var hideout_service: Node = get_tree().root.get_node_or_null("HideoutService")
+		if hideout_service != null and hideout_service.has_method("get_shop_discount_ratio"):
+			# 折后实付价格；折扣比例做非负与不超过 90% 的防御性钳制，最低仍收取 1 星穹。
+			purchase_price = maxi(ceili(float(purchase_price) * (1.0 - clampf(float(hideout_service.call("get_shop_discount_ratio")), 0.0, 0.9))), 1) if purchase_price > 0 else 0
 		if item_resource == null or not bool(_global_inventory.call("purchase_resource_to_warehouse", item_resource, purchase_price, quantity)):
 			return {"success": false, "message": "星穹不足，无法购买该物品"}
 		entries.remove_at(entry_index)

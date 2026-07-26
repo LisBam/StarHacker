@@ -322,6 +322,19 @@ func sell_asset(asset_id: String, quantity: int) -> Dictionary:
 	return {"success": true, "message": "资产出售成功", "asset_id": asset_id, "quantity": quantity, "returned": returned_amount}
 
 
+func deduct_compute_coins(amount: int, _reason: String = "") -> int:
+	## 银行贷款违约抵扣专用接口；直接按可用余额扣除算力币，返回实际扣除数量。
+	## 该接口不经过提现手续费，只允许信誉级联结算等系统级流程调用，普通兑换仍走既有充值与提现入口。
+	if amount <= 0:
+		return 0
+	# 实际扣除数量；请求值与当前余额取小，余额不会因抵扣变为负数。
+	var deducted: int = mini(amount, _balance)
+	if deducted <= 0:
+		return 0
+	_change_balance(-deducted)
+	return deducted
+
+
 func apply_successful_extraction_buff(extracted_value_gold: int) -> void:
 	if extracted_value_gold <= 0:
 		return
@@ -613,8 +626,13 @@ func _settle_offline_income(last_online_unix_time: int) -> void:
 	var raw_offline_seconds: int = int(Time.get_unix_time_from_system()) - last_online_unix_time
 	if raw_offline_seconds <= 0:
 		return
+	# 据点散热机房追加上限；每级 +3600 秒，据点服务缺失时按无加成处理。
+	var hideout_service: Node = get_tree().root.get_node_or_null("HideoutService")
+	# 追加离线上限秒数；由散热机房等级换算，最高 5 小时。
+	var offline_bonus_seconds: int = int(hideout_service.call("get_mining_offline_bonus_seconds")) if hideout_service != null and hideout_service.has_method("get_mining_offline_bonus_seconds") else 0
 	# 有效离线秒数；超过上限的部分不参与补发，保持在线游玩收益始终更高。
-	var capped_offline_seconds: int = mini(raw_offline_seconds, OFFLINE_INCOME_MAX_SECONDS)
+	# 据点加成补充：实际上限为基础 8 小时加散热机房追加时长。
+	var capped_offline_seconds: int = mini(raw_offline_seconds, OFFLINE_INCOME_MAX_SECONDS + maxi(offline_bonus_seconds, 0))
 	# 离线补发收益；按不含临时增益的基础总产出乘折算比例后向下取整。
 	var earned: int = int(floor(float(get_base_production_per_second()) * float(capped_offline_seconds) * OFFLINE_INCOME_RATIO))
 	if earned <= 0:

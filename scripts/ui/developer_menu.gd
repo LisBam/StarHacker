@@ -664,7 +664,9 @@ func _on_clear_stock_holdings_pressed() -> void:
 		return
 	# 清空股数；统计所有股票被移除的总股数，不返还星穹。
 	var cleared_quantity: int = int(_global_inventory.call("clear_stock_holdings"))
-	_status_label.text = "已清空全部持仓，共移除 %d 股，不返还星穹" % cleared_quantity
+	# 清空杠杆仓位数；股市服务同时移除全部杠杆合约且不返还证券币，保证测试后无残留仓位。
+	var cleared_leverage_count: int = int(_stock_market_service.call("clear_leverage_positions")) if _stock_market_service != null and _stock_market_service.has_method("clear_leverage_positions") else 0
+	_status_label.text = "已清空全部持仓，共移除 %d 股与 %d 个杠杆仓位，不返还星穹" % [cleared_quantity, cleared_leverage_count]
 
 
 func _on_infinite_health_toggled(enabled: bool) -> void:

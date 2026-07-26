@@ -10,6 +10,10 @@ signal event_announced(message: String)
 signal market_refreshed(refresh_source: String)
 ## 证券币余额变化信号；充值、提现和股票成交成功后通知股市界面刷新独立账户余额。
 signal securities_balance_changed(balance: float)
+## 杠杆仓位变化信号；开仓、平仓和强制平仓成功后通知股市界面刷新杠杆持仓展示。
+signal leverage_positions_changed
+## 杠杆仓位关闭信号；主动平仓与强制平仓统一携带股票标识和结算说明，供界面显示提示横幅。
+signal leverage_position_closed(stock_id: String, message: String)
 
 ## 股市全局状态存档路径；与商店状态同级独立保存，避免行情字段污染库存物品序列化结构。
 const SAVE_PATH: String = "user://stock_market_state.json"
@@ -17,7 +21,8 @@ const SAVE_PATH: String = "user://stock_market_state.json"
 ## 版本 2 补充；新增大盘、涨跌周期和随机事件的非战斗在线时长双触发进度。
 ## 版本 3 补充；在线触发阈值统一扩大 3 倍，并按原进度比例迁移版本 2 的累计时长与事件目标。
 ## 版本 4 补充；新增支持两位小数的证券币余额，旧存档默认从 0.00 证券币开始。
-const SAVE_VERSION: int = 4
+## 版本 5 补充；新增杠杆合约仓位表，旧存档默认没有任何杠杆仓位。
+const SAVE_VERSION: int = 5
 ## 牛市状态标识；价值中枢和短期情绪默认向正方向倾斜。
 const MARKET_BULL: String = "bull"
 ## 熊市状态标识；价值中枢和短期情绪默认向负方向倾斜。
@@ -32,6 +37,15 @@ const REFRESH_RUNTIME: String = "runtime"
 const REFRESH_DISPLAY: String = "display"
 ## 股票稳定顺序；UI、存档迁移、行为统计和事件目标统一使用该顺序。
 const STOCK_IDS: Array[String] = ["quantum_arms", "astral_defense", "hacker_tech", "frontline_supply", "relic_exploration"]
+## 杠杆做多方向标识；价格上涨时杠杆仓位盈利，下跌时亏损。
+const LEVERAGE_LONG: int = 1
+## 杠杆做空方向标识；价格下跌时杠杆仓位盈利，上涨时亏损。
+const LEVERAGE_SHORT: int = -1
+## 可选杠杆倍数目录；开仓时只能选择该目录内的整数倍率，名义本金等于保证金乘倍数。
+## 高倍扩展补充；新增 10、20、50、100 与 999 极限倍率，倍数越高开仓手续费越高且强平价越贴近开仓价。
+const LEVERAGE_MULTIPLIERS: Array[int] = [2, 3, 5, 10, 20, 50, 100, 999]
+## 单股价格历史保留上限；正式、局外和微行情共用，90 个采样让面板折线覆盖约 1.5 分钟微行情。
+const PRICE_HISTORY_LIMIT: int = 90
 ## 股票静态目录；初始价仅用于首次初始化和极端软上下限，不作为长期强制回归锚点。
 const STOCK_DEFINITIONS: Dictionary = {
 	"quantum_arms": {"name": "量子军备集团", "module": "全品类远程、近战武器", "base_price": 120.0, "volatility": 0.030},
@@ -98,6 +112,12 @@ const EVENT_DEFINITIONS: Array[Dictionary] = [
 @export_range(0.0, 0.20, 0.001) var stock_trade_fee_ratio: float = 0.005
 ## 证券币提现手续费比例；默认提现额的 0.5%，扣费后只把整数部分转为永久星穹，运行时无需动态修改。
 @export_range(0.0, 0.20, 0.001) var securities_withdrawal_fee_ratio: float = 0.005
+## 杠杆合约手续费比例；开仓与平仓均按名义本金的 0.5% 收取，向上保留到 0.01 且最低 0.01 证券币，运行时无需动态修改。
+@export_range(0.0, 0.20, 0.001) var leverage_fee_ratio: float = 0.005
+## 杠杆强制平仓亏损线；默认浮亏达到保证金的 90% 时强制平仓，返还剩余净值并扣除平仓手续费，运行时无需动态修改。
+@export_range(0.50, 1.0, 0.01) var leverage_liquidation_loss_ratio: float = 0.90
+## 杠杆最低开仓保证金；默认 10 证券币整数，防止刷出大量粉尘仓位，运行时无需动态修改。
+@export_range(1, 1000, 1) var leverage_minimum_margin: int = 10
 
 ## 全局库存服务；负责星穹、持仓和正式对局活动状态，缺失时行情仍可独立运行和调试。
 var _global_inventory: Node
@@ -134,6 +154,8 @@ var _display_accumulated_seconds: float = 0.0
 var _market_panel_open: bool = false
 ## 当前证券币余额；默认 0.00，只归股市服务所有，充值、提现和股票成交均保留两位小数。
 var _securities_balance: float = 0.0
+## 杠杆仓位表；键为股票标识，值包含方向、倍数、保证金和开仓价，每只股票最多同时持有一个杠杆仓位。
+var _leverage_positions: Dictionary = {}
 ## 本局行为原始统计；键为通用指标名，值为累计数量或价值，用于正式结算时计算五只股票影响。
 var _run_metrics: Dictionary = {}
 ## 上一帧正式对局活动状态；用于从 GlobalInventory 的无参数状态信号识别开始与完成边界。
@@ -270,6 +292,193 @@ func get_stock_trade_fee_ratio() -> float:
 	return clampf(stock_trade_fee_ratio, 0.0, 1.0)
 
 
+func get_total_securities_assets() -> float:
+	## 返回证券账户总资产；等于证券币余额、现货持仓实时市值与全部杠杆仓位实时净值之和，保留两位小数。
+	# 总资产累计值；从标准化余额开始，逐项叠加两类持仓的实时估值。
+	var total_assets: float = get_securities_balance()
+	for stock_id in STOCK_IDS:
+		# 当前股票实时价格；现货市值与杠杆净值共用同一份两位小数报价。
+		var price: float = get_current_price(stock_id)
+		if _global_inventory != null and _global_inventory.has_method("get_stock_holding"):
+			# 当前股票现货持仓；数量为 0 时不产生市值。
+			var holding: Dictionary = _global_inventory.call("get_stock_holding", stock_id) as Dictionary
+			total_assets += price * float(maxi(int(holding.get("quantity", 0)), 0))
+		if _leverage_positions.has(stock_id):
+			# 当前股票杠杆仓位净值；保证金加浮动盈亏，最低按 0 计入。
+			total_assets += _calculate_leverage_equity(_leverage_positions.get(stock_id) as Dictionary, price)
+	return _normalize_securities_amount(total_assets)
+
+
+func get_leverage_multipliers() -> Array[int]:
+	## 返回可选杠杆倍数目录副本；UI 用于生成倍数选择按钮，不允许外部修改常量目录。
+	return LEVERAGE_MULTIPLIERS.duplicate()
+
+
+func get_leverage_fee_ratio() -> float:
+	## 返回杠杆合约手续费比例；开仓弹窗只用于实时预览，最终费用仍由服务重新计算。
+	return clampf(leverage_fee_ratio, 0.0, 1.0)
+
+
+func get_leverage_liquidation_loss_ratio() -> float:
+	## 返回杠杆强制平仓亏损线；UI 用于预览强平价，实际强平判定仍由服务在每次行情刷新执行。
+	return clampf(leverage_liquidation_loss_ratio, 0.0, 1.0)
+
+
+func get_leverage_minimum_margin() -> int:
+	## 返回杠杆最低开仓保证金；开仓弹窗以该值作为滑条下限，服务在开仓请求中再次复核。
+	return maxi(leverage_minimum_margin, 1)
+
+
+func get_maximum_leverage_margin(leverage: int) -> int:
+	## 返回指定倍数下当前余额可支付的最大整数保证金；保证金加名义本金手续费不得超过证券币余额。
+	# 合法杠杆倍数；目录外的倍数直接返回 0，防止 UI 传入异常倍率。
+	if not leverage in LEVERAGE_MULTIPLIERS:
+		return 0
+	# 当前证券币余额；开仓花费为保证金加开仓手续费。
+	var balance: float = get_securities_balance()
+	# 估算保证金上限；先按含费比例推算，再向下逐一校验实际含费花费，循环次数受手续费进位限制。
+	var estimated_margin: int = maxi(floori(balance / (1.0 + float(leverage) * clampf(leverage_fee_ratio, 0.0, 1.0))), 0)
+	while estimated_margin > 0:
+		# 估算开仓手续费；与最终开仓请求使用同一公式，防止弹窗出现无法成交的上限。
+		var estimated_fee: float = _calculate_securities_fee(float(estimated_margin * leverage), leverage_fee_ratio)
+		if _normalize_securities_amount(float(estimated_margin) + estimated_fee) <= balance + 0.0001:
+			break
+		estimated_margin -= 1
+	return estimated_margin
+
+
+func has_leverage_position(stock_id: String) -> bool:
+	## 返回指定股票当前是否已持有杠杆仓位；每只股票最多同时存在一个杠杆仓位。
+	return _leverage_positions.has(stock_id)
+
+
+func get_leverage_position(stock_id: String) -> Dictionary:
+	## 返回指定股票杠杆仓位的展示快照；包含存档字段和按实时价格计算的盈亏、净值与强平价，无仓位时返回空字典。
+	if not _leverage_positions.has(stock_id):
+		return {}
+	# 仓位存档字段；深复制后附加实时计算字段，外部不能修改服务内存。
+	var position: Dictionary = (_leverage_positions.get(stock_id) as Dictionary).duplicate(true)
+	# 当前实时价格；盈亏、净值和强平判定共用同一份两位小数报价。
+	var price: float = get_current_price(stock_id)
+	position["stock_id"] = stock_id
+	position["current_price"] = price
+	position["notional"] = _normalize_securities_amount(float(position.get("margin", 0.0)) * float(position.get("leverage", 1)))
+	position["profit"] = _calculate_leverage_profit(position, price)
+	position["equity"] = _calculate_leverage_equity(position, price)
+	position["liquidation_price"] = _calculate_leverage_liquidation_price(position)
+	position["direction_name"] = "做多" if int(position.get("direction", LEVERAGE_LONG)) >= 0 else "做空"
+	return position
+
+
+func get_leverage_positions_snapshot() -> Dictionary:
+	## 返回全部杠杆仓位的展示快照表；键为股票标识，值为含实时计算字段的仓位副本，供底部持仓区统一刷新。
+	var snapshot: Dictionary = {}
+	for stock_id in _leverage_positions.keys():
+		snapshot[stock_id] = get_leverage_position(str(stock_id))
+	return snapshot
+
+
+func get_leverage_open_quote(stock_id: String, direction: int, leverage: int, margin: int) -> Dictionary:
+	## 生成杠杆开仓实时报价；只读取行情与余额，返回名义本金、手续费、总花费、预计强平价和可执行状态。
+	if not stock_id in STOCK_IDS or not leverage in LEVERAGE_MULTIPLIERS or margin < get_leverage_minimum_margin() or not direction in [LEVERAGE_LONG, LEVERAGE_SHORT]:
+		return {"valid": false, "executable": false, "message": "杠杆开仓参数无效"}
+	# 当前实时价格；开仓价以点击确认瞬间的实时行情为准。
+	var price: float = get_current_price(stock_id)
+	# 名义本金；保证金乘杠杆倍数，是盈亏和手续费的共同基数。
+	var notional: float = _normalize_securities_amount(float(margin) * float(leverage))
+	# 开仓手续费；按名义本金 0.5% 向上保留到 0.01 且最低 0.01 证券币。
+	var fee: float = _calculate_securities_fee(notional, leverage_fee_ratio)
+	# 开仓总花费；保证金与手续费之和，从证券币余额一次扣除。
+	var total_cost: float = _normalize_securities_amount(float(margin) + fee)
+	# 当前证券币余额；余额不足或该股票已有仓位时报价不可执行。
+	var balance: float = get_securities_balance()
+	# 报价可执行状态；每只股票最多一个杠杆仓位，重复开仓必须先平掉现有仓位。
+	var executable: bool = not _leverage_positions.has(stock_id) and balance + 0.0001 >= total_cost
+	# 不可执行原因；明确提示重复仓位或余额缺口。
+	var message: String = "可以开仓"
+	if _leverage_positions.has(stock_id):
+		message = "该股票已有杠杆仓位，请先平仓"
+	elif not executable:
+		message = "证券币不足，需要 %.2f，当前仅有 %.2f" % [total_cost, balance]
+	return {
+		"valid": true,
+		"executable": executable,
+		"message": message,
+		"price": price,
+		"notional": notional,
+		"fee": fee,
+		"total": total_cost,
+		"liquidation_price": _calculate_leverage_liquidation_price({"direction": direction, "leverage": leverage, "entry_price": price}),
+	}
+
+
+func get_leverage_close_quote(stock_id: String) -> Dictionary:
+	## 生成杠杆平仓实时报价；返回实时盈亏、净值、平仓手续费和最终返还金额，无仓位时不可执行。
+	if not _leverage_positions.has(stock_id):
+		return {"valid": false, "executable": false, "message": "当前没有杠杆仓位"}
+	# 仓位展示快照；已包含按实时价格计算的盈亏与净值。
+	var position: Dictionary = get_leverage_position(stock_id)
+	# 平仓手续费；与开仓同样按名义本金收取，从返还净值中扣除。
+	var fee: float = _calculate_securities_fee(float(position.get("notional", 0.0)), leverage_fee_ratio)
+	# 平仓返还金额；净值扣除手续费后最低为 0，不产生负债。
+	var payout: float = _normalize_securities_amount(maxf(float(position.get("equity", 0.0)) - fee, 0.0))
+	return {
+		"valid": true,
+		"executable": true,
+		"message": "可以平仓",
+		"price": float(position.get("current_price", 0.0)),
+		"profit": float(position.get("profit", 0.0)),
+		"equity": float(position.get("equity", 0.0)),
+		"fee": fee,
+		"total": payout,
+	}
+
+
+func request_leverage_open(stock_id: String, direction: int, leverage: int, margin: int) -> Dictionary:
+	## 执行杠杆开仓；按点击确认瞬间的实时价格建仓，先复核余额与仓位唯一性，成功后立即持久化。
+	# 开仓实时报价；复用报价接口保证校验规则与预览完全一致。
+	var quote: Dictionary = get_leverage_open_quote(stock_id, direction, leverage, margin)
+	if not bool(quote.get("valid", false)):
+		return {"success": false, "message": str(quote.get("message", "无法执行杠杆开仓"))}
+	if not bool(quote.get("executable", false)):
+		return {"success": false, "message": str(quote.get("message", "当前无法开仓"))}
+	_securities_balance = _normalize_securities_amount(_securities_balance - float(quote.get("total", 0.0)))
+	_leverage_positions[stock_id] = {
+		"direction": direction,
+		"leverage": leverage,
+		"margin": float(margin),
+		"entry_price": float(quote.get("price", 0.0)),
+		"opened_settlement_count": _settlement_count,
+	}
+	_save_state()
+	securities_balance_changed.emit(_securities_balance)
+	leverage_positions_changed.emit()
+	# 开仓方向名称；提示消息按方向区分做多与做空。
+	var direction_name: String = "做多" if direction >= 0 else "做空"
+	return {"success": true, "message": "杠杆开仓成功：%d×%s，保证金 %d 证券币" % [leverage, direction_name, margin], "price": float(quote.get("price", 0.0)), "fee": float(quote.get("fee", 0.0)), "total": float(quote.get("total", 0.0))}
+
+
+func request_leverage_close(stock_id: String) -> Dictionary:
+	## 执行主动杠杆平仓；按点击确认瞬间的实时价格结算净值，扣除平仓手续费后返还证券币并立即持久化。
+	if not _leverage_positions.has(stock_id):
+		return {"success": false, "message": "当前没有可平仓的杠杆仓位"}
+	# 平仓结算结果；主动平仓与强制平仓共用同一结算路径，保证费用与净值公式一致。
+	var settlement: Dictionary = _close_leverage_position(stock_id, "平仓")
+	return {"success": true, "message": str(settlement.get("message", "平仓完成")), "profit": float(settlement.get("profit", 0.0)), "total": float(settlement.get("payout", 0.0))}
+
+
+func clear_leverage_positions() -> int:
+	## 开发者调试接口；直接移除全部杠杆仓位且不返还任何证券币，返回被移除的仓位数量。
+	# 被移除仓位数量；用于开发者菜单状态提示。
+	var cleared_count: int = _leverage_positions.size()
+	if cleared_count <= 0:
+		return 0
+	_leverage_positions.clear()
+	_save_state()
+	leverage_positions_changed.emit()
+	return cleared_count
+
+
 func request_securities_deposit(coin_amount: int) -> Dictionary:
 	## 按 1:1 把整数永久星穹充值为证券币；星穹扣除失败时证券币余额保持不变。
 	if coin_amount <= 0 or _global_inventory == null or not _global_inventory.has_method("spend_coins"):
@@ -321,7 +530,16 @@ func get_maximum_buy_quantity(stock_id: String) -> int:
 	if price <= 0.0 or coins <= 0.0:
 		return 0
 	# 初始数量估算；先按不含手续费的整股数量计算，再向下校验含费实际花费。
-	var estimated_quantity: int = maxi(floori(coins / price), 0)
+	# 常数化估算补充；现改为直接按含费单价推算下界，再向上试探修正，避免大额余额时从无费上限逐一递减的长循环。
+	var estimated_quantity: int = maxi(floori(coins / (price * (1.0 + clampf(stock_trade_fee_ratio, 0.0, 1.0)))), 0)
+	while estimated_quantity + 1 <= floori(coins / price):
+		# 向上试探总额；检查再多买一股是否仍可支付，手续费进位使该循环最多前进一到两次。
+		var next_gross: float = _normalize_securities_amount(price * (estimated_quantity + 1))
+		# 向上试探手续费；与最终买入请求使用同一公式，防止数量弹窗出现无法成交的上限。
+		var next_fee: float = _calculate_securities_fee(next_gross, stock_trade_fee_ratio)
+		if _normalize_securities_amount(next_gross + next_fee) > coins + 0.0001:
+			break
+		estimated_quantity += 1
 	while estimated_quantity > 0:
 		# 估算总额；手续费按总成交额 0.5% 向上取整且最低 1 星穹。
 		# 证券币手续费规则；旧整数说明仅保留历史注释兼容，手续费向上保留至 0.01 证券币且最低 0.01。
@@ -423,9 +641,13 @@ func request_sell(stock_id: String, quantity: int, quoted_price: int = -1) -> Di
 	# 卖出实际所得；向下取整且最低 1 星穹。
 	# 证券币卖出所得；旧整数说明仅保留历史注释兼容，成交额扣除两位小数手续费后最低为 0.01 证券币。
 	var proceeds: float = maxf(_normalize_securities_amount(gross - fee), 0.01)
+	# 卖出前加权平均成本；含历史买入手续费，用于计算本次卖出的已实现盈亏提示。
+	var average_cost: float = float((_global_inventory.call("get_stock_holding", stock_id) as Dictionary).get("average_cost", 0.0)) if _global_inventory.has_method("get_stock_holding") else 0.0
 	# 卖出结果；库存服务会再次校验持仓数量并实时增加永久星穹。
 	# 证券币结算规则；旧星穹说明仅保留历史注释兼容，持仓扣除成功后才增加股市独立账户余额。
 	var success: bool = bool(_global_inventory.call("remove_stock_holding_without_currency", stock_id, quantity))
+	# 本次已实现盈亏；实际到手所得减去按加权成本折算的持仓成本，成本缺失时按 0 展示。
+	var realized_profit: float = snappedf(proceeds - average_cost * float(quantity), 0.01) if average_cost > 0.0 else 0.0
 	if success:
 		_securities_balance = _normalize_securities_amount(_securities_balance + proceeds)
 		# 持仓立即保存；与下方证券币状态同一次成功路径落盘，缩短跨文件交易状态的不一致窗口。
@@ -433,7 +655,9 @@ func request_sell(stock_id: String, quantity: int, quoted_price: int = -1) -> Di
 			_global_inventory.call("flush_stock_holdings_save")
 		_save_state()
 		securities_balance_changed.emit(_securities_balance)
-	return {"success": success, "message": "卖出成功" if success else "持仓数量不足", "quantity": quantity, "price": price, "fee": fee, "total": proceeds}
+	# 卖出成功提示；附带按含费加权成本计算的本次已实现盈亏，帮助玩家直接确认这笔交易的赚亏。
+	var success_message: String = "卖出成功，盈亏 %+.2f 证券币" % realized_profit if average_cost > 0.0 else "卖出成功"
+	return {"success": success, "message": success_message if success else "持仓数量不足", "quantity": quantity, "price": price, "fee": fee, "total": proceeds, "realized_profit": realized_profit}
 
 
 func refresh_market(refresh_source: String = REFRESH_SETTLEMENT) -> void:
@@ -450,6 +674,8 @@ func refresh_market(refresh_source: String = REFRESH_SETTLEMENT) -> void:
 		_update_market_cycles_before_refresh()
 	for stock_id in STOCK_IDS:
 		_refresh_stock(stock_id, refresh_source, float(behavior_impacts.get(stock_id, 0.0)))
+	# 杠杆强平检查；任意刷新来源改价后立即判定，强制平仓在结算路径内自行保存并广播信号。
+	_check_leverage_liquidations()
 	if not is_display_refresh:
 		_consume_event_duration(refresh_source)
 	if is_settlement:
@@ -627,9 +853,10 @@ func _refresh_stock(stock_id: String, refresh_source: String, player_impact: flo
 		state["last_player_contribution_ratio"] = clampf(absf(player_impact * 0.15) / absf(actual_change_ratio), 0.0, 1.0) if is_settlement and not is_zero_approx(actual_change_ratio) else 0.0
 		state["next_drift_probability"] = drift_probability
 	# 最近价格历史；保留两位小数后追加并只保留最近 30 次刷新，使每秒微行情能在折线中清晰呈现。
+	# 历史扩容补充；保留上限现由 PRICE_HISTORY_LIMIT 统一为 90 个采样，让折线覆盖约 1.5 分钟微行情走势。
 	var history: Array = state.get("history", []) as Array
 	history.append(maxf(snappedf(new_price, 0.01), 0.01))
-	while history.size() > 30:
+	while history.size() > PRICE_HISTORY_LIMIT:
 		history.remove_at(0)
 	state["history"] = history
 	_stock_states[stock_id] = state
@@ -914,6 +1141,83 @@ func _normalize_securities_amount(amount: float) -> float:
 	return maxf(snappedf(amount, 0.01), 0.0)
 
 
+func _calculate_leverage_profit(position: Dictionary, current_price: float) -> float:
+	## 计算杠杆仓位浮动盈亏；等于方向乘价格变化率乘名义本金，做多涨盈利、做空跌盈利，保留两位小数。
+	# 仓位开仓价；异常为零时按无盈亏处理，避免除零。
+	var entry_price: float = float(position.get("entry_price", 0.0))
+	if entry_price <= 0.0:
+		return 0.0
+	# 仓位名义本金；保证金乘杠杆倍数，开仓后固定不随价格变化。
+	var notional: float = float(position.get("margin", 0.0)) * float(position.get("leverage", 1))
+	# 仓位方向；正数做多、负数做空，异常值按做多处理。
+	var direction: float = -1.0 if int(position.get("direction", LEVERAGE_LONG)) < 0 else 1.0
+	return snappedf(direction * (current_price / entry_price - 1.0) * notional, 0.01)
+
+
+func _calculate_leverage_equity(position: Dictionary, current_price: float) -> float:
+	## 计算杠杆仓位实时净值；等于保证金加浮动盈亏，最低为 0，代表爆仓后不产生负债。
+	return maxf(snappedf(float(position.get("margin", 0.0)) + _calculate_leverage_profit(position, current_price), 0.01), 0.0)
+
+
+func _calculate_leverage_liquidation_price(position: Dictionary) -> float:
+	## 计算杠杆仓位理论强平价；亏损达到保证金乘强平亏损线时的价格，做多低于开仓价、做空高于开仓价。
+	# 仓位开仓价；异常为零时返回 0 表示无有效强平价。
+	var entry_price: float = float(position.get("entry_price", 0.0))
+	# 仓位杠杆倍数；至少为 1，倍数越高强平价越贴近开仓价。
+	var leverage: float = maxf(float(position.get("leverage", 1)), 1.0)
+	if entry_price <= 0.0:
+		return 0.0
+	# 强平触发的价格变化率；等于强平亏损线除以杠杆倍数。
+	var trigger_change_ratio: float = clampf(leverage_liquidation_loss_ratio, 0.0, 1.0) / leverage
+	# 仓位方向；做多时价格下跌触发，做空时价格上涨触发。
+	var direction: float = -1.0 if int(position.get("direction", LEVERAGE_LONG)) < 0 else 1.0
+	return maxf(snappedf(entry_price * (1.0 - direction * trigger_change_ratio), 0.01), 0.0)
+
+
+func _close_leverage_position(stock_id: String, action_label: String) -> Dictionary:
+	## 统一执行杠杆仓位结算；主动平仓与强制平仓共用，按实时价格计算净值、扣除平仓手续费、返还证券币并立即持久化。
+	# 待结算仓位；调用方必须先确认仓位存在。
+	var position: Dictionary = _leverage_positions.get(stock_id, {}) as Dictionary
+	# 结算实时价格；与玩家界面展示同源的两位小数报价。
+	var settle_price: float = get_current_price(stock_id)
+	# 结算浮动盈亏；正值盈利、负值亏损，仅用于提示消息与结果返回。
+	var profit: float = _calculate_leverage_profit(position, settle_price)
+	# 结算净值；保证金加盈亏且最低为 0。
+	var equity: float = _calculate_leverage_equity(position, settle_price)
+	# 平仓手续费；按名义本金收取，与开仓手续费同一公式。
+	var fee: float = _calculate_securities_fee(float(position.get("margin", 0.0)) * float(position.get("leverage", 1)), leverage_fee_ratio)
+	# 最终返还金额；净值扣除手续费后最低为 0，爆仓不产生负债。
+	var payout: float = _normalize_securities_amount(maxf(equity - fee, 0.0))
+	_leverage_positions.erase(stock_id)
+	_securities_balance = _normalize_securities_amount(_securities_balance + payout)
+	_save_state()
+	# 结算股票定义；提示消息使用玩家可读的股票名称。
+	var definition: Dictionary = STOCK_DEFINITIONS.get(stock_id, {}) as Dictionary
+	# 结算提示消息；统一说明动作、盈亏和返还金额。
+	var message: String = "%s%s：盈亏 %+.2f，返还 %.2f 证券币" % [str(definition.get("name", "股票")), action_label, profit, payout]
+	securities_balance_changed.emit(_securities_balance)
+	leverage_positions_changed.emit()
+	leverage_position_closed.emit(stock_id, message)
+	return {"message": message, "profit": profit, "payout": payout}
+
+
+func _check_leverage_liquidations() -> void:
+	## 检查全部杠杆仓位的强平条件；任意来源的行情刷新后调用，浮亏达到保证金乘强平亏损线时立即强制平仓。
+	if _leverage_positions.is_empty():
+		return
+	# 待检查股票列表；先复制键避免遍历期间移除仓位破坏迭代。
+	var position_stock_ids: Array = _leverage_positions.keys().duplicate()
+	for stock_id in position_stock_ids:
+		# 当前检查仓位；强平判定与展示共用同一净值公式。
+		var position: Dictionary = _leverage_positions.get(stock_id, {}) as Dictionary
+		# 当前实时净值；净值跌破保留线时触发强制平仓。
+		var equity: float = _calculate_leverage_equity(position, get_current_price(str(stock_id)))
+		# 净值保留线；保证金乘（1 - 强平亏损线），默认保证金的 10%。
+		var equity_floor: float = float(position.get("margin", 0.0)) * (1.0 - clampf(leverage_liquidation_loss_ratio, 0.0, 1.0))
+		if equity <= equity_floor + 0.0001:
+			_close_leverage_position(str(stock_id), "强制平仓")
+
+
 func _calculate_securities_fee(gross: float, fee_ratio: float) -> float:
 	## 计算证券币手续费；正成交额按比例向上保留到 0.01，最低收取 0.01 证券币。
 	if gross <= 0.0:
@@ -939,6 +1243,7 @@ func _save_state() -> void:
 		"active_event": _active_event,
 		"runtime_accumulated_seconds": _runtime_accumulated_seconds,
 		"securities_balance": _normalize_securities_amount(_securities_balance),
+		"leverage_positions": _leverage_positions,
 		"stock_states": _stock_states,
 	}
 	# 股市存档文件；打开失败时保留内存状态并等待下一次刷新重试。
@@ -965,6 +1270,32 @@ func _load_state() -> bool:
 	# var saved_version: int = maxi(int(save_data.get("version", 1)), 1)
 	# 证券币余额；版本 3 及更旧存档没有该字段，升级时从 0.00 开始且不自动搬运永久星穹。
 	_securities_balance = _normalize_securities_amount(float(save_data.get("securities_balance", 0.0)))
+	# 原始杠杆仓位表；版本 4 及更旧存档没有该字段，默认按无杠杆仓位处理。
+	var raw_leverage_positions: Variant = save_data.get("leverage_positions", {})
+	_leverage_positions.clear()
+	if raw_leverage_positions is Dictionary:
+		for leverage_stock_id in STOCK_IDS:
+			# 单股原始杠杆仓位；只恢复字段完整且保证金与开仓价为正数的合法仓位。
+			var raw_position: Variant = (raw_leverage_positions as Dictionary).get(leverage_stock_id)
+			if not (raw_position is Dictionary):
+				continue
+			# 原始仓位字典；逐字段标准化，异常倍数或方向的仓位直接丢弃。
+			var position_data: Dictionary = raw_position as Dictionary
+			# 恢复的杠杆倍数；必须命中可选倍数目录。
+			var restored_leverage: int = int(position_data.get("leverage", 0))
+			# 恢复的保证金；必须为正数。
+			var restored_margin: float = float(position_data.get("margin", 0.0))
+			# 恢复的开仓价；必须为正数。
+			var restored_entry_price: float = float(position_data.get("entry_price", 0.0))
+			if not restored_leverage in LEVERAGE_MULTIPLIERS or restored_margin <= 0.0 or restored_entry_price <= 0.0:
+				continue
+			_leverage_positions[leverage_stock_id] = {
+				"direction": LEVERAGE_SHORT if int(position_data.get("direction", LEVERAGE_LONG)) < 0 else LEVERAGE_LONG,
+				"leverage": restored_leverage,
+				"margin": restored_margin,
+				"entry_price": restored_entry_price,
+				"opened_settlement_count": maxi(int(position_data.get("opened_settlement_count", 0)), 0),
+			}
 	_market_state = str(save_data.get("market_state", MARKET_SIDEWAYS))
 	if not _market_state in [MARKET_BULL, MARKET_BEAR, MARKET_SIDEWAYS]:
 		_market_state = MARKET_SIDEWAYS

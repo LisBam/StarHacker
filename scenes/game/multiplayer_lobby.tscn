@@ -1,0 +1,65 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/game/multiplayer_lobby_world.gd" id="1_multiplayer_lobby_world"]
+[ext_resource type="PackedScene" path="res://scenes/characters/player.tscn" id="2_player"]
+[ext_resource type="Script" path="res://scripts/components/selected_character_runtime_component.gd" id="3_selected_character_runtime"]
+[ext_resource type="PackedScene" path="res://scenes/ui/lobby_hud.tscn" id="4_lobby_hud"]
+[ext_resource type="PackedScene" path="res://scenes/ui/main_menu.tscn" id="5_main_menu"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_horizontal_boundary"]
+size = Vector2(1600, 40)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_vertical_boundary"]
+size = Vector2(40, 1000)
+
+[node name="MultiplayerLobby" type="Node2D"]
+script = ExtResource("1_multiplayer_lobby_world")
+
+[node name="Player" parent="." instance=ExtResource("2_player")]
+position = Vector2(0, 0)
+
+[node name="SelectedCharacterRuntimeComponent" type="Node" parent="."]
+script = ExtResource("3_selected_character_runtime")
+
+[node name="Boundaries" type="Node2D" parent="."]
+
+[node name="TopBoundary" type="StaticBody2D" parent="Boundaries" groups=["environment_obstacles"]]
+position = Vector2(0, -500)
+collision_layer = 16
+collision_mask = 0
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Boundaries/TopBoundary"]
+shape = SubResource("RectangleShape2D_horizontal_boundary")
+
+[node name="BottomBoundary" type="StaticBody2D" parent="Boundaries" groups=["environment_obstacles"]]
+position = Vector2(0, 500)
+collision_layer = 16
+collision_mask = 0
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Boundaries/BottomBoundary"]
+shape = SubResource("RectangleShape2D_horizontal_boundary")
+
+[node name="LeftBoundary" type="StaticBody2D" parent="Boundaries" groups=["environment_obstacles"]]
+position = Vector2(-800, 0)
+collision_layer = 16
+collision_mask = 0
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Boundaries/LeftBoundary"]
+shape = SubResource("RectangleShape2D_vertical_boundary")
+
+[node name="RightBoundary" type="StaticBody2D" parent="Boundaries" groups=["environment_obstacles"]]
+position = Vector2(800, 0)
+collision_layer = 16
+collision_mask = 0
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Boundaries/RightBoundary"]
+shape = SubResource("RectangleShape2D_vertical_boundary")
+
+[node name="LobbyHud" parent="." instance=ExtResource("4_lobby_hud")]
+show_network_settings_button = true
+
+[node name="MainMenuLayer" type="CanvasLayer" parent="."]
+layer = 20
+
+[node name="MainMenuPanelHost" parent="MainMenuLayer" instance=ExtResource("5_main_menu")]
+lobby_host_mode = true

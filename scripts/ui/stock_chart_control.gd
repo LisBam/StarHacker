@@ -3,6 +3,7 @@ class_name StockChartControl
 
 ## 股票折线图只负责把价格历史绘制为透明深色行情区域，不读取服务或处理交易。
 ## 宿主通过 configure_history() 传入最多 30 个价格，控件会自动归一化并保留上下边距。
+## 历史扩容补充；服务侧历史上限已统一为 90 个采样，本控件按传入数组长度自适应绘制，不限制具体数量。
 
 ## 全局窗口样式指南；行情图底板随当前 UI 风格取色，红绿白折线保持涨跌语义不受影响。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")

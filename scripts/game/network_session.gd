@@ -64,6 +64,9 @@ var _combat_session_active: bool = false
 var _shared_map_seed: int = 0
 ## 当前联机战斗模式；取值为 COMBAT_MODE_TEAM 或 COMBAT_MODE_BATTLE_ROYALE，由主机选择并同步给全体成员，开局指令再次携带确保一致。
 var _session_combat_mode: String = COMBAT_MODE_TEAM
+## 当前联机骇入模式；取值为 HackModeRules 定义的 standard、bare 或 overclock，由主机选择并同步给全体成员。
+## 与多人模式（组队/对抗）为两个独立维度；开局指令再次携带该值作为最终权威，成员各自写入 SessionState。
+var _session_hack_variant: String = HackModeRules.VARIANT_STANDARD
 ## 主机侧房间发现监听套接字；仅主机绑定发现端口，收到探测请求后回复房间信息。
 var _discovery_server_socket: PacketPeerUDP = null
 ## 客户端房间探测套接字；仅发现模式开启时存在，负责广播探测与接收回复。
@@ -160,6 +163,7 @@ func _reset_session_state() -> void:
 	_combat_session_active = false
 	_shared_map_seed = 0
 	_session_combat_mode = COMBAT_MODE_TEAM
+	_session_hack_variant = HackModeRules.VARIANT_STANDARD
 	_roster.clear()
 
 
@@ -206,6 +210,33 @@ func _rpc_sync_combat_mode(combat_mode: String) -> void:
 	## 客户端接收主机的联机战斗模式；同步后刷新界面提示。
 	_session_combat_mode = COMBAT_MODE_BATTLE_ROYALE if combat_mode == COMBAT_MODE_BATTLE_ROYALE else COMBAT_MODE_TEAM
 	session_state_changed.emit()
+
+
+func set_session_hack_variant(hack_variant: String) -> void:
+	## 主机切换联机骇入模式（标准/零装/超频）；变化会清空全员准备状态并同步全员，客户端调用无效。
+	if _session_state != SESSION_STATE_HOSTING or _combat_session_active:
+		return
+	# 规范化骇入模式标识；未知取值一律回退标准骇入。
+	var resolved_hack_variant: String = HackModeRules.normalize_variant(hack_variant)
+	if resolved_hack_variant == _session_hack_variant:
+		return
+	_session_hack_variant = resolved_hack_variant
+	_set_all_ready_false()
+	_rpc_sync_hack_variant.rpc(resolved_hack_variant)
+	_broadcast_roster()
+	session_state_changed.emit()
+
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_sync_hack_variant(hack_variant: String) -> void:
+	## 客户端接收主机的联机骇入模式；同步后刷新界面提示。
+	_session_hack_variant = HackModeRules.normalize_variant(hack_variant)
+	session_state_changed.emit()
+
+
+func get_session_hack_variant() -> String:
+	## 返回当前联机骇入模式标识；联机面板下拉框与开局流程共用该查询。
+	return _session_hack_variant
 
 
 func get_session_combat_mode() -> String:
@@ -279,6 +310,8 @@ func _rpc_submit_profile(profile: Dictionary) -> void:
 	_broadcast_roster()
 	if is_new_member:
 		_rpc_sync_combat_mode.rpc_id(sender_peer_id, _session_combat_mode)
+		# 新成员骇入模式补发；保证晚加入者的骇入模式下拉框与主机当前选择一致。
+		_rpc_sync_hack_variant.rpc_id(sender_peer_id, _session_hack_variant)
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -302,24 +335,28 @@ func request_start_combat() -> bool:
 		return false
 	# 共享地图种子；取非零随机整数，全员用同一种子复现地图、宝箱与物资撤离点。
 	var shared_seed: int = int(randi()) | 1
-	_rpc_begin_combat.rpc(shared_seed, _session_combat_mode)
-	_rpc_begin_combat(shared_seed, _session_combat_mode)
+	_rpc_begin_combat.rpc(shared_seed, _session_combat_mode, _session_hack_variant)
+	_rpc_begin_combat(shared_seed, _session_combat_mode, _session_hack_variant)
 	return true
 
 
 @rpc("authority", "call_remote", "reliable")
-func _rpc_begin_combat(shared_seed: int, combat_mode: String) -> void:
+func _rpc_begin_combat(shared_seed: int, combat_mode: String, hack_variant: String = "standard") -> void:
 	## 接收主机统一开局指令；写入共享种子、战斗模式与骇入模式后经全局过渡切入战斗场景。
 	if _is_local_scene_busy():
 		return
 	_shared_map_seed = shared_seed
 	_session_combat_mode = COMBAT_MODE_BATTLE_ROYALE if combat_mode == COMBAT_MODE_BATTLE_ROYALE else COMBAT_MODE_TEAM
+	# 开局骇入模式；开局指令携带的值为最终权威，防止同步消息与开局指令乱序导致模式不一致。
+	_session_hack_variant = HackModeRules.normalize_variant(hack_variant)
 	_combat_session_active = true
 	_set_all_ready_false()
-	# 会话状态服务；开局统一写入正式骇入模式，当前角色保持各自选择。
+	# 会话状态服务；开局统一写入正式骇入模式与主机选择的骇入模式变体，当前角色保持各自选择。
 	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
 	if session_state != null and session_state.has_method("set_game_mode"):
 		session_state.call("set_game_mode", GAME_MODE_HACK)
+	if session_state != null and session_state.has_method("set_hack_variant"):
+		session_state.call("set_hack_variant", _session_hack_variant)
 	combat_session_started.emit()
 	roster_changed.emit()
 	# 全局场景过渡服务；与单机入口使用同一 0.3 秒黑屏过渡进入战斗。
@@ -465,6 +502,7 @@ func _poll_discovery_server() -> void:
 			"max_players": MAX_PLAYERS,
 			"in_combat": _combat_session_active,
 			"mode": _session_combat_mode,
+			"hack_variant": _session_hack_variant,
 		}
 		_discovery_server_socket.set_dest_address(request_ip, request_port)
 		_discovery_server_socket.put_packet(JSON.stringify(reply_payload).to_utf8_buffer())
@@ -501,6 +539,8 @@ func _poll_discovery_client(delta: float) -> void:
 			"max_players": int(reply_payload.get("max_players", MAX_PLAYERS)),
 			"version": int(reply_payload.get("version", 0)),
 			"in_combat": bool(reply_payload.get("in_combat", false)),
+			"mode": str(reply_payload.get("mode", COMBAT_MODE_TEAM)),
+			"hack_variant": HackModeRules.normalize_variant(str(reply_payload.get("hack_variant", HackModeRules.VARIANT_STANDARD))),
 			"last_seen": Time.get_ticks_msec() * 0.001,
 		}
 		rooms_changed = true

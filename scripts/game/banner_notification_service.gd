@@ -110,6 +110,10 @@ func _connect_business_signals() -> void:
 	var hideout_service: Node = get_tree().root.get_node_or_null("HideoutService")
 	if hideout_service != null and hideout_service.has_signal("construction_completed"):
 		hideout_service.connect("construction_completed", Callable(self, "_on_hideout_construction_completed"))
+	# 悬赏服务；悬赏达成常发生在战斗内，横幅保证玩家不打开悬赏面板也能第一时间知晓奖励到账。
+	var bounty_service: Node = get_tree().root.get_node_or_null("BountyService")
+	if bounty_service != null and bounty_service.has_signal("bounty_completed"):
+		bounty_service.connect("bounty_completed", Callable(self, "_on_bounty_completed"))
 
 
 func _on_leverage_position_liquidated(_stock_id: String, message: String) -> void:
@@ -140,6 +144,11 @@ func _on_bank_loan_auto_settled(message: String, defaulted: bool) -> void:
 func _on_dispatch_completed(_gold_amount: int, message: String) -> void:
 	## 派遣完成回调；委托交付与角色归队合并为一条横幅提示。
 	show_banner("【派遣归来】%s" % message)
+
+
+func _on_bounty_completed(bounty_title: String, reward_text: String) -> void:
+	## 悬赏完成回调；固定“悬赏完成”前缀播报标题与奖励结果，与悬赏面板展示文案一致。
+	show_banner("【悬赏完成】%s：%s" % [bounty_title, reward_text])
 
 
 func _on_hideout_construction_completed(facility_id: String, new_level: int) -> void:

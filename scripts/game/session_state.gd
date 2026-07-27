@@ -10,6 +10,12 @@ signal character_unlocked(character_id: String, content_pack_id: String)
 const MODE_HACK: String = "hack"
 ## 训练场模式标识；默认用于训练入口，修改会影响训练场设置是否显示。
 const MODE_TRAINING: String = "training"
+## 标准骇入变体标识；与 HackModeRules.VARIANT_STANDARD 保持一致，为骇入模式选择的默认项。
+const HACK_VARIANT_STANDARD: String = "standard"
+## 零装骇入变体标识；与 HackModeRules.VARIANT_BARE 保持一致，空背包空装备入场的战斗模式。
+const HACK_VARIANT_BARE: String = "bare"
+## 超频骇入变体标识；与 HackModeRules.VARIANT_OVERCLOCK 保持一致，不产出结算的娱乐模式。
+const HACK_VARIANT_OVERCLOCK: String = "overclock"
 ## 星角色标识；默认用于主菜单角色选择和占位属性随机。
 const CHARACTER_STELLE: String = "stelle"
 ## 穹角色标识；默认用于主菜单角色选择和占位属性随机。
@@ -23,6 +29,9 @@ const CHARACTER_UNLOCK_SAVE_VERSION: int = 2
 
 ## 当前游戏模式；取值为 hack 或 training，默认 hack 保证直接进游戏时不会打开训练场设置。
 var game_mode: String = MODE_HACK
+## 当前骇入模式变体；取值为 standard、bare 或 overclock，仅在 game_mode 为 hack 时生效。
+## 仅运行期有效不写入存档；主菜单模式选择、训练场入口与联机统一开局都会显式写入该值。
+var hack_variant: String = HACK_VARIANT_STANDARD
 ## 当前选择角色；取值为 stelle、caelus 或 silver_wolf，默认 stelle 作为未选择时的兜底角色。
 var selected_character_id: String = CHARACTER_STELLE
 ## 已解锁角色标识；启动时合并角色档案中的默认解锁项与存档项，运行时只允许通过 unlock_character 增加。
@@ -117,6 +126,38 @@ func get_unlocked_content_pack_ids() -> Array[String]:
 	return unlocked_pack_ids
 
 
+func set_hack_variant(next_hack_variant: String) -> void:
+	## 写入当前骇入模式变体；未知取值回退标准骇入，训练场入口应显式传入标准值避免残留上一局变体。
+	hack_variant = normalize_hack_variant(next_hack_variant)
+
+
+func get_hack_variant() -> String:
+	## 返回当前骇入模式变体；训练场模式下变体不参与任何规则判定，调用方按需先检查 game_mode。
+	return hack_variant
+
+
+func normalize_hack_variant(value: String) -> String:
+	## 规范化骇入模式变体；与 HackModeRules.normalize_variant 语义一致，未知取值回退标准骇入。
+	if value == HACK_VARIANT_BARE or value == HACK_VARIANT_OVERCLOCK:
+		return value
+	return HACK_VARIANT_STANDARD
+
+
+func is_bare_hack_variant() -> bool:
+	## 返回当前是否为零装骇入；仅正式骇入模式下有效，训练场恒为 false。
+	return game_mode == MODE_HACK and hack_variant == HACK_VARIANT_BARE
+
+
+func is_overclock_hack_variant() -> bool:
+	## 返回当前是否为超频骇入；仅正式骇入模式下有效，训练场恒为 false。
+	return game_mode == MODE_HACK and hack_variant == HACK_VARIANT_OVERCLOCK
+
+
+func is_item_settlement_disabled() -> bool:
+	## 返回当前会话是否不产出物品得失结算；训练场与超频骇入（娱乐模式）都返回 true。
+	return game_mode == MODE_TRAINING or is_overclock_hack_variant()
+
+
 func is_training_mode() -> bool:
 	return game_mode == MODE_TRAINING
 
@@ -132,6 +173,10 @@ func get_selected_character_name() -> String:
 func get_game_mode_label() -> String:
 	if game_mode == MODE_TRAINING:
 		return "训练场"
+	if hack_variant == HACK_VARIANT_BARE:
+		return "零装骇入"
+	if hack_variant == HACK_VARIANT_OVERCLOCK:
+		return "超频骇入"
 
 	return "骇入"
 

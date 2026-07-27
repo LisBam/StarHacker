@@ -6,14 +6,14 @@
 
 | 入口 | 实现 | 职责 |
 | --- | --- | --- |
-| 主菜单 | `res://scenes/ui/main_menu.tscn`、`res://scripts/ui/main_menu.gd` | 项目主场景；打开角色、图鉴、背包、仓库、商店、锻造、股市、矿场、保险、银行、据点、派遣及模式入口；同一场景可作为大厅局外面板宿主 |
+| 主菜单 | `res://scenes/ui/main_menu.tscn`、`res://scripts/ui/main_menu.gd` | 项目主场景；打开角色、图鉴、背包、仓库、商店、锻造、股市、矿场、保险、银行、据点、派遣、悬赏、统计及模式入口；点击“骇入”先打开骇入模式选择面板（标准/零装/超频，规则表见 `HackModeRules`）；同一场景可作为大厅局外面板宿主 |
 | 主大厅 | `res://scenes/game/main_lobby.tscn`、`res://scripts/game/lobby_world.gd` | 承载当前角色自由移动、攻击、技能、静态交互设施与大厅 HUD；不创建敌人、掉落、撤离或战斗结算 |
 | 联机大厅 | `res://scenes/game/multiplayer_lobby.tscn`、`res://scripts/game/multiplayer_lobby_world.gd`（继承 `LobbyWorld`） | 主菜单“联机”入口目标场景；进场自动打开联机面板，左上角提供“联机设置”入口，房间成员经 `NetworkLobbySync` 在同一大厅内互相可见；玩法约束与主大厅一致 |
 | 角色系统 | `res://scenes/ui/character_select.tscn`、`res://scripts/ui/character_select.gd` | 完整模式展示可选角色并持久化确认结果；当前角色模式隐藏角色列表，供战斗内只读查看同一套属性与技能详情 |
 | 战斗世界 | `res://scenes/game/game_world.tscn`、`res://scripts/game/game_world.gd` | 承载玩家、地图、环境、敌人人口、宝箱、掉落与撤离流程 |
 | 玩家预制体 | `res://scenes/characters/player.tscn`、`res://scripts/player/player_controller.gd` | 组合输入、移动、战斗属性、装备和攻击组件 |
 
-主菜单和主大厅进入正式骇入或训练场前，只把模式写入 `SessionState`。已确认角色由同一服务跨场景保存；角色页的一次性返回场景同样由该服务持有但不写入存档，使主菜单与大厅入口能各自原路返回。所有主场景切换统一经 `SceneTransition` 执行，业务 UI 不直接维护过渡动画。
+主菜单和主大厅进入正式骇入或训练场前，只把模式与骇入模式变体写入 `SessionState`（变体取值 standard/bare/overclock，仅运行期有效；训练场入口显式复位为 standard，联机开局由 `NetworkSession` 按主机同步值写入）。三种骇入模式的分组、文案与全部数值倍率集中在 `scripts/game/hack_mode_rules.gd`（`HackModeRules` 静态规则表），`GameWorld` 入场时据此应用人口倍率、二手概率覆盖与超频玩家豁免（无限能量、模式级武器/防具耐久豁免、技能冷却倍率），零装封存由 `GlobalInventory.begin_combat_run(bare_loadout)` 负责。已确认角色由同一服务跨场景保存；角色页的一次性返回场景同样由该服务持有但不写入存档，使主菜单与大厅入口能各自原路返回。所有主场景切换统一经 `SceneTransition` 执行，业务 UI 不直接维护过渡动画。
 
 ## 2. AutoLoad 服务
 
@@ -36,6 +36,8 @@
 | `MiningFarmService` | 维护算力币、矿场资产、在线收益和临时增益 | `user://mining_farm_state.json` |
 | `BankService` | 维护活期账户、定期存单、信用贷款、违约冻结与到期级联扣款 | `user://bank_state.json` |
 | `DispatchService` | 维护派遣委托、在线倒计时、大成功判定、完成报告与角色锁定查询 | `user://dispatch_state.json` |
+| `StatsService` | 生涯统计：怪物击杀计数、物品获得计数、对局与撤离统计、单局之最与财富曲线采样；战斗与库存挂点上报事实事件，图鉴计数、统计面板与悬赏系统只读取本服务或订阅其信号 | `user://stats_state.json` |
+| `BountyService` | 每日悬赏：按本地日期刷新随机悬赏、订阅 `StatsService` 事实信号推进进度、完成后自动发放星穹或稀有强化石；必须注册在 `StatsService` 之后 | `user://bounty_state.json` |
 | `BannerNotificationService` | 屏幕顶端全局横幅通知：CanvasLayer 图层 `1200` 高于场景过渡层，`process_mode = ALWAYS` 战斗内外与暂停期间均可播放；持有横幅开关并订阅强平等业务信号，业务服务不反向依赖 | `user://banner_notification_settings.cfg` |
 | `SceneTransition` | 统一场景切换和黑屏过渡 | 无 |
 | `NetworkSession` | 局域网联机会话：建房、UDP 房间发现、加入、成员名册与准备、共享地图种子分发、统一开局与战斗消息中继；`process_mode = ALWAYS` 且跨场景保持连接，完整协议见 `docs/multiplayer.md` | 无 |
@@ -104,7 +106,8 @@
 
 - `CombatHud` 负责局内信息、暂停、地图、拾取提示、物资撤离和结算编排，不直接拥有库存数据。
 - `LobbyHud` 负责大厅左上切换按钮、最近设施提示、角色生命能量、主动技能和武器快照；它不处理 F 输入、设施距离或场景动作。主菜单以 `lobby_host_mode` 嵌入更高 CanvasLayer，只复用局外面板，不复制背包、仓库、商店等业务 UI。
-- `EncyclopediaPanel` 读取 `ContentCatalog` 的全量武器、装备、道具与怪物模板，并通过 `GlobalInventory` 的稳定发现记录决定显示正式信息或“？？？”。怪物只在离树场景实例中读取稳定 ID、说明和基础属性，首次有效遇敌后解锁；左侧列表只负责选择当前条目，右侧物品详情复用 `ItemDetailFormatter`，怪物详情显示其固定基础数值。关键词筛选匹配名称、类型和说明，条目固定按基础内容、`stelle`（星）扩展包、其余扩展包目录顺序分组，并在每个扩展包前显示标题分割。组内装备按套装聚合并固定为头部、躯干、腿部、脚部；资源按初级、中级、高级、极品排列，无法识别品质时回退名称排序。它不复制物品数值或规则、不修改库存，也不把浏览、商店预览或临时快照视为获得。
+- `EncyclopediaPanel` 读取 `ContentCatalog` 的全量武器、装备、道具与怪物模板，并通过 `GlobalInventory` 的稳定发现记录决定显示正式信息或“？？？”。怪物只在离树场景实例中读取稳定 ID、说明和基础属性，首次有效遇敌后解锁；左侧列表只负责选择当前条目，右侧物品详情复用 `ItemDetailFormatter`，怪物详情显示其固定基础数值。关键词筛选匹配名称、类型和说明，条目固定按基础内容、`stelle`（星）扩展包、其余扩展包目录顺序分组，并在每个扩展包前显示标题分割。组内装备按套装聚合并固定为头部、躯干、腿部、脚部；资源按初级、中级、高级、极品排列，无法识别品质时回退名称排序。它不复制物品数值或规则、不修改库存，也不把浏览、商店预览或临时快照视为获得。图鉴条目名称行最右侧与详情首行显示 `StatsService` 提供的获得数量或击杀数量，图鉴只读取计数不写入统计。
+- `HackModeSelectPanel` 按 `HackModeRules` 定义表构建“战斗模式 / 娱乐模式”两组模式卡并派发 `mode_selected`；写入会话状态与场景切换由主菜单宿主完成。`BountyPanel` 只读取 `BountyService` 快照并订阅其变化信号；`StatsPanel` 只读取 `StatsService` 快照，财富曲线由面板内部类 `WealthCurveChart` 按采样数组绘制。三个面板都通过主菜单遮罩复用，不直接访问战斗节点。
 - `CombatHud` 运行时实例化角色系统的当前角色模式，负责 O 键打开、关闭、输入锁定和场景树暂停；角色档案、属性条与技能卡片仍由角色系统从 `SessionState` 读取，HUD 不保存副本。
 - 战斗常驻 HUD 将技能栏放在屏幕左下角、武器栏放在屏幕右下角，角色名字、生命与能量独立保留在底部中心；常驻 HUD 节点必须位于全部交互遮罩之前，菜单显示时不依赖逐项隐藏也不会覆盖菜单内容。
 - 右下常驻武器栏由 `CombatHud` 直接创建 `CombatHudSlotView` 并读取装备组件快照，顶部使用与技能按键相同的居中区域显示“远程 1 / 远程 2 / 近战”，下方显示武器名、能耗、耐久、当前手持高亮和攻击冷却；它不复用 `WeaponSlotControl` 或 `ItemCardView`，装备、卸下、修复、强化和拖拽操作只存在于背包等交互界面。
@@ -196,10 +199,11 @@ ContentCatalog 模板
 - 存档版本常量只标识当前写入结构。项目尚未发布正式版本，库存补发、强化公式转换、商店重建、股市进度缩放、旧堆叠拆分、图鉴补账和项目目录复制等迁移入口均已停用。
 - `SaveLocationMigration` 脚本保留为历史实现参考，但未在 `project.godot` 注册且脚本内迁移调用已注释；启动时不会实例化该服务，也不会读取或复制同级旧项目目录文件。
 - 普通高频变化可合并写入；货币兑换、股票成交等跨资产操作应立即保存，缩短文件间状态不一致窗口。
+- 零装骇入封存：`GlobalInventory` 在零装局开局时把真实背包与装备序列化为存档内 `bare_run_stash` 字段并立即落盘，结算收尾恢复后清除该字段；读档发现残留封存快照即视为零装局异常中断，恢复真实资产并放弃局内临时所得。该字段只在零装局进行中的存档内出现，不改变其他模块存档结构。
 - 测试不得直接覆盖日常 `user://` 数据，具体隔离要求见 `docs/功能验证测试规范.md`。
-- 存档导出使用默认名 `Star_Hacker_save_<本地时间>.lisbamsave`，保存 `character_unlocks.json`、`input_bindings.cfg`、`ui_style_settings.cfg`、`banner_notification_settings.cfg`、`debug_settings.cfg`、`global_inventory.json`、`shop_state.json`、`stock_market_state.json`、`mining_farm_state.json`、`hideout_state.json`、`insurance_state.json`、`bank_state.json` 与 `dispatch_state.json` 的原始字节；尚未生成的文件不写入归档。根元数据同时保存项目中文名与英文名，只用于人工识别，不参与兼容校验。
+- 存档导出使用默认名 `Star_Hacker_save_<本地时间>.lisbamsave`，保存 `character_unlocks.json`、`input_bindings.cfg`、`ui_style_settings.cfg`、`banner_notification_settings.cfg`、`debug_settings.cfg`、`global_inventory.json`、`shop_state.json`、`stock_market_state.json`、`mining_farm_state.json`、`hideout_state.json`、`insurance_state.json`、`bank_state.json`、`dispatch_state.json`、`stats_state.json` 与 `bounty_state.json` 的原始字节；尚未生成的文件不写入归档。根元数据同时保存项目中文名与英文名，只用于人工识别，不参与兼容校验。
 - 存档导入只接受格式版本 1 与固定文件白名单。服务先完成 JSON、文件名和 Base64 内容校验，再写入同目录临时文件，完整备份当前存档后替换正式文件；归档中缺失的模块文件会按快照语义移除，成功后重启游戏统一加载。
-- 存档删除使用与导出、导入相同的十三个文件白名单。服务先写入 `save_delete_pending_v1.marker`，再把全部现有活动存档改名到同目录 `.temp_delete` 路径；任一暂存失败时统一回滚，全部暂存成功后永久移除并立即重启。保护标记保留到下一次启动，`SaveArchiveService` 作为首个 AutoLoad 会在任何业务服务读档前再次删除活动文件、`.temp_import` 与 `.temp_delete` 残留，完成后移除标记，因此退出阶段的旧状态回写也不能恢复被删除存档。
+- 存档删除使用与导出、导入相同的十五个文件白名单。服务先写入 `save_delete_pending_v1.marker`，再把全部现有活动存档改名到同目录 `.temp_delete` 路径；任一暂存失败时统一回滚，全部暂存成功后永久移除并立即重启。保护标记保留到下一次启动，`SaveArchiveService` 作为首个 AutoLoad 会在任何业务服务读档前再次删除活动文件、`.temp_import` 与 `.temp_delete` 残留，完成后移除标记，因此退出阶段的旧状态回写也不能恢复被删除存档。
 - 存档删除只清理当前项目用户目录中的活动白名单文件和内部临时文件，不删除玩家自行导出的 `.lisbamsave`，也不删除历史导入备份目录；这些外部或备份快照只有玩家主动导入时才会重新成为活动存档。
 - 战斗暂停设置导出只包含已经落盘的数据，不强制保存正式战斗中的临时背包、装备与耐久变化，继续遵守本局成功、失败或正常退出结算后统一持久化的所有权规则。
 - 战斗暂停设置删除会丢弃当前活动存档及尚未落盘的本局内存变化，不执行战斗结算；重启后全部服务按首次启动默认值初始化。

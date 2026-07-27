@@ -7,7 +7,7 @@
 | 模块 | 实现 | 职责 |
 | --- | --- | --- |
 | 会话服务 | `scripts/game/network_session.gd`（AutoLoad `NetworkSession`） | ENet 建房与加入、UDP 局域网房间发现、成员名册与准备状态、共享地图种子分发、统一开局切场景、战斗消息中继 |
-| 联机面板 | `scripts/ui/multiplayer_lobby_panel.gd`（`MultiplayerLobbyPanel`） | 960×620 居中窗口（标题“联机”）；昵称编辑、房间列表、直连 IP、模式选择（组队骇入 / 大逃杀）、成员名册、准备与开始骇入入口 |
+| 联机面板 | `scripts/ui/multiplayer_lobby_panel.gd`（`MultiplayerLobbyPanel`） | 960×620 居中窗口（标题“联机”）；昵称编辑、房间列表、直连 IP、双模式选择（“多人模式”：组队骇入 / 对抗骇入即原大逃杀；“骇入模式”：标准 / 零装 / 超频，选项来自 `HackModeRules` 定义表）、成员名册、准备与开始骇入入口 |
 | 联机大厅 | `scenes/game/multiplayer_lobby.tscn`、`scripts/game/multiplayer_lobby_world.gd`（`MultiplayerLobbyWorld`，继承 `LobbyWorld`） | 入房后左上角“切换大厅/菜单”按钮的目标场景（主菜单“联机”按钮只打开面板、不再切场景）；未入房进场自动打开联机面板、已入房进场不打扰，左上角“切换大厅/菜单”下方提供“联机设置”按钮重新打开面板，1600×1000 场地无交互设施 |
 | 大厅在场同步器 | `scripts/game/network_lobby_sync.gd`（`NetworkLobbySync`） | 联机大厅内的成员互见：20Hz 广播带 `ctx=lobby` 的玩家状态包并以化身展示同房间成员；无伤害转发。名册内成员的化身常驻大厅：停止发包 1.6 秒后不移除化身，改为停在原位（从未发包的成员停在默认围观位、按名册序横向间隔 72 像素）并在头顶显示“菜单中”，恢复发包后提示消失，仅退员或断线移除化身 |
 | 房间状态字幕 | `scripts/game/network_room_status_overlay.gd`（AutoLoad `NetworkRoomStatusOverlay`，CanvasLayer 图层 120） | 入房期间在屏幕顶部中央（顶部偏移 50 像素）常驻显示“联机房间 N/M”（N 为已准备成员数、M 为房间总人数）；订阅名册与会话信号即时刷新并按 0.25 秒轮询兜底，正式战斗场景内隐藏，不拦截鼠标、不参与 UI 换肤 |
@@ -23,8 +23,8 @@
 1. 建房：主机 `create_room()` 在端口 `24857` 创建 ENet 服务器（上限 4 人），同时绑定 UDP 端口 `24858` 应答房间探测。
 2. 发现：客户端面板可见且未入房时，按 1 秒间隔向 `255.255.255.255:24858` 广播探测串；主机回复 JSON 房间信息（房名、人数、版本、是否战斗中），3 秒未刷新的房间条目自动过期。
 3. 加入：从房间列表选中或直接输入 IP 调 `join_room(ip)`；握手成功后客户端提交个人档案（昵称、当前角色、准备状态）进入名册，名册由主机权威维护并全量广播。
-4. 模式：主机通过 `set_session_combat_mode()` 在 `team`（组队骇入，默认）与 `battle_royale`（大逃杀）之间切换；切换会清空全员准备并经 `_rpc_sync_combat_mode` 同步，新成员入册时补发当前模式，房间发现回复也携带模式供房间列表标注。
-5. 开局：全员准备且成员数 ≥ 2 时主机 `request_start_combat()` 生效；主机生成非零共享种子并广播 `_rpc_begin_combat(seed, mode)`（开局指令再次携带模式作为最终权威），每个成员各自写入 `SessionState` 骇入模式并经 `SceneTransition` 进入 `game_world.tscn`。正处于战斗场景或转场中的成员会忽略开局指令。
+4. 模式：主机通过 `set_session_combat_mode()` 在 `team`（组队骇入，默认）与 `battle_royale`（对抗骇入，玩家可见名已由“大逃杀”更名，内部标识不变）之间切换多人模式，通过 `set_session_hack_variant()` 在 `standard` / `bare` / `overclock` 之间切换骇入模式；两个维度相互独立，任一切换都会清空全员准备并分别经 `_rpc_sync_combat_mode` 与 `_rpc_sync_hack_variant` 同步，新成员入册时补发两个当前值，房间发现回复同时携带 `mode` 与 `hack_variant` 供房间列表标注（非标准骇入模式在条目中追加模式名）。
+5. 开局：全员准备且成员数 ≥ 2 时主机 `request_start_combat()` 生效；主机生成非零共享种子并广播 `_rpc_begin_combat(seed, mode, hack_variant)`（开局指令再次携带两个模式作为最终权威），每个成员各自把 `hack` 模式与主机选定的骇入模式变体写入 `SessionState` 并经 `SceneTransition` 进入 `game_world.tscn`。正处于战斗场景或转场中的成员会忽略开局指令。零装骇入各成员分别封存与恢复各自资产；超频骇入全员按娱乐模式无结算规则作战，敌人人口在主机侧按“骇入模式倍率 × 联机成员倍率”缩放。
 6. 离场：任一成员离开战斗场景时广播离场事件并调用 `notify_combat_scene_exited()`；网络连接与名册保持，回到主菜单可直接准备下一局。开局后全员准备状态自动清零。
 
 战斗消息通道：`broadcast_combat_message(payload, reliable)` 与 `send_combat_message(peer_id, payload, reliable)`，底层是 `NetworkSession` 自身的两个 RPC（可靠 / 不可靠有序）。消息始终以 `combat_message_received(sender, payload)` 信号交给战斗同步器，联机代码不在业务节点上注册任何 RPC 路径。

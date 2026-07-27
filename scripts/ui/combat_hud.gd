@@ -282,6 +282,9 @@ var _combat_stone_return_view_pending: bool = false
 var _master_bus_index: int = -1
 ## 当前是否为训练场模式；取值为 true/false，默认 false，修改会影响训练场设置按钮和角色切换入口是否可见。
 var _is_training_mode: bool = false
+## 当前是否为无结算娱乐模式；训练场与超频骇入均为 true，控制离开按钮文本、死亡复活与拾取消耗行为。
+## 训练场专属工具（测试设置、角色切换）仍只看 _is_training_mode，本变量不扩大工具入口范围。
+var _is_casual_mode: bool = false
 ## 玩家是否已经死亡；取值为 true/false，默认 false，生命归零后用于阻止继续打开暂停、背包和大地图。
 var _is_player_dead: bool = false
 ## 本局结算是否已经完成；默认 false，成功撤离、死亡或主动退出只允许执行一次全局背包结算。
@@ -630,6 +633,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func _bind_game_world() -> void:
 	_game_world = get_node_or_null(game_world_path)
 	_is_training_mode = _resolve_training_mode()
+	_is_casual_mode = _resolve_casual_mode()
 
 
 func _bind_player_components() -> void:
@@ -2136,10 +2140,17 @@ func _resolve_training_mode() -> bool:
 	return bool(_game_world.call("is_training_mode"))
 
 
+func _resolve_casual_mode() -> bool:
+	## 解析本局是否为无结算娱乐模式；训练场与超频骇入都返回 true，世界节点缺失时回退训练场判定。
+	if _game_world != null and _game_world.has_method("is_settlement_disabled_mode"):
+		return bool(_game_world.call("is_settlement_disabled_mode"))
+	return _resolve_training_mode()
+
+
 func _sync_mode_controls() -> void:
 	_test_settings_button.visible = _is_training_mode
-	# 返回主菜单按钮文本；训练场没有物品损失结算，因此使用“离开”并直接返回主菜单。
-	_return_main_menu_button.text = "离开" if _is_training_mode else "逃跑"
+	# 返回主菜单按钮文本；训练场与超频骇入没有物品损失结算，因此使用“离开”并直接返回主菜单。
+	_return_main_menu_button.text = "离开" if _is_casual_mode else "逃跑"
 	if not _can_use_training_tools():
 		_test_settings_panel.visible = false
 		_character_switch_panel.visible = false
@@ -2449,7 +2460,8 @@ func _pickup_drop(drop_node: Node) -> void:
 	if not _is_drop_in_pickup_range(drop_node_2d):
 		return
 
-	if _is_training_mode and drop_node.has_method("consume_for_training") and bool(drop_node.call("consume_for_training")):
+	# 娱乐模式拾取；训练场与超频骇入只消费地面对象，不写入背包、仓库或存档。
+	if _is_casual_mode and drop_node.has_method("consume_for_training") and bool(drop_node.call("consume_for_training")):
 		_refresh_nearby_drop_panel()
 		return
 	if drop_node.has_method("pickup_to_inventory") and bool(drop_node.call("pickup_to_inventory", _inventory_component)):
@@ -3017,8 +3029,8 @@ func _on_weapon_attack_succeeded(source_kind: String, source_index: int, _weapon
 
 func _on_player_died() -> void:
 	_is_player_dead = true
-	if _is_training_mode:
-		# 训练场不进入正式结算；下一空闲帧恢复玩家生命并重新开放输入，避免死亡标记永久锁死 HUD。
+	if _is_casual_mode:
+		# 训练场与超频骇入不进入正式结算；下一空闲帧恢复玩家生命并重新开放输入，避免死亡标记永久锁死 HUD。
 		call_deferred("_revive_training_player")
 		return
 	# 联机观战分支；仍有存活队友时由战斗同步器接管视角并推迟死亡结算，观战结束后经回调恢复原结算流程，单机无同步器时直接结算。
@@ -3030,13 +3042,14 @@ func _on_player_died() -> void:
 
 func _show_deferred_death_settlement() -> void:
 	## 观战结束回调；执行被推迟的死亡结算，参数与即时死亡结算完全一致，重复结算由结算完成标记保护。
-	if _is_training_mode or not _is_player_dead:
+	if _is_casual_mode or not _is_player_dead:
 		return
 	_show_failure_settlement("角色死亡", 1.0 - clampf(failure_backpack_loss_ratio, 0.0, 1.0), 1.0 - clampf(failure_equipment_loss_ratio, 0.0, 1.0))
 
 
 func _revive_training_player() -> void:
-	if not _is_training_mode or _stats_component == null:
+	# 娱乐模式复活补充：训练场与超频骇入共用本复活流程，正式模式不允许触发。
+	if not _is_casual_mode or _stats_component == null:
 		return
 	# 最大生命；训练场复活直接恢复满血，不修改角色或装备提供的生命上限。
 	var maximum_health: float = maxf(float(_stats_component.get("max_health")), 1.0)
@@ -3607,7 +3620,8 @@ func _on_unstuck_button_pressed() -> void:
 
 
 func _on_return_main_menu_button_pressed() -> void:
-	if _is_training_mode:
+	# 娱乐模式离开；训练场与超频骇入没有物品得失结算，直接返回主菜单且不显示二次确认。
+	if _is_casual_mode:
 		_return_to_main_menu()
 		return
 	if _escape_confirmation_dialog == null:
@@ -3622,7 +3636,7 @@ func _on_return_main_menu_button_pressed() -> void:
 
 
 func _on_escape_confirmed() -> void:
-	if _is_training_mode:
+	if _is_casual_mode:
 		_return_to_main_menu()
 		return
 	_show_failure_settlement("逃跑", 1.0 - _get_current_escape_loss_ratio(), 1.0 - _get_current_escape_equipment_loss_ratio())
@@ -3812,6 +3826,11 @@ func _return_to_main_menu() -> void:
 func _show_success_settlement() -> void:
 	if _run_outcome_resolved:
 		return
+	# 娱乐模式撤离；训练场与超频骇入不产出结算，进入撤离点确认后直接返回主菜单，不展示结算窗口。
+	if _is_casual_mode:
+		_run_outcome_resolved = true
+		_return_to_main_menu()
+		return
 	_run_outcome_resolved = true
 	# 全局背包服务；正式撤离时保存全部物品、标记上次撤离优先级并返回本局新增物品列表。
 	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
@@ -3819,6 +3838,8 @@ func _show_success_settlement() -> void:
 	var outcome: Dictionary = {"result": "success", "title": "撤离成功", "gained_entries": [], "lost_entries": [], "gained_items": [], "lost_items": []}
 	_record_stock_survival_time()
 	_record_stock_extracted_values(global_inventory)
+	# 生涯统计结算上报；必须在库存完成正式结算前调用，保证随身价值摘要仍然可读。
+	_record_stats_run_finished("success")
 	# 玩家被动技能组件；成功撤离完成库存结算前读取地图掉落物并发放一次角色专属奖励。
 	var passive_skill_component: Node = _player.get_node_or_null("PassiveSkillComponent") if _player != null else null
 	if passive_skill_component != null and passive_skill_component.has_method("apply_successful_extraction_bonuses"):
@@ -3844,6 +3865,8 @@ func _show_failure_settlement(reason: String, retained_ratio: float = -1.0, equi
 	# 失败结算；主动逃跑可传入短时保护保留率，死亡等默认路径继续使用全局库存的 50% 规则。
 	# 现行规则补充：死亡与主动逃跑都传入背包、装备栏两类保留率，默认分别为 40% 与 80%。
 	_record_stock_survival_time()
+	# 生涯统计结算上报；按结算原因区分死亡与主动逃跑，两类都计入对局总数分母。
+	_record_stats_run_finished("death" if reason == "角色死亡" else "escape")
 	# 失败结算结果；两个保留率都有效时使用完整规则，缺省调用保留全局库存的默认失败概率作为兼容兜底。
 	var outcome: Dictionary = global_inventory.call("complete_combat_run_failure", reason, retained_ratio, equipment_retained_ratio) if retained_ratio >= 0.0 and equipment_retained_ratio >= 0.0 else global_inventory.call("complete_combat_run_failure", reason)
 	_present_run_outcome(outcome)
@@ -3854,6 +3877,25 @@ func _record_stock_survival_time() -> void:
 	var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")
 	if stock_market_service != null and stock_market_service.has_method("record_run_metric"):
 		stock_market_service.call("record_run_metric", "survival_seconds", _get_survival_time_seconds())
+
+
+func _record_stats_run_finished(result_id: String) -> void:
+	## 把一局正式战斗的结果写入生涯统计；娱乐模式的结算入口已提前返回主菜单，不会走到这里。
+	## 必须在库存执行正式结算之前调用，保证成功撤离时随身价值摘要与本局送回累计仍然可读。
+	# 生涯统计服务；缺失时结算流程照常执行，仅丢失统计。
+	var stats_service: Node = get_tree().root.get_node_or_null("StatsService")
+	if stats_service == null or not stats_service.has_method("record_run_finished"):
+		return
+	# 本局带出价值；成功撤离按“随身总价值 + 本局送回价值”计算完整收获，失败结算记 0。
+	var extracted_value: int = 0
+	if result_id == "success":
+		# 全局库存服务；提供随身价值摘要与本局已送回价值两个只读查询。
+		var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+		if global_inventory != null and global_inventory.has_method("get_combat_carried_value_summary"):
+			extracted_value = int((global_inventory.call("get_combat_carried_value_summary") as Dictionary).get("total_value", 0))
+		if global_inventory != null and global_inventory.has_method("get_combat_shipped_value"):
+			extracted_value += int(global_inventory.call("get_combat_shipped_value"))
+	stats_service.call("record_run_finished", result_id, _get_survival_time_seconds(), extracted_value)
 
 
 func _record_stock_extracted_values(global_inventory: Node) -> void:

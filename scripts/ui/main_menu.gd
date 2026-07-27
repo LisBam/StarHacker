@@ -46,6 +46,12 @@ const HIDEOUT_PANEL_SCRIPT: Script = preload("res://scripts/ui/hideout_panel.gd"
 const DISPATCH_PANEL_SCRIPT: Script = preload("res://scripts/ui/dispatch_panel.gd")
 ## 图鉴面板脚本；默认在主菜单点击图鉴按钮后动态创建，并从内容目录和永久库存读取展示与解锁状态。
 const ENCYCLOPEDIA_PANEL_SCRIPT: Script = preload("res://scripts/ui/encyclopedia_panel.gd")
+## 悬赏面板脚本；默认在主菜单点击右侧“悬赏”按钮后动态创建并读取全局悬赏服务。
+const BOUNTY_PANEL_SCRIPT: Script = preload("res://scripts/ui/bounty_panel.gd")
+## 统计面板脚本；默认在主菜单点击右侧“统计”按钮后动态创建并读取全局生涯统计服务。
+const STATS_PANEL_SCRIPT: Script = preload("res://scripts/ui/stats_panel.gd")
+## 骇入模式选择面板脚本；点击“骇入”后先打开该面板选择标准、零装或超频模式再进入战斗。
+const HACK_MODE_SELECT_PANEL_SCRIPT: Script = preload("res://scripts/ui/hack_mode_select_panel.gd")
 ## 联机组队面板脚本；默认在主菜单点击联机组队按钮后动态创建，调用 NetworkSession 完成建房、发现、加入与统一开局。
 const MULTIPLAYER_PANEL_SCRIPT: Script = preload("res://scripts/ui/multiplayer_lobby_panel.gd")
 ## 隐藏开发者菜单脚本；默认只在主菜单依次输入 LISBAM 后显示。
@@ -80,6 +86,10 @@ const LOBBY_ACTION_HIDEOUT: String = "hideout"
 const LOBBY_ACTION_DISPATCH: String = "dispatch"
 ## 大厅图鉴动作标识；固定 encyclopedia，复用主菜单图鉴面板。
 const LOBBY_ACTION_ENCYCLOPEDIA: String = "encyclopedia"
+## 大厅悬赏动作标识；固定 bounty，复用主菜单悬赏面板，当前大厅尚未放置对应实体。
+const LOBBY_ACTION_BOUNTY: String = "bounty"
+## 大厅统计动作标识；固定 stats，复用主菜单统计面板，当前大厅尚未放置对应实体。
+const LOBBY_ACTION_STATS: String = "stats"
 ## 大厅联机组队动作标识；固定 multiplayer，复用主菜单联机组队面板。
 const LOBBY_ACTION_MULTIPLAYER: String = "multiplayer"
 ## 大厅设置动作标识；固定 settings，复用主菜单设置面板。
@@ -132,6 +142,12 @@ const LOBBY_ACTION_QUIT: String = "quit"
 ## 图鉴按钮缓存；默认位于主菜单底部功能栏末位，点击后查看武器、装备与资源的永久收集状态。
 ## 怪物图鉴补充；同一入口还会展示按基础内容和扩展包分组的永久怪物遇敌收集状态。
 @onready var _encyclopedia_button: Button = %EncyclopediaButton
+## 悬赏按钮缓存；位于右侧竖列图鉴上方第一位，点击后打开每日随机悬赏面板。
+@onready var _bounty_button: Button = %BountyButton
+## 统计按钮缓存；位于右侧竖列图鉴上方第二位，点击后打开生涯统计与财富曲线面板。
+@onready var _stats_button: Button = %StatsButton
+## 右侧按钮列外框缓存；与底部功能栏同宽同边距，内部用等宽占位把按钮列对齐到“图鉴”正上方。
+@onready var _side_menu_margin: Control = get_node("SideMenuMargin") as Control
 ## 设置面板缓存；默认绑定唯一名 SettingsPanel，控制主菜单设置界面的显示和隐藏。
 @onready var _settings_panel: Control = %SettingsPanel
 ## 设置内容容器缓存；默认通过场景路径绑定，用于动态挂载按键绑定面板。
@@ -224,6 +240,18 @@ var _encyclopedia_panel: Control
 var _multiplayer_overlay: Control
 ## 联机组队面板实例；关闭后复用，网络会话由 NetworkSession 常驻持有，面板关闭不会断开连接。
 var _multiplayer_panel: Control
+## 悬赏全屏遮罩；默认运行时创建并隐藏，显示时阻止主菜单其他入口接收鼠标输入。
+var _bounty_overlay: Control
+## 悬赏面板实例；关闭后复用，悬赏进度与每日刷新由独立 AutoLoad 服务后台维护。
+var _bounty_panel: Control
+## 统计全屏遮罩；默认运行时创建并隐藏，显示时阻止主菜单其他入口接收鼠标输入。
+var _stats_overlay: Control
+## 统计面板实例；关闭后复用，打开时从生涯统计服务读取最新快照与财富采样。
+var _stats_panel: Control
+## 骇入模式选择全屏遮罩；默认运行时创建并隐藏，显示时阻止主菜单其他入口接收鼠标输入。
+var _hack_mode_overlay: Control
+## 骇入模式选择面板实例；关闭后复用，模式清单与说明由 HackModeRules 规则表提供。
+var _hack_mode_panel: Control
 ## 开发者菜单全屏遮罩；默认运行时创建并隐藏，解锁后阻止其他主菜单控件接收输入。
 var _developer_overlay: Control
 ## 开发者菜单实例；默认由 DeveloperMenu 脚本动态创建并在关闭后复用。
@@ -266,6 +294,8 @@ func _ready() -> void:
 	_hideout_button.pressed.connect(_on_hideout_button_pressed)
 	_dispatch_button.pressed.connect(_on_dispatch_button_pressed)
 	_encyclopedia_button.pressed.connect(_on_encyclopedia_button_pressed)
+	_bounty_button.pressed.connect(_on_bounty_button_pressed)
+	_stats_button.pressed.connect(_on_stats_button_pressed)
 	_master_volume_slider.value_changed.connect(_on_master_volume_slider_value_changed)
 	_settings_back_button.pressed.connect(_on_settings_back_button_pressed)
 	_switch_lobby_menu_button.pressed.connect(_on_switch_lobby_menu_button_pressed)
@@ -282,6 +312,9 @@ func _ready() -> void:
 	_build_dispatch_overlay()
 	_build_encyclopedia_overlay()
 	_build_multiplayer_overlay()
+	_build_bounty_overlay()
+	_build_stats_overlay()
+	_build_hack_mode_overlay()
 	_build_developer_overlay()
 	_settings_panel.visible = false
 	_show_key_binding_page(false)
@@ -347,11 +380,32 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 
 func _on_start_button_pressed() -> void:
-	_start_game(GAME_MODE_HACK)
+	## 打开骇入模式选择界面；实际进入战斗由模式面板的“进入”按钮经 _on_hack_mode_selected 完成。
+	if _hack_mode_overlay == null:
+		return
+	_settings_panel.visible = false
+	_hack_mode_overlay.visible = true
 
 
 func _on_training_button_pressed() -> void:
 	_start_game(GAME_MODE_TRAINING)
+
+
+func _on_hack_mode_selected(hack_variant: String) -> void:
+	## 模式面板选择回调；写入所选骇入模式变体后按正式骇入流程进入战斗。
+	if _hack_mode_overlay != null:
+		_hack_mode_overlay.visible = false
+	# 会话状态节点；缺失时仍按标准流程进入，模式变体留待战斗世界按标准骇入兜底。
+	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
+	if session_state != null and session_state.has_method("set_hack_variant"):
+		session_state.call("set_hack_variant", hack_variant)
+	_start_game(GAME_MODE_HACK)
+
+
+func _on_hack_mode_select_closed() -> void:
+	if _hack_mode_overlay != null:
+		_hack_mode_overlay.visible = false
+	_start_button.grab_focus()
 
 
 func _on_character_button_pressed() -> void:
@@ -411,6 +465,10 @@ func perform_lobby_action(action_id: String) -> bool:
 			_on_dispatch_button_pressed()
 		LOBBY_ACTION_ENCYCLOPEDIA:
 			_on_encyclopedia_button_pressed()
+		LOBBY_ACTION_BOUNTY:
+			_on_bounty_button_pressed()
+		LOBBY_ACTION_STATS:
+			_on_stats_button_pressed()
 		LOBBY_ACTION_MULTIPLAYER:
 			_on_multiplayer_button_pressed()
 		LOBBY_ACTION_SETTINGS:
@@ -438,6 +496,9 @@ func is_modal_open() -> bool:
 		or (_dispatch_overlay != null and _dispatch_overlay.visible)
 		or (_encyclopedia_overlay != null and _encyclopedia_overlay.visible)
 		or (_multiplayer_overlay != null and _multiplayer_overlay.visible)
+		or (_bounty_overlay != null and _bounty_overlay.visible)
+		or (_stats_overlay != null and _stats_overlay.visible)
+		or (_hack_mode_overlay != null and _hack_mode_overlay.visible)
 		or (_developer_overlay != null and _developer_overlay.visible)
 	)
 
@@ -447,6 +508,9 @@ func _apply_lobby_host_mode() -> void:
 	_background.visible = not lobby_host_mode
 	_center_menu.visible = not lobby_host_mode
 	_bottom_menu_margin.visible = not lobby_host_mode
+	# 右侧按钮列；与底部功能栏同属完整主菜单本体，大厅宿主模式下一并隐藏。
+	if _side_menu_margin != null:
+		_side_menu_margin.visible = not lobby_host_mode
 	_switch_lobby_menu_button.visible = not lobby_host_mode
 	mouse_filter = Control.MOUSE_FILTER_IGNORE if lobby_host_mode else Control.MOUSE_FILTER_STOP
 	if lobby_host_mode:
@@ -558,6 +622,24 @@ func _on_encyclopedia_button_pressed() -> void:
 	_encyclopedia_overlay.visible = true
 	if _encyclopedia_panel != null and _encyclopedia_panel.has_method("refresh"):
 		_encyclopedia_panel.call("refresh")
+
+
+func _on_bounty_button_pressed() -> void:
+	if _bounty_overlay == null:
+		return
+	_settings_panel.visible = false
+	_bounty_overlay.visible = true
+	if _bounty_panel != null and _bounty_panel.has_method("refresh"):
+		_bounty_panel.call("refresh")
+
+
+func _on_stats_button_pressed() -> void:
+	if _stats_overlay == null:
+		return
+	_settings_panel.visible = false
+	_stats_overlay.visible = true
+	if _stats_panel != null and _stats_panel.has_method("refresh"):
+		_stats_panel.call("refresh")
 
 
 func _build_warehouse_overlay() -> void:
@@ -1021,6 +1103,127 @@ func _build_encyclopedia_overlay() -> void:
 	encyclopedia_overlay.visible = false
 
 
+func _build_bounty_overlay() -> void:
+	if _bounty_overlay != null:
+		return
+	# 悬赏遮罩；覆盖完整主菜单并拦截输入，关闭时只隐藏界面而不停止每日刷新与进度推进。
+	var bounty_overlay: Control = Control.new()
+	bounty_overlay.name = "BountyOverlay"
+	bounty_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bounty_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(bounty_overlay)
+	_bounty_overlay = bounty_overlay
+	# 悬赏背景遮罩；使用与其他局外面板一致的深色透明层。
+	var bounty_dim: ColorRect = ColorRect.new()
+	bounty_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UI_STYLE_GUIDE.apply_overlay_dim(bounty_dim)
+	bounty_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	bounty_overlay.add_child(bounty_dim)
+	# 悬赏面板；固定 840×560 像素并由独立组件维护悬赏卡与进度展示。
+	var bounty_panel: Control = BOUNTY_PANEL_SCRIPT.new() as Control
+	if bounty_panel == null:
+		bounty_overlay.visible = false
+		return
+	bounty_panel.name = "BountyPanel"
+	bounty_panel.anchor_left = 0.5
+	bounty_panel.anchor_top = 0.5
+	bounty_panel.anchor_right = 0.5
+	bounty_panel.anchor_bottom = 0.5
+	bounty_panel.offset_left = -420.0
+	bounty_panel.offset_top = -280.0
+	bounty_panel.offset_right = 420.0
+	bounty_panel.offset_bottom = 280.0
+	bounty_panel.connect("closed", Callable(self, "_on_bounty_closed"))
+	bounty_overlay.add_child(bounty_panel)
+	_bounty_panel = bounty_panel
+	bounty_overlay.visible = false
+
+
+func _build_stats_overlay() -> void:
+	if _stats_overlay != null:
+		return
+	# 统计遮罩；覆盖完整主菜单并拦截输入，关闭时只隐藏界面，统计采集由后台服务持续进行。
+	var stats_overlay: Control = Control.new()
+	stats_overlay.name = "StatsOverlay"
+	stats_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	stats_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(stats_overlay)
+	_stats_overlay = stats_overlay
+	# 统计背景遮罩；使用与其他局外面板一致的深色透明层。
+	var stats_dim: ColorRect = ColorRect.new()
+	stats_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UI_STYLE_GUIDE.apply_overlay_dim(stats_dim)
+	stats_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	stats_overlay.add_child(stats_dim)
+	# 统计面板；固定 880×600 像素并由独立组件维护统计分区与财富曲线。
+	var stats_panel: Control = STATS_PANEL_SCRIPT.new() as Control
+	if stats_panel == null:
+		stats_overlay.visible = false
+		return
+	stats_panel.name = "StatsPanel"
+	stats_panel.anchor_left = 0.5
+	stats_panel.anchor_top = 0.5
+	stats_panel.anchor_right = 0.5
+	stats_panel.anchor_bottom = 0.5
+	stats_panel.offset_left = -440.0
+	stats_panel.offset_top = -300.0
+	stats_panel.offset_right = 440.0
+	stats_panel.offset_bottom = 300.0
+	stats_panel.connect("closed", Callable(self, "_on_stats_closed"))
+	stats_overlay.add_child(stats_panel)
+	_stats_panel = stats_panel
+	stats_overlay.visible = false
+
+
+func _build_hack_mode_overlay() -> void:
+	if _hack_mode_overlay != null:
+		return
+	# 骇入模式遮罩；覆盖完整主菜单并拦截输入，选择模式或返回后隐藏。
+	var hack_mode_overlay: Control = Control.new()
+	hack_mode_overlay.name = "HackModeOverlay"
+	hack_mode_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hack_mode_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(hack_mode_overlay)
+	_hack_mode_overlay = hack_mode_overlay
+	# 骇入模式背景遮罩；使用与其他局外面板一致的深色透明层。
+	var hack_mode_dim: ColorRect = ColorRect.new()
+	hack_mode_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UI_STYLE_GUIDE.apply_overlay_dim(hack_mode_dim)
+	hack_mode_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	hack_mode_overlay.add_child(hack_mode_dim)
+	# 骇入模式选择面板；固定 680×560 像素，战斗模式与娱乐模式分组展示全部可选骇入模式。
+	var hack_mode_panel: Control = HACK_MODE_SELECT_PANEL_SCRIPT.new() as Control
+	if hack_mode_panel == null:
+		hack_mode_overlay.visible = false
+		return
+	hack_mode_panel.name = "HackModeSelectPanel"
+	hack_mode_panel.anchor_left = 0.5
+	hack_mode_panel.anchor_top = 0.5
+	hack_mode_panel.anchor_right = 0.5
+	hack_mode_panel.anchor_bottom = 0.5
+	hack_mode_panel.offset_left = -340.0
+	hack_mode_panel.offset_top = -280.0
+	hack_mode_panel.offset_right = 340.0
+	hack_mode_panel.offset_bottom = 280.0
+	hack_mode_panel.connect("mode_selected", Callable(self, "_on_hack_mode_selected"))
+	hack_mode_panel.connect("closed", Callable(self, "_on_hack_mode_select_closed"))
+	hack_mode_overlay.add_child(hack_mode_panel)
+	_hack_mode_panel = hack_mode_panel
+	hack_mode_overlay.visible = false
+
+
+func _on_bounty_closed() -> void:
+	if _bounty_overlay != null:
+		_bounty_overlay.visible = false
+	_bounty_button.grab_focus()
+
+
+func _on_stats_closed() -> void:
+	if _stats_overlay != null:
+		_stats_overlay.visible = false
+	_stats_button.grab_focus()
+
+
 func _build_developer_overlay() -> void:
 	if _developer_overlay != null:
 		return
@@ -1081,6 +1284,12 @@ func _open_developer_menu() -> void:
 		_dispatch_overlay.visible = false
 	if _encyclopedia_overlay != null:
 		_encyclopedia_overlay.visible = false
+	if _bounty_overlay != null:
+		_bounty_overlay.visible = false
+	if _stats_overlay != null:
+		_stats_overlay.visible = false
+	if _hack_mode_overlay != null:
+		_hack_mode_overlay.visible = false
 	_developer_overlay.visible = true
 
 
@@ -1182,6 +1391,12 @@ func _start_game(game_mode: String) -> void:
 	## 写入本次模式并直接进入战斗；角色由独立角色系统最后确认的 SessionState 选择提供。
 	_settings_panel.visible = false
 	_set_session_game_mode(game_mode)
+	# 训练场变体复位；训练入口显式把骇入模式变体重置为标准值，避免上一局零装或超频规则残留。
+	if game_mode == GAME_MODE_TRAINING:
+		# 会话状态节点；缺失时训练场按 GameWorld 的训练判定自动回退标准变体。
+		var session_state: Node = get_tree().root.get_node_or_null("SessionState")
+		if session_state != null and session_state.has_method("set_hack_variant"):
+			session_state.call("set_hack_variant", "standard")
 	_change_scene_with_transition(game_scene_path)
 
 

@@ -56,6 +56,8 @@ var _equipment_vision_range_ratio: float = 0.0
 @onready var _inventory_component = get_node_or_null(inventory_component_path)
 ## 全局背包服务；默认从自动加载 GlobalInventory 获取，存在时装备槽与主菜单仓库共享同一份数据。
 var _global_inventory: Node
+## 是否由骇入模式规则禁用防具耐久消耗；默认 false，超频骇入由 GameWorld 入场时开启，场景销毁后自动失效。
+var _armor_durability_consumption_disabled_by_mode: bool = false
 
 
 func _ready() -> void:
@@ -299,8 +301,15 @@ func consume_armor_durability_on_hit() -> void:
 		equipment_changed.emit()
 
 
+func set_armor_durability_consumption_disabled_by_mode(enabled: bool) -> void:
+	## 写入骇入模式级防具耐久豁免；超频骇入入场时由 GameWorld 开启，与训练场跳过规则互不影响。
+	_armor_durability_consumption_disabled_by_mode = enabled
+
+
 func _should_skip_armor_durability_consumption() -> bool:
-	## 返回当前是否为训练场；缺少会话服务时按正式战斗处理，使隔离组件测试保持显式可预测。
+	## 返回当前是否跳过防具耐久消耗；训练场与骇入模式豁免（超频）都会跳过，缺少会话服务时按正式战斗处理。
+	if _armor_durability_consumption_disabled_by_mode:
+		return true
 	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
 	return session_state != null and session_state.has_method("is_training_mode") and bool(session_state.call("is_training_mode"))
 

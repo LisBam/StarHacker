@@ -7,7 +7,7 @@ extends Node
 const BASIC_MONSTER_SCRIPT: Script = preload("res://scripts/enemies/basic_monster.gd")
 ## 远程怪物脚本；用于验证父类保护属性与远程弹体专属属性会共同降低。
 const RANGED_MONSTER_SCRIPT: Script = preload("res://scripts/enemies/ranged_monster.gd")
-## 新手保护服务脚本；用于验证新档默认处于保护状态且统一输出 0.50 倍率。
+## 新手保护服务脚本；用于验证新档默认处于保护状态且统一输出 0.75 倍率。
 const NEWCOMER_PROTECTION_SERVICE_SCRIPT: Script = preload("res://scripts/game/newcomer_protection_service.gd")
 ## 主菜单场景；用于验证锻造、据点、派遣与悬赏在首次成功撤离前锁定并在完成后实时开放。
 const MAIN_MENU_SCENE: PackedScene = preload("res://scenes/ui/main_menu.tscn")
@@ -34,14 +34,14 @@ func _ready() -> void:
 
 
 func _test_newcomer_service_default_state() -> void:
-	## 验证未读取存档的独立服务实例保持新档保护状态，并返回需求声明的 50% 怪物属性倍率。
+	## 验证未读取存档的独立服务实例保持新档保护状态，并返回需求声明的 75% 怪物属性倍率。
 	# 临时服务实例；未加入根节点，因此其私有保存守卫不会获得用户目录写入权限。
 	var protection_service: Node = NEWCOMER_PROTECTION_SERVICE_SCRIPT.new() as Node
 	_check(protection_service != null, "新手保护服务脚本必须可实例化。")
 	if protection_service == null:
 		return
 	_check(bool(protection_service.call("is_newcomer_protection_active")), "新档默认必须启用新手保护。")
-	_check(is_equal_approx(float(protection_service.call("get_monster_attribute_multiplier")), 0.50), "新手保护怪物属性倍率必须固定为 0.50。")
+	_check(is_equal_approx(float(protection_service.call("get_monster_attribute_multiplier")), 0.75), "新手保护怪物属性倍率必须固定为 0.75。")
 	protection_service.free()
 
 
@@ -155,14 +155,14 @@ func _test_basic_monster_protection_attributes() -> void:
 	monster.vision_range = 500.0
 	monster.attack_range = 80.0
 	monster.attack_cooldown = 0.8
-	monster.apply_newcomer_protection_multiplier(0.50)
-	_check(is_equal_approx(monster.max_health, 50.0), "近战怪物最大生命必须降低至 50%。")
-	_check(is_equal_approx(monster.current_health, 40.0), "近战怪物当前生命必须按相同比例降低。")
-	_check(is_equal_approx(monster.max_shield, 20.0) and is_equal_approx(monster.current_shield, 15.0), "近战怪物护盾上限与当前值必须降低至 50%。")
-	_check(is_equal_approx(monster.attack_damage, 20.0) and is_equal_approx(monster.attack_power, 60.0), "近战怪物伤害与攻击力必须降低至 50%。")
-	_check(is_equal_approx(monster.defense_power, 30.0) and is_equal_approx(monster.toughness, 10.0), "近战怪物防御与韧性必须降低至 50%。")
-	_check(is_equal_approx(monster.move_speed, 100.0) and is_equal_approx(monster.vision_range, 250.0) and is_equal_approx(monster.attack_range, 40.0), "近战怪物移速、视野与攻击距离必须降低至 50%。")
-	_check(is_equal_approx(monster.attack_cooldown, 1.6), "近战怪物冷却必须翻倍，使每秒攻击次数降低至 50%。")
+	monster.apply_newcomer_protection_multiplier(0.75)
+	_check(is_equal_approx(monster.max_health, 75.0), "近战怪物最大生命必须降低至 75%。")
+	_check(is_equal_approx(monster.current_health, 60.0), "近战怪物当前生命必须按相同比例降低。")
+	_check(is_equal_approx(monster.max_shield, 30.0) and is_equal_approx(monster.current_shield, 22.5), "近战怪物护盾上限与当前值必须降低至 75%。")
+	_check(is_equal_approx(monster.attack_damage, 30.0) and is_equal_approx(monster.attack_power, 90.0), "近战怪物伤害与攻击力必须降低至 75%。")
+	_check(is_equal_approx(monster.defense_power, 45.0) and is_equal_approx(monster.toughness, 15.0), "近战怪物防御与韧性必须降低至 75%。")
+	_check(is_equal_approx(monster.move_speed, 150.0) and is_equal_approx(monster.vision_range, 375.0) and is_equal_approx(monster.attack_range, 60.0), "近战怪物移速、视野与攻击距离必须降低至 75%。")
+	_check(is_equal_approx(monster.attack_cooldown, 0.8 / 0.75), "近战怪物冷却必须乘 4/3，使每秒攻击次数降低至 75%。")
 	monster.free()
 
 
@@ -183,12 +183,12 @@ func _test_ranged_monster_protection_attributes() -> void:
 	monster.ranged_projectile_max_distance = 550.0
 	monster.ranged_projectile_impact_force = 25.0
 	monster.cooldown = 1.0
-	monster.apply_newcomer_protection_multiplier(0.50)
-	_check(is_equal_approx(monster.max_health, 40.0) and is_equal_approx(monster.attack_power, 75.0), "远程怪物继承生命与攻击力必须降低至 50%。")
-	_check(is_equal_approx(monster.shoot_range, 250.0) and is_equal_approx(monster.keep_distance, 130.0), "远程怪物射程与保持距离必须降低至 50%。")
-	_check(is_equal_approx(monster.ranged_projectile_speed, 300.0) and is_equal_approx(monster.ranged_projectile_damage, 10.0), "远程弹体速度与伤害必须降低至 50%。")
-	_check(is_equal_approx(monster.ranged_projectile_max_distance, 275.0) and is_equal_approx(monster.ranged_projectile_impact_force, 12.5), "远程弹体距离与冲击力必须降低至 50%。")
-	_check(is_equal_approx(monster.cooldown, 2.0), "远程怪物冷却必须翻倍，使每秒开火次数降低至 50%。")
+	monster.apply_newcomer_protection_multiplier(0.75)
+	_check(is_equal_approx(monster.max_health, 60.0) and is_equal_approx(monster.attack_power, 112.5), "远程怪物继承生命与攻击力必须降低至 75%。")
+	_check(is_equal_approx(monster.shoot_range, 375.0) and is_equal_approx(monster.keep_distance, 195.0), "远程怪物射程与保持距离必须降低至 75%。")
+	_check(is_equal_approx(monster.ranged_projectile_speed, 450.0) and is_equal_approx(monster.ranged_projectile_damage, 15.0), "远程弹体速度与伤害必须降低至 75%。")
+	_check(is_equal_approx(monster.ranged_projectile_max_distance, 412.5) and is_equal_approx(monster.ranged_projectile_impact_force, 18.75), "远程弹体距离与冲击力必须降低至 75%。")
+	_check(is_equal_approx(monster.cooldown, 1.0 / 0.75), "远程怪物冷却必须乘 4/3，使每秒开火次数降低至 75%。")
 	monster.free()
 
 

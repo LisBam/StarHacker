@@ -37,7 +37,7 @@
 | `BankService` | 维护活期账户、定期存单、信用贷款、违约冻结与到期级联扣款 | `user://bank_state.json` |
 | `DispatchService` | 维护按角色并行的派遣委托、在线倒计时、大成功判定、近期完成报告与角色锁定查询 | `user://dispatch_state.json` |
 | `StatsService` | 生涯统计：怪物击杀计数、物品获得计数、对局与撤离统计、单局之最与财富曲线采样；聚合 `GlobalInventory` 的累计获得星穹并转发变化通知，图鉴计数、统计面板与悬赏系统只读取本服务或订阅其信号 | `user://stats_state.json`；累计获得星穹仍只保存于 `user://global_inventory.json` |
-| `NewcomerProtectionService` | 维护首次成功撤离永久进度，订阅正式结算并向怪物生成路径提供撤离前 0.50 战斗属性倍率，同时为锻造、据点、派遣与悬赏提供统一局外成长资格；首次引入时从既有成功撤离统计迁移 | `user://newcomer_protection_state.json` |
+| `NewcomerProtectionService` | 维护首次成功撤离永久进度，订阅正式结算并向怪物生成路径提供撤离前 0.75 战斗属性倍率，同时为锻造、据点、派遣与悬赏提供统一局外成长资格；首次引入时从既有成功撤离统计迁移 | `user://newcomer_protection_state.json` |
 | `BountyService` | 每日悬赏：按本地日期刷新随机悬赏、订阅 `StatsService` 事实信号推进进度、完成后自动发放星穹或稀有强化石；必须注册在 `StatsService` 之后 | `user://bounty_state.json` |
 | `BannerNotificationService` | 屏幕顶端全局横幅通知：CanvasLayer 图层 `1200` 高于场景过渡层，`process_mode = ALWAYS` 战斗内外与暂停期间均可播放；持有横幅开关并订阅强平等业务信号，业务服务不反向依赖 | `user://banner_notification_settings.cfg` |
 | `SceneTransition` | 统一场景切换和黑屏过渡 | 无 |

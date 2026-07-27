@@ -97,6 +97,91 @@ custom_minimum_size = Vector2(0, 44)
 layout_mode = 2
 text = "退出游戏"
 
+[node name="BottomCategoryExpansionMargin" type="MarginContainer" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -132.0
+offset_bottom = -82.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_right = 24
+
+[node name="BottomCategoryExpansionHost" type="HBoxContainer" parent="BottomCategoryExpansionMargin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="FinanceCategoryPanel" type="PanelContainer" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost"]
+visible = false
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/FinanceCategoryPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 6
+
+[node name="Buttons" type="HBoxContainer" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/FinanceCategoryPanel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="StockMarketButton" type="Button" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/FinanceCategoryPanel/Margin/Buttons" unique_id=106598226]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 36)
+layout_mode = 2
+text = "炒股"
+
+[node name="MiningFarmButton" type="Button" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/FinanceCategoryPanel/Margin/Buttons" unique_id=213572583]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 36)
+layout_mode = 2
+text = "矿场"
+
+[node name="InsuranceButton" type="Button" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/FinanceCategoryPanel/Margin/Buttons" unique_id=1599930243]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 36)
+layout_mode = 2
+text = "保险"
+
+[node name="BankButton" type="Button" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/FinanceCategoryPanel/Margin/Buttons" unique_id=817354970]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 36)
+layout_mode = 2
+text = "银行"
+
+[node name="StatisticsCategoryPanel" type="PanelContainer" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost"]
+visible = false
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/StatisticsCategoryPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 6
+
+[node name="Buttons" type="HBoxContainer" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/StatisticsCategoryPanel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="EncyclopediaButton" type="Button" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/StatisticsCategoryPanel/Margin/Buttons" unique_id=1828126173]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 36)
+layout_mode = 2
+text = "图鉴"
+
+[node name="StatsButton" type="Button" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/StatisticsCategoryPanel/Margin/Buttons"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 36)
+layout_mode = 2
+text = "生涯"
+
 [node name="BottomMenuMargin" type="MarginContainer" parent="." unique_id=541020951]
 layout_mode = 1
 anchors_preset = 12
@@ -145,29 +230,11 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "锻造"
 
-[node name="StockMarketButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons" unique_id=106598226]
+[node name="FinanceCategoryButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-text = "炒股"
-
-[node name="MiningFarmButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons" unique_id=213572583]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
-text = "矿场"
-
-[node name="InsuranceButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons" unique_id=1599930243]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
-text = "保险"
-
-[node name="BankButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons" unique_id=817354970]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
-text = "银行"
+text = "金融 ▲"
 
 [node name="HideoutButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons" unique_id=957338281]
 unique_name_in_owner = true
@@ -181,101 +248,17 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "派遣"
 
-[node name="EncyclopediaButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons" unique_id=1828126173]
+[node name="BountyButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-text = "图鉴"
-
-[node name="SideMenuMargin" type="MarginContainer" parent="."]
-layout_mode = 1
-anchors_preset = 12
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_top = -188.0
-offset_bottom = -82.0
-grow_horizontal = 2
-grow_vertical = 0
-theme_override_constants/margin_left = 24
-theme_override_constants/margin_right = 24
-
-[node name="SideMenuColumns" type="HBoxContainer" parent="SideMenuMargin"]
-layout_mode = 2
-theme_override_constants/separation = 10
-
-[node name="SideSpacer1" type="Control" parent="SideMenuMargin/SideMenuColumns"]
-layout_mode = 2
-size_flags_horizontal = 3
-mouse_filter = 2
-
-[node name="SideSpacer2" type="Control" parent="SideMenuMargin/SideMenuColumns"]
-layout_mode = 2
-size_flags_horizontal = 3
-mouse_filter = 2
-
-[node name="SideSpacer3" type="Control" parent="SideMenuMargin/SideMenuColumns"]
-layout_mode = 2
-size_flags_horizontal = 3
-mouse_filter = 2
-
-[node name="SideSpacer4" type="Control" parent="SideMenuMargin/SideMenuColumns"]
-layout_mode = 2
-size_flags_horizontal = 3
-mouse_filter = 2
-
-[node name="SideSpacer5" type="Control" parent="SideMenuMargin/SideMenuColumns"]
-layout_mode = 2
-size_flags_horizontal = 3
-mouse_filter = 2
-
-[node name="SideSpacer6" type="Control" parent="SideMenuMargin/SideMenuColumns"]
-layout_mode = 2
-size_flags_horizontal = 3
-mouse_filter = 2
-
-[node name="SideSpacer7" type="Control" parent="SideMenuMargin/SideMenuColumns"]
-layout_mode = 2
-size_flags_horizontal = 3
-mouse_filter = 2
-
-[node name="SideSpacer8" type="Control" parent="SideMenuMargin/SideMenuColumns"]
-layout_mode = 2
-size_flags_horizontal = 3
-mouse_filter = 2
-
-[node name="SideSpacer9" type="Control" parent="SideMenuMargin/SideMenuColumns"]
-layout_mode = 2
-size_flags_horizontal = 3
-mouse_filter = 2
-
-[node name="SideSpacer10" type="Control" parent="SideMenuMargin/SideMenuColumns"]
-layout_mode = 2
-size_flags_horizontal = 3
-mouse_filter = 2
-
-[node name="SideSpacer11" type="Control" parent="SideMenuMargin/SideMenuColumns"]
-layout_mode = 2
-size_flags_horizontal = 3
-mouse_filter = 2
-
-[node name="SideButtonColumn" type="VBoxContainer" parent="SideMenuMargin/SideMenuColumns"]
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_constants/separation = 10
-alignment = 2
-
-[node name="StatsButton" type="Button" parent="SideMenuMargin/SideMenuColumns/SideButtonColumn"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 48)
-layout_mode = 2
-text = "统计"
-
-[node name="BountyButton" type="Button" parent="SideMenuMargin/SideMenuColumns/SideButtonColumn"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 48)
-layout_mode = 2
 text = "悬赏"
+
+[node name="StatisticsCategoryButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "统计 ▲"
 
 [node name="SettingsPanel" type="PanelContainer" parent="." unique_id=2143343297]
 unique_name_in_owner = true

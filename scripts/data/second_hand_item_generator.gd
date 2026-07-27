@@ -15,6 +15,10 @@ const ENHANCEMENT_STONE_COUNT_MINIMUM: int = 1
 ## 二手物品最多历史强化石数量；固定为 20 颗，与单把武器强化次数上限保持一致。
 ## 通用限制补充：武器与装备现共用单件 20 颗强化上限。
 const ENHANCEMENT_STONE_COUNT_MAXIMUM: int = EnhancementRules.MAX_TARGET_ENHANCEMENT_COUNT
+## 二手物品历史强化次数的最低抽样权重；固定为 1，使 20 次强化仍可极低概率出现。
+const ENHANCEMENT_COUNT_WEIGHT_MINIMUM: int = 1
+## 二手物品历史强化次数相邻档位的权重差；固定为 1，使每提高一次强化都会严格降低出现概率。
+const ENHANCEMENT_COUNT_WEIGHT_STEP: int = 1
 ## 单颗历史强化石寻找兼容词条的最大尝试次数；默认 128 次，保证标准武器装备稳定获得目标数量并为异常扩展资源保留退出边界。
 const COMPATIBILITY_ATTEMPT_LIMIT_PER_STONE: int = 128
 ## 强化石兼容最少词条数量；正式词条数量由品质规则决定，该值只保持统一生成接口完整。
@@ -46,8 +50,8 @@ static func apply_second_hand_state(item_resource: Resource, random_source: Rand
 	var failed_result: Dictionary = {"second_hand": false, "used_stone_count": 0, "durability_consumption_percent": 0}
 	if item_resource == null or random_source == null or not _is_supported_item(item_resource) or not item_resource.has_method("set_current_durability"):
 		return failed_result
-	# 计划使用强化石数量；在 1 至 20 闭区间内等概率抽取，每颗继续使用正式品质分布与词条规则。
-	var requested_stone_count: int = random_source.randi_range(ENHANCEMENT_STONE_COUNT_MINIMUM, ENHANCEMENT_STONE_COUNT_MAXIMUM)
+	# 计划使用强化石数量；按递减权重从 1 至 20 次抽取，次数越高权重越低，每颗继续使用正式品质分布与词条规则。
+	var requested_stone_count: int = _roll_weighted_enhancement_count(random_source)
 	# 实际成功强化数量；标准武器装备应等于计划数量，异常扩展资源无法匹配任何词条时可能提前结束。
 	var applied_stone_count: int = 0
 	for _stone_index in range(requested_stone_count):
@@ -63,6 +67,30 @@ static func apply_second_hand_state(item_resource: Resource, random_source: Rand
 	item_resource.call("set_current_durability", maximum_durability * remaining_durability_ratio)
 	item_resource.set("is_second_hand", true)
 	return {"second_hand": true, "used_stone_count": applied_stone_count, "durability_consumption_percent": durability_consumption_percent}
+
+
+static func _roll_weighted_enhancement_count(random_source: RandomNumberGenerator) -> int:
+	## 按线性递减权重抽取历史强化次数；1 次权重为 20，20 次权重为 1，确保高强化二手物品持续更稀有。
+	# 全部候选权重；由 1 至 20 的递减整数权重累计而成，默认总和为 210。
+	var total_weight: int = 0
+	for enhancement_count in range(ENHANCEMENT_STONE_COUNT_MINIMUM, ENHANCEMENT_STONE_COUNT_MAXIMUM + 1):
+		total_weight += _get_enhancement_count_weight(enhancement_count)
+	# 已抽取的权重位置；使用闭区间使每个整数权重桶恰好对应一次候选次数。
+	var rolled_weight: int = random_source.randi_range(1, total_weight)
+	# 已累计权重；首次覆盖抽取位置的次数即为结果。
+	var accumulated_weight: int = 0
+	for enhancement_count in range(ENHANCEMENT_STONE_COUNT_MINIMUM, ENHANCEMENT_STONE_COUNT_MAXIMUM + 1):
+		accumulated_weight += _get_enhancement_count_weight(enhancement_count)
+		if rolled_weight <= accumulated_weight:
+			return enhancement_count
+	return ENHANCEMENT_STONE_COUNT_MAXIMUM
+
+
+static func _get_enhancement_count_weight(enhancement_count: int) -> int:
+	## 返回指定历史强化次数的相对权重；越接近最大次数权重越低，异常输入也会收敛到合法范围。
+	# 限制后的强化次数；避免未来外部调用传入范围外值破坏递减概率表。
+	var clamped_count: int = clampi(enhancement_count, ENHANCEMENT_STONE_COUNT_MINIMUM, ENHANCEMENT_STONE_COUNT_MAXIMUM)
+	return ENHANCEMENT_COUNT_WEIGHT_MINIMUM + (ENHANCEMENT_STONE_COUNT_MAXIMUM - clamped_count) * ENHANCEMENT_COUNT_WEIGHT_STEP
 
 
 static func _apply_random_compatible_enhancement(item_resource: Resource, random_source: RandomNumberGenerator) -> bool:

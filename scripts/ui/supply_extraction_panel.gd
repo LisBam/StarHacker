@@ -28,6 +28,12 @@ const SOURCE_BACKPACK: String = "backpack"
 const SOURCE_MELEE: String = "melee"
 ## 远程装备来源前缀；与 GlobalInventory 的 ranged_0、ranged_1 位置保持一致。
 const SOURCE_RANGED_PREFIX: String = "ranged_"
+## 防具装备来源前缀；与 GlobalInventory 的 armor_head、armor_body、armor_legs、armor_feet 位置保持一致。
+const SOURCE_ARMOR_PREFIX: String = "armor_"
+## 防具部位稳定顺序；撤离面板按头部、躯干、腿部、脚部展示，保证与背包和仓库一致。
+const ARMOR_SLOT_IDS: Array[String] = ["head", "body", "legs", "feet"]
+## 防具部位显示名称；键为稳定部位 ID，值为面板内的中文槽位标签。
+const ARMOR_SLOT_DISPLAY_NAMES: Dictionary = {"head": "头部", "body": "躯干", "legs": "腿部", "feet": "脚部"}
 
 ## 面板最小尺寸；默认 920×620，暂停时居中显示并保留屏幕边缘空间。
 @export var panel_minimum_size: Vector2 = Vector2(920.0, 620.0)
@@ -42,8 +48,10 @@ var _global_inventory: Node
 var _coins_label: Label
 ## 剩余送回价值文本；默认显示 1000，所有物资撤离点共用同一单局额度。
 var _remaining_value_label: Label
-## 装备栏网格；默认三列，展示两个远程槽和一个近战槽中的非空武器。
-var _equipment_grid: GridContainer
+## 武器栏网格；位于撤离面板装备区域左半部分，展示两个远程槽和一个近战槽。
+var _weapon_equipment_grid: GridContainer
+## 防具栏网格；位于撤离面板装备区域右半部分，展示头部、躯干、腿部和脚部四个装备槽。
+var _armor_equipment_grid: GridContainer
 ## 背包物品网格；默认两列，展示全部武器与可堆叠资源。
 var _backpack_grid: GridContainer
 ## 标准物品操作弹窗；根据堆叠数量显示“送回仓库”或“全部/部分送回仓库”。
@@ -53,6 +61,7 @@ var _quantity_dialog: SellQuantityDialog
 ## 当前操作物品；默认 null，菜单关闭不会改变所有权。
 var _action_resource: Resource
 ## 当前操作来源；取值为 backpack、ranged_N 或 melee，默认空字符串。
+## 防具来源补充：已装备防具使用 armor_head、armor_body、armor_legs 或 armor_feet，与全局库存位置协议保持一致。
 var _action_source_location: String = ""
 ## 当前操作物品数量；默认 1，背包堆叠资源读取真实数量。
 var _action_quantity: int = 1
@@ -61,6 +70,7 @@ var _pending_partial_resource: Resource
 ## 当前等待部分送回确认的来源；默认空字符串，与待确认资源共同定位所有权。
 var _pending_partial_source_location: String = ""
 ## 撤离背包渐进加载器；只处理可变长度背包列表，三个装备槽保持立即显示。
+## 装备栏补充：武器三槽与防具四槽均为固定槽位，因此不进入渐进加载队列。
 var _item_loader: ProgressiveItemLoader
 
 
@@ -142,16 +152,45 @@ func _build_interface() -> void:
 	rule_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	rule_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(rule_label)
-	# 装备栏标题；与背包区域使用分隔线区分所有权来源。
-	var equipment_title: Label = Label.new()
-	equipment_title.text = "武器栏"
-	equipment_title.add_theme_font_size_override("font_size", 18)
-	content.add_child(equipment_title)
-	_equipment_grid = GridContainer.new()
-	_equipment_grid.columns = 3
-	_equipment_grid.add_theme_constant_override("h_separation", 8)
-	_equipment_grid.add_theme_constant_override("v_separation", 6)
-	content.add_child(_equipment_grid)
+	# 装备区域；原武器栏左右等宽拆分为武器与防具两栏，两类已装备物品均可独立送回仓库。
+	var loadout_row: HBoxContainer = HBoxContainer.new()
+	loadout_row.add_theme_constant_override("separation", 12)
+	content.add_child(loadout_row)
+	# 武器栏容器；占装备区域左半部分，固定显示全部远程与近战槽位。
+	var weapon_section: VBoxContainer = VBoxContainer.new()
+	weapon_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	weapon_section.add_theme_constant_override("separation", 6)
+	loadout_row.add_child(weapon_section)
+	# 武器栏标题；明确左侧仅显示远程与近战武器槽。
+	var weapon_title: Label = Label.new()
+	weapon_title.text = "武器栏"
+	weapon_title.add_theme_font_size_override("font_size", 18)
+	weapon_section.add_child(weapon_title)
+	_weapon_equipment_grid = GridContainer.new()
+	_weapon_equipment_grid.name = "WeaponEquipmentGrid"
+	_weapon_equipment_grid.columns = 2
+	_weapon_equipment_grid.add_theme_constant_override("h_separation", 8)
+	_weapon_equipment_grid.add_theme_constant_override("v_separation", 6)
+	weapon_section.add_child(_weapon_equipment_grid)
+	# 栏位分隔线；固定占据中间空隙，避免左右两类装备在视觉上混为同一网格。
+	var loadout_separator: VSeparator = VSeparator.new()
+	loadout_row.add_child(loadout_separator)
+	# 防具栏容器；占装备区域右半部分，固定显示四个可穿戴装备槽。
+	var armor_section: VBoxContainer = VBoxContainer.new()
+	armor_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	armor_section.add_theme_constant_override("separation", 6)
+	loadout_row.add_child(armor_section)
+	# 防具栏标题；明确右侧是头部、躯干、腿部和脚部装备的独立送回区域。
+	var armor_title: Label = Label.new()
+	armor_title.text = "装备栏"
+	armor_title.add_theme_font_size_override("font_size", 18)
+	armor_section.add_child(armor_title)
+	_armor_equipment_grid = GridContainer.new()
+	_armor_equipment_grid.name = "ArmorEquipmentGrid"
+	_armor_equipment_grid.columns = 2
+	_armor_equipment_grid.add_theme_constant_override("h_separation", 8)
+	_armor_equipment_grid.add_theme_constant_override("v_separation", 6)
+	armor_section.add_child(_armor_equipment_grid)
 	# 装备与背包分隔线；明确两类来源都可直接送回仓库。
 	var separator: HSeparator = HSeparator.new()
 	content.add_child(separator)
@@ -205,26 +244,24 @@ func _refresh_all() -> void:
 
 
 func _rebuild_equipment_items() -> void:
-	_clear_container(_equipment_grid)
+	_clear_container(_weapon_equipment_grid)
+	_clear_container(_armor_equipment_grid)
 	if _global_inventory == null:
 		return
-	# 动态列数；只按当前非空装备槽数量收缩布局，避免装备较少时固定三列留下大块空白。
-	var occupied_slot_count: int = 0
-	for slot_index in range(int(_global_inventory.call("get_ranged_slot_count"))):
-		if _global_inventory.call("get_ranged_equipment_resource", slot_index) != null:
-			occupied_slot_count += 1
-	if _global_inventory.call("get_melee_equipment_resource") != null:
-		occupied_slot_count += 1
-	_equipment_grid.columns = clampi(occupied_slot_count, 1, 3)
 	# 远程装备槽；空槽显示占位文本，非空武器按其稳定装备位置建立可送回卡片。
 	var ranged_slot_count: int = int(_global_inventory.call("get_ranged_slot_count"))
 	for slot_index in range(ranged_slot_count):
 		# 当前远程装备；空资源会生成不可操作占位卡。
 		var ranged_resource: Resource = _global_inventory.call("get_ranged_equipment_resource", slot_index) as Resource
-		_add_item_card(_equipment_grid, ranged_resource, "%s%d" % [SOURCE_RANGED_PREFIX, slot_index], 1, "远程%d空" % (slot_index + 1))
+		_add_item_card(_weapon_equipment_grid, ranged_resource, "%s%d" % [SOURCE_RANGED_PREFIX, slot_index], 1, "远程%d空" % (slot_index + 1))
 	# 当前近战装备；唯一近战槽使用 melee 稳定来源标识。
 	var melee_resource: Resource = _global_inventory.call("get_melee_equipment_resource") as Resource
-	_add_item_card(_equipment_grid, melee_resource, SOURCE_MELEE, 1, "近战空")
+	_add_item_card(_weapon_equipment_grid, melee_resource, SOURCE_MELEE, 1, "近战空")
+	# 防具装备槽；四个部位复用与武器相同的报价与送回接口，仅来源位置切换为 armor_ 前缀。
+	for armor_slot in ARMOR_SLOT_IDS:
+		# 当前部位装备；空资源会生成不可操作占位卡，确保玩家始终能识别全部防具槽。
+		var armor_resource: Resource = _global_inventory.call("get_armor_equipment_resource", armor_slot) as Resource
+		_add_item_card(_armor_equipment_grid, armor_resource, SOURCE_ARMOR_PREFIX + armor_slot, 1, "%s空" % str(ARMOR_SLOT_DISPLAY_NAMES.get(armor_slot, armor_slot)))
 
 
 func _rebuild_backpack_items() -> void:

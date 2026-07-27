@@ -13,7 +13,7 @@
 | 战斗世界 | `res://scenes/game/game_world.tscn`、`res://scripts/game/game_world.gd` | 承载玩家、地图、环境、敌人人口、宝箱、掉落与撤离流程 |
 | 玩家预制体 | `res://scenes/characters/player.tscn`、`res://scripts/player/player_controller.gd` | 组合输入、移动、战斗属性、装备和攻击组件 |
 
-主菜单和主大厅进入正式骇入或训练场前，只把模式与骇入模式变体写入 `SessionState`（变体取值 standard/bare/overclock，仅运行期有效；训练场入口显式复位为 standard，联机开局由 `NetworkSession` 按主机同步值写入）。三种骇入模式的分组、文案与全部数值倍率集中在 `scripts/game/hack_mode_rules.gd`（`HackModeRules` 静态规则表），`GameWorld` 入场时据此应用人口倍率、二手概率覆盖与超频玩家豁免（无限能量、模式级武器/防具耐久豁免、技能冷却倍率），零装封存由 `GlobalInventory.begin_combat_run(bare_loadout)` 负责。已确认角色由同一服务跨场景保存；角色页的一次性返回场景同样由该服务持有但不写入存档，使主菜单与大厅入口能各自原路返回。所有主场景切换统一经 `SceneTransition` 执行，业务 UI 不直接维护过渡动画。
+主菜单和主大厅进入正式骇入或训练场前，只把模式与骇入模式变体写入 `SessionState`（变体取值 standard/bare/overclock，仅运行期有效；训练场入口显式复位为 standard，联机开局由 `NetworkSession` 按主机同步值写入）。三种骇入模式的分组、文案与全部数值倍率集中在 `scripts/game/hack_mode_rules.gd`（`HackModeRules` 静态规则表），`GameWorld` 入场时据此应用人口倍率、二手概率覆盖与超频玩家豁免（通过 `player_stats_component_path` 的无限能量、模式级武器/防具耐久豁免、技能冷却倍率），`CombatHud` 在 GameWorld 完成会话状态应用后的延后帧重新读取娱乐模式标识，零装封存由 `GlobalInventory.begin_combat_run(bare_loadout)` 负责。已确认角色由同一服务跨场景保存；角色页的一次性返回场景同样由该服务持有但不写入存档，使主菜单与大厅入口能各自原路返回。所有主场景切换统一经 `SceneTransition` 执行，业务 UI 不直接维护过渡动画。
 
 ## 2. AutoLoad 服务
 

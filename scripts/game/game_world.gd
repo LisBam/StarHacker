@@ -679,8 +679,8 @@ func _apply_hack_variant_player_rules() -> void:
 	## 该函数只在入场时调用一次；全部开关都属于场景内组件状态，离开战斗后自动失效，不写入任何存档。
 	if _player == null or _hack_variant != HackModeRules.VARIANT_OVERCLOCK:
 		return
-	# 战斗属性组件；超频模式复用无限能量开关实现“能量不消耗”，与开发者调试开关语义一致。
-	var stats_component: Node = _player.get_node_or_null("CombatStatsComponent")
+	# 战斗属性组件；通过已导出的玩家属性路径解析，避免预制体节点名变动使超频无限能量开关失效。
+	var stats_component: Node = _player.get_node_or_null(player_stats_component_path)
 	if HackModeRules.is_energy_consumption_disabled(_hack_variant) and stats_component != null and stats_component.has_method("set_infinite_energy"):
 		stats_component.call("set_infinite_energy", true)
 	# 武器耐久豁免；写入玩家控制器的模式级开关，与开发者调试开关互不覆盖。

@@ -35,7 +35,7 @@
 | `StockMarketService` | 维护行情、事件、证券币、杠杆合约、交易历史记录、通知记录和对局行为影响 | `user://stock_market_state.json` |
 | `MiningFarmService` | 维护算力币、矿场资产、在线收益和临时增益 | `user://mining_farm_state.json` |
 | `BankService` | 维护活期账户、定期存单、信用贷款、违约冻结与到期级联扣款 | `user://bank_state.json` |
-| `DispatchService` | 维护派遣委托、在线倒计时、大成功判定、完成报告与角色锁定查询 | `user://dispatch_state.json` |
+| `DispatchService` | 维护按角色并行的派遣委托、在线倒计时、大成功判定、近期完成报告与角色锁定查询 | `user://dispatch_state.json` |
 | `StatsService` | 生涯统计：怪物击杀计数、物品获得计数、对局与撤离统计、单局之最与财富曲线采样；战斗与库存挂点上报事实事件，图鉴计数、统计面板与悬赏系统只读取本服务或订阅其信号 | `user://stats_state.json` |
 | `BountyService` | 每日悬赏：按本地日期刷新随机悬赏、订阅 `StatsService` 事实信号推进进度、完成后自动发放星穹或稀有强化石；必须注册在 `StatsService` 之后 | `user://bounty_state.json` |
 | `BannerNotificationService` | 屏幕顶端全局横幅通知：CanvasLayer 图层 `1200` 高于场景过渡层，`process_mode = ALWAYS` 战斗内外与暂停期间均可播放；持有横幅开关并订阅强平等业务信号，业务服务不反向依赖 | `user://banner_notification_settings.cfg` |

@@ -11,8 +11,8 @@ signal first_successful_extraction_completed
 const SAVE_PATH: String = "user://newcomer_protection_state.json"
 ## 新手保护存档版本；默认 1 仅保存首次成功撤离完成状态，未来字段调整时用于兼容读取。
 const SAVE_VERSION: int = 1
-## 保护期怪物战斗属性倍率；默认 0.50 表示生命、伤害、防御、移速等战斗属性降低至原来的 50%。
-const MONSTER_ATTRIBUTE_MULTIPLIER: float = 0.50
+## 保护期怪物战斗属性倍率；默认 0.75 表示生命、伤害、防御、移速等战斗属性降低至原来的 75%。
+const MONSTER_ATTRIBUTE_MULTIPLIER: float = 0.75
 ## 成功撤离结算结果标识；与 GlobalInventory 的正式成功结算结果保持一致，其他结果不会结束保护。
 const SUCCESS_OUTCOME_RESULT: String = "success"
 

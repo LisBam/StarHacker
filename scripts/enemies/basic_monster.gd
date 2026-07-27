@@ -347,7 +347,7 @@ func apply_mode_extension_multipliers(effect_multipliers: Dictionary) -> void:
 
 func apply_newcomer_protection_multiplier(attribute_multiplier: float) -> void:
 	## 应用首次成功撤离前的统一怪物战斗属性降级；本函数在出生随机与风险合约后仅调用一次。
-	## 冷却使用倍率的倒数，使 0.5 表示每秒攻击次数降为 50%，而不是把等待时间缩短为一半。
+	## 冷却使用倍率的倒数，使 0.75 表示每秒攻击次数降为 75%，而不是把等待时间缩短为 75%。
 	# 标准化保护倍率；最高限制为 1 防止配置错误把新手保护变成怪物强化。
 	var resolved_multiplier: float = clampf(attribute_multiplier, 0.01, 1.0)
 	_newcomer_protection_multiplier = resolved_multiplier

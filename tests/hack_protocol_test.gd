@@ -5,6 +5,40 @@ extends Node
 
 ## 正式战斗场景；用于验证真实玩家、GameWorld 与 CombatHud 的动态组件接线。
 const GAME_WORLD_SCENE: PackedScene = preload("res://scenes/game/game_world.tscn")
+## 用户指定的协议说明顺序；逐项与规则表比对，防止 UI 文案再次加入额外限定词或改写句式。
+const EXPECTED_PROTOCOL_DESCRIPTIONS: Array[String] = [
+	"每次击杀敌人回复8点能量。",
+	"所有武器弹射+1。",
+	"所有武器穿透+1。",
+	"所有武器连击+1。",
+	"所有武器散射+1。",
+	"攻击力+12%。",
+	"防御力+15%。",
+	"速度+10%。",
+	"生命上限+15%。",
+	"能量上限+15%。",
+	"造成的伤害+10%。",
+	"受到的伤害降低8%。",
+	"击杀敌人的物品掉落概率+12%。",
+	"击杀敌人回复6点生命值。",
+	"闪避消耗的能量-20%。",
+	"冲刺消耗的能量-20%。",
+	"击杀敌人缩短主动技能10%的冷却。",
+	"攻速+12%。",
+	"暴击率+8%。",
+	"暴击伤害+30%。",
+	"生命值低于30%时获得18（+10%最大生命值）的护盾。",
+	"冲刺后获得2秒的20%减伤。",
+	"受到伤害回复7点能量。",
+	"当能量高于70%时提高15%的伤害。",
+	"将溢出的50%的治疗转化为持续6秒的护盾。",
+	"持有护盾时，伤害提高15%。",
+	"护盾被击破时击退周围的敌人。",
+	"对生命值低于30%的敌人造成的伤害提高25%。",
+	"弹体未命中敌人时，返回40%的能耗。",
+	"生命值低于30%时，攻速提高25%。",
+	"对满血敌人造成的伤害必定暴击。",
+]
 
 ## 当前失败数量；默认 0，每个失败断言加一并在测试结束时作为退出码依据。
 var _failure_count: int = 0
@@ -32,16 +66,19 @@ func _test_rule_table() -> void:
 	# 全部协议定义；用户需求当前固定列出 31 项，数量变化必须同步更新测试与权威玩法文档。
 	var definitions: Array[Dictionary] = HackProtocolRules.get_protocol_definitions()
 	_check(definitions.size() == 31, "协议规则表应包含 31 项定义。")
+	_check(definitions.size() == EXPECTED_PROTOCOL_DESCRIPTIONS.size(), "协议定义与指定说明数量必须一致。")
 	# 已见协议 ID；用于验证规则表没有重复稳定标识。
 	var seen_protocol_ids: Dictionary = {}
-	for protocol_definition in definitions:
+	for definition_index in range(definitions.size()):
+		# 当前协议定义；按规则表稳定顺序与用户指定文案逐项比对。
+		var protocol_definition: Dictionary = definitions[definition_index]
 		# 当前协议 ID；必须非空且全表唯一，网络和局内组件均依赖该稳定值。
 		var protocol_id: String = str(protocol_definition.get("id", ""))
 		_check(not protocol_id.is_empty(), "协议 ID 不得为空。")
 		_check(not seen_protocol_ids.has(protocol_id), "协议 ID 不得重复：%s。" % protocol_id)
 		seen_protocol_ids[protocol_id] = true
 		_check(not str(protocol_definition.get("display_name", "")).is_empty(), "协议名称不得为空：%s。" % protocol_id)
-		_check(not str(protocol_definition.get("description", "")).is_empty(), "协议说明不得为空：%s。" % protocol_id)
+		_check(str(protocol_definition.get("description", "")) == EXPECTED_PROTOCOL_DESCRIPTIONS[definition_index], "协议说明必须严格匹配指定句式：%s。" % protocol_id)
 	# 固定随机源；相同种子应稳定产生三个候选，候选内部不得重复。
 	var offer_random: RandomNumberGenerator = RandomNumberGenerator.new()
 	offer_random.seed = 20260727
@@ -51,6 +88,9 @@ func _test_rule_table() -> void:
 	_check(offer_ids.duplicate().all(func(protocol_id: String) -> bool: return offer_ids.count(protocol_id) == 1), "同一批协议候选不得重复。")
 	_check(is_equal_approx(HackProtocolRules.get_fragment_requirement(0), 100.0), "首次协议需求应为 100 碎片。")
 	_check(is_equal_approx(HackProtocolRules.get_fragment_requirement(1), 175.0), "第二次协议需求应为 175 碎片。")
+	_check(is_equal_approx(HackProtocolRules.SURVIVAL_FRAGMENT_AMOUNT, 2.0), "每 5 秒存活奖励应翻倍为 2 碎片。")
+	_check(is_equal_approx(HackProtocolRules.KILL_FRAGMENT_AMOUNT, 6.0), "最终击杀奖励应翻倍为 6 碎片。")
+	_check(is_equal_approx(HackProtocolRules.CHEST_FRAGMENT_AMOUNT, 36.0), "开箱奖励应翻倍为 36 碎片。")
 	_check(is_equal_approx(HackProtocolRules.get_population_multiplier(0.0), 1.0), "0 层协议不得提前增加怪物。")
 	_check(is_equal_approx(HackProtocolRules.get_population_multiplier(2.0), 1.24), "团队平均 2 层协议应增加 24% 怪物。")
 	_check(is_equal_approx(HackProtocolRules.get_population_multiplier(99.0), 1.72), "协议怪物增幅应封顶 72%。")
@@ -107,6 +147,16 @@ func _test_runtime_flow() -> void:
 	var progress_panel: Control = game_world.get_node_or_null("BattleHUD/Root/BottomDock/HackProtocolProgressPanel") as Control
 	_check(combat_hud != null, "战斗场景应包含 CombatHud。")
 	_check(progress_panel != null and progress_panel.visible, "启用扩展后数据碎片进度条应显示。")
+	# 风险合约查看入口；本局没有启用该扩展，暂停主页必须保持隐藏。
+	var risk_view_button: Button = game_world.get_node_or_null("BattleHUD/Root/PauseOverlay/RiskContractViewButton") as Button
+	# 骇入协议查看入口；本局显式启用该扩展，暂停主页必须显示并独占居中位置。
+	var hack_view_button: Button = game_world.get_node_or_null("BattleHUD/Root/PauseOverlay/HackProtocolViewButton") as Button
+	if combat_hud != null:
+		combat_hud.call("_set_pause_menu_visible", true)
+	_check(risk_view_button != null and not risk_view_button.visible, "未启用的风险合约不得显示在暂停菜单左侧。")
+	_check(hack_view_button != null and hack_view_button.visible, "已启用的骇入协议应显示在暂停菜单左侧。")
+	if combat_hud != null:
+		combat_hud.call("_set_pause_menu_visible", false)
 	protocol_component.call("add_fragments", 250.0)
 	_check(bool(protocol_component.call("is_offer_ready")), "达到 100 碎片后应固定生成三项候选。")
 	# 选择遮罩；碎片刚满时必须保持隐藏，证明系统没有立即弹窗。

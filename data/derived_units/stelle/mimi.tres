@@ -21,4 +21,4 @@ damage = 20.0
 attack_range = 60.0
 attack_cooldown = 1.0
 front_recoil_force = 10.0
-impact_force = 15.0
+impact_force = 25.0

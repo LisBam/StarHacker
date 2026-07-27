@@ -85,6 +85,8 @@ func _ready() -> void:
 
 func record_run_started() -> void:
 	## 记录一局正式战斗开始；只允许标准与零装骇入的开局挂点调用，训练场与超频骇入不得上报。
+	if _is_permanent_progression_suppressed():
+		return
 	_total_runs_started += 1
 	_current_run_kills = 0
 	_current_run_shipped_value = 0
@@ -94,6 +96,8 @@ func record_run_started() -> void:
 
 func record_monster_killed(monster_id: String) -> void:
 	## 记录一次本机确认击杀；空 ID 回退为未知怪物键，训练场与超频骇入由挂点负责不调用本接口。
+	if _is_permanent_progression_suppressed():
+		return
 	# 规范化怪物标识；异常空值统一落入 unknown 键，保证总数与分表一致。
 	var resolved_monster_id: String = monster_id.strip_edges()
 	if resolved_monster_id.is_empty():
@@ -108,6 +112,8 @@ func record_monster_killed(monster_id: String) -> void:
 
 func record_chest_opened(quality_id: String) -> void:
 	## 记录一次宝箱开启；联机中只有实际出货的认领端上报，训练场与超频骇入由挂点负责不调用本接口。
+	if _is_permanent_progression_suppressed():
+		return
 	_total_chests_opened += 1
 	_queue_save()
 	chest_open_recorded.emit(quality_id.strip_edges())
@@ -116,6 +122,8 @@ func record_chest_opened(quality_id: String) -> void:
 
 func record_shipped_value(shipped_value: int) -> void:
 	## 记录一次物资撤离点送回；同时累计生涯总额与本局额度，本局累计经信号广播给悬赏系统。
+	if _is_permanent_progression_suppressed():
+		return
 	if shipped_value <= 0:
 		return
 	_total_shipped_value += shipped_value
@@ -127,6 +135,8 @@ func record_shipped_value(shipped_value: int) -> void:
 
 func record_item_acquired(item_resource: Resource, quantity: int = 1) -> void:
 	## 记录物品获得数量；键与图鉴发现键同构，战斗拾取与商店购买共用本入口，读档恢复不得调用。
+	if _is_permanent_progression_suppressed():
+		return
 	# 物品统计键；无法生成稳定键的异常资源不计数。
 	var statistics_key: String = get_item_statistics_key(item_resource)
 	if statistics_key.is_empty():
@@ -140,6 +150,8 @@ func record_item_acquired(item_resource: Resource, quantity: int = 1) -> void:
 
 func record_run_finished(result_id: String, survival_seconds: float, extracted_value: int) -> void:
 	## 记录一局正式战斗结算；刷新对局计数、单局之最并追加一次财富采样。
+	if _is_permanent_progression_suppressed():
+		return
 	# 规范化结果标识；未知取值按逃跑处理，保证三类计数总和不漏计。
 	var resolved_result_id: String = result_id
 	if resolved_result_id not in [RUN_RESULT_SUCCESS, RUN_RESULT_DEATH, RUN_RESULT_ESCAPE]:
@@ -160,6 +172,13 @@ func record_run_finished(result_id: String, survival_seconds: float, extracted_v
 	record_wealth_sample()
 	_queue_save()
 	stats_changed.emit()
+
+
+func _is_permanent_progression_suppressed() -> bool:
+	## 返回当前会话是否禁止写入生涯统计与悬赏事实；首次战斗引导和娱乐模式只教学或体验，不形成永久记录。
+	# 会话状态服务；独立统计测试缺少服务时保持原有记录行为。
+	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
+	return session_state != null and session_state.has_method("is_permanent_progression_suppressed") and bool(session_state.call("is_permanent_progression_suppressed"))
 
 
 func record_wealth_sample() -> void:

@@ -45,6 +45,10 @@ func _mark_farthest_chest() -> void:
 	var farthest_chest: Node2D
 	# 当前最远距离平方；默认负无穷，任何合法宝箱都能成为首次候选。
 	var farthest_distance_squared: float = -INF
+	# 首次引导近箱规则；引导局复用同一金色技能标记但选择最近宝箱，减少新玩家无目标长途移动。
+	var use_tutorial_nearest_chest: bool = _game_world.has_method("is_first_run_tutorial") and bool(_game_world.call("is_first_run_tutorial"))
+	if use_tutorial_nearest_chest:
+		farthest_distance_squared = INF
 	# 可标记宝箱组；空组不会选择目标，避免错误配置扫描无关节点。
 	var chest_group: StringName = StringName(str(_skill_data.get("chest_group")))
 	if chest_group.is_empty():
@@ -57,7 +61,7 @@ func _mark_farthest_chest() -> void:
 			continue
 		# 宝箱距离平方；避免不必要开方并稳定比较最远目标。
 		var distance_squared: float = _caster.global_position.distance_squared_to(chest.global_position)
-		if distance_squared > farthest_distance_squared:
+		if (use_tutorial_nearest_chest and distance_squared < farthest_distance_squared) or (not use_tutorial_nearest_chest and distance_squared > farthest_distance_squared):
 			farthest_distance_squared = distance_squared
 			farthest_chest = chest
 	_disconnect_marked_chest()

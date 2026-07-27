@@ -139,6 +139,8 @@ var _acquisition_sequence: int = 0
 var _last_extraction_epoch: int = 0
 ## 当前是否处于正式战斗局；默认 false，只有 GameWorld 正式骇入模式会开启损失与撤离结算。
 var _run_active: bool = false
+## 当前正式库存局是否属于一次性首次战斗引导；默认 false，引导结算保留战利品但不写正式撤离编号。
+var _tutorial_run_active: bool = false
 ## 本局背包物品组容量倍率；默认 1.0，风险合约可在正式战斗开始前写入 0.75、0.5 或 0.25，结算后恢复。
 var _combat_backpack_capacity_multiplier: float = 1.0
 ## 本局已经持有过的资源实例集合；键为 Resource 实例编号，值为 true，用于排除自己丢弃后重新捡回的开局物品。
@@ -193,19 +195,25 @@ func _ready() -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST and _run_active:
-		complete_combat_run_failure("主动退出游戏")
+		# 首次引导关闭保护；窗口关闭时保留已获得物品并结束一次性引导，避免首次体验因退出产生正式死亡损失。
+		if _tutorial_run_active:
+			complete_combat_run_tutorial("新手引导已结束")
+		else:
+			complete_combat_run_failure("主动退出游戏")
 		_save_inventory()
 	elif what == NOTIFICATION_WM_CLOSE_REQUEST and _stock_trade_save_queued:
 		# 关闭窗口前立即落盘；避免最后 0.5 秒内的交易尚未触发合并计时器而丢失。
 		_save_inventory()
 
 
-func begin_combat_run(bare_loadout: bool = false) -> void:
+func begin_combat_run(bare_loadout: bool = false, tutorial_run: bool = false) -> void:
 	## 开始一局正式战斗；bare_loadout 为 true 时先封存真实背包与装备并以空所有权入场（零装骇入）。
+	## tutorial_run 为 true 时沿用正式拾取所有权，但结束时走不计正式撤离编号的保留结算。
 	# 零装封存；必须在建立本局已见资源集合之前执行，封存后所有权为空，局内全部拾取都会计入本局收益。
 	if bare_loadout:
 		_stash_loadout_for_bare_run()
 	_run_active = true
+	_tutorial_run_active = tutorial_run
 	_combat_inventory_save_pending = false
 	_combat_shipped_value = 0
 	_run_seen_resource_instance_ids.clear()
@@ -229,6 +237,11 @@ func set_combat_backpack_capacity_multiplier(multiplier: float) -> void:
 
 func is_combat_run_active() -> bool:
 	return _run_active
+
+
+func is_tutorial_run_active() -> bool:
+	## 返回当前库存局是否为首次战斗引导；展示层用它选择独立结算，不从标题或场景路径推断。
+	return _run_active and _tutorial_run_active
 
 
 func is_bare_run_active() -> bool:
@@ -378,6 +391,7 @@ func complete_combat_run_success() -> Dictionary:
 	# 成功撤离只保留背包现状，不自动转入仓库；玩家需要在局外仓库手动整理安全物品。
 	# 零装骇入例外补充：零装局的收尾已把本局所得存入仓库，恢复后的背包与装备为入场前的真实资产。
 	_run_active = false
+	_tutorial_run_active = false
 	_combat_backpack_capacity_multiplier = 1.0
 	_run_seen_resource_instance_ids.clear()
 	_run_gained_resources.clear()
@@ -388,6 +402,37 @@ func complete_combat_run_success() -> Dictionary:
 		"lost_entries": [],
 		"gained_items": gained_items,
 		"lost_items": [],
+	}
+	_queue_save_inventory()
+	inventory_changed.emit()
+	equipment_changed.emit()
+	run_state_changed.emit()
+	return _last_run_outcome.duplicate(true)
+
+
+func complete_combat_run_tutorial(title: String = "新手引导完成") -> Dictionary:
+	## 完成一次性首次战斗引导；保留当前背包与装备，并展示本局收益，但不增加正式撤离编号或标记“上次撤离”物品。
+	if not _run_active:
+		return _last_run_outcome.duplicate(true)
+	# 引导收益条目；复用正式成功结算的本局来源统计，覆盖引导期间拾取后仍由玩家持有的全部物品。
+	var gained_entries: Array[Dictionary] = _build_retained_run_gained_entries()
+	# 引导收益名称；兼容仍只读取名称数组的旧结算展示。
+	var gained_items: Array[String] = _get_outcome_entry_names(gained_entries)
+	# 零装兼容收尾；启动路由固定标准模式，该调用只防止外部测试错误组合参数时封存资产无法恢复。
+	_finalize_bare_run_ownership()
+	_run_active = false
+	_tutorial_run_active = false
+	_combat_backpack_capacity_multiplier = 1.0
+	_run_seen_resource_instance_ids.clear()
+	_run_gained_resources.clear()
+	_last_run_outcome = {
+		"result": "tutorial_success",
+		"title": title,
+		"gained_entries": gained_entries,
+		"lost_entries": [],
+		"gained_items": gained_items,
+		"lost_items": [],
+		"progression_eligible": false,
 	}
 	_queue_save_inventory()
 	inventory_changed.emit()
@@ -475,6 +520,7 @@ func complete_combat_run_failure(reason: String = "战斗失败", retained_ratio
 	# 零装骇入收尾；失败概率判定后的幸存所得全部转入仓库并恢复封存的真实资产，标准模式为空操作。
 	_finalize_bare_run_ownership()
 	_run_active = false
+	_tutorial_run_active = false
 	_combat_backpack_capacity_multiplier = 1.0
 	_run_seen_resource_instance_ids.clear()
 	_run_gained_resources.clear()

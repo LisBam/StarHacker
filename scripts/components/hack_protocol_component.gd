@@ -31,6 +31,8 @@ var _current_fragments: float = 0.0
 var _acquired_protocol_ids: Array[String] = []
 ## 当前待选的三个协议 ID；只有碎片达到需求后生成，关闭窗口不会刷新或丢失候选。
 var _offer_ids: Array[String] = []
+## 首次候选覆盖列表；默认空数组使用正常随机池，新手引导可在首批候选生成前注入三个固定且互不重复的合法协议。
+var _first_offer_override_ids: Array[String] = []
 ## 按协议 kind 汇总的叠加值；每次获得协议后重建，战斗高频查询不重复遍历定义表。
 var _effect_totals: Dictionary = {}
 ## 存活碎片的未结算时间；每达到 5 秒结算 1 点，死亡期间不会增加。
@@ -78,6 +80,24 @@ func _process(delta: float) -> void:
 func set_random_seed(seed_value: int) -> void:
 	## 固定候选随机种子；只影响后续新生成的三选一候选，不刷新已经存在的候选。
 	_random.seed = seed_value
+
+
+func set_first_offer_override_ids(raw_protocol_ids: Array) -> bool:
+	## 注入首批固定候选；只允许尚未获得协议且尚无候选时调用，合法 ID 去重后最多保留规则表规定的三个。
+	if not _acquired_protocol_ids.is_empty() or not _offer_ids.is_empty():
+		return false
+	# 规范候选列表；规则表过滤未知 ID，本地去重保证一次三选一不会出现相同协议。
+	var normalized_ids: Array[String] = HackProtocolRules.normalize_protocol_ids(raw_protocol_ids)
+	# 固定候选结果；按调用方顺序保存，数量不足时由正常随机池补齐。
+	var override_ids: Array[String] = []
+	for protocol_id in normalized_ids:
+		if override_ids.has(protocol_id):
+			continue
+		override_ids.append(protocol_id)
+		if override_ids.size() >= HackProtocolRules.OFFER_COUNT:
+			break
+	_first_offer_override_ids = override_ids
+	return not _first_offer_override_ids.is_empty()
 
 
 func add_fragments(amount: float) -> void:
@@ -287,7 +307,21 @@ func _ensure_offer_ready() -> void:
 	## 碎片达到当前需求时生成一次候选；已有候选保持不变，避免关闭窗口或继续溢出导致刷词条。
 	if _current_fragments < get_required_fragments() or not _offer_ids.is_empty():
 		return
-	_offer_ids = HackProtocolRules.roll_offer_ids(_random, HackProtocolRules.OFFER_COUNT)
+	if not _first_offer_override_ids.is_empty():
+		_offer_ids = _first_offer_override_ids.duplicate()
+		_first_offer_override_ids.clear()
+		# 随机补充候选；固定列表少于三个时只加入尚未出现的合法协议，确保 UI 仍保持标准三选一。
+		if _offer_ids.size() < HackProtocolRules.OFFER_COUNT:
+			# 随机候选池；只有覆盖列表不足三项时才生成，完整引导候选不会被追加第四项。
+			var random_offer_ids: Array[String] = HackProtocolRules.roll_offer_ids(_random, HackProtocolRules.PROTOCOL_DEFINITIONS.size())
+			for protocol_id in random_offer_ids:
+				if _offer_ids.has(protocol_id):
+					continue
+				_offer_ids.append(protocol_id)
+				if _offer_ids.size() >= HackProtocolRules.OFFER_COUNT:
+					break
+	else:
+		_offer_ids = HackProtocolRules.roll_offer_ids(_random, HackProtocolRules.OFFER_COUNT)
 	offer_ready.emit()
 
 

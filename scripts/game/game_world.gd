@@ -226,6 +226,18 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 @export_range(1.0, 7200.0, 1.0, "or_greater") var extraction_spawn_time_seconds: float = 120.0
 ## 撤离点地图标记时间；取值为进入战斗后的秒数，默认 300 表示存活 5 分钟后在地图上显示撤离点标记。
 @export_range(1.0, 7200.0, 1.0, "or_greater") var extraction_map_marker_time_seconds: float = 300.0
+## 首次新手引导撤离点出现并标记的时间；默认 120 秒，让玩家完成战斗、拾取、开箱和协议选择后进入撤离教学。
+@export_range(30.0, 480.0, 1.0) var tutorial_extraction_time_seconds: float = 120.0
+## 首次新手引导开局普通敌人与玩家的期望距离；默认 520 像素，保证很快遇敌且不会贴脸出生。
+@export_range(240.0, 1600.0, 1.0) var tutorial_anchor_monster_distance: float = 520.0
+## 首次新手引导撤离点与生成时玩家的期望距离；默认 1100 像素，保留一次短途探索但可在八分钟内轻松抵达。
+@export_range(480.0, 3000.0, 1.0) var tutorial_extraction_distance: float = 1100.0
+## 首次击杀保底武器；默认“陷阵”，运行时深复制后掉落，修改模板不会影响其他普通掉落池。
+@export var tutorial_first_kill_weapon: Resource = preload("res://data/weapons/basic/formation_breaker.tres")
+## 首次开箱保底防具；默认“起源护甲”，与正常宝箱随机产出叠加且不替换原掉落。
+@export var tutorial_first_chest_equipment: Resource = preload("res://data/equipment/basic/origin_armor.tres")
+## 首次协议固定候选；默认提供连发、散射和击杀回血三种直观收益，只覆盖新手引导的第一轮。
+@export var tutorial_first_protocol_offer_ids: Array[String] = ["weapon_combo_bonus", "weapon_scatter_bonus", "kill_health_restore"]
 ## 训练工具单次增加的游戏时长；默认 60 秒即 1 分钟，运行时修改会影响调试按钮加速撤离点生成与地图标记的幅度。
 @export_range(1.0, 3600.0, 1.0, "or_greater") var training_time_addition_seconds: float = 60.0
 ## 撤离驻留时长；取值应大于 0，默认 5 秒，玩家在撤离范围内连续停留满该时间后可按冲刺键撤离。
@@ -333,6 +345,14 @@ var _has_last_exploration_view_rect: bool = false
 var _last_grid_window_signature: Vector4i = Vector4i(-2147483648, -2147483648, -2147483648, -2147483648)
 ## 当前是否为训练场模式；默认 false 表示正式骇入，修改会影响 HUD 是否显示训练场设置。
 var _is_training_mode: bool = false
+## 当前是否为一次性首次战斗新手引导；默认 false，入场时从 SessionState 缓存并决定专属流程与结算。
+var _is_first_run_tutorial: bool = false
+## 引导局是否已经完成首次击杀；默认 false，首次变为 true 时生成固定武器奖励并推进目标文案。
+var _tutorial_first_enemy_defeated: bool = false
+## 引导局是否已经释放首次宝箱；默认 false，首次变为 true 时追加固定防具、强化石并补足首轮协议碎片。
+var _tutorial_first_chest_opened: bool = false
+## 引导局是否已经获得第一项协议；默认 false，协议组件首次产生有效获得列表时变为 true。
+var _tutorial_first_protocol_acquired: bool = false
 ## 当前骇入模式变体；取值为 HackModeRules 定义的 standard、bare 或 overclock，训练场固定回退 standard。
 ## 入场时从 SessionState 读取一次并缓存整局；决定人口倍率、二手概率覆盖、结算资格与玩家规则豁免。
 var _hack_variant: String = HackModeRules.VARIANT_STANDARD
@@ -448,7 +468,9 @@ func _ready() -> void:
 	_spawn_boundary_walls()
 	_spawn_random_environment()
 	_spawn_loot_chests()
-	_spawn_supply_extraction_points()
+	# 首次引导聚焦正式撤离；隐藏物资送回点，避免新玩家把“送回物品”误认为结束本局。
+	if not _is_first_run_tutorial:
+		_spawn_supply_extraction_points()
 	_environment_obstacle_version += 1
 	if _network_combat_active:
 		# 联机撤离点预推导；此刻全员环境障碍、宝箱缓存与玩家位置（出生原点）完全一致，专用随机流保证各端得到同一位置。
@@ -480,7 +502,12 @@ func _ready() -> void:
 			# 同时活跃敌人上限缩放；骇入模式倍率（零装 0.6、超频 2.0）与联机成员倍率统一应用，标准单机保持原值。
 			_base_materialized_monster_limit = int(_monster_simulation_manager.get("max_materialized_monsters"))
 			_refresh_hack_protocol_population_limit()
+		# 引导锚点敌人；始终使用普通怪物兜底场景在玩家附近创建一条虚拟记录，不生成任何精英怪。
+		_spawn_first_run_tutorial_anchor_monster()
 		_spawn_monster_batch()
+		if _is_first_run_tutorial and _monster_simulation_manager != null and _monster_simulation_manager.has_method("refresh_all"):
+			# 引导即时物化；让附近锚点敌人在开局首批扫描中出现，无需等待全地图人口轮询。
+			_monster_simulation_manager.call("refresh_all")
 	_monster_replenish_remaining = monster_replenish_interval
 	if _network_combat_active:
 		if _network_battle_royale_active:
@@ -620,6 +647,9 @@ func _create_hack_protocol_component() -> void:
 	_hack_protocol_component = HACK_PROTOCOL_COMPONENT_SCRIPT.new()
 	_hack_protocol_component.name = "HackProtocolComponent"
 	_player.add_child(_hack_protocol_component)
+	if _is_first_run_tutorial and _hack_protocol_component.has_method("set_first_offer_override_ids"):
+		# 引导首轮协议；固定三个易理解候选，后续轮次恢复完整随机池。
+		_hack_protocol_component.call("set_first_offer_override_ids", tutorial_first_protocol_offer_ids)
 	if _player.has_method("set_hack_protocol_component"):
 		_player.call("set_hack_protocol_component", _hack_protocol_component)
 	if _hack_protocol_component.has_signal("protocols_changed"):
@@ -638,6 +668,8 @@ func is_hack_protocol_enabled() -> bool:
 
 func _on_local_hack_protocols_changed(_protocol_ids: Array[String]) -> void:
 	## 单机协议层数变化时立即重算人口上限；联机同步器会再发团队状态信号并使用全队平均值校正。
+	if _is_first_run_tutorial and not _protocol_ids.is_empty():
+		_tutorial_first_protocol_acquired = true
 	_refresh_hack_protocol_population_limit()
 
 
@@ -753,6 +785,30 @@ func is_training_mode() -> bool:
 		return bool(session_state.call("is_training_mode"))
 
 	return _is_training_mode
+
+
+func is_first_run_tutorial() -> bool:
+	## 返回本世界是否正在执行一次性首次战斗引导；HUD 只依赖该接口选择教学展示和独立结算。
+	return _is_first_run_tutorial
+
+
+func get_first_run_tutorial_objective_text() -> String:
+	## 返回当前引导阶段的单一行动目标；文本由战斗事实推导，不保存冗余阶段编号，死亡复活后仍可继续原目标。
+	if not _is_first_run_tutorial:
+		return ""
+	if not _tutorial_first_enemy_defeated:
+		return "W/A/S/D 移动 · 左键远程攻击 · 右键近战攻击｜击败附近的普通敌人"
+	if not _tutorial_first_chest_opened:
+		return "按 F 拾取“陷阵”，按 E 打开背包装备｜前往金色标记并长按 F 开启宝箱"
+	if not _tutorial_first_protocol_acquired:
+		return "数据碎片已充足｜从三个骇入协议中选择一项"
+	if not _has_extraction_point:
+		return "可用 C / V / B 施放主动技能｜生存至 02:00，等待撤离信号"
+	if not _player_inside_extraction_area:
+		return "撤离点已标记｜按 Q 查看地图，前往绿色撤离点"
+	if not _extraction_ready_to_leave:
+		return "保持在撤离区域内｜连续驻留 %.1f 秒" % get_extraction_hold_duration_seconds()
+	return "撤离准备完成｜按 Space 完成本次新手引导"
 
 
 func get_hack_variant() -> String:
@@ -1226,6 +1282,7 @@ func _apply_session_state() -> void:
 	var session_state: Node = _get_session_state()
 	if session_state == null:
 		_is_training_mode = false
+		_is_first_run_tutorial = false
 		_hack_variant = HackModeRules.VARIANT_STANDARD
 		_mode_extension_effect_multipliers = ModeExtensionRules.get_effect_multipliers([])
 		_hack_protocol_enabled = false
@@ -1239,6 +1296,8 @@ func _apply_session_state() -> void:
 		# 会话模式属性；取值为字符串，默认 hack，修改会影响当前 GameWorld 模式缓存。
 		var session_mode: String = str(session_state.get("game_mode"))
 		_is_training_mode = session_mode == GAME_MODE_TRAINING
+	# 首次新手引导会话；只读取显式运行期标志，普通新手保护状态不会自动套用教学规则。
+	_is_first_run_tutorial = session_state.has_method("is_first_run_tutorial_active") and bool(session_state.call("is_first_run_tutorial_active"))
 	# 骇入模式变体；训练场固定使用标准值，正式骇入按会话状态读取，缺少接口时按标准骇入兜底。
 	_hack_variant = HackModeRules.normalize_variant(str(session_state.call("get_hack_variant"))) if not _is_training_mode and session_state.has_method("get_hack_variant") else HackModeRules.VARIANT_STANDARD
 	# 模式扩展效果；训练场固定使用中性值，正式骇入从 SessionState 获取已经规范化的整局汇总倍率。
@@ -1278,10 +1337,10 @@ func _begin_global_inventory_run() -> void:
 	# 全局背包服务；默认由自动加载提供，正式骇入开始时记录本局物品快照用于撤离和失败结算。
 	# 零装骇入补充：传入 true 让库存服务先封存真实背包与装备，再以空所有权开始本局。
 	if global_inventory != null and global_inventory.has_method("begin_combat_run"):
-		global_inventory.call("begin_combat_run", HackModeRules.is_bare_loadout(_hack_variant))
+		global_inventory.call("begin_combat_run", HackModeRules.is_bare_loadout(_hack_variant), _is_first_run_tutorial)
 	# 生涯统计服务；只有产出结算的战斗模式会走到这里，对局开始计入总局数并清零本局临时计数。
 	var stats_service: Node = get_tree().root.get_node_or_null("StatsService")
-	if stats_service != null and stats_service.has_method("record_run_started"):
+	if not _is_first_run_tutorial and stats_service != null and stats_service.has_method("record_run_started"):
 		stats_service.call("record_run_started")
 
 
@@ -1514,11 +1573,21 @@ func _update_survival_time(delta: float) -> void:
 
 
 func _update_extraction_timeline() -> void:
-	if not _has_extraction_point and _survival_time_seconds >= maxf(extraction_spawn_time_seconds, 1.0):
+	if not _has_extraction_point and _survival_time_seconds >= _get_effective_extraction_spawn_time_seconds():
 		_spawn_extraction_point()
 
-	if _has_extraction_point and not _extraction_point_marked_on_map and _survival_time_seconds >= maxf(extraction_map_marker_time_seconds, 1.0):
+	if _has_extraction_point and not _extraction_point_marked_on_map and _survival_time_seconds >= _get_effective_extraction_map_marker_time_seconds():
 		_extraction_point_marked_on_map = true
+
+
+func _get_effective_extraction_spawn_time_seconds() -> float:
+	## 返回本局正式撤离点出现时间；首次引导使用独立两分钟节点，其他模式保持检查器配置。
+	return maxf(tutorial_extraction_time_seconds, 1.0) if _is_first_run_tutorial else maxf(extraction_spawn_time_seconds, 1.0)
+
+
+func _get_effective_extraction_map_marker_time_seconds() -> float:
+	## 返回本局撤离地图标记时间；首次引导在点位出现时立即标记，普通局继续保留延迟情报阶段。
+	return maxf(tutorial_extraction_time_seconds, 1.0) if _is_first_run_tutorial else maxf(extraction_map_marker_time_seconds, 1.0)
 
 
 func _update_extraction_state(delta: float) -> void:
@@ -1567,7 +1636,7 @@ func _spawn_extraction_point() -> void:
 	_extraction_point_position = _extraction_point_positions.front()
 	_extraction_point_node = _extraction_point_nodes.front() if not _extraction_point_nodes.is_empty() else null
 	_has_extraction_point = true
-	_extraction_point_marked_on_map = _survival_time_seconds >= maxf(extraction_map_marker_time_seconds, 1.0)
+	_extraction_point_marked_on_map = _survival_time_seconds >= _get_effective_extraction_map_marker_time_seconds()
 	_player_inside_extraction_area = false
 	_active_extraction_point_index = -1
 	_extraction_hold_elapsed_seconds = 0.0
@@ -1752,6 +1821,8 @@ func _build_circle_points(radius: float, point_count: int, close_loop: bool) -> 
 
 func _get_effective_extraction_point_count() -> int:
 	## 返回本局正式撤离点数量；常规局使用检查器配置，风险合约的有效数量字段可将其覆盖为 1。
+	if _is_first_run_tutorial:
+		return 1
 	# 风险合约指定数量；中性值 0 表示未限制，正数表示本局强制使用该数量。
 	var contracted_count: int = int(_mode_extension_effect_multipliers.get("extraction_point_count", 0))
 	if contracted_count > 0:
@@ -1761,6 +1832,8 @@ func _get_effective_extraction_point_count() -> int:
 
 func _get_random_extraction_positions(point_count: int) -> Array[Vector2]:
 	## 生成多个尽量远离的正式撤离点；每个新点从有效候选中选择与已选点最近距离最大的候选，优先满足期望间距。
+	if _is_first_run_tutorial:
+		return [_get_first_run_tutorial_extraction_position()]
 	# 目标点位数量；至少生成一个，避免错误配置把撤离流程变为无出口状态。
 	var resolved_point_count: int = maxi(point_count, 1)
 	# 已选点位；按生成顺序保存，每轮都会作为下一点距离评分的参照集合。
@@ -1820,6 +1893,11 @@ func _get_nearest_extraction_position_distance(candidate_position: Vector2, exis
 	for existing_position in existing_positions:
 		nearest_distance = minf(nearest_distance, candidate_position.distance_to(existing_position))
 	return nearest_distance
+
+
+func _get_first_run_tutorial_extraction_position() -> Vector2:
+	## 在玩家当前位置附近生成唯一引导撤离点；点位仍避开环境障碍和地图边缘，缩短首次学习局的无效赶路时间。
+	return _find_tutorial_clear_position(tutorial_extraction_distance, maxf(extraction_radius, 1.0))
 
 
 func _get_random_extraction_position() -> Vector2:
@@ -2431,6 +2509,8 @@ func execute_loot_chest_release(chest_position: Vector2, quality_id: String, dro
 	if _hack_protocol_component != null and _hack_protocol_component.has_method("notify_chest_opened"):
 		# 宝箱碎片事实；只有实际取得出货权的一端执行本函数，因此联机不会给其他成员重复奖励。
 		_hack_protocol_component.call("notify_chest_opened")
+	if _is_first_run_tutorial and not _tutorial_first_chest_opened:
+		_spawn_first_run_tutorial_chest_rewards(chest_position, broken_open)
 	# 最终掉落数量；主动长按开启时允许已触发套装追加物品，击毁宝箱始终保持品质原始数量。
 	var resolved_drop_count: int = _get_resolved_loot_chest_drop_count(drop_count, broken_open)
 	# 宝箱掉落循环；极品前五件强制高品质，其余物品按当前宝箱品质对应概率独立判定。
@@ -2448,6 +2528,36 @@ func execute_loot_chest_release(chest_position: Vector2, quality_id: String, dro
 			var launch_arc_height: float = _random.randf_range(minf(loot_chest_launch_arc_height_min, loot_chest_launch_arc_height_max), maxf(loot_chest_launch_arc_height_min, loot_chest_launch_arc_height_max))
 			# 开启方式只改变最终扩散半径；手动开启和击破统一从箱体中心播放同款抛物线动画。
 			spawn_item_drop(item_resource, drop_target, chest_position, launch_duration, launch_arc_height)
+
+
+func _spawn_first_run_tutorial_chest_rewards(chest_position: Vector2, broken_open: bool) -> void:
+	## 为引导局首次开箱追加固定防具与高级正向伤害强化石，并补足首轮协议碎片；普通宝箱原掉落仍完整保留。
+	_tutorial_first_chest_opened = true
+	# 保底奖励列表；每项均为独立运行时资源，避免强化或耐久变化污染项目模板。
+	var tutorial_rewards: Array[Resource] = []
+	if tutorial_first_chest_equipment != null:
+		# 保底防具副本；深复制保留完整套装引用与耐久字段，同时隔离本次物品状态。
+		var tutorial_equipment: Resource = tutorial_first_chest_equipment.duplicate(true) as Resource
+		tutorial_rewards.append(tutorial_equipment if tutorial_equipment != null else tutorial_first_chest_equipment)
+	# 高级武器强化石；固定正向伤害词条，让玩家第一次使用强化系统获得直观收益且不会抽到负面词条。
+	var tutorial_stone: EnhancementStoneData = EnhancementStoneData.create_custom(EnhancementRules.QUALITY_HIGH, "weapon", "damage")
+	if tutorial_stone != null:
+		tutorial_rewards.append(tutorial_stone)
+	for reward_index in range(tutorial_rewards.size()):
+		# 当前保底资源；顺序固定为防具、强化石，便于掉落位置分散和测试断言。
+		var reward_resource: Resource = tutorial_rewards[reward_index]
+		# 保底掉落目标；复用宝箱手动或击破扩散规则，不创建不可拾取的直接库存注入。
+		var reward_drop_target: Vector2 = _get_loot_chest_drop_position(chest_position, reward_index, tutorial_rewards.size(), broken_open)
+		# 保底掉落动画时长；取现有宝箱动画区间中值，反馈稳定且不引入额外随机等待。
+		var reward_launch_duration: float = (loot_chest_launch_duration_min + loot_chest_launch_duration_max) * 0.5
+		# 保底掉落弧高；取现有宝箱弧高区间中值，与普通随机掉落保持统一视觉语言。
+		var reward_launch_arc_height: float = (loot_chest_launch_arc_height_min + loot_chest_launch_arc_height_max) * 0.5
+		spawn_item_drop(reward_resource, reward_drop_target, chest_position, reward_launch_duration, reward_launch_arc_height)
+	if _hack_protocol_component != null and _hack_protocol_component.has_method("get_required_fragments") and _hack_protocol_component.has_method("get_current_fragments") and _hack_protocol_component.has_method("add_fragments"):
+		# 首轮碎片缺口；开箱原奖励先结算，再只补足尚缺数量，已有击杀与生存碎片不会被覆盖或浪费。
+		var tutorial_fragment_shortfall: float = maxf(float(_hack_protocol_component.call("get_required_fragments")) - float(_hack_protocol_component.call("get_current_fragments")), 0.0)
+		if tutorial_fragment_shortfall > 0.0:
+			_hack_protocol_component.call("add_fragments", tutorial_fragment_shortfall)
 
 
 func _get_resolved_loot_chest_drop_count(base_drop_count: int, broken_open: bool) -> int:
@@ -2606,6 +2716,39 @@ func _on_loot_chest_removed(chest: Node) -> void:
 	_environment_obstacle_rects.erase(chest_rect)
 	_navigation_grid_cache.clear()
 	_environment_obstacle_version += 1
+
+
+func _spawn_first_run_tutorial_anchor_monster() -> void:
+	## 为首次引导在玩家附近加入一只普通敌人；只使用场景配置的普通兜底怪物，不创建精英类型或第二套 AI。
+	if not _is_first_run_tutorial or not _has_monster_scene_available():
+		return
+	# 普通怪物场景；优先使用 GameWorld 的单场景兜底，它在正式场景中固定为普通虚卒·掠夺者。
+	var tutorial_monster_scene: PackedScene = monster_scene if monster_scene != null else _get_random_monster_scene()
+	if tutorial_monster_scene == null:
+		return
+	# 引导敌人位置；围绕玩家搜索清晰点位，距离由检查器参数控制且不会贴进建筑。
+	var tutorial_monster_position: Vector2 = _find_tutorial_clear_position(tutorial_anchor_monster_distance, 36.0)
+	if _monster_simulation_manager != null and _monster_simulation_manager.has_method("add_virtual_monster"):
+		_monster_simulation_manager.call("add_virtual_monster", tutorial_monster_scene, tutorial_monster_position, 1.0, 1.0)
+		return
+	# 兼容直接实例；加载管理器缺失时仍生成同一普通敌人并连接既有死亡、遇敌和索敌接口。
+	var tutorial_monster: Node2D = tutorial_monster_scene.instantiate() as Node2D
+	if tutorial_monster == null:
+		return
+	_apply_monster_spawn_variation_values(tutorial_monster, 1.0, 1.0)
+	tutorial_monster.add_to_group(TRAINING_MONSTER_GROUP)
+	# 引导怪物父节点；沿用正式怪物容器，缺失时回退 GameWorld。
+	var tutorial_spawn_parent: Node = _monster_parent if _monster_parent != null else self
+	tutorial_spawn_parent.add_child(tutorial_monster)
+	tutorial_monster.global_position = tutorial_monster_position
+	if tutorial_monster.has_signal("player_encountered"):
+		tutorial_monster.connect("player_encountered", Callable(self, "_on_monster_encountered"))
+	if tutorial_monster.has_signal("died"):
+		tutorial_monster.connect("died", Callable(self, "_on_monster_died").bind(tutorial_monster))
+	if tutorial_monster.has_method("set_primary_target"):
+		tutorial_monster.call("set_primary_target", _player)
+	elif tutorial_monster.has_method("set_target"):
+		tutorial_monster.call("set_target", _player)
 
 
 func _spawn_monster_batch(requested_count: int = -1) -> void:
@@ -2874,7 +3017,7 @@ func _apply_population_scales(base_population: int) -> int:
 func _on_monster_encountered(monster_id: String) -> void:
 	## 接收战斗怪物的首次遇敌事件并转交永久图鉴服务；GameWorld 是战斗节点与局外存档之间的协调边界。
 	# 娱乐模式图鉴豁免；训练场与超频骇入均不产生正式进度，首次遇敌也不能解锁永久怪物图鉴。
-	if is_settlement_disabled_mode():
+	if is_settlement_disabled_mode() or _is_first_run_tutorial:
 		return
 	# 全局库存服务；由自动加载创建，缺失时保持战斗可运行，避免独立场景预览依赖完整游戏启动顺序。
 	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
@@ -2893,10 +3036,16 @@ func _on_monster_died(monster_node: Node) -> void:
 		if _hack_protocol_component != null and _hack_protocol_component.has_method("notify_enemy_killed"):
 			# 单机协议击杀事实；联机与套装使用同一击杀归属口径，碎片和回复只奖励最终击杀者。
 			_hack_protocol_component.call("notify_enemy_killed")
+	if _is_first_run_tutorial and not _tutorial_first_enemy_defeated:
+		_tutorial_first_enemy_defeated = true
+		if tutorial_first_kill_weapon != null:
+			# 首杀武器副本；深复制后作为独立地面物品生成，后续强化、耐久和丢弃都不修改项目模板。
+			var tutorial_weapon: Resource = tutorial_first_kill_weapon.duplicate(true) as Resource
+			_spawn_monster_drop_with_animation(tutorial_weapon if tutorial_weapon != null else tutorial_first_kill_weapon, (monster_node as Node2D).global_position)
 
 	# 生涯统计击杀上报；单机战斗模式下本机世界的全部击杀都归属玩家侧（含友方单位击杀）。
 	# 联机口径补充：联机时由 NetworkCombatSync 按主机回传的击杀归属分别计数，这里不重复上报避免主机多计队友击杀。
-	if not _network_combat_active and not is_settlement_disabled_mode():
+	if not _network_combat_active and not is_settlement_disabled_mode() and not _is_first_run_tutorial:
 		# 生涯统计服务；缺失时战斗照常运行，仅丢失计数。
 		var stats_service: Node = get_tree().root.get_node_or_null("StatsService")
 		if stats_service != null and stats_service.has_method("record_monster_killed"):
@@ -3139,6 +3288,28 @@ func _free_monster_node(monster_node: Node) -> void:
 		monster_node.get_parent().remove_child(monster_node)
 
 	monster_node.free()
+
+
+func _find_tutorial_clear_position(preferred_distance: float, clearance_radius: float) -> Vector2:
+	## 围绕玩家按等角度搜索引导点位；开局敌人和两分钟撤离点共用该算法，避免各自维护障碍与边界规则。
+	# 搜索中心；玩家缺失的隔离场景回退世界原点。
+	var search_center: Vector2 = _player.global_position if _player != null else Vector2.ZERO
+	# 有效搜索距离；至少大于清障半径两倍，避免候选与玩家位置重叠。
+	var resolved_distance: float = maxf(preferred_distance, maxf(clearance_radius, 1.0) * 2.0)
+	# 起始角度；每局随机旋转整组候选，但候选间距与尝试数量保持稳定。
+	var starting_angle: float = _random.randf_range(0.0, TAU)
+	# 等角候选数量；默认 32 个方向足以绕开常规建筑群，同时只在两次引导生成时执行。
+	var attempt_count: int = 32
+	for attempt_index in range(attempt_count):
+		# 候选角度；围绕整圆均匀分布，避免连续随机在同一障碍方向重复失败。
+		var candidate_angle: float = starting_angle + TAU * float(attempt_index) / float(attempt_count)
+		# 候选位置；先按期望距离生成，再限制到地图范围内。
+		var candidate_position: Vector2 = _clamp_position_to_map(search_center + Vector2.RIGHT.rotated(candidate_angle) * resolved_distance)
+		if not _is_position_blocked_by_environment(candidate_position, maxf(clearance_radius, 1.0)):
+			return candidate_position
+	# 退化候选；极端密集地图没有清晰方向时仍给出地图内位置，避免引导流程因无目标永久阻塞。
+	var fallback_position: Vector2 = _clamp_position_to_map(search_center + Vector2.RIGHT.rotated(starting_angle) * resolved_distance)
+	return fallback_position
 
 
 func _get_random_monster_spawn_position() -> Vector2:

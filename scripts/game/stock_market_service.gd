@@ -1415,8 +1415,15 @@ func _on_run_state_changed() -> void:
 	if is_active and not _previous_run_active:
 		_run_metrics.clear()
 	elif not is_active and _previous_run_active:
-		_collect_outcome_metrics()
-		refresh_market(REFRESH_SETTLEMENT)
+		# 最近结算结果；首次新手引导显式声明不参与永久进度，其他历史结果缺少字段时默认保持正式结算行为。
+		var outcome: Dictionary = _global_inventory.call("get_last_run_outcome") as Dictionary if _global_inventory != null and _global_inventory.has_method("get_last_run_outcome") else {}
+		# 是否允许推动行情；tutorial_success 为 false，正式成功和失败均按旧规则刷新市场。
+		var progression_eligible: bool = bool(outcome.get("progression_eligible", true))
+		if progression_eligible:
+			_collect_outcome_metrics()
+			refresh_market(REFRESH_SETTLEMENT)
+		else:
+			_run_metrics.clear()
 	_previous_run_active = is_active
 	# 正式战斗期间在线行情本就停止推进；关闭 process 可避免每帧重复查询同一战斗状态，结算信号仍会负责恢复局外计时。
 	set_process(not is_active)

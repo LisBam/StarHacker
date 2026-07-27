@@ -6,18 +6,27 @@ extends Node
 
 ## 首次成功撤离完成信号；HUD 等展示层可订阅并在当前结算流程中弹出一次结束提示。
 signal first_successful_extraction_completed
+## 首次战斗新手引导完成信号；启动路由与展示层可据此刷新一次性入口，不代表正式成功撤离。
+signal first_run_tutorial_completed
 
 ## 新手保护独立存档路径；与库存、统计分离，保证首次撤离资格不受统计字段扩展影响。
 const SAVE_PATH: String = "user://newcomer_protection_state.json"
 ## 新手保护存档版本；默认 1 仅保存首次成功撤离完成状态，未来字段调整时用于兼容读取。
-const SAVE_VERSION: int = 1
+## 版本 2 补充：增加首次战斗新手引导完成状态，旧版本读取时视为已经完成引导以免打断老玩家。
+const SAVE_VERSION: int = 2
 ## 保护期怪物战斗属性倍率；默认 0.75 表示生命、伤害、防御、移速等战斗属性降低至原来的 75%。
 const MONSTER_ATTRIBUTE_MULTIPLIER: float = 0.75
 ## 成功撤离结算结果标识；与 GlobalInventory 的正式成功结算结果保持一致，其他结果不会结束保护。
 const SUCCESS_OUTCOME_RESULT: String = "success"
+## 新手引导撤离结算结果标识；只结束一次性引导，不结束新手保护，也不构成首次正式成功撤离。
+const TUTORIAL_SUCCESS_OUTCOME_RESULT: String = "tutorial_success"
 
 ## 是否已完成首次成功撤离；默认 false，false 时新手保护有效，首次正式成功结算后永久写为 true。
 var _has_completed_first_successful_extraction: bool = false
+## 是否已完成首次战斗新手引导；新档默认 false，完成引导撤离或从引导中主动离开后永久写为 true。
+var _has_completed_first_run_tutorial: bool = false
+## 本次进程是否正在运行首次战斗新手引导；只在启动路由进入引导战斗后为 true，不写入存档。
+var _first_run_tutorial_session_active: bool = false
 ## 结束提示是否尚未被 HUD 消费；默认 false，只在本次运行首次成功撤离后为 true，不写入存档避免跨场景重复弹窗。
 var _completion_notice_pending: bool = false
 ## 全局库存服务缓存；默认从 AutoLoad 获取，用于监听正式对局状态转换与读取最后结算结果。
@@ -49,6 +58,64 @@ func has_completed_first_successful_extraction() -> bool:
 	return _has_completed_first_successful_extraction
 
 
+func should_start_first_run_tutorial() -> bool:
+	## 返回启动路由是否应直接进入首次战斗引导；同一进程已经启动或永久完成时都不会重复跳转。
+	return not _has_completed_first_run_tutorial and not _first_run_tutorial_session_active
+
+
+func has_completed_first_run_tutorial() -> bool:
+	## 返回本档是否已经完成一次性首次战斗引导；该状态与首次正式成功撤离资格完全独立。
+	return _has_completed_first_run_tutorial
+
+
+func is_first_run_tutorial_active() -> bool:
+	## 返回当前进程是否正在运行首次战斗引导；战斗世界和 HUD 只读取该状态，不自行推断新档条件。
+	return _first_run_tutorial_session_active
+
+
+func begin_first_run_tutorial() -> void:
+	## 配置一次性引导会话；固定使用标准骇入、星角色与骇入协议扩展，随后由启动路由切入战斗场景。
+	if _has_completed_first_run_tutorial:
+		return
+	_first_run_tutorial_session_active = true
+	# 会话状态服务；缺失时仍保留服务内激活标志，使独立启动测试可以验证路由判断。
+	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
+	if session_state == null:
+		return
+	if session_state.has_method("set_first_run_tutorial_active"):
+		session_state.call("set_first_run_tutorial_active", true)
+	if session_state.has_method("set_game_mode"):
+		session_state.call("set_game_mode", "hack")
+	if session_state.has_method("set_hack_variant"):
+		session_state.call("set_hack_variant", "standard")
+	if session_state.has_method("set_selected_character"):
+		session_state.call("set_selected_character", "stelle")
+	if session_state.has_method("configure_mode_extensions"):
+		# 引导扩展配置；只启用骇入协议，风险合约和其他难度扩展均保持关闭。
+		var tutorial_extension_ids: Array[String] = [ModeExtensionRules.EXTENSION_HACK_PROTOCOL]
+		session_state.call("configure_mode_extensions", tutorial_extension_ids, [])
+
+
+func complete_first_run_tutorial() -> void:
+	## 永久完成一次性首次战斗引导；不会修改首次正式成功撤离状态，因此新手保护与局外解锁继续等待下一次正式撤离。
+	if _has_completed_first_run_tutorial:
+		_end_first_run_tutorial_session()
+		return
+	_has_completed_first_run_tutorial = true
+	_end_first_run_tutorial_session()
+	_save_state()
+	first_run_tutorial_completed.emit()
+
+
+func _end_first_run_tutorial_session() -> void:
+	## 清理当前引导运行标志；保留玩家当前模式和角色选择，主菜单后续入口会按玩家新选择重新配置。
+	_first_run_tutorial_session_active = false
+	# 会话状态服务；显式关闭引导标志，避免返回主菜单后普通战斗继承一次性规则。
+	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
+	if session_state != null and session_state.has_method("set_first_run_tutorial_active"):
+		session_state.call("set_first_run_tutorial_active", false)
+
+
 func get_monster_attribute_multiplier() -> float:
 	## 返回当前怪物战斗属性倍率；保护结束后固定返回中性值 1.0，调用方可直接与其他模式倍率相乘。
 	return MONSTER_ATTRIBUTE_MULTIPLIER if is_newcomer_protection_active() else 1.0
@@ -74,7 +141,7 @@ func _connect_global_inventory() -> void:
 
 func _on_run_state_changed() -> void:
 	## 在正式对局结束时读取统一结算结果；开始对局、失败、逃跑和训练场都不会改变首次撤离资格。
-	if _has_completed_first_successful_extraction or _global_inventory == null:
+	if _global_inventory == null:
 		return
 	if _global_inventory.has_method("is_combat_run_active") and bool(_global_inventory.call("is_combat_run_active")):
 		return
@@ -82,7 +149,12 @@ func _on_run_state_changed() -> void:
 		return
 	# 最近结算结果；只有库存服务已经完成正式成功结算时才包含 success 标识。
 	var outcome: Dictionary = _global_inventory.call("get_last_run_outcome") as Dictionary
-	if str(outcome.get("result", "")) != SUCCESS_OUTCOME_RESULT:
+	# 最近结算标识；新手引导成功只完成引导，正式 success 才结束保护。
+	var outcome_result: String = str(outcome.get("result", ""))
+	if outcome_result == TUTORIAL_SUCCESS_OUTCOME_RESULT:
+		complete_first_run_tutorial()
+		return
+	if _has_completed_first_successful_extraction or outcome_result != SUCCESS_OUTCOME_RESULT:
 		return
 	_has_completed_first_successful_extraction = true
 	_completion_notice_pending = true
@@ -91,7 +163,7 @@ func _on_run_state_changed() -> void:
 
 
 func _migrate_existing_successful_extraction(state_loaded: bool) -> void:
-	## 首次引入独立保护存档时，读取既有生涯统计迁移已成功撤离的老档，避免老玩家重新获得保护。
+	## 首次引入独立保护存档时，读取既有生涯统计迁移已成功撤离的老档，避免老玩家重新获得保护或被强制拉入首次教学。
 	if state_loaded or _has_completed_first_successful_extraction:
 		return
 	# 生涯统计服务；本服务注册在 StatsService 之后，缺失或独立测试时保持新档保护默认值。
@@ -103,6 +175,8 @@ func _migrate_existing_successful_extraction(state_loaded: bool) -> void:
 	if int(statistics_snapshot.get("total_success_extractions", 0)) <= 0:
 		return
 	_has_completed_first_successful_extraction = true
+	# 老档引导迁移；已经完成过正式撤离的玩家必然不是新建存档，因此同时视为已经完成一次性首次战斗教学。
+	_has_completed_first_run_tutorial = true
 	_save_state()
 
 
@@ -114,6 +188,7 @@ func _save_state() -> void:
 	var save_data: Dictionary = {
 		"version": SAVE_VERSION,
 		"has_completed_first_successful_extraction": _has_completed_first_successful_extraction,
+		"has_completed_first_run_tutorial": _has_completed_first_run_tutorial,
 	}
 	# 存档文件；打开失败时保留内存状态，后续结算或退出时会再次尝试写入。
 	var save_file: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -138,6 +213,10 @@ func _load_state() -> bool:
 	if not (parsed_data is Dictionary):
 		return false
 	# 存档字典；当前版本只读取完成标识，缺失字段按 false 处理以兼容旧档。
+	# 版本 2 补充：同时读取新手引导与首次正式撤离，两项永久进度互不覆盖。
 	var save_data: Dictionary = parsed_data as Dictionary
+	# 存档版本；版本 1 及更早来自新手引导功能上线前，默认视为已完成引导以避免老档被强制拉入教学局。
+	var save_version: int = int(save_data.get("version", 1))
 	_has_completed_first_successful_extraction = bool(save_data.get("has_completed_first_successful_extraction", false))
+	_has_completed_first_run_tutorial = bool(save_data.get("has_completed_first_run_tutorial", save_version < SAVE_VERSION))
 	return true

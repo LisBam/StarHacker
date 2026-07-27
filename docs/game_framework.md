@@ -13,7 +13,7 @@
 | 战斗世界 | `res://scenes/game/game_world.tscn`、`res://scripts/game/game_world.gd` | 承载玩家、地图、环境、敌人人口、宝箱、掉落与撤离流程 |
 | 玩家预制体 | `res://scenes/characters/player.tscn`、`res://scripts/player/player_controller.gd` | 组合输入、移动、战斗属性、装备和攻击组件 |
 
-主菜单和主大厅进入正式骇入前，把模式、骇入模式变体、模式扩展 ID 与扩展专属配置写入 `SessionState`；这些字段都只在运行期有效。训练场入口显式复位为 standard 并清空扩展，联机开局由 `NetworkSession` 按房主最终权威值写入。三种骇入模式的分组、文案与倍率集中在 `HackModeRules`，模式扩展与风险词条集中在 `ModeExtensionRules`。`GameWorld` 入场时取得两份规则结果：骇入模式负责人口、二手概率与超频豁免，模式扩展通过汇总字典把人口、怪物属性、耐久、视野、背包、小地图和掉落倍率分发给各数据所有者。`CombatHud` 在 GameWorld 完成状态应用后的延后帧重新读取娱乐模式与小地图禁用状态，零装封存由 `GlobalInventory.begin_combat_run(bare_loadout)` 负责。完整模式扩展边界见 `docs/mode_extensions.md`。已确认角色由同一服务跨场景保存；角色页的一次性返回场景同样由该服务持有但不写入存档，使主菜单与大厅入口能各自原路返回。所有主场景切换统一经 `SceneTransition` 执行，业务 UI 不直接维护过渡动画。
+主菜单和主大厅进入正式骇入前，把模式、骇入模式变体、模式扩展 ID 与扩展专属配置写入 `SessionState`；这些字段都只在运行期有效。训练场入口显式复位为 standard 并清空扩展，联机开局由 `NetworkSession` 按房主最终权威值写入。三种骇入模式的分组、文案与倍率集中在 `HackModeRules`，模式扩展与风险词条集中在 `ModeExtensionRules`，31 项局内协议与碎片/代价数值集中在 `HackProtocolRules`。`GameWorld` 入场时取得模式结果并按需动态创建 `HackProtocolComponent`：骇入模式负责人口、二手概率与超频豁免，风险合约汇总字典把怪物属性、耐久、视野、背包、小地图和掉落倍率分发给各数据所有者，骇入协议组件只维护本机本局状态。`CombatHud` 在 GameWorld 完成状态应用后的延后帧重新读取娱乐模式、小地图禁用状态与协议组件，零装封存由 `GlobalInventory.begin_combat_run(bare_loadout)` 负责。完整模式扩展边界见 `docs/mode_extensions.md`。已确认角色由同一服务跨场景保存；角色页的一次性返回场景同样由该服务持有但不写入存档，使主菜单与大厅入口能各自原路返回。所有主场景切换统一经 `SceneTransition` 执行，业务 UI 不直接维护过渡动画。
 
 ## 2. AutoLoad 服务
 
@@ -71,6 +71,7 @@
 | `TemporaryBuffComponent` | 管理消耗品限时效果、同 ID 刷新和到期属性清理 |
 | `TopDownMovementComponent` | 合成输入速度与外部击退并执行角色物理移动 |
 | `CombatStatsComponent` | 维护生命、0.1 精度能量、攻防、恢复和死亡状态；支持按稳定来源临时暂停自然能量恢复 |
+| `HackProtocolComponent` | 每名玩家独立维护局内数据碎片、固定三选一、协议叠加层与条件效果；通过稳定来源接口写入玩家和属性组件，不拥有 UI、联机或永久存档 |
 | `CombatCamera` | 跟随玩家、叠加屏幕震动，并在玩家传送时用反向偏移和短时补间平滑追赶新位置 |
 | `RangedAttackComponent` | 校验攻击条件、为普通或散射攻击构造弹体偏移，并把穿透、弹射、连击参数传入弹体；空闲时关闭处理，枪口空间查询复用组件私有形状 |
 | `MeleeAttackComponent` | 管理近战命中框、命中去重、冲击、敌方弹体清除和不启用碰撞的蓄力范围预览；命中窗口与冷却均结束后关闭处理 |
@@ -98,13 +99,13 @@
 - 虚拟敌人物化时优先调用 `set_primary_target()`，确保组合根同时保存长期玩家目标与当前目标；只有不支持该协议的自定义节点才回退 `set_target()`。带有稳定 `monster_id` 的基础怪物会在有效玩家目标注入时发出遇敌信号，重复物化由库存服务按 ID 去重。
 - 未交互宝箱不注册逐帧处理；HUD 以 0.12 秒默认批次刷新附近掉落物与宝箱目标，并在同一批次复用掉落物查询结果。按下或松开拾取键仍即时开始或停止已选宝箱交互，长按期间继续逐帧复核新掉落物以维持拾取优先级。
 
-- 联机骇入时 `GameWorld` 动态创建 `NetworkCombatSync`（节点组 `network_combat_sync`）作为局内唯一实体复制协调者：主机权威产出敌人并向客户端复制傀儡，队友以 `RemotePlayerAvatar` 化身互相可见且可被敌人索敌命中，掉落与宝箱由主机先到先得仲裁；客户端 `GameWorld` 跳过虚拟人口初始化与补充。地图、宝箱布点与撤离点位置依靠共享种子在各端确定性复现，不经网络传输。架构与消息协议见 `docs/multiplayer.md`。
+- 联机骇入时 `GameWorld` 动态创建 `NetworkCombatSync`（节点组 `network_combat_sync`）作为局内唯一实体复制协调者：主机权威产出敌人并向客户端复制傀儡，队友以 `RemotePlayerAvatar` 化身互相可见且可被敌人索敌命中，掉落与宝箱由主机先到先得仲裁；客户端 `GameWorld` 跳过虚拟人口初始化与补充。骇入协议仅互播每名成员已获得的稳定 ID，主机用有效成员平均层数结算动态人口和掉落代价。地图、宝箱布点与撤离点位置依靠共享种子在各端确定性复现，不经网络传输。架构与消息协议见 `docs/multiplayer.md`。
 
 敌人状态机与加载协议见 `docs/enemy_ai.md`，掉落概率、人口曲线和撤离数值见机制总表。
 
 ### 3.4 UI 层
 
-- `CombatHud` 负责局内信息、暂停、地图、风险合约只读入口、拾取提示、物资撤离和结算编排，不直接拥有库存或模式扩展数据。暂停左栏的 `RiskContractViewPanel` 每次打开都从 `SessionState` 取得稳定 ID，再由 `ModeExtensionRules` 解析名称与奖励；物资撤离面板由 `SupplyExtractionPanel` 在左侧武器栏和右侧防具栏中展示全部已装备槽位，两个分区只向 `GlobalInventory` 的统一报价与原子送回接口发起操作。
+- `CombatHud` 负责局内信息、暂停、地图、模式扩展查看入口、拾取提示、物资撤离和结算编排，不直接拥有库存或模式扩展数据。暂停左栏的 `RiskContractViewPanel` 从 `SessionState` 读取风险 ID，`HackProtocolViewPanel` 从本机组件读取协议 ID；生命能量面板上方的数据碎片条读取组件快照与 `InputBindings` 实际键位，长按达标才显示不暂停世界的 `HackProtocolSelectPanel`。物资撤离面板由 `SupplyExtractionPanel` 在左侧武器栏和右侧防具栏中展示全部已装备槽位，两个分区只向 `GlobalInventory` 的统一报价与原子送回接口发起操作。
 - `LobbyHud` 负责大厅左上切换按钮、最近设施提示、角色生命能量、主动技能和武器快照；它不处理 F 输入、设施距离或场景动作。主菜单以 `lobby_host_mode` 嵌入更高 CanvasLayer，只复用局外面板，不复制背包、仓库、商店等业务 UI。
 - `EncyclopediaPanel` 读取 `ContentCatalog` 的全量武器、装备、道具与怪物模板，并通过 `GlobalInventory` 的稳定发现记录决定显示正式信息或“？？？”。怪物只在离树场景实例中读取稳定 ID、说明和基础属性，首次有效遇敌后解锁；左侧列表只负责选择当前条目，右侧物品详情复用 `ItemDetailFormatter`，怪物详情显示其固定基础数值。关键词筛选匹配名称、类型和说明，条目固定按基础内容、`stelle`（星）扩展包、其余扩展包目录顺序分组，并在每个扩展包前显示标题分割。组内装备按套装聚合并固定为头部、躯干、腿部、脚部；资源按初级、中级、高级、极品排列，无法识别品质时回退名称排序。它不复制物品数值或规则、不修改库存，也不把浏览、商店预览或临时快照视为获得。图鉴条目名称行最右侧与详情首行显示 `StatsService` 提供的获得数量或击杀数量，图鉴只读取计数不写入统计。
 - `HackModeSelectPanel` 按 `HackModeRules` 定义表构建“战斗模式 / 娱乐模式”两组模式卡并派发 `mode_selected`；窗口内容四周使用左右 18、上下 16 像素页边距，写入会话状态与场景切换由主菜单宿主完成。`MainMenu` 自身维护金融与统计两个互斥分类：普通样式的分类按钮展开时在所属按钮正上方以 0.18 秒动画打开纵向列表，分类子按钮仍复用原有面板打开回调；`BountyPanel` 与 `StatsPanel` 同样使用左右 18、上下 16 像素页边距，前者只读取 `BountyService` 快照并订阅其变化信号，后者只读取 `StatsService` 快照，财富曲线由面板内部类 `WealthCurveChart` 按采样数组绘制。三个面板都通过主菜单遮罩复用，不直接访问战斗节点。
@@ -194,17 +195,17 @@ ContentCatalog 模板
 ### 4.6 模式扩展
 
 ```text
-HackModeRules + ModeExtensionRules
+HackModeRules + ModeExtensionRules + HackProtocolRules
         -> ModeExtensionSelectPanel（单人或房主编辑）
         -> SessionState / NetworkSession（只保存稳定 ID）
-        -> GameWorld 获取中性键齐全的效果字典
+        -> GameWorld 获取效果字典并按需创建 HackProtocolComponent
         -> 人口 / BasicMonster / PlayerController / EquipmentComponent
-        -> GlobalInventory / CombatHud / 怪物掉落
+        -> GlobalInventory / CombatHud / 怪物掉落 / NetworkCombatSync
 ```
 
 规则层只返回数据，不持有 UI、场景树或存档。`GameWorld` 是整局配置的协调边界，但具体状态仍由最近的数据所有者维护：怪物属性由 `BasicMonster` 应用，虚拟人口由 `MonsterSimulationManager` 补齐，耐久由玩家与装备组件结算，容量由 `GlobalInventory` 原子校验，小地图由 `CombatHud` 显隐。新扩展必须保持中性默认值，使无配置、训练场和旧调用路径无需增加分支。
 
-局内查看链路不经过效果字典：`CombatHud` 只在玩家打开暂停左栏时从 `SessionState` 读取扩展和风险词条稳定 ID，`RiskContractViewPanel` 再通过 `ModeExtensionRules` 构建只读文本。这样显示层与实际效果共享同一规则来源，同时不会获得修改本局配置的权限。
+局内查看链路不经过效果字典：`CombatHud` 打开暂停左栏时，风险合约从 `SessionState` 读取稳定 ID，骇入协议从本机 `HackProtocolComponent` 读取稳定 ID；两个面板分别通过对应规则表构建只读文本。这样显示层与实际效果共享同一规则来源，同时不会获得修改本局配置的权限。
 
 ## 5. 存档边界
 
@@ -293,4 +294,5 @@ HackModeRules + ModeExtensionRules
 - 单人、联机、晚加入补发和最终开局必须共同经过 `ModeExtensionRules.sanitize_configuration()`，未知 ID、空风险合约、同类多档和超额词条不能进入战斗。
 - 效果字典的每个键必须定义中性值。消费组件只读取自身负责的键，并提供公开设置接口；不得让一个全能脚本长期维护所有效果细节。
 - 模式扩展只保存运行期稳定 ID，不进入永久存档。需要永久进度的未来扩展必须另建明确的数据所有者，不能直接扩大 `SessionState` 职责。
+- 骇入协议的碎片、候选、协议层与条件状态全部归 `HackProtocolComponent`；多人只同步协议 ID 快照，不能同步或共享碎片和候选。团队代价必须按有效成员平均层数计算。
 - 完整随机规则、乘算顺序、掉落边界与验证清单见 `docs/mode_extensions.md`。

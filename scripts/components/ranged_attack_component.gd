@@ -114,19 +114,21 @@ func try_attack(direction: Vector2, weapon_data: Resource = null, attack_modifie
 	# 本次使用的偏移角度；取值来自武器数据，默认 0 度表示弹体严格沿瞄准方向发射。
 	var selected_deviation_degrees: float = maxf(_get_weapon_float(weapon_data, "deviation_degrees", 0.0), 0.0)
 	# 本次每轮散射弹体数；未持有散射属性的武器固定为 1，避免默认字段让普通武器获得额外弹体。
-	var selected_scatter_count: int = maxi(roundi(_get_weapon_float(weapon_data, "scatter_count", 1.0)), 1) if _weapon_has_attribute(weapon_data, "has_scatter") else 1
+	var selected_scatter_count: int = (maxi(roundi(_get_weapon_float(weapon_data, "scatter_count", 1.0)), 1) if _weapon_has_attribute(weapon_data, "has_scatter") else 1) + maxi(int(attack_modifiers.get("scatter_bonus", 0)), 0)
 	# 本次连击轮数；未持有连击属性的武器固定为 1，完整轮次结束后才进入正式冷却。
-	var selected_combo_count: int = maxi(roundi(_get_weapon_float(weapon_data, "combo_count", 1.0)), 1) if _weapon_has_attribute(weapon_data, "has_combo") else 1
+	var selected_combo_count: int = (maxi(roundi(_get_weapon_float(weapon_data, "combo_count", 1.0)), 1) if _weapon_has_attribute(weapon_data, "has_combo") else 1) + maxi(int(attack_modifiers.get("combo_bonus", 0)), 0)
 	# 本次穿透次数；表示每颗弹体在首个目标之后还能额外穿过的目标数量。
-	var selected_piercing_count: int = maxi(roundi(_get_weapon_float(weapon_data, "piercing_count", 0.0)), 0) if _weapon_has_attribute(weapon_data, "has_piercing") else 0
+	var selected_piercing_count: int = (maxi(roundi(_get_weapon_float(weapon_data, "piercing_count", 0.0)), 0) if _weapon_has_attribute(weapon_data, "has_piercing") else 0) + maxi(int(attack_modifiers.get("piercing_bonus", 0)), 0)
 	# 本次弹射次数；表示每颗弹体在墙体或可穿透目标命中后最多还能改变方向的次数。
-	var selected_bounce_count: int = maxi(roundi(_get_weapon_float(weapon_data, "bounce_count", 0.0)), 0) if _weapon_has_attribute(weapon_data, "has_bounce") else 0
+	var selected_bounce_count: int = (maxi(roundi(_get_weapon_float(weapon_data, "bounce_count", 0.0)), 0) if _weapon_has_attribute(weapon_data, "has_bounce") else 0) + maxi(int(attack_modifiers.get("bounce_bonus", 0)), 0)
+	# 单颗弹体空弹返还能量；一次攻击成本按散射数与连击轮数平均分摊，全部未命中时合计正好返还配置比例。
+	var miss_refund_per_projectile: float = maxf(float(attack_modifiers.get("attack_energy_consumption", 0.0)), 0.0) * clampf(float(attack_modifiers.get("miss_energy_refund_ratio", 0.0)), 0.0, 1.0) / float(maxi(selected_scatter_count * selected_combo_count, 1))
 
 	if not _is_attack_ready(direction, weapon_data):
 		return false
 	# 连击运行参数；集中保存本次攻击数据，后续轮次无需依赖玩家当前装备槽状态。
 	weapon_data.set_meta("active_scatter_count", selected_scatter_count)
-	weapon_data.set_meta("active_has_scatter", _weapon_has_attribute(weapon_data, "has_scatter"))
+	weapon_data.set_meta("active_has_scatter", _weapon_has_attribute(weapon_data, "has_scatter") or int(attack_modifiers.get("scatter_bonus", 0)) > 0)
 	weapon_data.set_meta("active_piercing_count", selected_piercing_count)
 	weapon_data.set_meta("active_bounce_count", selected_bounce_count)
 	weapon_data.set_meta("active_projectile_scene", selected_projectile_scene)
@@ -135,6 +137,7 @@ func try_attack(direction: Vector2, weapon_data: Resource = null, attack_modifie
 	weapon_data.set_meta("active_projectile_damage", selected_projectile_damage)
 	weapon_data.set_meta("active_impact_force", selected_impact_force)
 	weapon_data.set_meta("active_deviation_degrees", selected_deviation_degrees)
+	weapon_data.set_meta("active_miss_refund_per_projectile", miss_refund_per_projectile)
 	if not _fire_round(direction.normalized(), weapon_data):
 		return false
 	_combo_rounds_remaining = selected_combo_count - 1
@@ -217,6 +220,8 @@ func _fire_round(direction: Vector2, weapon_data: Resource) -> bool:
 			projectile.call("configure_combat_attributes", _get_owner_attack_power(), clampf(_get_weapon_float(weapon_data, "critical_chance", 0.0) + _get_stats_float("get_equipment_critical_chance", 0.0), 0.0, EnhancementRules.CRITICAL_CHANCE_MAXIMUM), _get_weapon_float(weapon_data, "critical_damage", 1.5) + _get_stats_float("get_equipment_critical_damage", 0.0))
 		if projectile.has_method("set_damage_instigator"):
 			projectile.call("set_damage_instigator", owner)
+		if projectile.has_method("set_miss_energy_refund"):
+			projectile.call("set_miss_energy_refund", float(weapon_data.get_meta("active_miss_refund_per_projectile", 0.0)))
 		projectile.global_position = spawn_position
 		projectile.global_rotation = resolved_direction.angle()
 		projectile_parent.add_child(projectile)

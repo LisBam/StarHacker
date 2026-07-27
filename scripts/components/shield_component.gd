@@ -63,6 +63,26 @@ func remove_shield(amount: float, reduce_maximum: bool = false) -> float:
 	return removed_shield
 
 
+func remove_temporary_shield(remaining_amount: float, maximum_amount: float) -> float:
+	## 移除一份限时护盾的剩余值并回收它创建时增加的完整上限；已被伤害消耗的部分不会再次扣除其他护盾。
+	# 实际待移除剩余值；只扣除该限时来源仍未承伤的部分。
+	var resolved_remaining_amount: float = maxf(remaining_amount, 0.0)
+	# 待回收上限容量；允许大于剩余值，表示该来源已有一部分被伤害提前消耗。
+	var resolved_maximum_amount: float = maxf(maximum_amount, 0.0)
+	if resolved_remaining_amount <= 0.0 and resolved_maximum_amount <= 0.0:
+		return 0.0
+	# 修改前护盾；用于返回实际移除量并判断本次是否从正值归零。
+	var previous_shield: float = current_shield
+	# 修改前是否持有护盾；限时到期仍沿用统一破盾信号，由调用方决定是否抑制到期触发效果。
+	var had_shield: bool = current_shield > 0.0
+	current_shield = maxf(current_shield - resolved_remaining_amount, 0.0)
+	max_shield = maxf(max_shield - resolved_maximum_amount, current_shield)
+	shield_changed.emit(current_shield, max_shield)
+	if had_shield and current_shield <= 0.0:
+		shield_broken.emit()
+	return maxf(previous_shield - current_shield, 0.0)
+
+
 func absorb_damage(amount: float) -> float:
 	## 使用当前护盾吸收伤害并返回仍需由生命值承担的剩余伤害；护盾不足时允许同一次伤害溢出。
 	if amount <= 0.0 or current_shield <= 0.0:

@@ -15,6 +15,8 @@ signal damage_received(final_damage: float, source: Node)
 signal movement_speed_attribute_bonus_changed
 ## 玩家技能命中合法目标后派发；限时状态可按技能 ID 追加效果，不需要依赖具体行为节点实例。
 signal skill_target_hit(skill_id: String, target: Node)
+## 玩家成功支付能量并开始冲刺时派发；局内协议等组件可监听而无需读取输入或修改冲刺状态机。
+signal dodge_succeeded
 
 ## 战斗爆发特效脚本；默认通过路径预加载，避免依赖 Godot 全局类名缓存解析顺序。
 const COMBAT_BURST_EFFECT_SCRIPT: Script = preload("res://scripts/effects/combat_burst_effect.gd")
@@ -130,6 +132,8 @@ var _forced_movement_speed: float = 0.0
 var _forced_movement_blocked_this_frame: bool = false
 ## 当前是否已经成功支付疾跑能耗；默认 false，状态变化时同步暂停或恢复自然能量回复，确保疾跑净耗能符合配置值。
 var _is_sprinting: bool = false
+## 本局骇入协议组件缓存；默认 null，由 GameWorld 启用扩展时注入，未开启扩展时所有协议查询保持中性值。
+var _hack_protocol_component: Node = null
 
 ## 输入组件实例缓存；默认在 ready 阶段按路径获取，保持动态类型以降低脚本类名缓存依赖，修改会影响移动与攻击输入读取。
 @onready var _input_component = get_node(input_component_path)
@@ -226,7 +230,7 @@ func apply_damage(damage: float, source: Node) -> void:
 	# 最终伤害；生命扣除、镜头震动和受击反馈使用同一整数结果。
 	# 减伤前最终伤害；已经完成攻防与暴击结算，所有临时减伤只对该结果应用一次。
 	var damage_before_reduction: float = float(damage_result.get("damage", 0))
-		# 最终伤害；武器蓄力、套装与技能来源先在免伤乘区加算，四舍五入到项目统一整数伤害。
+	# 最终伤害；武器蓄力、套装与技能来源先在免伤乘区加算，四舍五入到项目统一整数伤害。
 	var final_damage: float = float(maxi(roundi(damage_before_reduction * _get_received_damage_multiplier()), 1)) if damage_before_reduction > 0.0 else 0.0
 	_record_stock_metric("damage_taken", final_damage)
 	_damage_interval_remaining = maxf(damage_interval, 0.0)
@@ -420,6 +424,13 @@ func _execute_weapon_attack(weapon_data: Resource, requested_mode: String, charg
 	var attack_speed_multiplier: float = get_attack_speed_multiplier()
 	# 攻击参数；攻速只转换为冷却倍率，不改变弹体速度、近战判定时长或武器资源基础数值。
 	var attack_modifiers: Dictionary = {"damage_multiplier": damage_multiplier, "impact_multiplier": impact_multiplier, "cooldown_multiplier": 1.0 / maxf(attack_speed_multiplier, 0.01)}
+	if _hack_protocol_component != null and _hack_protocol_component.has_method("get_weapon_modifier_snapshot"):
+		# 协议离散武器增量；统一合并到本次攻击快照，武器资源本身与永久强化数据不会被改写。
+		attack_modifiers.merge(_hack_protocol_component.call("get_weapon_modifier_snapshot") as Dictionary, true)
+	if _hack_protocol_component != null and _hack_protocol_component.has_method("get_miss_energy_refund_ratio"):
+		# 空弹返还能耗；远程攻击组件按本次总弹体数分摊，近战组件会忽略这两个远程专用字段。
+		attack_modifiers["miss_energy_refund_ratio"] = float(_hack_protocol_component.call("get_miss_energy_refund_ratio"))
+		attack_modifiers["attack_energy_consumption"] = energy_consumption
 	# 是否为混合武器；兼容资源缺少方法时按 weapon_type 字段判断。
 	var is_hybrid_weapon: bool = bool(weapon_data.call("is_hybrid")) if weapon_data.has_method("is_hybrid") else str(weapon_data.get("weapon_type")) == "hybrid"
 	# 远程通道是否成功；混合武器始终要求成功，普通武器只按远程请求执行。
@@ -551,7 +562,9 @@ func _handle_dodge_request(movement_direction: Vector2) -> void:
 	if movement_direction.is_zero_approx():
 		return
 
-	if not _spend_energy(dodge_energy_consumption):
+	# 冲刺协议能耗倍率；未启用扩展时保持 1.0，重复节流协议由组件负责限制最低成本。
+	var dodge_energy_multiplier: float = float(_hack_protocol_component.call("get_dodge_energy_cost_multiplier")) if _hack_protocol_component != null and _hack_protocol_component.has_method("get_dodge_energy_cost_multiplier") else 1.0
+	if not _spend_energy(dodge_energy_consumption * maxf(dodge_energy_multiplier, 0.0)):
 		return
 
 	# 蓄力打断只发生在冲刺能量已成功支付后；方向无效、能量不足或状态冲突不会改变当前蓄力。
@@ -562,6 +575,7 @@ func _handle_dodge_request(movement_direction: Vector2) -> void:
 	_dodge_direction = movement_direction.normalized()
 	_dodge_time_remaining = maxf(dodge_duration, 0.01)
 	_record_stock_metric("dodges", 1.0)
+	dodge_succeeded.emit()
 
 
 func _record_stock_metric(metric_name: String, amount: float) -> void:
@@ -593,7 +607,10 @@ func _get_movement_speed_multiplier(movement_direction: Vector2, delta: float) -
 	var sprinting_this_frame: bool = false
 	if not movement_direction.is_zero_approx() and _input_component.has_method("is_sprint_pressed") and bool(_input_component.call("is_sprint_pressed")):
 		# 本帧疾跑能耗；取值大于等于 0，只有成功支付时才应用疾跑倍率。
-		var sprint_energy_consumption: float = maxf(sprint_energy_consumption_per_second, 0.0) * delta
+		# 疾跑协议能耗倍率；未启用扩展时保持 1.0，组件内部负责重复协议的最低成本限制。
+		var sprint_energy_multiplier: float = float(_hack_protocol_component.call("get_sprint_energy_cost_multiplier")) if _hack_protocol_component != null and _hack_protocol_component.has_method("get_sprint_energy_cost_multiplier") else 1.0
+		# 本次疾跑实际能耗由每秒基础值、协议倍率与帧时长共同决定，修改任一项都会改变续航。
+		var sprint_energy_consumption: float = maxf(sprint_energy_consumption_per_second, 0.0) * maxf(sprint_energy_multiplier, 0.0) * delta
 		if _spend_energy(sprint_energy_consumption):
 			sprinting_this_frame = true
 			resolved_multiplier *= maxf(sprint_speed_multiplier, 1.0)
@@ -710,6 +727,29 @@ func get_outgoing_damage_bonus_ratio() -> float:
 	if _equipment_set_component != null and _equipment_set_component.has_method("get_move_speed_damage_bonus_ratio"):
 		combined_bonus_ratio += maxf(float(_equipment_set_component.call("get_move_speed_damage_bonus_ratio", get_current_move_speed_attribute())), 0.0)
 	return maxf(combined_bonus_ratio, 0.0)
+
+
+func set_hack_protocol_component(component: Node) -> void:
+	## 注入本局骇入协议组件；只保存场景内引用，离开战斗后随玩家销毁且不写入存档。
+	_hack_protocol_component = component
+
+
+func get_damage_multiplier_against(target: Node) -> float:
+	## 返回目标相关的骇入协议伤害倍率；弹体、近战和技能来源通过实际发起者统一委托到这里。
+	if _hack_protocol_component != null and _hack_protocol_component.has_method("get_damage_multiplier_against"):
+		return maxf(float(_hack_protocol_component.call("get_damage_multiplier_against", target)), 0.0)
+	return 1.0
+
+
+func is_critical_guaranteed_against(target: Node) -> bool:
+	## 判断骇入协议是否让本次对指定目标必定暴击；没有协议组件时固定返回 false。
+	return _hack_protocol_component != null and _hack_protocol_component.has_method("is_critical_guaranteed_against") and bool(_hack_protocol_component.call("is_critical_guaranteed_against", target))
+
+
+func refund_missed_projectile_energy(amount: float) -> void:
+	## 接收弹体生命周期结束时的空弹能量返还；实际上限与能量精度继续由协议和属性组件处理。
+	if _hack_protocol_component != null and _hack_protocol_component.has_method("refund_missed_projectile_energy"):
+		_hack_protocol_component.call("refund_missed_projectile_energy", amount)
 
 
 func set_outgoing_damage_bonus_source(source_id: String, bonus_ratio: float) -> void:

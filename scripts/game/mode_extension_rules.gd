@@ -8,6 +8,8 @@ class_name ModeExtensionRules
 
 ## 风险合约扩展标识；启用后必须从当前四个随机负面词条中至少选择一项。
 const EXTENSION_RISK_CONTRACT: String = "risk_contract"
+## 骇入协议扩展标识；启用后每名玩家在本局独立积攒碎片并获得可叠加协议。
+const EXTENSION_HACK_PROTOCOL: String = "hack_protocol"
 
 ## 怪物数量词条类别；同一批候选最多出现一个数量强度档位。
 const FAMILY_MONSTER_COUNT: String = "monster_count"
@@ -36,6 +38,12 @@ const EXTENSION_DEFINITIONS: Array[Dictionary] = [
 		"display_name": "风险合约",
 		"description": "随机获得四个负面词条，至少选择一项后开局；每项词条都会提高本局怪物掉落概率。",
 		"requires_settlement": true,
+	},
+	{
+		"id": EXTENSION_HACK_PROTOCOL,
+		"display_name": "骇入协议",
+		"description": "局内积攒数据碎片并从三个随机协议中选择强化；协议越多，怪物数量越高且物品掉落率越低。",
+		"requires_settlement": false,
 	},
 ]
 
@@ -388,4 +396,6 @@ static func get_configuration_summary(extension_ids: Array, modifier_ids: Array)
 		# 风险词条数量；便于联机成员快速确认房主启用了多少项负面效果。
 		var modifier_count: int = (sanitized_configuration.get("risk_modifier_ids", []) as Array).size()
 		summary_parts.append("风险合约（%d项，掉落+%d%%）" % [modifier_count, drop_bonus_percent])
+	if normalized_extension_ids.has(EXTENSION_HACK_PROTOCOL):
+		summary_parts.append("骇入协议")
 	return "、".join(summary_parts) if not summary_parts.is_empty() else "未开启"

@@ -44,6 +44,10 @@ const UI_STYLE_SELECTOR_SCRIPT: Script = preload("res://scripts/ui/ui_style_sele
 const BANNER_NOTIFICATION_TOGGLE_SCRIPT: Script = preload("res://scripts/ui/banner_notification_toggle.gd")
 ## 风险合约只读查看面板；暂停界面左栏使用该组件展示本局已确认词条与掉落奖励。
 const RISK_CONTRACT_VIEW_PANEL_SCRIPT: Script = preload("res://scripts/ui/risk_contract_view_panel.gd")
+## 骇入协议只读查看面板；暂停界面左栏使用该组件展示本机本局协议与叠加层数。
+const HACK_PROTOCOL_VIEW_PANEL_SCRIPT: Script = preload("res://scripts/ui/hack_protocol_view_panel.gd")
+## 骇入协议三选一面板；碎片积满并完成长按后显示，窗口存在期间不暂停场景树。
+const HACK_PROTOCOL_SELECT_PANEL_SCRIPT: Script = preload("res://scripts/ui/hack_protocol_select_panel.gd")
 ## 主动技能栏脚本；动态显示三个技能槽的实际按键、名称和冷却，不接管技能输入状态机。
 const ACTIVE_SKILL_BAR_SCRIPT: Script = preload("res://scripts/ui/active_skill_bar.gd")
 ## 局内共享槽位视图；左侧技能栏和右侧纯展示武器栏直接复用同一视觉组件。
@@ -92,10 +96,16 @@ const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
 const RISK_CONTRACT_VIEW_PANEL_TOP_LEFT: Vector2 = Vector2(-620.0, -210.0)
 ## 风险合约左栏右下偏移；相对屏幕中心为 (-200, 210)，形成固定 420×420 查看区域。
 const RISK_CONTRACT_VIEW_PANEL_BOTTOM_RIGHT: Vector2 = Vector2(-200.0, 210.0)
-## 风险合约入口按钮左上偏移；相对屏幕中心为 (-620, -22)，在未展开时垂直居中于左栏。
-const RISK_CONTRACT_VIEW_BUTTON_TOP_LEFT: Vector2 = Vector2(-620.0, -22.0)
-## 风险合约入口按钮右下偏移；相对屏幕中心为 (-200, 22)，形成固定 420×44 按钮。
-const RISK_CONTRACT_VIEW_BUTTON_BOTTOM_RIGHT: Vector2 = Vector2(-200.0, 22.0)
+## 风险合约入口按钮左上偏移；相对屏幕中心为 (-620, -50)，与骇入协议入口上下并列。
+const RISK_CONTRACT_VIEW_BUTTON_TOP_LEFT: Vector2 = Vector2(-620.0, -50.0)
+## 风险合约入口按钮右下偏移；相对屏幕中心为 (-200, -6)，形成固定 420×44 按钮。
+const RISK_CONTRACT_VIEW_BUTTON_BOTTOM_RIGHT: Vector2 = Vector2(-200.0, -6.0)
+## 骇入协议入口按钮左上偏移；相对屏幕中心为 (-620, 6)，位于风险合约入口下方。
+const HACK_PROTOCOL_VIEW_BUTTON_TOP_LEFT: Vector2 = Vector2(-620.0, 6.0)
+## 骇入协议入口按钮右下偏移；相对屏幕中心为 (-200, 50)，形成固定 420×44 按钮。
+const HACK_PROTOCOL_VIEW_BUTTON_BOTTOM_RIGHT: Vector2 = Vector2(-200.0, 50.0)
+## 骇入协议选择窗口半尺寸；默认 390×250，完整窗口为 780×500 并容纳三张等宽候选卡。
+const HACK_PROTOCOL_SELECT_PANEL_HALF_SIZE: Vector2 = Vector2(390.0, 250.0)
 
 ## 玩家节点路径；默认指向同一游戏世界下的 Player，必须解析到玩家根节点，运行时通常不修改。
 @export var player_path: NodePath = ^"../Player"
@@ -129,6 +139,8 @@ const RISK_CONTRACT_VIEW_BUTTON_BOTTOM_RIGHT: Vector2 = Vector2(-200.0, 22.0)
 @export var pickup_action: StringName = &"pickup_nearby"
 ## 掉落物列表开关输入动作名；默认 toggle_drop_list 对应 G 键，运行时通常不修改，改名会影响自动展开开关。
 @export var toggle_drop_list_action: StringName = &"toggle_drop_list"
+## 骇入协议选择输入动作名；默认 select_hack_protocol 对应 H 键，玩家改键后进度条会实时显示实际绑定。
+@export var select_hack_protocol_action: StringName = &"select_hack_protocol"
 ## 撤离确认输入动作名；默认复用兼容 ID dodge 对应冲刺键，运行时通常不修改，改名会影响撤离点可撤离后的确认操作。
 @export var extraction_action: StringName = &"dodge"
 ## 主菜单场景路径；默认返回项目主菜单，必须填写 tscn 资源，运行时通常不修改，改错会导致暂停菜单返回失败。
@@ -196,6 +208,20 @@ var _melee_component_has_cooldown_ratio: bool = false
 var _melee_component_has_cooldown_duration: bool = false
 ## 主动技能组件缓存；默认从玩家子节点 ActiveSkillComponent 获取，允许为空但不会显示角色主动技能或冷却。
 var _active_skill_component: Node
+## 本地玩家骇入协议组件；仅在启用扩展的正式战斗存在，碎片与协议不会读取其他玩家状态。
+var _hack_protocol_component: Node
+## 数据碎片进度分区；动态插入生命能量面板上方，扩展未启用时隐藏且不占布局。
+var _hack_protocol_progress_panel: PanelContainer
+## 数据碎片文本；显示实际碎片、当前需求、真实绑定键和长按秒数。
+var _hack_protocol_progress_label: Label
+## 数据碎片进度条；数值比例最高显示 100%，溢出量仍由文本完整展示。
+var _hack_protocol_progress_bar: ProgressBar
+## 当前选择键持续按住时间；松开、界面受阻或打开候选后归零。
+var _hack_protocol_hold_elapsed: float = 0.0
+## 骇入协议选择全屏遮罩；打开时只锁定本机战斗输入，不暂停单机或联机场景树。
+var _hack_protocol_select_overlay: Control
+## 骇入协议三选一面板；每次打开读取组件已固定候选，关闭不会重新随机。
+var _hack_protocol_select_panel: Control
 ## 主动技能栏缓存；默认运行时创建在屏幕左下角，三个技能槽按技能一、二、三顺序显示。
 var _active_skill_bar: Control
 ## 主动技能栏标准分区面板；默认位于普通 HUD 层并排在所有菜单遮罩之前，避免覆盖背包、暂停或结算界面。
@@ -377,6 +403,10 @@ var _pause_save_transfer_control: Control
 var _risk_contract_view_button: Button
 ## 风险合约只读查看面板；默认运行时创建并隐藏，打开时占用暂停界面左侧 420×420 空栏。
 var _risk_contract_view_panel: Control
+## 骇入协议查看入口按钮；默认运行时创建在暂停界面左栏，与风险合约入口上下排列。
+var _hack_protocol_view_button: Button
+## 骇入协议只读查看面板；默认运行时创建并隐藏，只展示本机本局协议。
+var _hack_protocol_view_panel: Control
 ## 战斗开发者全屏遮罩；默认运行时创建并隐藏，暂停界面完成 LISBAM 序列后显示。
 var _combat_developer_overlay: Control
 ## 战斗开发者菜单实例；默认复用 DeveloperMenu 并切换到无限属性与训练工具上下文。
@@ -527,10 +557,13 @@ func _ready() -> void:
 	_master_bus_index = AudioServer.get_bus_index("Master")
 	_bind_game_world()
 	_bind_player_components()
+	_build_hack_protocol_progress()
+	_build_hack_protocol_select_overlay()
 	_build_active_skill_bar()
 	_build_shared_backpack_panel()
 	_bind_pause_menu()
 	_build_risk_contract_view()
+	_build_hack_protocol_view()
 	_build_escape_confirmation_dialog()
 	_build_combat_status_panel()
 	_build_nearby_drop_panel()
@@ -554,6 +587,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_refresh_cooldown_overlays()
+	_update_hack_protocol_hold(delta)
 	_combat_status_refresh_remaining = maxf(_combat_status_refresh_remaining - delta, 0.0)
 	if _combat_status_refresh_remaining <= 0.0:
 		_combat_status_refresh_remaining = maxf(combat_status_refresh_interval, 0.02)
@@ -662,6 +696,8 @@ func _refresh_mode_state_after_game_world_initialized() -> void:
 	_is_casual_mode = _resolve_casual_mode()
 	if _mini_map != null:
 		_mini_map.visible = not (_game_world != null and _game_world.has_method("is_minimap_disabled_by_mode_extension") and bool(_game_world.call("is_minimap_disabled_by_mode_extension")))
+	_bind_hack_protocol_component()
+	_refresh_hack_protocol_progress()
 	_sync_mode_controls()
 
 
@@ -687,6 +723,7 @@ func _bind_player_components() -> void:
 	_melee_component_has_cooldown_ratio = _melee_attack_component != null and _melee_attack_component.has_method("get_cooldown_ratio")
 	_melee_component_has_cooldown_duration = _melee_attack_component != null and _melee_attack_component.has_method("get_cooldown_duration")
 	_active_skill_component = _player.get_node_or_null(active_skill_component_path)
+	_hack_protocol_component = _player.get_node_or_null("HackProtocolComponent")
 
 	if _stats_component != null:
 		_stats_component.connect("health_changed", Callable(self, "_on_health_changed"))
@@ -697,6 +734,7 @@ func _bind_player_components() -> void:
 			_on_player_died()
 	if _shield_component != null and _shield_component.has_signal("shield_changed"):
 		_shield_component.connect("shield_changed", Callable(self, "_on_shield_changed"))
+	_bind_hack_protocol_component()
 
 	if _equipment_component != null:
 		_equipment_component.connect("equipment_changed", Callable(self, "_on_equipment_changed"))
@@ -706,6 +744,203 @@ func _bind_player_components() -> void:
 
 	if _active_skill_component != null and _active_skill_component.has_signal("skill_loadout_changed"):
 		_active_skill_component.connect("skill_loadout_changed", Callable(self, "_on_active_skill_loadout_changed"))
+
+
+func _bind_hack_protocol_component() -> void:
+	## 绑定 GameWorld 在父节点 ready 阶段动态创建的本机协议组件；信号只连接一次。
+	if _hack_protocol_component == null and _game_world != null and _game_world.has_method("get_hack_protocol_component"):
+		_hack_protocol_component = _game_world.call("get_hack_protocol_component") as Node
+	if _hack_protocol_component == null:
+		return
+	if _hack_protocol_component.has_signal("fragments_changed") and not _hack_protocol_component.is_connected("fragments_changed", Callable(self, "_on_hack_protocol_fragments_changed")):
+		_hack_protocol_component.connect("fragments_changed", Callable(self, "_on_hack_protocol_fragments_changed"))
+	if _hack_protocol_component.has_signal("offer_ready") and not _hack_protocol_component.is_connected("offer_ready", Callable(self, "_on_hack_protocol_offer_ready")):
+		_hack_protocol_component.connect("offer_ready", Callable(self, "_on_hack_protocol_offer_ready"))
+	if _hack_protocol_component.has_signal("protocols_changed") and not _hack_protocol_component.is_connected("protocols_changed", Callable(self, "_on_hack_protocols_changed")):
+		_hack_protocol_component.connect("protocols_changed", Callable(self, "_on_hack_protocols_changed"))
+
+
+func _build_hack_protocol_progress() -> void:
+	## 在生命能量面板上方创建数据碎片条；扩展未启用时整个分区隐藏。
+	if _hack_protocol_progress_panel != null:
+		return
+	# 底部状态容器；场景固定为 VBoxContainer，缺失时保持 HUD 其他功能可用。
+	var bottom_dock: VBoxContainer = get_node_or_null("Root/BottomDock") as VBoxContainer
+	if bottom_dock == null:
+		return
+	_hack_protocol_progress_panel = PanelContainer.new()
+	_hack_protocol_progress_panel.name = "HackProtocolProgressPanel"
+	_hack_protocol_progress_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UI_STYLE_GUIDE.apply_section_panel(_hack_protocol_progress_panel)
+	bottom_dock.add_child(_hack_protocol_progress_panel)
+	bottom_dock.move_child(_hack_protocol_progress_panel, 0)
+	# 分区内容边距；与生命能量面板使用相同紧凑留白。
+	var progress_margin: MarginContainer = MarginContainer.new()
+	progress_margin.add_theme_constant_override("margin_left", 8)
+	progress_margin.add_theme_constant_override("margin_top", 4)
+	progress_margin.add_theme_constant_override("margin_right", 8)
+	progress_margin.add_theme_constant_override("margin_bottom", 4)
+	_hack_protocol_progress_panel.add_child(progress_margin)
+	# 文本与进度条纵向布局；文字负责完整溢出量和长按提示，进度条只表达当前阶段比例。
+	var progress_layout: VBoxContainer = VBoxContainer.new()
+	progress_layout.add_theme_constant_override("separation", 2)
+	progress_margin.add_child(progress_layout)
+	_hack_protocol_progress_label = Label.new()
+	_hack_protocol_progress_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hack_protocol_progress_label.add_theme_font_size_override("font_size", 11)
+	progress_layout.add_child(_hack_protocol_progress_label)
+	_hack_protocol_progress_bar = ProgressBar.new()
+	_hack_protocol_progress_bar.custom_minimum_size = Vector2(0.0, 8.0)
+	_hack_protocol_progress_bar.show_percentage = false
+	UI_STYLE_GUIDE.apply_semantic_progress_bar(_hack_protocol_progress_bar)
+	progress_layout.add_child(_hack_protocol_progress_bar)
+	_refresh_hack_protocol_progress()
+
+
+func _build_hack_protocol_select_overlay() -> void:
+	## 构建不暂停游戏的全屏选择遮罩；只有完成三秒长按时才显示。
+	if _hack_protocol_select_overlay != null:
+		return
+	_hack_protocol_select_overlay = Control.new()
+	_hack_protocol_select_overlay.name = "HackProtocolSelectOverlay"
+	_hack_protocol_select_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_hack_protocol_select_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	_root_control.add_child(_hack_protocol_select_overlay)
+	# 半透明背景；只用于提高战斗中三选一卡片可读性，场景树继续运行。
+	var overlay_dim: ColorRect = ColorRect.new()
+	overlay_dim.name = "HackProtocolSelectDim"
+	overlay_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	UI_STYLE_GUIDE.apply_overlay_dim(overlay_dim)
+	_hack_protocol_select_overlay.add_child(overlay_dim)
+	# 中央候选面板；脚本负责固定候选展示与选择验证。
+	var select_panel: Control = HACK_PROTOCOL_SELECT_PANEL_SCRIPT.new() as Control
+	if select_panel == null:
+		_hack_protocol_select_overlay.visible = false
+		return
+	select_panel.name = "HackProtocolSelectPanel"
+	select_panel.set_anchors_preset(Control.PRESET_CENTER)
+	select_panel.offset_left = -HACK_PROTOCOL_SELECT_PANEL_HALF_SIZE.x
+	select_panel.offset_top = -HACK_PROTOCOL_SELECT_PANEL_HALF_SIZE.y
+	select_panel.offset_right = HACK_PROTOCOL_SELECT_PANEL_HALF_SIZE.x
+	select_panel.offset_bottom = HACK_PROTOCOL_SELECT_PANEL_HALF_SIZE.y
+	select_panel.connect("protocol_selected", Callable(self, "_on_hack_protocol_selected"))
+	select_panel.connect("closed", Callable(self, "_on_hack_protocol_select_closed"))
+	_hack_protocol_select_overlay.add_child(select_panel)
+	_hack_protocol_select_panel = select_panel
+	_hack_protocol_select_overlay.visible = false
+
+
+func _update_hack_protocol_hold(delta: float) -> void:
+	## 推进选择键长按；任一阻塞界面、松键或碎片未满都会立即清空本次进度。
+	if not _can_hold_hack_protocol_action() or not Input.is_action_pressed(select_hack_protocol_action):
+		if _hack_protocol_hold_elapsed > 0.0:
+			_hack_protocol_hold_elapsed = 0.0
+			_refresh_hack_protocol_progress()
+		return
+	_hack_protocol_hold_elapsed = minf(_hack_protocol_hold_elapsed + maxf(delta, 0.0), HackProtocolRules.HOLD_DURATION_SECONDS)
+	_refresh_hack_protocol_progress()
+	if _hack_protocol_hold_elapsed < HackProtocolRules.HOLD_DURATION_SECONDS:
+		return
+	_hack_protocol_hold_elapsed = 0.0
+	_open_hack_protocol_select()
+
+
+func _can_hold_hack_protocol_action() -> bool:
+	## 判断当前是否允许累计长按；选择窗口本身不暂停战斗，但其他菜单与死亡状态不能后台触发。
+	if _hack_protocol_component == null or not _hack_protocol_component.has_method("is_offer_ready") or not bool(_hack_protocol_component.call("is_offer_ready")):
+		return false
+	if _is_player_dead or _death_overlay.visible or _pause_overlay.visible or _large_map_overlay.visible or _is_shared_inventory_visible() or _is_character_showcase_visible():
+		return false
+	if _supply_extraction_overlay != null and _supply_extraction_overlay.visible:
+		return false
+	return _hack_protocol_select_overlay == null or not _hack_protocol_select_overlay.visible
+
+
+func _open_hack_protocol_select() -> void:
+	## 打开三选一窗口并锁定本机战斗输入；不修改 get_tree().paused。
+	if _hack_protocol_select_overlay == null or _hack_protocol_select_panel == null or _hack_protocol_component == null:
+		return
+	if not _hack_protocol_component.has_method("is_offer_ready") or not bool(_hack_protocol_component.call("is_offer_ready")):
+		return
+	_hack_protocol_select_overlay.visible = true
+	if _hack_protocol_select_panel.has_method("present"):
+		_hack_protocol_select_panel.call("present", _hack_protocol_component)
+	_refresh_combat_input_state()
+
+
+func _close_hack_protocol_select() -> void:
+	## 关闭三选一窗口并恢复本机战斗输入；候选和溢出碎片由组件继续保留。
+	if _hack_protocol_select_overlay != null:
+		_hack_protocol_select_overlay.visible = false
+	if _hack_protocol_select_panel != null and _hack_protocol_select_panel.has_method("dismiss"):
+		_hack_protocol_select_panel.call("dismiss")
+	_hack_protocol_hold_elapsed = 0.0
+	_refresh_hack_protocol_progress()
+	_refresh_combat_input_state()
+
+
+func _refresh_hack_protocol_progress() -> void:
+	## 刷新进度条数值与动态绑定提示；文本保留真实溢出碎片，条形比例限制在本阶段需求。
+	if _hack_protocol_progress_panel == null or _hack_protocol_progress_label == null or _hack_protocol_progress_bar == null:
+		return
+	# 扩展开关；优先使用世界公开接口，组件存在作为独立场景预览兜底。
+	var extension_enabled: bool = _game_world != null and _game_world.has_method("is_hack_protocol_enabled") and bool(_game_world.call("is_hack_protocol_enabled"))
+	if _game_world == null:
+		extension_enabled = _hack_protocol_component != null
+	_hack_protocol_progress_panel.visible = extension_enabled
+	if not extension_enabled or _hack_protocol_component == null:
+		return
+	# 当前碎片；允许超过需求，取整展示与策划整数奖励口径一致。
+	var current_fragments: float = maxf(float(_hack_protocol_component.call("get_current_fragments")), 0.0)
+	# 当前需求；至少为 1，防止异常配置导致原生进度条范围无效。
+	var required_fragments: float = maxf(float(_hack_protocol_component.call("get_required_fragments")), 1.0)
+	_hack_protocol_progress_bar.max_value = required_fragments
+	_hack_protocol_progress_bar.value = minf(current_fragments, required_fragments)
+	# 当前实际绑定文本；玩家改键、解绑或恢复默认后均从 InputBindings 即时读取。
+	var binding_text: String = _get_action_binding_display_text(select_hack_protocol_action)
+	if _hack_protocol_component.has_method("is_offer_ready") and bool(_hack_protocol_component.call("is_offer_ready")):
+		_hack_protocol_progress_label.text = "数据碎片 %d / %d · 长按 %s 选择协议（%.1f / %.1f 秒）" % [roundi(current_fragments), roundi(required_fragments), binding_text, _hack_protocol_hold_elapsed, HackProtocolRules.HOLD_DURATION_SECONDS]
+	else:
+		_hack_protocol_progress_label.text = "数据碎片 %d / %d" % [roundi(current_fragments), roundi(required_fragments)]
+
+
+func _get_action_binding_display_text(action_name: StringName) -> String:
+	## 返回动作当前主绑定的人类可读文本；服务缺失时回退 InputMap 第一个事件。
+	# 输入绑定服务；负责把键盘与鼠标事件转换成统一显示文本。
+	var input_bindings_service: Node = get_tree().root.get_node_or_null("InputBindings")
+	if input_bindings_service != null and input_bindings_service.has_method("get_action_display_text"):
+		return str(input_bindings_service.call("get_action_display_text", action_name))
+	if not InputMap.has_action(action_name) or InputMap.action_get_events(action_name).is_empty():
+		return "未绑定"
+	# 首个绑定事件；隔离场景缺少服务时使用事件原生文本作为可读兜底。
+	var binding_event: InputEvent = InputMap.action_get_events(action_name)[0] as InputEvent
+	return binding_event.as_text() if binding_event != null else "未绑定"
+
+
+func _on_hack_protocol_fragments_changed(_current_fragments: float, _required_fragments: float) -> void:
+	## 组件碎片变化回调；参数已由组件规范化，HUD 重新读取完整状态以包含候选就绪信息。
+	_refresh_hack_protocol_progress()
+
+
+func _on_hack_protocol_offer_ready() -> void:
+	## 候选生成回调；只更新长按提示，不自动弹出窗口。
+	_refresh_hack_protocol_progress()
+
+
+func _on_hack_protocols_changed(_protocol_ids: Array[String]) -> void:
+	## 本机协议变化回调；刷新碎片新需求，已打开的只读面板在下次进入时读取最新快照。
+	_refresh_hack_protocol_progress()
+
+
+func _on_hack_protocol_selected(_protocol_id: String) -> void:
+	## 选择成功回调；关闭窗口并显示扣除旧需求、保留溢出后的新进度。
+	_close_hack_protocol_select()
+
+
+func _on_hack_protocol_select_closed() -> void:
+	## “稍后选择”回调；只关闭界面，不触发重掷或碎片扣除。
+	_close_hack_protocol_select()
 
 
 func _build_active_skill_bar() -> void:
@@ -1683,7 +1918,7 @@ func _set_character_showcase_visible(visible: bool) -> void:
 
 func _refresh_combat_input_state() -> void:
 	# 战斗输入启用状态；取值由背包、大地图、角色展示、暂停菜单和掉落物 UI 共同决定，默认任意交互界面打开都会禁用战斗输入。
-	var combat_input_enabled: bool = not _is_shared_inventory_visible() and not _large_map_overlay.visible and not _is_character_showcase_visible() and not _pause_overlay.visible and not _death_overlay.visible and (_supply_extraction_overlay == null or not _supply_extraction_overlay.visible) and not _is_player_dead and not _should_drop_ui_block_combat_input()
+	var combat_input_enabled: bool = not _is_shared_inventory_visible() and not _large_map_overlay.visible and not _is_character_showcase_visible() and not _pause_overlay.visible and not _death_overlay.visible and (_supply_extraction_overlay == null or not _supply_extraction_overlay.visible) and (_hack_protocol_select_overlay == null or not _hack_protocol_select_overlay.visible) and not _is_player_dead and not _should_drop_ui_block_combat_input()
 	if _has_combat_input_enabled_state and _last_combat_input_enabled == combat_input_enabled:
 		return
 
@@ -2097,6 +2332,40 @@ func _build_risk_contract_view() -> void:
 	_sync_risk_contract_view_visibility()
 
 
+func _build_hack_protocol_view() -> void:
+	## 构建暂停界面左栏的骇入协议入口与只读面板；与风险合约入口上下排列并共享同一查看区域。
+	if _hack_protocol_view_button != null or _hack_protocol_view_panel != null:
+		return
+	# 左栏查看按钮；两种模式扩展入口同时可见，任一面板展开后共同隐藏。
+	var view_button: Button = Button.new()
+	view_button.name = "HackProtocolViewButton"
+	view_button.text = "查看骇入协议"
+	view_button.set_anchors_preset(Control.PRESET_CENTER)
+	view_button.offset_left = HACK_PROTOCOL_VIEW_BUTTON_TOP_LEFT.x
+	view_button.offset_top = HACK_PROTOCOL_VIEW_BUTTON_TOP_LEFT.y
+	view_button.offset_right = HACK_PROTOCOL_VIEW_BUTTON_BOTTOM_RIGHT.x
+	view_button.offset_bottom = HACK_PROTOCOL_VIEW_BUTTON_BOTTOM_RIGHT.y
+	view_button.pressed.connect(_on_hack_protocol_view_button_pressed)
+	_pause_overlay.add_child(view_button)
+	_hack_protocol_view_button = view_button
+	# 左栏只读面板；复用风险合约 420×420 查看区域，两者永不同时展开。
+	var view_panel: Control = HACK_PROTOCOL_VIEW_PANEL_SCRIPT.new() as Control
+	if view_panel == null:
+		view_button.visible = false
+		return
+	view_panel.name = "HackProtocolViewPanel"
+	view_panel.set_anchors_preset(Control.PRESET_CENTER)
+	view_panel.offset_left = RISK_CONTRACT_VIEW_PANEL_TOP_LEFT.x
+	view_panel.offset_top = RISK_CONTRACT_VIEW_PANEL_TOP_LEFT.y
+	view_panel.offset_right = RISK_CONTRACT_VIEW_PANEL_BOTTOM_RIGHT.x
+	view_panel.offset_bottom = RISK_CONTRACT_VIEW_PANEL_BOTTOM_RIGHT.y
+	view_panel.connect("closed", Callable(self, "_on_hack_protocol_view_closed"))
+	_pause_overlay.add_child(view_panel)
+	_hack_protocol_view_panel = view_panel
+	view_panel.visible = false
+	_sync_risk_contract_view_visibility()
+
+
 func _get_current_risk_contract_modifier_ids() -> Array[String]:
 	## 从运行期会话读取本局风险词条；训练场、未启用合约或服务缺失时返回空数组。
 	# 会话状态服务；只读取本局稳定 ID，不让查看面板依赖 GameWorld 内部倍率缓存。
@@ -2112,24 +2381,67 @@ func _get_current_risk_contract_modifier_ids() -> Array[String]:
 	return ModeExtensionRules.normalize_risk_modifier_ids(modifier_ids)
 
 
+func _get_current_hack_protocol_ids() -> Array[String]:
+	## 返回本机本局协议快照；组件缺失或扩展未启用时返回空数组。
+	if _hack_protocol_component == null or not _hack_protocol_component.has_method("get_acquired_protocol_ids"):
+		return []
+	return HackProtocolRules.normalize_protocol_ids(_hack_protocol_component.call("get_acquired_protocol_ids") as Array)
+
+
+func _is_hack_protocol_extension_enabled() -> bool:
+	## 返回本局骇入协议扩展开关；优先读取 GameWorld 已缓存状态，独立 UI 场景回退组件是否存在。
+	if _game_world != null and _game_world.has_method("is_hack_protocol_enabled"):
+		return bool(_game_world.call("is_hack_protocol_enabled"))
+	return _hack_protocol_component != null
+
+
 func _show_risk_contract_view(visible: bool) -> void:
 	## 打开或关闭左栏只读面板；中央暂停菜单与右侧地图保持可见，战斗继续处于暂停状态。
 	if _risk_contract_view_panel == null:
 		return
 	if visible and _risk_contract_view_panel.has_method("present"):
+		if _hack_protocol_view_panel != null:
+			_hack_protocol_view_panel.visible = false
 		_risk_contract_view_panel.call("present", _get_current_risk_contract_modifier_ids())
 	else:
 		_risk_contract_view_panel.visible = false
 	_sync_risk_contract_view_visibility()
 
 
-func _sync_risk_contract_view_visibility() -> void:
-	## 根据暂停页层级切换左栏入口；只在中央暂停主页显示，避免与宽版设置页或开发者菜单重叠。
-	if _risk_contract_view_button == null:
+func _show_hack_protocol_view(visible: bool) -> void:
+	## 打开或关闭本机协议只读面板；多人不会展示其他成员的协议、碎片或候选。
+	if _hack_protocol_view_panel == null:
 		return
-	# 查看面板是否展开；展开时入口按钮隐藏，关闭后恢复。
-	var view_panel_visible: bool = _risk_contract_view_panel != null and _risk_contract_view_panel.visible
-	_risk_contract_view_button.visible = _pause_overlay.visible and _pause_menu_panel.visible and not view_panel_visible and not _is_combat_developer_menu_visible()
+	if visible and _hack_protocol_view_panel.has_method("present"):
+		if _risk_contract_view_panel != null:
+			_risk_contract_view_panel.visible = false
+		_hack_protocol_view_panel.call("present", _get_current_hack_protocol_ids(), _is_hack_protocol_extension_enabled())
+	else:
+		_hack_protocol_view_panel.visible = false
+	_sync_risk_contract_view_visibility()
+
+
+func _hide_mode_extension_views() -> void:
+	## 同时关闭暂停左栏的两种模式扩展查看面板；进入宽版子页前统一调用。
+	if _risk_contract_view_panel != null:
+		_risk_contract_view_panel.visible = false
+	if _hack_protocol_view_panel != null:
+		_hack_protocol_view_panel.visible = false
+	_sync_risk_contract_view_visibility()
+
+
+func _sync_risk_contract_view_visibility() -> void:
+	## 根据暂停页层级切换左栏入口；任一查看面板展开时隐藏两个入口，避免按钮覆盖共享查看区域。
+	if _risk_contract_view_button == null and _hack_protocol_view_button == null:
+		return
+	# 查看面板是否展开；风险合约与骇入协议共享左栏区域，任一展开时两个入口都隐藏。
+	var view_panel_visible: bool = (_risk_contract_view_panel != null and _risk_contract_view_panel.visible) or (_hack_protocol_view_panel != null and _hack_protocol_view_panel.visible)
+	# 入口基础可见条件；只在暂停主页且开发者菜单关闭时成立。
+	var entry_visible: bool = _pause_overlay.visible and _pause_menu_panel.visible and not view_panel_visible and not _is_combat_developer_menu_visible()
+	if _risk_contract_view_button != null:
+		_risk_contract_view_button.visible = entry_visible
+	if _hack_protocol_view_button != null:
+		_hack_protocol_view_button.visible = entry_visible
 
 
 func _build_escape_confirmation_dialog() -> void:
@@ -2424,6 +2736,7 @@ func _should_use_physical_fallback(action_name: StringName) -> bool:
 func _on_input_bindings_changed() -> void:
 	## 绑定变更回调；清空物理键兜底判定缓存，下一次输入判定按最新 InputMap 事件与显式解绑状态重算。
 	_physical_fallback_cache.clear()
+	_refresh_hack_protocol_progress()
 
 
 func _is_action_explicitly_unbound(action_name: StringName) -> bool:
@@ -2461,7 +2774,7 @@ func _is_combat_developer_menu_visible() -> bool:
 func _open_combat_developer_menu() -> void:
 	if _combat_developer_overlay == null or _combat_developer_menu == null:
 		return
-	_show_risk_contract_view(false)
+	_hide_mode_extension_views()
 	_pause_menu_panel.visible = false
 	_pause_settings_panel.visible = false
 	_test_settings_panel.visible = false
@@ -2485,6 +2798,9 @@ func _is_weapon_durability_consumption_disabled_by_debug() -> bool:
 
 
 func _close_top_interactive_panel() -> bool:
+	if _hack_protocol_select_overlay != null and _hack_protocol_select_overlay.visible:
+		_close_hack_protocol_select()
+		return true
 	if _supply_extraction_overlay != null and _supply_extraction_overlay.visible:
 		_close_supply_extraction_panel()
 		return true
@@ -2493,6 +2809,9 @@ func _close_top_interactive_panel() -> bool:
 		return true
 	if _is_character_showcase_visible():
 		_set_character_showcase_visible(false)
+		return true
+	if (_risk_contract_view_panel != null and _risk_contract_view_panel.visible) or (_hack_protocol_view_panel != null and _hack_protocol_view_panel.visible):
+		_hide_mode_extension_views()
 		return true
 
 	if _inventory_panel.visible:
@@ -2664,8 +2983,8 @@ func _toggle_pause_menu() -> void:
 		_on_combat_developer_menu_closed()
 		return
 
-	if _risk_contract_view_panel != null and _risk_contract_view_panel.visible:
-		_show_risk_contract_view(false)
+	if (_risk_contract_view_panel != null and _risk_contract_view_panel.visible) or (_hack_protocol_view_panel != null and _hack_protocol_view_panel.visible):
+		_hide_mode_extension_views()
 		return
 
 	if _pause_overlay.visible and _pause_settings_panel.visible and _is_pause_key_binding_page_visible():
@@ -2702,6 +3021,8 @@ func _set_pause_menu_visible(visible: bool) -> void:
 	_character_switch_panel.visible = false
 	if _risk_contract_view_panel != null:
 		_risk_contract_view_panel.visible = false
+	if _hack_protocol_view_panel != null:
+		_hack_protocol_view_panel.visible = false
 	_sync_mode_controls()
 	_set_battle_tree_paused(visible)
 	if visible:
@@ -2719,7 +3040,7 @@ func _set_pause_menu_visible(visible: bool) -> void:
 
 
 func _show_pause_settings(visible: bool) -> void:
-	_show_risk_contract_view(false)
+	_hide_mode_extension_views()
 	_pause_menu_panel.visible = not visible
 	_pause_settings_panel.visible = visible
 	_test_settings_panel.visible = false
@@ -2756,7 +3077,7 @@ func _show_test_settings(visible: bool) -> void:
 	if visible and not _can_use_training_tools():
 		return
 
-	_show_risk_contract_view(false)
+	_hide_mode_extension_views()
 	_pause_menu_panel.visible = not visible
 	_pause_settings_panel.visible = false
 	_test_settings_panel.visible = visible
@@ -2776,7 +3097,7 @@ func _show_character_switch(visible: bool) -> void:
 	if visible and not _can_use_training_tools():
 		return
 
-	_show_risk_contract_view(false)
+	_hide_mode_extension_views()
 	_pause_menu_panel.visible = false
 	_pause_settings_panel.visible = false
 	_test_settings_panel.visible = not visible
@@ -3730,6 +4051,18 @@ func _on_risk_contract_view_closed() -> void:
 	_sync_risk_contract_view_visibility()
 	if _risk_contract_view_button != null and _risk_contract_view_button.visible:
 		_risk_contract_view_button.grab_focus()
+
+
+func _on_hack_protocol_view_button_pressed() -> void:
+	## 打开本机骇入协议只读面板；不会影响碎片、候选、协议效果或战斗暂停状态。
+	_show_hack_protocol_view(true)
+
+
+func _on_hack_protocol_view_closed() -> void:
+	## 关闭骇入协议查看面板后恢复两个模式扩展入口。
+	_sync_risk_contract_view_visibility()
+	if _hack_protocol_view_button != null and _hack_protocol_view_button.visible:
+		_hack_protocol_view_button.grab_focus()
 
 
 func _on_test_settings_button_pressed() -> void:

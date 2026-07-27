@@ -38,6 +38,7 @@ var _action_entries: Array[Dictionary] = [
 	{"action": "pause_game", "label": "暂停菜单"},
 	{"action": "pickup_nearby", "label": "快速拾取"},
 	{"action": "toggle_drop_list", "label": "掉落列表"},
+	{"action": "select_hack_protocol", "label": "选择骇入协议"},
 ]
 ## 默认输入事件缓存；键为动作名，值为 InputEvent 数组，用于恢复默认绑定。
 var _default_events_by_action: Dictionary = {}

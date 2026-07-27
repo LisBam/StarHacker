@@ -506,9 +506,9 @@ func _forward_network_puppet_damage(damage: float, source: Node) -> void:
 	if damage <= 0.0 or current_health <= 0.0 or _is_dying or not _network_puppet_damage_handler.is_valid():
 		return
 	# 伤害结算结果；使用与本地受击完全相同的公式与来源兼容规则，保证联机与单机数值一致。
-	var damage_result: Dictionary = COMBAT_DAMAGE_CALCULATOR_SCRIPT.calculate_damage(damage, _get_source_combat_value(source, "get_attack_power", 100.0), defense_power, _get_source_combat_value(source, "get_critical_chance", 0.0), _get_source_combat_value(source, "get_critical_damage_multiplier", 1.5))
+	var damage_result: Dictionary = COMBAT_DAMAGE_CALCULATOR_SCRIPT.calculate_damage(damage, _get_source_combat_value(source, "get_attack_power", 100.0), defense_power, _get_source_critical_chance_against(source), _get_source_combat_value(source, "get_critical_damage_multiplier", 1.5))
 	# 最终伤害；本地立即显示飘字提供打击反馈，权威生命变化由主机快照回传。
-	var final_damage: float = float(damage_result.get("damage", 0))
+	var final_damage: float = _apply_source_target_damage_multiplier(float(damage_result.get("damage", 0)), source)
 	if final_damage <= 0.0:
 		return
 	DAMAGE_NUMBER_POPUP_SCRIPT.spawn_damage_number(get_tree().current_scene, global_position, final_damage, bool(damage_result.get("is_critical", false)), get_instance_id())
@@ -820,11 +820,12 @@ func apply_damage(damage: float, source: Node) -> void:
 		return
 	if damage <= 0.0 or current_health <= 0.0 or _is_dying:
 		return
+	_notify_network_local_damage_source()
 
 	# 伤害结算结果；旧来源缺少接口时使用 100 攻击、0% 暴击和 150% 暴伤。
-	var damage_result: Dictionary = COMBAT_DAMAGE_CALCULATOR_SCRIPT.calculate_damage(damage, _get_source_combat_value(source, "get_attack_power", 100.0), defense_power, _get_source_combat_value(source, "get_critical_chance", 0.0), _get_source_combat_value(source, "get_critical_damage_multiplier", 1.5))
+	var damage_result: Dictionary = COMBAT_DAMAGE_CALCULATOR_SCRIPT.calculate_damage(damage, _get_source_combat_value(source, "get_attack_power", 100.0), defense_power, _get_source_critical_chance_against(source), _get_source_combat_value(source, "get_critical_damage_multiplier", 1.5))
 	# 最终伤害；生命与飘字统一使用同一个整数结果。
-	var final_damage: float = float(damage_result.get("damage", 0))
+	var final_damage: float = _apply_source_target_damage_multiplier(float(damage_result.get("damage", 0)), source)
 	_update_target_from_damage_source(source)
 	# 护盾结算后的生命伤害；同一次伤害允许击破护盾后把剩余值继续传给生命。
 	var health_damage: float = float(_shield_component.call("absorb_damage", final_damage)) if _shield_component != null and _shield_component.has_method("absorb_damage") else final_damage
@@ -948,6 +949,38 @@ func get_knockback_decay() -> float:
 
 func _get_source_combat_value(source: Node, method_name: String, fallback_value: float) -> float:
 	return float(source.call(method_name)) if source != null and source.has_method(method_name) else fallback_value
+
+
+func _notify_network_local_damage_source() -> void:
+	## 告知主机同步器该权威怪物最新一次伤害来自主机本地；远端伤害走独立网络入口，不会调用本函数。
+	for raw_sync_node in get_tree().get_nodes_in_group("network_combat_sync"):
+		# 战斗同步器；组内通常只有一个，接口缺失时继续兼容独立敌人预览场景。
+		var sync_node: Node = raw_sync_node as Node
+		if sync_node != null and sync_node.has_method("record_host_local_enemy_damage"):
+			sync_node.call("record_host_local_enemy_damage", self)
+			return
+
+
+func _get_source_critical_chance_against(source: Node) -> float:
+	## 返回来源对当前怪物的暴击率；满血必暴协议只覆盖本次判定，不永久篡改玩家面板暴击率。
+	# 基础暴击率先从伤害来源读取，随后才根据当前怪物状态应用协议的单次必暴覆盖。
+	var critical_chance: float = _get_source_combat_value(source, "get_critical_chance", 0.0)
+	# 实际伤害发起者；弹体、近战组件与技能行为均可把协议查询转交给玩家根节点。
+	var damage_instigator: Node = _resolve_damage_instigator(source)
+	if damage_instigator != null and damage_instigator.has_method("is_critical_guaranteed_against") and bool(damage_instigator.call("is_critical_guaranteed_against", self)):
+		return 1.0
+	return critical_chance
+
+
+func _apply_source_target_damage_multiplier(base_damage: float, source: Node) -> float:
+	## 应用来源针对当前怪物的条件增伤；最终重新取整，使终结协议与基础伤害公式保持同一整数口径。
+	if base_damage <= 0.0:
+		return 0.0
+	# 实际伤害发起者；来源未提供委托接口时直接使用来源自身，兼容旧武器与扩展技能。
+	var damage_instigator: Node = _resolve_damage_instigator(source)
+	# 条件增伤倍率；缺少协议接口时保持 1 倍，异常负值按 0 处理。
+	var target_multiplier: float = maxf(float(damage_instigator.call("get_damage_multiplier_against", self)), 0.0) if damage_instigator != null and damage_instigator.has_method("get_damage_multiplier_against") else 1.0
+	return float(maxi(roundi(base_damage * target_multiplier), 1))
 
 
 func _try_attack_target() -> void:

@@ -175,6 +175,11 @@ func get_mode_extension_effect_multipliers() -> Dictionary:
 	return ModeExtensionRules.get_effect_multipliers(risk_contract_modifier_ids)
 
 
+func is_hack_protocol_enabled() -> bool:
+	## 返回当前正式骇入是否启用了骇入协议；训练场即使残留扩展 ID 也不会创建局内协议组件。
+	return game_mode == MODE_HACK and mode_extension_ids.has(ModeExtensionRules.EXTENSION_HACK_PROTOCOL)
+
+
 func normalize_hack_variant(value: String) -> String:
 	## 规范化骇入模式变体；与 HackModeRules.normalize_variant 语义一致，未知取值回退标准骇入。
 	if value == HACK_VARIANT_BARE or value == HACK_VARIANT_OVERCLOCK:

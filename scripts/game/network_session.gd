@@ -33,8 +33,8 @@ const DISCOVERY_PORT: int = 24858
 const DISCOVERY_REQUEST_MAGIC: String = "star_hacker_room_probe_v1"
 ## 房间探测回复魔法字符串；客户端只接受携带该标识的回复。
 const DISCOVERY_REPLY_MAGIC: String = "star_hacker_room_reply_v1"
-## 联机协议版本；版本 3 新增局内骇入协议快照与团队平均代价，版本不一致的房间会显示为不可加入。
-const PROTOCOL_VERSION: int = 3
+## 联机协议版本；版本 4 在敌人生成消息新增主机新手保护倍率，版本不一致的房间会显示为不可加入。
+const PROTOCOL_VERSION: int = 4
 ## 房间最大成员数量；默认 4 人小队，超出后主机会拒绝新的连接。
 const MAX_PLAYERS: int = 4
 ## 房间探测广播间隔；单位秒，发现开启期间按该周期向局域网发送探测请求。

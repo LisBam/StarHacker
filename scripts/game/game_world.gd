@@ -474,6 +474,9 @@ func _ready() -> void:
 			if _monster_simulation_manager.has_method("set_mode_extension_multipliers"):
 				# 怪物扩展倍率；虚拟人口每次物化时统一应用，反复卸载与恢复不会重复叠加。
 				_monster_simulation_manager.call("set_mode_extension_multipliers", _mode_extension_effect_multipliers)
+			if _monster_simulation_manager.has_method("set_newcomer_protection_multiplier"):
+				# 新手保护倍率；由主机本地档案决定，虚拟人口和直接实例化回退路径均使用同一倍率。
+				_monster_simulation_manager.call("set_newcomer_protection_multiplier", _get_newcomer_protection_monster_attribute_multiplier())
 			# 同时活跃敌人上限缩放；骇入模式倍率（零装 0.6、超频 2.0）与联机成员倍率统一应用，标准单机保持原值。
 			_base_materialized_monster_limit = int(_monster_simulation_manager.get("max_materialized_monsters"))
 			_refresh_hack_protocol_population_limit()
@@ -2806,11 +2809,22 @@ func _apply_monster_spawn_variation_values(monster: Node2D, size_multiplier: flo
 
 
 func _apply_mode_extension_monster_effects(monster: Node2D) -> void:
-	## 把风险合约的怪物属性倍率交给怪物自身处理；直接生成与虚拟人口实体化路径均使用同一接口。
+	## 按固定顺序把风险合约与新手保护交给怪物自身处理；直接生成与虚拟人口实体化路径均使用同一接口。
 	if monster == null:
 		return
 	if monster.has_method("apply_mode_extension_multipliers"):
 		monster.call("apply_mode_extension_multipliers", _mode_extension_effect_multipliers)
+	if monster.has_method("apply_newcomer_protection_multiplier"):
+		monster.call("apply_newcomer_protection_multiplier", _get_newcomer_protection_monster_attribute_multiplier())
+
+
+func _get_newcomer_protection_monster_attribute_multiplier() -> float:
+	## 返回本局怪物应使用的新手保护倍率；联机由主机生成路径读取自身档案并通过敌人生成消息同步给客户端。
+	# 新手保护服务；缺失时按中性倍率运行，避免独立场景或旧测试缺少 AutoLoad 时阻断怪物生成。
+	var newcomer_protection_service: Node = get_tree().root.get_node_or_null("NewcomerProtectionService")
+	if newcomer_protection_service == null or not newcomer_protection_service.has_method("get_monster_attribute_multiplier"):
+		return 1.0
+	return clampf(float(newcomer_protection_service.call("get_monster_attribute_multiplier")), 0.01, 1.0)
 
 
 func _get_target_monster_population() -> int:

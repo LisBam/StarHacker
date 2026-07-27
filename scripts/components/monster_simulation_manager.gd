@@ -47,6 +47,8 @@ var _materialized_count: int = 0
 var _additional_anchor_nodes: Array[Node2D] = []
 ## 模式扩展效果倍率；默认空字典由怪物接口按中性值解析，GameWorld 初始化后写入风险合约整局配置。
 var _mode_extension_multipliers: Dictionary = {}
+## 新手保护怪物战斗属性倍率；默认 1.0 表示中性，GameWorld 在本局创建虚拟人口前写入主机权威值。
+var _newcomer_protection_multiplier: float = 1.0
 
 
 func initialize(player: Node2D, monster_parent: Node = null, target: Node = null, monster_group: StringName = &"") -> void:
@@ -65,6 +67,11 @@ func set_additional_simulation_anchors(anchor_nodes: Array[Node2D]) -> void:
 func set_mode_extension_multipliers(effect_multipliers: Dictionary) -> void:
 	## 缓存整局模式扩展倍率；虚拟人口每次实体化都重新应用，卸载记录只需继续保存生命比例。
 	_mode_extension_multipliers = effect_multipliers.duplicate(true)
+
+
+func set_newcomer_protection_multiplier(attribute_multiplier: float) -> void:
+	## 缓存本局新手保护倍率；每次虚拟记录实体化时重新应用，休眠重载不会遗漏或重复叠加。
+	_newcomer_protection_multiplier = clampf(attribute_multiplier, 0.01, 1.0)
 
 
 func _get_min_anchor_distance_squared(world_position: Vector2) -> float:
@@ -260,6 +267,8 @@ func _materialize_record(record: Dictionary) -> bool:
 		monster.scale *= Vector2(size_multiplier, size_multiplier)
 	if monster.has_method("apply_mode_extension_multipliers"):
 		monster.call("apply_mode_extension_multipliers", _mode_extension_multipliers)
+	if monster.has_method("apply_newcomer_protection_multiplier"):
+		monster.call("apply_newcomer_protection_multiplier", _newcomer_protection_multiplier)
 	if not _monster_group.is_empty():
 		monster.add_to_group(_monster_group)
 

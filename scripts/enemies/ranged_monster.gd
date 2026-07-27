@@ -52,6 +52,20 @@ func apply_spawn_variation(size_multiplier: float, attribute_multiplier: float) 
 	cooldown /= resolved_attribute_multiplier
 
 
+func apply_newcomer_protection_multiplier(attribute_multiplier: float) -> void:
+	## 应用远程怪物专属的保护期战斗降级；基础通用属性由父类处理，弹体与射程在此补齐。
+	# 标准化保护倍率；最高为 1，避免网络或配置异常把保护期远程怪物强化。
+	var resolved_multiplier: float = clampf(attribute_multiplier, 0.01, 1.0)
+	super.apply_newcomer_protection_multiplier(resolved_multiplier)
+	shoot_range *= resolved_multiplier
+	keep_distance *= resolved_multiplier
+	ranged_projectile_speed *= resolved_multiplier
+	ranged_projectile_damage *= resolved_multiplier
+	ranged_projectile_max_distance *= resolved_multiplier
+	ranged_projectile_impact_force *= resolved_multiplier
+	cooldown /= resolved_multiplier
+
+
 func _ready() -> void:
 	super._ready()
 	_randomize_individual_shooting()

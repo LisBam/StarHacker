@@ -558,7 +558,7 @@ func _host_scan_and_broadcast_enemies() -> void:
 
 
 func _broadcast_enemy_add(enemy_id: int, monster: Node2D) -> void:
-	## 广播一名敌人的生成参数；客户端据此实例化同场景傀儡并还原体型与属性倍率。
+	## 广播一名敌人的生成参数；客户端据此实例化同场景傀儡并还原体型、出生属性与主机新手保护倍率。
 	_network_session.call("broadcast_combat_message", {
 		"t": "enemy_add",
 		"id": enemy_id,
@@ -567,6 +567,7 @@ func _broadcast_enemy_add(enemy_id: int, monster: Node2D) -> void:
 		"y": monster.global_position.y,
 		"sm": float(monster.get("_spawn_size_multiplier")) if monster.get("_spawn_size_multiplier") != null else 1.0,
 		"am": float(monster.get("_spawn_attribute_multiplier")) if monster.get("_spawn_attribute_multiplier") != null else 1.0,
+		"npm": float(monster.get("_newcomer_protection_multiplier")) if monster.get("_newcomer_protection_multiplier") != null else 1.0,
 		"hp": float(monster.get("current_health")),
 		"mhp": float(monster.get("max_health")),
 	}, true)
@@ -650,6 +651,9 @@ func _spawn_puppet_enemy(payload: Dictionary) -> void:
 		return
 	if puppet.has_method("apply_spawn_variation"):
 		puppet.call("apply_spawn_variation", float(payload.get("sm", 1.0)), float(payload.get("am", 1.0)))
+	if puppet.has_method("apply_newcomer_protection_multiplier"):
+		# 主机保护倍率；客户端只按主机权威值还原傀儡，避免不同玩家档案导致同一怪物的本地伤害公式分歧。
+		puppet.call("apply_newcomer_protection_multiplier", clampf(float(payload.get("npm", 1.0)), 0.01, 1.0))
 	if puppet.has_method("enter_network_puppet_mode"):
 		puppet.call("enter_network_puppet_mode", Callable(self, "_on_puppet_damage_forward"))
 	# 傀儡的敌人网络编号元数据；受击转发按该编号定位主机权威敌人，避免每次命中反查傀儡表。

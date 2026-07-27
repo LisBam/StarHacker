@@ -3,6 +3,7 @@ extends Node
 ## 悬赏服务：维护每日随机悬赏的刷新、进度推进、自动发奖与独立持久化。
 ## 悬赏进度完全依赖 StatsService 广播的战斗事实事件（击杀、开箱、送回、对局结束），
 ## 本服务不直接接触战斗节点；训练场与超频骇入的事件在统计服务挂点处已被排除，悬赏天然不计。
+## 首次正式成功撤离前，悬赏入口和全部事实事件推进都保持锁定；完成后的下一局才开始累计悬赏进度。
 ## 每日按本地日期刷新一批随机悬赏；完成的悬赏立即自动发放星穹或稀有强化石，并广播完成信号供横幅播报。
 
 ## 悬赏列表变化信号；刷新、进度推进与发奖后派发，悬赏面板据此重建展示。
@@ -223,6 +224,8 @@ func _pick_random_monster_target() -> Dictionary:
 
 func _on_monster_kill_recorded(monster_id: String) -> void:
 	## 击杀事件回调；推进目标怪物匹配的击杀悬赏进度。
+	if not _is_bounty_feature_unlocked():
+		return
 	for bounty in _bounties:
 		if bool(bounty.get("completed", false)) or str(bounty.get("kind", "")) != BOUNTY_KIND_KILL:
 			continue
@@ -236,7 +239,7 @@ func _on_monster_kill_recorded(monster_id: String) -> void:
 
 func _on_chest_open_recorded(quality_id: String) -> void:
 	## 开箱事件回调；只有高级与极品宝箱推进宝箱悬赏进度。
-	if quality_id not in CHEST_BOUNTY_QUALITY_IDS:
+	if not _is_bounty_feature_unlocked() or quality_id not in CHEST_BOUNTY_QUALITY_IDS:
 		return
 	for bounty in _bounties:
 		if bool(bounty.get("completed", false)) or str(bounty.get("kind", "")) != BOUNTY_KIND_CHEST:
@@ -249,6 +252,8 @@ func _on_chest_open_recorded(quality_id: String) -> void:
 
 func _on_run_shipped_value_changed(run_shipped_value: int) -> void:
 	## 单局送回累计回调；送回悬赏按“单局内累计值”判定，跨局不叠加。
+	if not _is_bounty_feature_unlocked():
+		return
 	for bounty in _bounties:
 		if bool(bounty.get("completed", false)) or str(bounty.get("kind", "")) != BOUNTY_KIND_SHIP:
 			continue
@@ -261,7 +266,7 @@ func _on_run_shipped_value_changed(run_shipped_value: int) -> void:
 
 func _on_run_finished(result_id: String, survival_seconds: float, _extracted_value: int) -> void:
 	## 对局结束回调；撤离悬赏要求成功撤离且存活时长达标，其余结果不推进。
-	if result_id != "success":
+	if not _is_bounty_feature_unlocked() or result_id != "success":
 		return
 	for bounty in _bounties:
 		if bool(bounty.get("completed", false)) or str(bounty.get("kind", "")) != BOUNTY_KIND_SURVIVE:
@@ -272,6 +277,15 @@ func _on_run_finished(result_id: String, survival_seconds: float, _extracted_val
 		_try_complete_bounty(bounty)
 	_queue_save()
 	bounties_changed.emit()
+
+
+func _is_bounty_feature_unlocked() -> bool:
+	## 返回悬赏事实事件是否可以推进；资格统一读取首次成功撤离服务，服务缺失时保持安全锁定。
+	# 新手成长服务；只提供永久完成资格，不把悬赏定义或进度反向写入成长服务。
+	var newcomer_protection_service: Node = get_tree().root.get_node_or_null("NewcomerProtectionService")
+	if newcomer_protection_service == null or not newcomer_protection_service.has_method("has_completed_first_successful_extraction"):
+		return false
+	return bool(newcomer_protection_service.call("has_completed_first_successful_extraction"))
 
 
 func _try_complete_bounty(bounty: Dictionary) -> void:

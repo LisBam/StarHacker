@@ -10,6 +10,8 @@
 | 悬赏面板 | `scripts/ui/bounty_panel.gd`（`BountyPanel`） | 840×560 居中窗口；四周使用左右 18、上下 16 像素内容页边距，按服务快照展示悬赏卡（标题、说明、进度条、奖励与完成状态），只读不推进 |
 | 横幅播报 | `BannerNotificationService` 订阅 `bounty_completed` | 完成时播出“【悬赏完成】标题：奖励结果”全局横幅；悬赏服务不反向依赖横幅 |
 
+悬赏入口在玩家个人首次完成一次正式成功撤离后永久开放；此前主菜单按钮为纯黑禁用状态并提示“首次成功撤离后解锁”，大厅 `bounty` 动作不能绕过该资格。锁定期间每日悬赏可以按日期预生成，但击杀、开箱、送回和结算事实事件均不推进进度、不发放奖励；首次成功撤离本身也不计入悬赏，完成后的下一局才开始累计。
+
 ## 2. 数据流
 
 ```text
@@ -20,7 +22,7 @@
         -> bounty_completed 信号 -> 横幅播报 / bounties_changed -> 面板刷新
 ```
 
-- 悬赏服务不直接接触战斗节点；统计挂点已经按“产出结算的战斗模式”过滤，训练场与超频骇入天然不推进悬赏。
+- 悬赏服务不直接接触战斗节点；统计挂点已经按“产出结算的战斗模式”过滤，训练场与超频骇入天然不推进悬赏；四类事实事件回调还会读取 `NewcomerProtectionService.has_completed_first_successful_extraction()`，在首次成功撤离前统一提前返回。
 - 击杀目标从 `ContentCatalog.get_enemy_scene_paths()`（已按角色解锁过滤）随机抽取，离树实例化只读取 `monster_id` 与 `display_name`，标题与说明在刷新时固化。
 - 稀有强化石奖励复用 `EnhancementStoneData.create_random` 与宝箱高品质保底流程（最多 12 次重试后强制提升高级），入库走 `GlobalInventory.add_storage_resource` 公共接口并回写 `StatsService` 获得计数。
 - 星穹报酬与强化石发放失败补偿统一走 `GlobalInventory.grant_coins()`，因此会增加金融系统使用的生涯累计获得星穹；强化石直接入库本身不增加该累计值。

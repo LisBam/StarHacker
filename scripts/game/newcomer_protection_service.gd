@@ -44,6 +44,11 @@ func is_newcomer_protection_active() -> bool:
 	return not _has_completed_first_successful_extraction
 
 
+func has_completed_first_successful_extraction() -> bool:
+	## 返回当前档案是否已经完成首次正式成功撤离；局外成长入口只读取本资格，不访问新手保护私有状态或复制进度。
+	return _has_completed_first_successful_extraction
+
+
 func get_monster_attribute_multiplier() -> float:
 	## 返回当前怪物战斗属性倍率；保护结束后固定返回中性值 1.0，调用方可直接与其他模式倍率相乘。
 	return MONSTER_ATTRIBUTE_MULTIPLIER if is_newcomer_protection_active() else 1.0

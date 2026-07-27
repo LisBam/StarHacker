@@ -96,6 +96,8 @@ const LOBBY_ACTION_DISPATCH: String = "dispatch"
 const LOBBY_ACTION_ENCYCLOPEDIA: String = "encyclopedia"
 ## 大厅悬赏动作标识；固定 bounty，复用主菜单悬赏面板，当前大厅尚未放置对应实体。
 const LOBBY_ACTION_BOUNTY: String = "bounty"
+## 首次成功撤离成长入口锁定提示；锻造、据点、派遣与悬赏在完成首局正式成功撤离前统一显示该文案。
+const FIRST_SUCCESSFUL_EXTRACTION_UNLOCK_TOOLTIP: String = "首次成功撤离后解锁"
 ## 大厅统计动作标识；固定 stats，复用主菜单统计面板，当前大厅尚未放置对应实体。
 const LOBBY_ACTION_STATS: String = "stats"
 ## 大厅联机组队动作标识；固定 multiplayer，复用主菜单联机组队面板。
@@ -207,6 +209,8 @@ var _ui_style_selector: Control
 var _banner_notification_toggle: Control
 ## 全局库存服务缓存；读取只增不减的累计获得星穹并监听变化，不直接修改金融资产。
 var _global_inventory: Node
+## 新手成长服务缓存；只读取首次成功撤离永久资格并监听完成信号，不参与战斗结算或功能业务。
+var _newcomer_protection_service: Node
 ## 主菜单存档传输控件；默认运行时插入设置首页，导入成功后由全局服务重启游戏。
 ## 删除功能补充：删除成功后同样由全局服务重启，并在其他业务服务读档前清理活动存档。
 var _save_transfer_control: Control
@@ -333,6 +337,10 @@ func _ready() -> void:
 	if _global_inventory != null and _global_inventory.has_signal("total_coins_earned_changed"):
 		_global_inventory.connect("total_coins_earned_changed", Callable(self, "_refresh_finance_unlock_buttons"))
 	_refresh_finance_unlock_buttons()
+	_newcomer_protection_service = get_tree().root.get_node_or_null("NewcomerProtectionService")
+	if _newcomer_protection_service != null and _newcomer_protection_service.has_signal("first_successful_extraction_completed"):
+		_newcomer_protection_service.connect("first_successful_extraction_completed", Callable(self, "_refresh_first_successful_extraction_unlock_buttons"))
+	_refresh_first_successful_extraction_unlock_buttons()
 	_master_volume_slider.value_changed.connect(_on_master_volume_slider_value_changed)
 	_settings_back_button.pressed.connect(_on_settings_back_button_pressed)
 	_switch_lobby_menu_button.pressed.connect(_on_switch_lobby_menu_button_pressed)
@@ -391,6 +399,32 @@ func _is_finance_feature_unlocked(feature_id: String) -> bool:
 	if _global_inventory == null or not _global_inventory.has_method("get_total_coins_earned"):
 		return false
 	return bool(FINANCE_UNLOCK_RULES.is_feature_unlocked(feature_id, int(_global_inventory.call("get_total_coins_earned"))))
+
+
+func _refresh_first_successful_extraction_unlock_buttons() -> void:
+	## 按首次正式成功撤离永久资格统一刷新四个局外成长入口；完成信号到达后立即解除全部锁定。
+	# 是否已经完成首次成功撤离；服务缺失或查询接口不可用时保持安全锁定。
+	var is_unlocked: bool = _has_completed_first_successful_extraction()
+	_apply_first_successful_extraction_button_state(_forge_button, is_unlocked)
+	_apply_first_successful_extraction_button_state(_hideout_button, is_unlocked)
+	_apply_first_successful_extraction_button_state(_dispatch_button, is_unlocked)
+	_apply_first_successful_extraction_button_state(_bounty_button, is_unlocked)
+
+
+func _apply_first_successful_extraction_button_state(button: Button, is_unlocked: bool) -> void:
+	## 把单个首次撤离成长入口同步为普通可用或纯黑禁用状态；锁定时显示统一完成条件。
+	if button == null:
+		return
+	button.disabled = not is_unlocked
+	button.tooltip_text = "" if is_unlocked else FIRST_SUCCESSFUL_EXTRACTION_UNLOCK_TOOLTIP
+	UI_STYLE_GUIDE.apply_locked_button_visual(button, not is_unlocked)
+
+
+func _has_completed_first_successful_extraction() -> bool:
+	## 返回四个局外成长功能共享的永久资格；实际状态只由新手成长服务在正式成功结算后修改。
+	if _newcomer_protection_service == null or not _newcomer_protection_service.has_method("has_completed_first_successful_extraction"):
+		return false
+	return bool(_newcomer_protection_service.call("has_completed_first_successful_extraction"))
 
 
 func _build_settings_dim_overlay() -> void:
@@ -763,7 +797,7 @@ func _on_shop_button_pressed() -> void:
 
 
 func _on_forge_button_pressed() -> void:
-	if _forge_overlay == null:
+	if _forge_overlay == null or not _has_completed_first_successful_extraction():
 		return
 	_settings_panel.visible = false
 	_forge_overlay.visible = true
@@ -812,7 +846,7 @@ func _on_bank_button_pressed() -> void:
 
 
 func _on_hideout_button_pressed() -> void:
-	if _hideout_overlay == null:
+	if _hideout_overlay == null or not _has_completed_first_successful_extraction():
 		return
 	_settings_panel.visible = false
 	_hideout_overlay.visible = true
@@ -821,7 +855,7 @@ func _on_hideout_button_pressed() -> void:
 
 
 func _on_dispatch_button_pressed() -> void:
-	if _dispatch_overlay == null:
+	if _dispatch_overlay == null or not _has_completed_first_successful_extraction():
 		return
 	_settings_panel.visible = false
 	_dispatch_overlay.visible = true
@@ -840,7 +874,7 @@ func _on_encyclopedia_button_pressed() -> void:
 
 
 func _on_bounty_button_pressed() -> void:
-	if _bounty_overlay == null:
+	if _bounty_overlay == null or not _has_completed_first_successful_extraction():
 		return
 	_settings_panel.visible = false
 	_bounty_overlay.visible = true

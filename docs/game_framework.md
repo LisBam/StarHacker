@@ -6,7 +6,7 @@
 
 | 入口 | 实现 | 职责 |
 | --- | --- | --- |
-| 主菜单 | `res://scenes/ui/main_menu.tscn`、`res://scripts/ui/main_menu.gd` | 项目主场景；底部直接打开角色、背包、仓库、商店、锻造、据点、派遣、悬赏及模式入口；普通样式“金融 ▲”位于“统计 ▲”左侧，两者分别向上展开单列的股市/矿场/保险/银行和图鉴/生涯入口；点击“骇入”先选择标准/零装/超频骇入，再进入可多选或不选的模式扩展窗口；同一场景可作为大厅局外面板宿主 |
+| 主菜单 | `res://scenes/ui/main_menu.tscn`、`res://scripts/ui/main_menu.gd` | 项目主场景；底部直接打开角色、背包、仓库、商店及局外成长入口，锻造、据点、派遣和悬赏共用首次成功撤离资格；普通样式“金融 ▲”位于“统计 ▲”左侧，两者分别向上展开单列的股市/矿场/保险/银行和图鉴/生涯入口；点击“骇入”先选择标准/零装/超频骇入，再进入可多选或不选的模式扩展窗口；同一场景可作为大厅局外面板宿主 |
 | 主大厅 | `res://scenes/game/main_lobby.tscn`、`res://scripts/game/lobby_world.gd` | 承载当前角色自由移动、攻击、技能、静态交互设施与大厅 HUD；不创建敌人、掉落、撤离或战斗结算 |
 | 联机大厅 | `res://scenes/game/multiplayer_lobby.tscn`、`res://scripts/game/multiplayer_lobby_world.gd`（继承 `LobbyWorld`） | 主菜单“联机”入口目标场景；进场自动打开联机面板，左上角提供“联机设置”入口，房间成员经 `NetworkLobbySync` 在同一大厅内互相可见；玩法约束与主大厅一致 |
 | 角色系统 | `res://scenes/ui/character_select.tscn`、`res://scripts/ui/character_select.gd` | 完整模式展示可选角色并持久化确认结果；当前角色模式隐藏角色列表，供战斗内只读查看同一套属性与技能详情 |
@@ -37,7 +37,7 @@
 | `BankService` | 维护活期账户、定期存单、信用贷款、违约冻结与到期级联扣款 | `user://bank_state.json` |
 | `DispatchService` | 维护按角色并行的派遣委托、在线倒计时、大成功判定、近期完成报告与角色锁定查询 | `user://dispatch_state.json` |
 | `StatsService` | 生涯统计：怪物击杀计数、物品获得计数、对局与撤离统计、单局之最与财富曲线采样；聚合 `GlobalInventory` 的累计获得星穹并转发变化通知，图鉴计数、统计面板与悬赏系统只读取本服务或订阅其信号 | `user://stats_state.json`；累计获得星穹仍只保存于 `user://global_inventory.json` |
-| `NewcomerProtectionService` | 维护首次成功撤离前的新手保护状态，订阅正式结算并向怪物生成路径提供 0.50 战斗属性倍率；首次引入时从既有成功撤离统计迁移 | `user://newcomer_protection_state.json` |
+| `NewcomerProtectionService` | 维护首次成功撤离永久进度，订阅正式结算并向怪物生成路径提供撤离前 0.50 战斗属性倍率，同时为锻造、据点、派遣与悬赏提供统一局外成长资格；首次引入时从既有成功撤离统计迁移 | `user://newcomer_protection_state.json` |
 | `BountyService` | 每日悬赏：按本地日期刷新随机悬赏、订阅 `StatsService` 事实信号推进进度、完成后自动发放星穹或稀有强化石；必须注册在 `StatsService` 之后 | `user://bounty_state.json` |
 | `BannerNotificationService` | 屏幕顶端全局横幅通知：CanvasLayer 图层 `1200` 高于场景过渡层，`process_mode = ALWAYS` 战斗内外与暂停期间均可播放；持有横幅开关并订阅强平等业务信号，业务服务不反向依赖 | `user://banner_notification_settings.cfg` |
 | `SceneTransition` | 统一场景切换和黑屏过渡 | 无 |

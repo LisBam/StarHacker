@@ -8,6 +8,8 @@ class_name CombatStatsComponent
 signal health_changed(current_health: float, max_health: float)
 ## 生命实际恢复信号；只在正数治疗确实提高当前生命时派发实际恢复量，玩家视觉反馈不会显示溢出治疗。
 signal healed(amount: float)
+## 治疗结算明细信号；依次提供请求量、实际恢复量和溢出量，护盾转化等组件可监听且不改变原 healed 视觉语义。
+signal healing_received(requested_amount: float, restored_amount: float, overheal_amount: float)
 signal energy_changed(current_energy: float, max_energy: float)
 signal stats_changed
 ## 能量实际消费信号；每次成功扣除正数能量时派发，限时技能可精确统计期间总消耗而不受自然恢复影响。
@@ -75,6 +77,18 @@ var _temporary_dodge_chance: float = 0.0
 var _temporary_energy_regeneration: float = 0.0
 ## 装备套装最终属性倍率；键为角色属性名、值为额外比例，默认空字典，由装备组件整体覆盖且不写入基础或装备点数。
 var _equipment_set_stat_multipliers: Dictionary = {}
+## 骇入协议攻击力提高比例；默认 0，仅本局组件整体覆盖，作为现有基础、装备、套装和技能结算后的独立倍率。
+var _hack_protocol_attack_power_bonus_ratio: float = 0.0
+## 骇入协议防御力提高比例；默认 0，仅本局组件整体覆盖，作为现有防御结算后的独立倍率。
+var _hack_protocol_defense_power_bonus_ratio: float = 0.0
+## 骇入协议生命上限提高比例；默认 0，变化时保持当前生命比例且不写回角色或装备基础数据。
+var _hack_protocol_max_health_bonus_ratio: float = 0.0
+## 骇入协议能量上限提高比例；默认 0，变化时保持当前能量比例且不改变自然恢复速度。
+var _hack_protocol_max_energy_bonus_ratio: float = 0.0
+## 骇入协议暴击率加成；默认 0，以百分点直接加到装备暴击率接口并限制到 100%。
+var _hack_protocol_critical_chance_bonus: float = 0.0
+## 骇入协议暴击伤害倍率增量；默认 0，直接加到武器或技能基础暴击伤害倍率。
+var _hack_protocol_critical_damage_bonus: float = 0.0
 
 
 func _ready() -> void:
@@ -160,8 +174,8 @@ func configure_max_stats(new_max_health: float, new_max_energy: float) -> void:
 	var resolved_max_health: float = maxf(new_max_health, 1.0)
 	# 标准化后的最大能量；取值至少为 1，默认由角色配置随机得出，修改会影响能量上限和满能量值。
 	var resolved_max_energy: float = maxf(new_max_energy, 1.0)
-	max_health = resolved_max_health + _equipment_max_health
-	max_energy = resolved_max_energy
+	max_health = (resolved_max_health + _equipment_max_health) * (1.0 + _hack_protocol_max_health_bonus_ratio)
+	max_energy = resolved_max_energy * (1.0 + _hack_protocol_max_energy_bonus_ratio)
 	current_health = max_health
 	current_energy = max_energy
 	_is_dead = false
@@ -196,6 +210,9 @@ func heal(amount: float) -> void:
 	var restored_health: float = maxf(current_health - previous_health, 0.0)
 	if restored_health > 0.0:
 		healed.emit(restored_health)
+	# 溢出治疗量；请求量扣除真实恢复量，满血治疗会把完整请求量交给可选的护盾转化组件。
+	var overheal_amount: float = maxf(amount - restored_health, 0.0)
+	healing_received.emit(amount, restored_health, overheal_amount)
 
 
 func set_health(value: float) -> void:
@@ -256,11 +273,34 @@ func is_dead() -> bool:
 
 
 func get_attack_power() -> float:
-	return maxf((attack_power + _equipment_attack_power) * _get_equipment_set_stat_multiplier("attack_power") * _get_combined_skill_multiplier("attack") + _get_combined_skill_flat_bonus("attack"), 0.0)
+	return maxf(((attack_power + _equipment_attack_power) * _get_equipment_set_stat_multiplier("attack_power") * _get_combined_skill_multiplier("attack") + _get_combined_skill_flat_bonus("attack")) * (1.0 + _hack_protocol_attack_power_bonus_ratio), 0.0)
 
 
 func get_defense_power() -> float:
-	return maxf((defense_power + _equipment_defense_power) * _get_equipment_set_stat_multiplier("defense_power") * _get_combined_skill_multiplier("defense") + _get_combined_skill_flat_bonus("defense"), 0.0)
+	return maxf(((defense_power + _equipment_defense_power) * _get_equipment_set_stat_multiplier("defense_power") * _get_combined_skill_multiplier("defense") + _get_combined_skill_flat_bonus("defense")) * (1.0 + _hack_protocol_defense_power_bonus_ratio), 0.0)
+
+
+func set_hack_protocol_bonuses(attack_power_bonus_ratio: float, defense_power_bonus_ratio: float, max_health_bonus_ratio: float, max_energy_bonus_ratio: float, critical_chance_bonus: float, critical_damage_bonus: float) -> void:
+	## 整体覆盖当前本局骇入协议属性；生命与能量上限改变时保持当前比例，重复刷新不会继续乘算旧值。
+	# 旧生命上限；最低为 1，用于保持生命比例并反推出不含旧协议倍率的底层上限。
+	var old_max_health: float = maxf(max_health, 1.0)
+	# 旧能量上限；最低为 0.1，用于保持能量比例并反推出不含旧协议倍率的底层上限。
+	var old_max_energy: float = maxf(max_energy, ENERGY_VALUE_PRECISION)
+	# 不含旧协议的生命上限；包含角色基础与当前装备生命点数，供新协议倍率整体覆盖。
+	var underlying_max_health: float = old_max_health / maxf(1.0 + _hack_protocol_max_health_bonus_ratio, 0.01)
+	# 不含旧协议的能量上限；当前没有装备能量上限，但仍使用统一反推避免重复叠加。
+	var underlying_max_energy: float = old_max_energy / maxf(1.0 + _hack_protocol_max_energy_bonus_ratio, 0.01)
+	_hack_protocol_attack_power_bonus_ratio = maxf(attack_power_bonus_ratio, 0.0)
+	_hack_protocol_defense_power_bonus_ratio = maxf(defense_power_bonus_ratio, 0.0)
+	_hack_protocol_max_health_bonus_ratio = maxf(max_health_bonus_ratio, 0.0)
+	_hack_protocol_max_energy_bonus_ratio = maxf(max_energy_bonus_ratio, 0.0)
+	_hack_protocol_critical_chance_bonus = clampf(critical_chance_bonus, 0.0, EnhancementRules.CRITICAL_CHANCE_MAXIMUM)
+	_hack_protocol_critical_damage_bonus = maxf(critical_damage_bonus, 0.0)
+	max_health = maxf(underlying_max_health * (1.0 + _hack_protocol_max_health_bonus_ratio), 1.0)
+	max_energy = maxf(underlying_max_energy * (1.0 + _hack_protocol_max_energy_bonus_ratio), ENERGY_VALUE_PRECISION)
+	current_health = clampf(current_health * max_health / old_max_health, 0.0, max_health)
+	current_energy = snappedf(clampf(current_energy * max_energy / old_max_energy, 0.0, max_energy), ENERGY_VALUE_PRECISION)
+	_emit_all_stats_changed()
 
 
 func set_skill_flat_stat_bonus(source_id: String, attack_bonus: float, defense_bonus: float) -> void:
@@ -349,12 +389,16 @@ func _get_combined_skill_multiplier(stat_name: String) -> float:
 
 func get_character_attribute_snapshot() -> Dictionary:
 	## 返回角色面板所需的基础值、有效装备值与总值，UI 无需访问组件私有字段或复制战斗计算公式。
-	# 基础生命上限；从当前总生命上限扣除装备加成，最低保持 1。
-	var base_max_health: float = maxf(max_health - _equipment_max_health, 1.0)
+	# 不含协议的生命上限；从当前总值移除协议倍率，避免协议比例被误标成角色基础点数。
+	var pre_protocol_max_health: float = max_health / maxf(1.0 + _hack_protocol_max_health_bonus_ratio, 0.01)
+	# 基础生命上限；从不含协议的上限扣除装备加成，最低保持 1。
+	var base_max_health: float = maxf(pre_protocol_max_health - _equipment_max_health, 1.0)
+	# 不含协议的能量上限；当前没有装备能量上限，协议贡献仍应单独列入临时来源。
+	var pre_protocol_max_energy: float = max_energy / maxf(1.0 + _hack_protocol_max_energy_bonus_ratio, 0.01)
 	return {
 		"current_health": current_health,
-		"max_health": _build_attribute_snapshot(base_max_health, _equipment_max_health),
-		"max_energy": _build_attribute_snapshot(max_energy, 0.0),
+		"max_health": _build_attribute_snapshot(base_max_health, _equipment_max_health, pre_protocol_max_health * _hack_protocol_max_health_bonus_ratio),
+		"max_energy": _build_attribute_snapshot(pre_protocol_max_energy, 0.0, pre_protocol_max_energy * _hack_protocol_max_energy_bonus_ratio),
 		"attack_power": _build_skill_attribute_snapshot(attack_power, _equipment_attack_power, "attack"),
 		"defense_power": _build_skill_attribute_snapshot(defense_power, _equipment_defense_power, "defense"),
 		"health_regeneration_per_five_seconds": _build_attribute_snapshot(0.0, _equipment_health_regeneration_per_five_seconds),
@@ -385,12 +429,16 @@ func _build_skill_attribute_snapshot(base_value: float, equipment_value: float, 
 	var pre_skill_value: float = base_and_equipment_value + equipment_set_bonus_value
 	# 技能额外值；同时合并比例与固定点数来源，保证角色面板总值与实际攻防结算完全一致。
 	var skill_bonus_value: float = pre_skill_value * get_skill_stat_bonus_ratio(stat_name) + _get_combined_skill_flat_bonus(stat_name)
+	# 骇入协议比例；作为现有套装与技能结果后的独立倍率，角色面板暂归入局内技能/协议额外值。
+	var hack_protocol_bonus_ratio: float = _hack_protocol_attack_power_bonus_ratio if stat_name == "attack" else _hack_protocol_defense_power_bonus_ratio
+	# 骇入协议额外值；以技能结算后的数值为基准，确保面板总值与实际 get_attack_power/get_defense_power 一致。
+	var hack_protocol_bonus_value: float = (pre_skill_value + skill_bonus_value) * hack_protocol_bonus_ratio
 	return {
 		"base": base_value,
 		"equipment": equipment_value,
 		"set": equipment_set_bonus_value,
-		"skill": skill_bonus_value,
-		"total": pre_skill_value + skill_bonus_value,
+		"skill": skill_bonus_value + hack_protocol_bonus_value,
+		"total": pre_skill_value + skill_bonus_value + hack_protocol_bonus_value,
 	}
 
 
@@ -406,19 +454,21 @@ func set_temporary_buff_attributes(dodge_chance_bonus: float, energy_regeneratio
 
 
 func get_equipment_critical_chance() -> float:
-	return clampf(_equipment_critical_chance, 0.0, EnhancementRules.CRITICAL_CHANCE_MAXIMUM)
+	return clampf(_equipment_critical_chance + _hack_protocol_critical_chance_bonus, 0.0, EnhancementRules.CRITICAL_CHANCE_MAXIMUM)
 
 
 func get_equipment_critical_damage() -> float:
 	# 暴击伤害增量允许为负且不设置上限，使装备削弱词条能正确降低武器暴击倍率。
-	return _equipment_critical_damage
+	return _equipment_critical_damage + _hack_protocol_critical_damage_bonus
 
 
 func apply_equipment_attributes(attributes: Dictionary) -> void:
 	# 旧生命上限；用于在装备变化时保持当前生命比例而不是直接补满。
 	var old_max_health: float = maxf(max_health, 1.0)
-	# 基础生命上限；从当前总值扣除旧装备加成，防止重复刷新时不断叠加。
-	var base_max_health: float = maxf(max_health - _equipment_max_health, 1.0)
+	# 不含协议的旧生命上限；先移除本局协议倍率，再扣除装备点数，防止换装时重复叠加协议。
+	var pre_protocol_max_health: float = max_health / maxf(1.0 + _hack_protocol_max_health_bonus_ratio, 0.01)
+	# 基础生命上限；从不含协议的旧上限扣除旧装备加成，防止重复刷新时不断叠加。
+	var base_max_health: float = maxf(pre_protocol_max_health - _equipment_max_health, 1.0)
 	_equipment_attack_power = maxf(float(attributes.get("attack_power", 0.0)), 0.0)
 	_equipment_defense_power = maxf(float(attributes.get("defense_power", 0.0)), 0.0)
 	_equipment_max_health = maxf(float(attributes.get("max_health", 0.0)), 0.0)
@@ -428,7 +478,7 @@ func apply_equipment_attributes(attributes: Dictionary) -> void:
 	_equipment_critical_chance = clampf(float(attributes.get("critical_chance", 0.0)), 0.0, EnhancementRules.CRITICAL_CHANCE_MAXIMUM)
 	# 装备暴击伤害增量；保留负值且不设置上限，最终与武器暴击伤害直接相加。
 	_equipment_critical_damage = float(attributes.get("critical_damage", 0.0))
-	max_health = base_max_health + _equipment_max_health
+	max_health = (base_max_health + _equipment_max_health) * (1.0 + _hack_protocol_max_health_bonus_ratio)
 	current_health = clampf(current_health * max_health / old_max_health, 0.0, max_health)
 	_emit_all_stats_changed()
 

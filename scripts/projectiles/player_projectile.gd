@@ -50,6 +50,12 @@ var _excluded_collision_rids: Array[RID] = []
 var _max_distance_squared: float = 0.0
 ## 弹体伤害的实际发起单位；默认 null，由远程攻击组件在生成时注入玩家，供敌人受伤改索敌使用。
 var _damage_instigator: Node
+## 当前弹体分摊的空弹能量返还；默认 0，只有骇入协议攻击快照会注入正值。
+var _miss_energy_refund: float = 0.0
+## 当前弹体是否已经命中敌对战斗目标；默认 false，命中后阻止生命周期结束时返还能量。
+var _hit_enemy_target: bool = false
+## 空弹返还是否已经结算；默认 false，退出场景树时置 true，防止异常重复退出产生多次返还。
+var _miss_refund_settled: bool = false
 ## 弹射随机源；每颗弹体独立随机化，用于在合法反射半平面内生成不同弹道。
 var _bounce_random: RandomNumberGenerator = RandomNumberGenerator.new()
 
@@ -59,6 +65,17 @@ func _ready() -> void:
 	_max_distance_squared = maxf(max_distance, 1.0) * maxf(max_distance, 1.0)
 	_excluded_collision_rids = [get_rid()]
 	_bounce_random.randomize()
+
+
+func _exit_tree() -> void:
+	## 弹体生命周期结束时结算一次空弹返还；命中敌人、未配置返还或场景发起者失效时不会回复。
+	if _miss_refund_settled:
+		return
+	_miss_refund_settled = true
+	if _hit_enemy_target or _miss_energy_refund <= 0.0 or not is_instance_valid(_damage_instigator):
+		return
+	if _damage_instigator.has_method("refund_missed_projectile_energy"):
+		_damage_instigator.call("refund_missed_projectile_energy", _miss_energy_refund)
 
 
 func _physics_process(delta: float) -> void:
@@ -118,6 +135,11 @@ func set_damage_instigator(instigator: Node) -> void:
 	_damage_instigator = instigator
 
 
+func set_miss_energy_refund(amount: float) -> void:
+	## 设置本颗弹体未命中敌人时返还的能量；调用方应已按同次攻击总弹体数完成分摊。
+	_miss_energy_refund = maxf(amount, 0.0)
+
+
 func get_damage_instigator() -> Node:
 	## 返回实际发射者；敌人不会把独立弹体节点误当作长期追击目标。
 	return _damage_instigator
@@ -133,6 +155,18 @@ func get_critical_chance() -> float:
 
 func get_critical_damage_multiplier() -> float:
 	return _critical_damage
+
+
+func get_damage_multiplier_against(target: Node) -> float:
+	## 把目标相关增伤查询委托给实际发射者；弹体自身不解析具体骇入协议。
+	if is_instance_valid(_damage_instigator) and _damage_instigator.has_method("get_damage_multiplier_against"):
+		return maxf(float(_damage_instigator.call("get_damage_multiplier_against", target)), 0.0)
+	return 1.0
+
+
+func is_critical_guaranteed_against(target: Node) -> bool:
+	## 把满血必暴等目标条件委托给实际发射者；没有有效发射者时保持普通暴击率。
+	return is_instance_valid(_damage_instigator) and _damage_instigator.has_method("is_critical_guaranteed_against") and bool(_damage_instigator.call("is_critical_guaranteed_against", target))
 
 
 func get_impact_force() -> float:
@@ -188,6 +222,8 @@ func _apply_hit(target: Node, collision_normal: Vector2 = Vector2.ZERO) -> bool:
 	if not target.has_method("apply_damage"):
 		_try_bounce(collision_normal)
 		return false
+	if target.is_in_group(&"training_monsters") or (target.is_in_group(&"player_combat_target") and target != _damage_instigator):
+		_hit_enemy_target = true
 	_hit_target_ids[target.get_instance_id()] = true
 	target.call("apply_damage", damage, self)
 	if piercing_count <= 0 or destroy_on_hit:

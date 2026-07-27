@@ -131,6 +131,11 @@ func get_attack_power() -> float:
 	return _current_attack_power
 
 
+func get_damage_instigator() -> Node:
+	## 返回技能的实际施放者；目标据此查询玩家独立的骇入协议条件增伤与必定暴击规则。
+	return _caster
+
+
 func get_critical_chance() -> float:
 	## 返回本次冲锋固定暴击率，限制到 0 至 100%。
 	return clampf(_current_critical_chance, 0.0, 1.0)

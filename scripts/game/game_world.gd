@@ -18,6 +18,8 @@ const LOOT_CHEST_SCRIPT: Script = preload("res://scripts/environment/loot_chest.
 const SECOND_HAND_ITEM_GENERATOR: Script = preload("res://scripts/data/second_hand_item_generator.gd")
 ## 战斗网络同步器脚本；联机骇入时由 GameWorld 动态创建，单机流程不实例化任何多人逻辑节点。
 const NETWORK_COMBAT_SYNC_SCRIPT: Script = preload("res://scripts/game/network_combat_sync.gd")
+## 玩家骇入协议组件脚本；仅在正式骇入且启用对应模式扩展时动态挂载，本局结束后随玩家销毁。
+const HACK_PROTOCOL_COMPONENT_SCRIPT: Script = preload("res://scripts/components/hack_protocol_component.gd")
 ## 联机撤离点随机流种子偏移；与共享地图种子相加派生独立随机流，保证撤离点位置不受各端后续随机消耗影响。
 const NETWORK_EXTRACTION_SEED_OFFSET: int = 7717
 ## 大逃杀出生点随机流种子偏移；与共享地图种子相加派生独立随机流，全员在各自机器上推导出同一组出生点。
@@ -333,6 +335,10 @@ var _hack_variant: String = HackModeRules.VARIANT_STANDARD
 ## 当前模式扩展汇总效果；键由 ModeExtensionRules 定义，入场时从 SessionState 读取一次并缓存整局。
 ## 中性配置的数值倍率均为 1.0、布尔开关均为 false，训练场与无扩展骇入不会改变现有规则。
 var _mode_extension_effect_multipliers: Dictionary = ModeExtensionRules.get_effect_multipliers([])
+## 当前是否启用骇入协议模式扩展；入场时从 SessionState 缓存，决定是否创建玩家局内协议组件。
+var _hack_protocol_enabled: bool = false
+## 本地玩家骇入协议组件；每台设备只保存本机碎片、候选与效果，多人摘要交由网络同步器维护。
+var _hack_protocol_component: Node = null
 ## 当前选择角色标识；取值为 stelle、caelus 或 silver_wolf，默认 stelle，用于角色切换和属性随机。
 var _selected_character_id: String = CHARACTER_STELLE
 ## 当前战斗存活时间；取值为进入 GameWorld 后玩家未死亡的累计秒数，默认 0 用于 HUD 计时显示。
@@ -389,6 +395,8 @@ var _network_battle_royale_active: bool = false
 var _network_spawn_positions: Dictionary = {}
 ## 联机敌人人口倍率；默认 1.0，开局按成员数量解析为 1.5 的（成员数-1）次幂并在本局内固定，仅主机的人口逻辑消费。
 var _network_population_multiplier: float = 1.0
+## 怪物管理器未应用任何模式倍率前的实体化上限；协议层数变化时从该值重算，避免在旧倍率上重复相乘。
+var _base_materialized_monster_limit: int = 0
 
 ## 玩家节点缓存；默认按 player_path 获取，允许为空并以世界原点作为生成中心。
 @onready var _player: Node2D = get_node_or_null(player_path) as Node2D
@@ -413,6 +421,7 @@ func _ready() -> void:
 	_random.randomize()
 	_merge_automatically_discovered_content()
 	_apply_session_state()
+	_create_hack_protocol_component()
 	# 骇入模式玩家规则；角色应用完成后立即写入超频等模式的能量、耐久与技能冷却豁免。
 	_apply_hack_variant_player_rules()
 	_resolve_network_combat_session()
@@ -449,7 +458,8 @@ func _ready() -> void:
 				# 怪物扩展倍率；虚拟人口每次物化时统一应用，反复卸载与恢复不会重复叠加。
 				_monster_simulation_manager.call("set_mode_extension_multipliers", _mode_extension_effect_multipliers)
 			# 同时活跃敌人上限缩放；骇入模式倍率（零装 0.6、超频 2.0）与联机成员倍率统一应用，标准单机保持原值。
-			_monster_simulation_manager.set("max_materialized_monsters", _apply_population_scales(int(_monster_simulation_manager.get("max_materialized_monsters"))))
+			_base_materialized_monster_limit = int(_monster_simulation_manager.get("max_materialized_monsters"))
+			_refresh_hack_protocol_population_limit()
 		_spawn_monster_batch()
 	_monster_replenish_remaining = monster_replenish_interval
 	if _network_combat_active:
@@ -574,6 +584,58 @@ func _create_network_combat_sync() -> void:
 	# 傀儡挂载父节点；与敌人生成使用同一 Enemies 容器回退规则。
 	var spawn_parent: Node = _monster_parent if _monster_parent != null else self
 	_network_combat_sync.call("initialize", self, _player, spawn_parent, _monster_simulation_manager)
+	if _network_combat_sync.has_signal("hack_protocol_team_state_changed"):
+		_network_combat_sync.connect("hack_protocol_team_state_changed", Callable(self, "_on_hack_protocol_team_state_changed"))
+	_refresh_hack_protocol_population_limit()
+
+
+func _create_hack_protocol_component() -> void:
+	## 为本地玩家创建局内协议组件；未启用扩展、训练场或玩家缺失时完全不产生额外运行期状态。
+	if not _hack_protocol_enabled or _player == null or _hack_protocol_component != null:
+		return
+	_hack_protocol_component = HACK_PROTOCOL_COMPONENT_SCRIPT.new()
+	_hack_protocol_component.name = "HackProtocolComponent"
+	_player.add_child(_hack_protocol_component)
+	if _player.has_method("set_hack_protocol_component"):
+		_player.call("set_hack_protocol_component", _hack_protocol_component)
+	if _hack_protocol_component.has_signal("protocols_changed"):
+		_hack_protocol_component.connect("protocols_changed", Callable(self, "_on_local_hack_protocols_changed"))
+
+
+func get_hack_protocol_component() -> Node:
+	## 返回本机玩家的局内协议组件；扩展未启用时返回 null，HUD 不需要自行推断节点结构。
+	return _hack_protocol_component
+
+
+func is_hack_protocol_enabled() -> bool:
+	## 返回本局是否启用了骇入协议扩展；仅正式骇入可为 true。
+	return _hack_protocol_enabled
+
+
+func _on_local_hack_protocols_changed(_protocol_ids: Array[String]) -> void:
+	## 单机协议层数变化时立即重算人口上限；联机同步器会再发团队状态信号并使用全队平均值校正。
+	_refresh_hack_protocol_population_limit()
+
+
+func _on_hack_protocol_team_state_changed() -> void:
+	## 多人协议快照变化时刷新动态人口上限；每名成员独立协议数先求平均，再进入统一倍率公式。
+	_refresh_hack_protocol_population_limit()
+
+
+func _refresh_hack_protocol_population_limit() -> void:
+	## 从未缩放基础值重算实体化上限；开局协议数为 0 时严格保持原模式与联机规则结果。
+	if _monster_simulation_manager == null or _base_materialized_monster_limit <= 0:
+		return
+	_monster_simulation_manager.set("max_materialized_monsters", _apply_population_scales(_base_materialized_monster_limit))
+
+
+func _get_average_hack_protocol_count() -> float:
+	## 返回当前动态代价使用的协议层级；多人读取同步器团队均值，单机读取本地协议总层数。
+	if not _hack_protocol_enabled:
+		return 0.0
+	if _network_combat_active and _network_combat_sync != null and _network_combat_sync.has_method("get_team_average_hack_protocol_count"):
+		return maxf(float(_network_combat_sync.call("get_team_average_hack_protocol_count")), 0.0)
+	return float(_hack_protocol_component.call("get_acquired_protocol_count")) if _hack_protocol_component != null and _hack_protocol_component.has_method("get_acquired_protocol_count") else 0.0
 
 
 func _is_network_remote_client() -> bool:
@@ -1136,6 +1198,7 @@ func _apply_session_state() -> void:
 		_is_training_mode = false
 		_hack_variant = HackModeRules.VARIANT_STANDARD
 		_mode_extension_effect_multipliers = ModeExtensionRules.get_effect_multipliers([])
+		_hack_protocol_enabled = false
 		_selected_character_id = CHARACTER_STELLE
 		_apply_selected_character()
 		return
@@ -1150,6 +1213,8 @@ func _apply_session_state() -> void:
 	_hack_variant = HackModeRules.normalize_variant(str(session_state.call("get_hack_variant"))) if not _is_training_mode and session_state.has_method("get_hack_variant") else HackModeRules.VARIANT_STANDARD
 	# 模式扩展效果；训练场固定使用中性值，正式骇入从 SessionState 获取已经规范化的整局汇总倍率。
 	_mode_extension_effect_multipliers = session_state.call("get_mode_extension_effect_multipliers") as Dictionary if not _is_training_mode and session_state.has_method("get_mode_extension_effect_multipliers") else ModeExtensionRules.get_effect_multipliers([])
+	# 骇入协议扩展开关；由 SessionState 同时校验正式模式与扩展 ID，训练场固定关闭。
+	_hack_protocol_enabled = not _is_training_mode and session_state.has_method("is_hack_protocol_enabled") and bool(session_state.call("is_hack_protocol_enabled"))
 	# 二手概率模式覆盖；零装骇入把局内掉落武器装备的二手概率从基础值提高到规则表覆盖值，负值表示不覆盖。
 	var second_hand_override: float = HackModeRules.get_second_hand_chance_override(_hack_variant)
 	if second_hand_override >= 0.0:
@@ -2239,6 +2304,9 @@ func _on_loot_chest_released(chest_position: Vector2, quality_id: String, drop_c
 
 func execute_loot_chest_release(chest_position: Vector2, quality_id: String, drop_count: int, minimum_high_quality_count: int, broken_open: bool) -> void:
 	## 执行宝箱实际出货；单机由信号回调直接调用，联机由取得认领权的一端调用一次，掉落经网络登记钩子同步给全员。
+	if _hack_protocol_component != null and _hack_protocol_component.has_method("notify_chest_opened"):
+		# 宝箱碎片事实；只有实际取得出货权的一端执行本函数，因此联机不会给其他成员重复奖励。
+		_hack_protocol_component.call("notify_chest_opened")
 	# 最终掉落数量；主动长按开启时允许已触发套装追加物品，击毁宝箱始终保持品质原始数量。
 	var resolved_drop_count: int = _get_resolved_loot_chest_drop_count(drop_count, broken_open)
 	# 宝箱掉落循环；极品前五件强制高品质，其余物品按当前宝箱品质对应概率独立判定。
@@ -2651,7 +2719,7 @@ func _apply_network_population_scale(base_population: int) -> int:
 
 func _apply_population_scales(base_population: int) -> int:
 	## 统一应用骇入模式人口倍率与联机成员倍率；先按模式缩放（零装 0.6、超频 2.0），再按联机人数放大。
-	## 模式扩展补充：风险合约数量倍率插入骇入模式与联机成员倍率之间，各层依次取整。
+	## 模式扩展补充：风险合约数量倍率与骇入协议动态倍率插入骇入模式与联机成员倍率之间，各层依次取整。
 	## 开局布怪数量、人口曲线目标与同时活跃真实敌人上限都必须经过本函数，保证三处口径一致。
 	# 模式人口倍率；标准骇入与训练场为 1.0，直接透传避免无意义的取整误差。
 	var variant_population_multiplier: float = HackModeRules.get_population_multiplier(_hack_variant)
@@ -2661,7 +2729,11 @@ func _apply_population_scales(base_population: int) -> int:
 	var extension_population_multiplier: float = maxf(float(_mode_extension_effect_multipliers.get("population_multiplier", 1.0)), 0.0)
 	# 模式扩展缩放结果；独立取整后再应用联机人数倍率，避免三个调用点出现不同计算顺序。
 	var extension_scaled_population: int = variant_scaled_population if extension_population_multiplier == 1.0 else roundi(float(variant_scaled_population) * extension_population_multiplier)
-	return _apply_network_population_scale(extension_scaled_population)
+	# 骇入协议人口倍率；按当前团队平均协议层数动态计算，0 层固定为 1.0，不向尚未获得协议的玩家预收代价。
+	var protocol_population_multiplier: float = HackProtocolRules.get_population_multiplier(_get_average_hack_protocol_count())
+	# 协议缩放结果；在现有模式扩展后独立取整，最后再应用固定的联机成员倍率。
+	var protocol_scaled_population: int = extension_scaled_population if protocol_population_multiplier == 1.0 else roundi(float(extension_scaled_population) * protocol_population_multiplier)
+	return _apply_network_population_scale(protocol_scaled_population)
 
 
 func _on_monster_encountered(monster_id: String) -> void:
@@ -2678,10 +2750,14 @@ func _on_monster_encountered(monster_id: String) -> void:
 func _on_monster_died(monster_node: Node) -> void:
 	if monster_node == null or not (monster_node is Node2D):
 		return
-	# 玩家套装击杀通知；只传递事件不传递怪物实现，使装备组件独立维护持续时间和当前穿戴门槛。
-	var equipment_set_component: Node = _player.get_node_or_null("EquipmentSetComponent") if _player != null else null
-	if equipment_set_component != null and equipment_set_component.has_method("notify_enemy_killed"):
-		equipment_set_component.call("notify_enemy_killed")
+	if not _network_combat_active:
+		# 玩家套装击杀通知；联机由 NetworkCombatSync 按主机确认的最终击杀者触发，避免主机误领队友击杀。
+		var equipment_set_component: Node = _player.get_node_or_null("EquipmentSetComponent") if _player != null else null
+		if equipment_set_component != null and equipment_set_component.has_method("notify_enemy_killed"):
+			equipment_set_component.call("notify_enemy_killed")
+		if _hack_protocol_component != null and _hack_protocol_component.has_method("notify_enemy_killed"):
+			# 单机协议击杀事实；联机与套装使用同一击杀归属口径，碎片和回复只奖励最终击杀者。
+			_hack_protocol_component.call("notify_enemy_killed")
 
 	# 生涯统计击杀上报；单机战斗模式下本机世界的全部击杀都归属玩家侧（含友方单位击杀）。
 	# 联机口径补充：联机时由 NetworkCombatSync 按主机回传的击杀归属分别计数，这里不重复上报避免主机多计队友击杀。
@@ -2797,7 +2873,15 @@ func _get_effective_monster_drop_chance(monster_node: Node, base_chance: float) 
 		resolved_drop_multiplier = maxf(float(monster_node.get("drop_multiplier")), 0.0)
 	# 风险合约掉落倍率；所有已选词条奖励先在规则表中加算，再统一乘到怪物的四类独立掉落概率。
 	var extension_drop_multiplier: float = maxf(float(_mode_extension_effect_multipliers.get("drop_chance_multiplier", 1.0)), 0.0)
-	return clampf(clampf(base_chance, 0.0, 1.0) * resolved_drop_multiplier * extension_drop_multiplier, 0.0, 1.0)
+	# 骇入协议团队代价倍率；按平均协议层数动态降低，0 层严格为 1.0，最低保留规则表声明的 65%。
+	var protocol_team_drop_multiplier: float = HackProtocolRules.get_drop_chance_multiplier(_get_average_hack_protocol_count())
+	# 最终击杀者个人掉落倍率；单机读取本机组件，联机主机按该怪物最后伤害归属读取对应成员协议。
+	var protocol_killer_drop_multiplier: float = 1.0
+	if _network_combat_active and _network_combat_sync != null and _network_combat_sync.has_method("get_hack_protocol_drop_multiplier_for_monster"):
+		protocol_killer_drop_multiplier = maxf(float(_network_combat_sync.call("get_hack_protocol_drop_multiplier_for_monster", monster_node)), 0.0)
+	elif _hack_protocol_component != null and _hack_protocol_component.has_method("get_kill_drop_chance_multiplier"):
+		protocol_killer_drop_multiplier = maxf(float(_hack_protocol_component.call("get_kill_drop_chance_multiplier")), 0.0)
+	return clampf(clampf(base_chance, 0.0, 1.0) * resolved_drop_multiplier * extension_drop_multiplier * protocol_team_drop_multiplier * protocol_killer_drop_multiplier, 0.0, 1.0)
 
 
 func _spawn_monster_drop_with_animation(item_data: Resource, monster_position: Vector2) -> bool:

@@ -292,6 +292,18 @@ func get_critical_damage_multiplier() -> float:
 	return _current_critical_damage
 
 
+func get_damage_multiplier_against(target: Node) -> float:
+	## 把目标相关增伤查询委托给玩家持有者；近战命中框不解析具体骇入协议。
+	if owner != null and owner.has_method("get_damage_multiplier_against"):
+		return maxf(float(owner.call("get_damage_multiplier_against", target)), 0.0)
+	return 1.0
+
+
+func is_critical_guaranteed_against(target: Node) -> bool:
+	## 把满血必暴等目标条件委托给玩家持有者；没有公开接口时保持普通暴击率。
+	return owner != null and owner.has_method("is_critical_guaranteed_against") and bool(owner.call("is_critical_guaranteed_against", target))
+
+
 func _get_weapon_float(weapon_data: Resource, property_name: StringName, fallback_value: float) -> float:
 	if weapon_data == null:
 		return fallback_value

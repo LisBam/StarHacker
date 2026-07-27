@@ -123,13 +123,20 @@ func _apply_shield_damage(target: Node, damage: float) -> void:
 	## 通过统一伤害接口结算护盾附加伤害；不暴击且不产生额外冲击。
 	if damage <= 0.0 or not is_instance_valid(target) or not target.has_method("apply_damage"):
 		return
-	_current_damage = damage
-	target.call("apply_damage", damage, self)
+	# 玩家综合增伤倍率；骇入协议“造成的伤害提高”和持盾、高能条件增伤与其他来源统一聚合。
+	var outgoing_damage_multiplier: float = float(_caster.call("get_outgoing_damage_multiplier")) if is_instance_valid(_caster) and _caster.has_method("get_outgoing_damage_multiplier") else 1.0
+	_current_damage = damage * maxf(outgoing_damage_multiplier, 0.0)
+	target.call("apply_damage", _current_damage, self)
 
 
 func get_attack_power() -> float:
 	## 返回固定 100 公式攻击力，护盾值不会再次被玩家攻击力放大。
 	return maxf(float(_skill_data.get("damage_formula_attack_power")), 0.0) if _skill_data != null else 100.0
+
+
+func get_damage_instigator() -> Node:
+	## 返回技能的实际施放者；目标据此查询玩家独立的骇入协议条件增伤与必定暴击规则。
+	return _caster
 
 
 func get_critical_chance() -> float:

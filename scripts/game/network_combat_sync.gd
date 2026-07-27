@@ -5,6 +5,8 @@ class_name NetworkCombatSync
 ## 职责划分：队友化身状态互播（全员对等）、敌人主机权威复制（主机产出、客户端傀儡）、伤害双向转发、掉落物创建广播与拾取仲裁、宝箱开启仲裁与事件提示。
 ## 地图、宝箱布点与撤离点依靠共享种子在各端确定性复现，不经网络传输；本节点只同步运行期动态状态。
 
+signal hack_protocol_team_state_changed
+
 ## 同步器节点组名；WeaponDrop 与 RangedMonster 通过该组查找当前局内同步器，避免硬编码节点路径。
 const SYNC_GROUP: StringName = &"network_combat_sync"
 ## 队友状态广播间隔；单位秒，默认 0.05 即 20Hz，兼顾局域网带宽与位置平滑度。
@@ -45,6 +47,8 @@ var _player: Node2D = null
 var _player_stats_component: Node = null
 ## 本地玩家护盾组件缓存；读取当前护盾值用于状态广播。
 var _player_shield_component: Node = null
+## 本地玩家骇入协议组件缓存；只保存本机碎片与效果，网络仅广播已获得协议 ID。
+var _local_hack_protocol_component: Node = null
 ## 怪物挂载父节点缓存；主机扫描真实敌人、客户端挂载傀儡敌人共用。
 var _monster_parent: Node = null
 ## 怪物加载管理器缓存；主机把队友化身注册为额外物化锚点并订阅死亡信号。
@@ -71,6 +75,8 @@ var _next_enemy_network_id: int = 1
 var _host_dead_enemy_ids: Dictionary = {}
 ## 最近一次网络伤害击杀归属表；键为敌人网络编号，值为攻击方 peer_id，用于死亡广播附带击杀者。
 var _last_network_damage_peer_by_enemy_id: Dictionary = {}
+## 队伍协议快照；键为 peer_id，值为该成员按获得顺序保存的合法协议 ID，重复项代表叠加层数。
+var _hack_protocol_ids_by_peer: Dictionary = {}
 ## 客户端傀儡敌人表；键为敌人网络编号，值为傀儡怪物节点。
 var _puppet_enemies_by_id: Dictionary = {}
 ## 客户端傀儡场景缓存；键为场景路径，值为 PackedScene，避免重复加载。
@@ -135,15 +141,19 @@ func initialize(game_world: Node2D, player: Node2D, monster_parent: Node, monste
 	if _player != null:
 		_player_stats_component = _player.get_node_or_null("StatsComponent")
 		_player_shield_component = _player.get_node_or_null("ShieldComponent")
+		_local_hack_protocol_component = _player.get_node_or_null("HackProtocolComponent")
 		_connect_local_fire_signals()
 		if _player_stats_component != null and _player_stats_component.has_signal("died"):
 			_player_stats_component.connect("died", Callable(self, "_on_local_player_died"))
+		if _local_hack_protocol_component != null and _local_hack_protocol_component.has_signal("protocols_changed"):
+			_local_hack_protocol_component.connect("protocols_changed", Callable(self, "_on_local_hack_protocols_changed"))
 	# 网络伤害代理；作为同步器子节点常驻复用，不参与目标查询组。
 	_damage_proxy = NETWORK_DAMAGE_PROXY_SCRIPT.new() as Node2D
 	_damage_proxy.name = "NetworkDamageProxy"
 	add_child(_damage_proxy)
 	_build_toast_layer()
 	_rebuild_remote_avatars()
+	_initialize_hack_protocol_state()
 	if _is_host and _monster_simulation_manager != null and _monster_simulation_manager.has_signal("virtual_monster_died"):
 		_monster_simulation_manager.connect("virtual_monster_died", Callable(self, "_on_host_monster_died"))
 
@@ -277,6 +287,93 @@ func _broadcast_local_player_state() -> void:
 		"sh": current_shield,
 		"dead": local_dead,
 	}, false)
+
+
+func _initialize_hack_protocol_state() -> void:
+	## 建立本机协议快照；扩展未启用时组件为空，团队平均协议层级自然保持 0。
+	if _network_session == null:
+		return
+	# 本机成员编号；只使用会话服务分配的正整数编号作为同步字典键。
+	var local_peer_id: int = int(_network_session.call("get_local_peer_id"))
+	if local_peer_id <= 0:
+		return
+	# 本机协议列表；组件缺失时保存空数组，使平均数分母仍按完整队伍人数计算。
+	var local_protocol_ids: Array[String] = []
+	if _local_hack_protocol_component != null and _local_hack_protocol_component.has_method("get_acquired_protocol_ids"):
+		local_protocol_ids = HackProtocolRules.normalize_protocol_ids(_local_hack_protocol_component.call("get_acquired_protocol_ids") as Array)
+	_hack_protocol_ids_by_peer[local_peer_id] = local_protocol_ids
+	hack_protocol_team_state_changed.emit()
+
+
+func _on_local_hack_protocols_changed(protocol_ids: Array[String]) -> void:
+	## 本机获得协议后可靠广播完整快照；数据量只随协议层数增长，不同步碎片与随机候选。
+	if _network_session == null:
+		return
+	# 标准协议列表；客户端输入先过规则表，未知或伪造 ID 不会进入本机团队代价计算。
+	var normalized_protocol_ids: Array[String] = HackProtocolRules.normalize_protocol_ids(protocol_ids)
+	# 本机成员编号；写入本地快照后立即刷新主机人口上限，无需等待网络回环。
+	var local_peer_id: int = int(_network_session.call("get_local_peer_id"))
+	_hack_protocol_ids_by_peer[local_peer_id] = normalized_protocol_ids
+	hack_protocol_team_state_changed.emit()
+	_network_session.call("broadcast_combat_message", {
+		"t": "hack_protocol_state",
+		"ids": normalized_protocol_ids,
+	}, true)
+
+
+func _apply_remote_hack_protocol_state(sender_peer_id: int, payload: Dictionary) -> void:
+	## 应用一名队友的协议完整快照；碎片、候选和协议效果从不在玩家之间共享。
+	if sender_peer_id <= 0 or _departed_peer_ids.has(sender_peer_id):
+		return
+	# 远端协议列表；规则表保留合法重复层数并过滤所有未知 ID。
+	var protocol_ids: Array[String] = HackProtocolRules.normalize_protocol_ids(payload.get("ids", []) as Array)
+	_hack_protocol_ids_by_peer[sender_peer_id] = protocol_ids
+	hack_protocol_team_state_changed.emit()
+
+
+func get_team_average_hack_protocol_count() -> float:
+	## 返回当前战斗名册的平均协议层数；未上报成员按 0 层计入，绝不把成员层数直接相加作为代价。
+	if _network_session == null:
+		return float(_local_hack_protocol_component.call("get_acquired_protocol_count")) if _local_hack_protocol_component != null and _local_hack_protocol_component.has_method("get_acquired_protocol_count") else 0.0
+	# 当前有效成员数；离场成员不再制造怪物与掉落代价，名册缺失时至少保留本机一人。
+	var active_member_count: int = 0
+	# 全队协议层数总和；最终只用于除以人数得到平均值。
+	var total_protocol_count: int = 0
+	for member_profile in (_network_session.call("get_roster_snapshot") as Array):
+		# 成员编号；无效编号和已主动离场成员不参与当前战斗平均。
+		var member_peer_id: int = int((member_profile as Dictionary).get("peer_id", 0))
+		if member_peer_id <= 0 or _departed_peer_ids.has(member_peer_id):
+			continue
+		active_member_count += 1
+		total_protocol_count += (_hack_protocol_ids_by_peer.get(member_peer_id, []) as Array).size()
+	if active_member_count <= 0:
+		return 0.0
+	return float(total_protocol_count) / float(active_member_count)
+
+
+func get_hack_protocol_drop_multiplier_for_monster(monster: Node) -> float:
+	## 返回指定权威怪物最终击杀者的个人掉落倍率；无法解析归属时按主机本机协议处理。
+	if monster == null:
+		return 1.0
+	# 敌人网络编号；怪物尚未扫描入表时为 0，此类击杀只能发生在主机本地。
+	var enemy_id: int = int(_host_enemy_ids_by_instance.get(monster.get_instance_id(), 0))
+	# 击杀成员编号；网络归属 0 表示主机本机或主机友方完成击杀。
+	var killer_peer_id: int = int(_last_network_damage_peer_by_enemy_id.get(enemy_id, 0))
+	if killer_peer_id <= 0 and _network_session != null:
+		killer_peer_id = int(_network_session.call("get_local_peer_id"))
+	# 击杀者协议列表；只汇总个人“战利品嗅探”层数，不使用团队平均值。
+	var killer_protocol_ids: Array = _hack_protocol_ids_by_peer.get(killer_peer_id, [])
+	return 1.0 + maxf(HackProtocolRules.get_stacked_effect_total(killer_protocol_ids, "kill_drop_chance_bonus"), 0.0)
+
+
+func record_host_local_enemy_damage(monster: Node) -> void:
+	## 记录权威怪物最新伤害来自主机本地；覆盖更早的远端归属，使最终击杀碎片、回复与个人掉落准确归属。
+	if not _is_host or monster == null:
+		return
+	# 敌人网络编号；尚未被扫描广播的怪物无需写入，死亡时默认归属主机本地。
+	var enemy_id: int = int(_host_enemy_ids_by_instance.get(monster.get_instance_id(), 0))
+	if enemy_id > 0:
+		_last_network_damage_peer_by_enemy_id[enemy_id] = 0
 
 
 func _on_avatar_damage_forward(peer_id: int, damage: float, source: Node) -> void:
@@ -482,10 +579,12 @@ func _on_host_monster_died(monster: Node2D) -> void:
 	# 死亡敌人网络编号；尚未进入复制表的敌人（生成即死亡）无需广播。
 	var enemy_id: int = int(_host_enemy_ids_by_instance.get(monster.get_instance_id(), 0))
 	if enemy_id == 0:
+		_notify_local_kill_effects()
 		return
 	# 主机侧生涯统计击杀上报；最后一次网络伤害归属为 0 表示主机自己（或其友方单位）完成击杀。
 	# 归属其他成员的击杀由对应客户端按 enemy_remove 回传的 kp 自行计数，主机不代记，保证每人只统计本人击杀。
 	if int(_last_network_damage_peer_by_enemy_id.get(enemy_id, 0)) == 0:
+		_notify_local_kill_effects()
 		_record_local_kill_statistics(str(monster.get("monster_id")))
 	_host_dead_enemy_ids[enemy_id] = true
 	_host_forget_enemy(enemy_id, true)
@@ -600,13 +699,15 @@ func _remove_puppet_enemy(payload: Dictionary) -> void:
 
 
 func _notify_local_kill_effects() -> void:
-	## 本机确认击杀后触发套装击杀通知；与单机 GameWorld 的击杀链路语义一致。
+	## 本机确认击杀后触发套装与骇入协议通知；与单机 GameWorld 的击杀链路语义一致。
 	if _player == null or not is_instance_valid(_player):
 		return
 	# 套装组件节点；缺失时静默跳过。
 	var equipment_set_component: Node = _player.get_node_or_null("EquipmentSetComponent")
 	if equipment_set_component != null and equipment_set_component.has_method("notify_enemy_killed"):
 		equipment_set_component.call("notify_enemy_killed")
+	if _local_hack_protocol_component != null and _local_hack_protocol_component.has_method("notify_enemy_killed"):
+		_local_hack_protocol_component.call("notify_enemy_killed")
 
 
 func _record_local_kill_statistics(monster_id: String) -> void:
@@ -1151,6 +1252,10 @@ func _on_roster_changed() -> void:
 		if not roster_peer_ids.has(avatar_peer_id):
 			_show_toast("%s 已断开连接" % _network_session.call("get_peer_display_name", avatar_peer_id))
 			_remove_remote_avatar(int(avatar_peer_id))
+	for protocol_peer_id in _hack_protocol_ids_by_peer.keys().duplicate():
+		if not roster_peer_ids.has(protocol_peer_id):
+			_hack_protocol_ids_by_peer.erase(protocol_peer_id)
+	hack_protocol_team_state_changed.emit()
 
 
 func _on_disconnected_from_host() -> void:
@@ -1215,6 +1320,8 @@ func _on_combat_message_received(sender_peer_id: int, payload: Dictionary) -> vo
 			_handle_chest_grant(payload)
 		"chest_gone":
 			_handle_chest_gone(payload)
+		"hack_protocol_state":
+			_apply_remote_hack_protocol_state(sender_peer_id, payload)
 		"event":
 			_handle_member_event(sender_peer_id, payload)
 
@@ -1252,6 +1359,8 @@ func _handle_member_event(sender_peer_id: int, payload: Dictionary) -> void:
 			_show_toast("%s 已倒下" % member_display_name)
 		"player_left":
 			_departed_peer_ids[sender_peer_id] = true
+			_hack_protocol_ids_by_peer.erase(sender_peer_id)
+			hack_protocol_team_state_changed.emit()
 			_show_toast("%s 已离开战斗" % member_display_name)
 			_remove_remote_avatar(sender_peer_id)
 		"host_left":

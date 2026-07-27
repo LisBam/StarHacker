@@ -1,0 +1,148 @@
+extends Node
+
+## 骇入协议专项自动验证覆盖规则表、模式配置、战斗组件、HUD 长按入口、非暂停窗口与碎片溢出。
+## 测试通过独立场景运行，不写入项目资源或永久存档；任一断言失败会以非零退出码结束。
+
+## 正式战斗场景；用于验证真实玩家、GameWorld 与 CombatHud 的动态组件接线。
+const GAME_WORLD_SCENE: PackedScene = preload("res://scenes/game/game_world.tscn")
+
+## 当前失败数量；默认 0，每个失败断言加一并在测试结束时作为退出码依据。
+var _failure_count: int = 0
+
+
+func _ready() -> void:
+	## 顺序执行纯规则与真实场景验证；协程等待确保动态子节点完成 ready。
+	_test_rule_table()
+	_test_mode_extension_configuration()
+	await _test_runtime_flow()
+	# 会话清理；防止编辑器中手动运行测试后下一次进入战斗仍保留测试扩展。
+	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
+	if session_state != null and session_state.has_method("clear_mode_extensions"):
+		session_state.call("clear_mode_extensions")
+	if _failure_count > 0:
+		push_error("骇入协议专项测试失败：%d 项。" % _failure_count)
+		get_tree().quit(1)
+		return
+	print("HACK_PROTOCOL_TEST_PASS")
+	get_tree().quit(0)
+
+
+func _test_rule_table() -> void:
+	## 验证 31 项协议、候选唯一性、碎片成长和动态团队代价的策划常量。
+	# 全部协议定义；用户需求当前固定列出 31 项，数量变化必须同步更新测试与权威玩法文档。
+	var definitions: Array[Dictionary] = HackProtocolRules.get_protocol_definitions()
+	_check(definitions.size() == 31, "协议规则表应包含 31 项定义。")
+	# 已见协议 ID；用于验证规则表没有重复稳定标识。
+	var seen_protocol_ids: Dictionary = {}
+	for protocol_definition in definitions:
+		# 当前协议 ID；必须非空且全表唯一，网络和局内组件均依赖该稳定值。
+		var protocol_id: String = str(protocol_definition.get("id", ""))
+		_check(not protocol_id.is_empty(), "协议 ID 不得为空。")
+		_check(not seen_protocol_ids.has(protocol_id), "协议 ID 不得重复：%s。" % protocol_id)
+		seen_protocol_ids[protocol_id] = true
+		_check(not str(protocol_definition.get("display_name", "")).is_empty(), "协议名称不得为空：%s。" % protocol_id)
+		_check(not str(protocol_definition.get("description", "")).is_empty(), "协议说明不得为空：%s。" % protocol_id)
+	# 固定随机源；相同种子应稳定产生三个候选，候选内部不得重复。
+	var offer_random: RandomNumberGenerator = RandomNumberGenerator.new()
+	offer_random.seed = 20260727
+	# 三选一候选；规则表负责无放回抽取。
+	var offer_ids: Array[String] = HackProtocolRules.roll_offer_ids(offer_random)
+	_check(offer_ids.size() == HackProtocolRules.OFFER_COUNT, "每次应生成 3 个协议候选。")
+	_check(offer_ids.duplicate().all(func(protocol_id: String) -> bool: return offer_ids.count(protocol_id) == 1), "同一批协议候选不得重复。")
+	_check(is_equal_approx(HackProtocolRules.get_fragment_requirement(0), 100.0), "首次协议需求应为 100 碎片。")
+	_check(is_equal_approx(HackProtocolRules.get_fragment_requirement(1), 175.0), "第二次协议需求应为 175 碎片。")
+	_check(is_equal_approx(HackProtocolRules.get_population_multiplier(0.0), 1.0), "0 层协议不得提前增加怪物。")
+	_check(is_equal_approx(HackProtocolRules.get_population_multiplier(2.0), 1.24), "团队平均 2 层协议应增加 24% 怪物。")
+	_check(is_equal_approx(HackProtocolRules.get_population_multiplier(99.0), 1.72), "协议怪物增幅应封顶 72%。")
+	_check(is_equal_approx(HackProtocolRules.get_drop_chance_multiplier(0.0), 1.0), "0 层协议不得提前降低掉落。")
+	_check(is_equal_approx(HackProtocolRules.get_drop_chance_multiplier(2.0), 0.86), "团队平均 2 层协议应降低 14% 掉落。")
+	_check(is_equal_approx(HackProtocolRules.get_drop_chance_multiplier(99.0), 0.65), "协议掉落倍率最低应保留 65%。")
+	# 临时护盾验证组件；先建立 40 点永久护盾，再追加 50 点限时来源。
+	var shield_component: ShieldComponent = ShieldComponent.new()
+	add_child(shield_component)
+	shield_component.call("configure_shield", 40.0, true)
+	shield_component.call("add_shield", 50.0, true)
+	shield_component.call("absorb_damage", 20.0)
+	shield_component.call("remove_temporary_shield", 30.0, 50.0)
+	_check(is_equal_approx(float(shield_component.get("current_shield")), 40.0), "限时护盾承伤后到期不得重复扣除永久护盾。")
+	_check(is_equal_approx(float(shield_component.get("max_shield")), 40.0), "限时护盾到期应回收创建时增加的完整上限。")
+	shield_component.queue_free()
+
+
+func _test_mode_extension_configuration() -> void:
+	## 验证骇入协议可独立启用，且不会被风险合约“必须选择词条”的校验误删。
+	# 标准骇入配置；仅启用骇入协议且不选择风险词条。
+	var standard_configuration: Dictionary = ModeExtensionRules.sanitize_configuration([ModeExtensionRules.EXTENSION_HACK_PROTOCOL], [], HackModeRules.VARIANT_STANDARD)
+	_check((standard_configuration.get("extension_ids", []) as Array).has(ModeExtensionRules.EXTENSION_HACK_PROTOCOL), "标准骇入应允许独立启用骇入协议。")
+	# 超频配置；骇入协议没有永久结算奖励，因此允许在无结算娱乐变体运行。
+	var overclock_configuration: Dictionary = ModeExtensionRules.sanitize_configuration([ModeExtensionRules.EXTENSION_HACK_PROTOCOL], [], HackModeRules.VARIANT_OVERCLOCK)
+	_check((overclock_configuration.get("extension_ids", []) as Array).has(ModeExtensionRules.EXTENSION_HACK_PROTOCOL), "超频骇入应保留骇入协议扩展。")
+	_check(ModeExtensionRules.get_configuration_summary([ModeExtensionRules.EXTENSION_HACK_PROTOCOL], []).contains("骇入协议"), "模式扩展摘要应显示骇入协议。")
+
+
+func _test_runtime_flow() -> void:
+	## 在真实战斗场景验证组件创建、满碎片提示、三秒长按、非暂停窗口和两阶段溢出结算。
+	# 会话状态；配置禁用正式结算的超频协议与骇入协议，确保自动测试不会写入永久战绩。
+	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
+	_check(session_state != null, "测试需要 SessionState 自动加载。")
+	if session_state == null:
+		return
+	session_state.call("set_game_mode", "hack")
+	session_state.call("set_hack_variant", HackModeRules.VARIANT_OVERCLOCK)
+	session_state.call("configure_mode_extensions", [ModeExtensionRules.EXTENSION_HACK_PROTOCOL], [])
+	# 战斗世界实例；真实执行 GameWorld、玩家和 CombatHud 的 ready 顺序。
+	var game_world: Node = GAME_WORLD_SCENE.instantiate()
+	add_child(game_world)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	# 玩家协议组件；必须由 GameWorld 动态挂载且只存在于本局玩家节点。
+	var protocol_component: Node = game_world.call("get_hack_protocol_component") as Node
+	_check(protocol_component != null, "启用扩展后应创建玩家骇入协议组件。")
+	if protocol_component == null:
+		game_world.queue_free()
+		return
+	# 战斗 HUD 与进度分区；扩展启用时进度条必须可见。
+	var combat_hud: Node = game_world.get_node_or_null("BattleHUD")
+	# 数据碎片分区；固定插入生命能量面板上方。
+	var progress_panel: Control = game_world.get_node_or_null("BattleHUD/Root/BottomDock/HackProtocolProgressPanel") as Control
+	_check(combat_hud != null, "战斗场景应包含 CombatHud。")
+	_check(progress_panel != null and progress_panel.visible, "启用扩展后数据碎片进度条应显示。")
+	protocol_component.call("add_fragments", 250.0)
+	_check(bool(protocol_component.call("is_offer_ready")), "达到 100 碎片后应固定生成三项候选。")
+	# 选择遮罩；碎片刚满时必须保持隐藏，证明系统没有立即弹窗。
+	var selection_overlay: Control = game_world.get_node_or_null("BattleHUD/Root/HackProtocolSelectOverlay") as Control
+	_check(selection_overlay != null and not selection_overlay.visible, "碎片攒满后不应立即弹出选择窗口。")
+	if combat_hud != null:
+		Input.action_press("select_hack_protocol")
+		combat_hud.call("_update_hack_protocol_hold", HackProtocolRules.HOLD_DURATION_SECONDS)
+		Input.action_release("select_hack_protocol")
+	_check(selection_overlay != null and selection_overlay.visible, "持续按住选择键 3 秒后应打开协议窗口。")
+	_check(not get_tree().paused, "骇入协议选择窗口打开期间不得暂停游戏。")
+	if combat_hud != null:
+		combat_hud.call("_close_hack_protocol_select")
+	# 第一阶段选择；250 碎片扣除 100 后保留 150 溢出，下一阶段需求变为 175。
+	var first_offer_ids: Array[String] = HackProtocolRules.normalize_protocol_ids(protocol_component.call("get_offer_ids") as Array)
+	_check(not first_offer_ids.is_empty() and bool(protocol_component.call("select_protocol", first_offer_ids[0])), "应能从固定候选中获得第一项协议。")
+	_check(is_equal_approx(float(protocol_component.call("get_current_fragments")), 150.0), "第一项协议选择后应保留 150 点溢出碎片。")
+	_check(is_equal_approx(float(protocol_component.call("get_required_fragments")), 175.0), "获得一项协议后需求应提高到 175。")
+	_check(not bool(protocol_component.call("is_offer_ready")), "150 点溢出不足 175 时不应提前生成下一批候选。")
+	protocol_component.call("add_fragments", 25.0)
+	_check(bool(protocol_component.call("is_offer_ready")), "补足 25 点后应生成下一批三选一。")
+	# 动态人口倍率；超频基础 2 倍与第 1 层协议 1.12 倍共同作用，开局 0 层仍不会承担协议代价。
+	var scaled_population: int = int(game_world.call("_apply_population_scales", 100))
+	_check(scaled_population == 224, "超频下单人获得 1 层协议后基础人口 100 应动态变为 224。")
+	# 第二阶段选择；175 点正好扣清，第三阶段需求为 250。
+	var second_offer_ids: Array[String] = HackProtocolRules.normalize_protocol_ids(protocol_component.call("get_offer_ids") as Array)
+	_check(not second_offer_ids.is_empty() and bool(protocol_component.call("select_protocol", second_offer_ids[0])), "应能获得第二项协议。")
+	_check(is_zero_approx(float(protocol_component.call("get_current_fragments"))), "第二阶段正好支付 175 后碎片应归零。")
+	_check(is_equal_approx(float(protocol_component.call("get_required_fragments")), 250.0), "获得两项协议后下一需求应为 250。")
+	game_world.queue_free()
+	await get_tree().process_frame
+
+
+func _check(condition: bool, failure_message: String) -> void:
+	## 记录单条验证结果；不中断后续断言，便于一次运行暴露全部回归点。
+	if condition:
+		return
+	_failure_count += 1
+	push_error(failure_message)

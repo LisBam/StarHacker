@@ -531,6 +531,8 @@ func _ready() -> void:
 	_set_pause_menu_visible(false)
 	if not _is_player_dead:
 		_set_death_overlay_visible(false)
+	# 模式状态延后刷新；CombatHud 子节点会先于 GameWorld 父节点 ready，等待父节点写入 SessionState 的超频变体后再同步离开入口。
+	call_deferred("_refresh_mode_state_after_game_world_initialized")
 
 
 func _process(delta: float) -> void:
@@ -634,6 +636,13 @@ func _bind_game_world() -> void:
 	_game_world = get_node_or_null(game_world_path)
 	_is_training_mode = _resolve_training_mode()
 	_is_casual_mode = _resolve_casual_mode()
+
+
+func _refresh_mode_state_after_game_world_initialized() -> void:
+	## 在 GameWorld 应用会话模式后重新读取 HUD 模式状态；保证超频骇入从首帧起使用娱乐模式的离开与拾取规则。
+	_is_training_mode = _resolve_training_mode()
+	_is_casual_mode = _resolve_casual_mode()
+	_sync_mode_controls()
 
 
 func _bind_player_components() -> void:
@@ -3621,8 +3630,10 @@ func _on_unstuck_button_pressed() -> void:
 
 func _on_return_main_menu_button_pressed() -> void:
 	# 娱乐模式离开；训练场与超频骇入没有物品得失结算，直接返回主菜单且不显示二次确认。
+	# 离开确认补充：娱乐模式同样保留二次确认以防误触，但正文不展示正式模式的物品丢失概率。
 	if _is_casual_mode:
-		_return_to_main_menu()
+		if _escape_confirmation_dialog != null:
+			_escape_confirmation_dialog.present_adaptive("确认离开", "确认离开并返回主菜单吗？", "确认离开", "取消", true)
 		return
 	if _escape_confirmation_dialog == null:
 		return

@@ -97,89 +97,86 @@ custom_minimum_size = Vector2(0, 44)
 layout_mode = 2
 text = "退出游戏"
 
-[node name="BottomCategoryExpansionMargin" type="MarginContainer" parent="."]
+[node name="BottomCategoryExpansionMargin" type="Control" parent="."]
 visible = false
 layout_mode = 1
-anchors_preset = 12
-anchor_top = 1.0
+anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_top = -132.0
-offset_bottom = -82.0
 grow_horizontal = 2
-grow_vertical = 0
-theme_override_constants/margin_left = 24
-theme_override_constants/margin_right = 24
+grow_vertical = 2
+mouse_filter = 2
 
-[node name="BottomCategoryExpansionHost" type="HBoxContainer" parent="BottomCategoryExpansionMargin"]
-layout_mode = 2
-theme_override_constants/separation = 10
-alignment = 1
-
-[node name="FinanceCategoryPanel" type="PanelContainer" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost"]
+[node name="FinanceCategoryPanel" type="PanelContainer" parent="BottomCategoryExpansionMargin"]
 visible = false
-layout_mode = 2
+layout_mode = 0
 
-[node name="Margin" type="MarginContainer" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/FinanceCategoryPanel"]
-layout_mode = 2
+[node name="Margin" type="MarginContainer" parent="BottomCategoryExpansionMargin/FinanceCategoryPanel"]
+layout_mode = 0
 theme_override_constants/margin_left = 8
 theme_override_constants/margin_top = 6
 theme_override_constants/margin_right = 8
 theme_override_constants/margin_bottom = 6
 
-[node name="Buttons" type="HBoxContainer" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/FinanceCategoryPanel/Margin"]
-layout_mode = 2
-theme_override_constants/separation = 8
+[node name="Buttons" type="VBoxContainer" parent="BottomCategoryExpansionMargin/FinanceCategoryPanel/Margin"]
+layout_mode = 0
+theme_override_constants/separation = 6
 
-[node name="StockMarketButton" type="Button" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/FinanceCategoryPanel/Margin/Buttons" unique_id=106598226]
+[node name="StockMarketButton" type="Button" parent="BottomCategoryExpansionMargin/FinanceCategoryPanel/Margin/Buttons" unique_id=106598226]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(120, 36)
 layout_mode = 2
+size_flags_horizontal = 3
 text = "炒股"
 
-[node name="MiningFarmButton" type="Button" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/FinanceCategoryPanel/Margin/Buttons" unique_id=213572583]
+[node name="MiningFarmButton" type="Button" parent="BottomCategoryExpansionMargin/FinanceCategoryPanel/Margin/Buttons" unique_id=213572583]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(120, 36)
 layout_mode = 2
+size_flags_horizontal = 3
 text = "矿场"
 
-[node name="InsuranceButton" type="Button" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/FinanceCategoryPanel/Margin/Buttons" unique_id=1599930243]
+[node name="InsuranceButton" type="Button" parent="BottomCategoryExpansionMargin/FinanceCategoryPanel/Margin/Buttons" unique_id=1599930243]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(120, 36)
 layout_mode = 2
+size_flags_horizontal = 3
 text = "保险"
 
-[node name="BankButton" type="Button" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/FinanceCategoryPanel/Margin/Buttons" unique_id=817354970]
+[node name="BankButton" type="Button" parent="BottomCategoryExpansionMargin/FinanceCategoryPanel/Margin/Buttons" unique_id=817354970]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(120, 36)
 layout_mode = 2
+size_flags_horizontal = 3
 text = "银行"
 
-[node name="StatisticsCategoryPanel" type="PanelContainer" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost"]
+[node name="StatisticsCategoryPanel" type="PanelContainer" parent="BottomCategoryExpansionMargin"]
 visible = false
-layout_mode = 2
+layout_mode = 0
 
-[node name="Margin" type="MarginContainer" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/StatisticsCategoryPanel"]
-layout_mode = 2
+[node name="Margin" type="MarginContainer" parent="BottomCategoryExpansionMargin/StatisticsCategoryPanel"]
+layout_mode = 0
 theme_override_constants/margin_left = 8
 theme_override_constants/margin_top = 6
 theme_override_constants/margin_right = 8
 theme_override_constants/margin_bottom = 6
 
-[node name="Buttons" type="HBoxContainer" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/StatisticsCategoryPanel/Margin"]
-layout_mode = 2
-theme_override_constants/separation = 8
+[node name="Buttons" type="VBoxContainer" parent="BottomCategoryExpansionMargin/StatisticsCategoryPanel/Margin"]
+layout_mode = 0
+theme_override_constants/separation = 6
 
-[node name="EncyclopediaButton" type="Button" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/StatisticsCategoryPanel/Margin/Buttons" unique_id=1828126173]
+[node name="EncyclopediaButton" type="Button" parent="BottomCategoryExpansionMargin/StatisticsCategoryPanel/Margin/Buttons" unique_id=1828126173]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(120, 36)
 layout_mode = 2
+size_flags_horizontal = 3
 text = "图鉴"
 
-[node name="StatsButton" type="Button" parent="BottomCategoryExpansionMargin/BottomCategoryExpansionHost/StatisticsCategoryPanel/Margin/Buttons"]
+[node name="StatsButton" type="Button" parent="BottomCategoryExpansionMargin/StatisticsCategoryPanel/Margin/Buttons"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(120, 36)
 layout_mode = 2
+size_flags_horizontal = 3
 text = "生涯"
 
 [node name="BottomMenuMargin" type="MarginContainer" parent="." unique_id=541020951]
@@ -230,12 +227,6 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "锻造"
 
-[node name="FinanceCategoryButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
-text = "金融 ▲"
-
 [node name="HideoutButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons" unique_id=957338281]
 unique_name_in_owner = true
 layout_mode = 2
@@ -253,6 +244,12 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 text = "悬赏"
+
+[node name="FinanceCategoryButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "金融 ▲"
 
 [node name="StatisticsCategoryButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons"]
 unique_name_in_owner = true

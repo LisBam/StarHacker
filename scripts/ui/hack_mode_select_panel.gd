@@ -22,6 +22,10 @@ const CATEGORY_HINTS: Dictionary = {
 }
 ## 模式进入按钮尺寸；宽 96 高 38 像素，与联机面板操作按钮规格一致。
 const ENTER_BUTTON_SIZE: Vector2 = Vector2(96.0, 38.0)
+## 模式选择窗口内容横向页边距；默认 18 像素，避免模式卡边框贴住或覆盖最外层窗口描边。
+const CONTENT_HORIZONTAL_MARGIN: int = 18
+## 模式选择窗口内容纵向页边距；默认 16 像素，保证标题、分组滚动区和返回按钮与窗口边框保持稳定留白。
+const CONTENT_VERTICAL_MARGIN: int = 16
 
 
 func _ready() -> void:
@@ -32,10 +36,17 @@ func _ready() -> void:
 
 func _build_content() -> void:
 	## 构建面板完整内容；标题、两个分组区与底部返回按钮全部在运行时创建。
+	# 内容页边距容器；为模式分组和卡片提供统一安全距离，内部描边不会再贴住最外层窗口描边。
+	var content_margin: MarginContainer = MarginContainer.new()
+	content_margin.add_theme_constant_override("margin_left", CONTENT_HORIZONTAL_MARGIN)
+	content_margin.add_theme_constant_override("margin_top", CONTENT_VERTICAL_MARGIN)
+	content_margin.add_theme_constant_override("margin_right", CONTENT_HORIZONTAL_MARGIN)
+	content_margin.add_theme_constant_override("margin_bottom", CONTENT_VERTICAL_MARGIN)
+	add_child(content_margin)
 	# 根布局容器；纵向排列标题、分组与返回按钮。
 	var root_layout: VBoxContainer = VBoxContainer.new()
 	root_layout.add_theme_constant_override("separation", 10)
-	add_child(root_layout)
+	content_margin.add_child(root_layout)
 	# 面板标题；与其他局外面板一致使用 24 号标题。
 	var title_label: Label = Label.new()
 	title_label.text = "骇入模式"

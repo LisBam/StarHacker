@@ -15,6 +15,10 @@ const WEALTH_LINE_COLOR: Color = Color(0.35, 1.0, 0.72, 1.0)
 const WEALTH_GRID_COLOR: Color = Color(0.5, 0.6, 0.7, 0.18)
 ## 财富曲线区域最小高度；默认 150 像素，保证折线有可读的纵向空间。
 const WEALTH_CHART_MINIMUM_HEIGHT: float = 150.0
+## 生涯窗口内容横向页边距；默认 18 像素，避免统计分区卡的边框贴住或遮盖最外层窗口描边。
+const CONTENT_HORIZONTAL_MARGIN: int = 18
+## 生涯窗口内容纵向页边距；默认 16 像素，保证标题、统计卡、财富曲线和返回按钮与窗口边框保持稳定留白。
+const CONTENT_VERTICAL_MARGIN: int = 16
 
 ## 生涯统计服务缓存；ready 时解析，缺失时面板显示服务不可用提示。
 var _stats_service: Node = null
@@ -110,10 +114,17 @@ func refresh() -> void:
 
 func _build_content() -> void:
 	## 构建面板完整内容；标题、两列统计分区、财富曲线分区与返回按钮。
+	# 内容页边距容器；为全部内部统计分区预留窗口安全距离，避免嵌套卡片与最外层窗口描边发生视觉重叠。
+	var content_margin: MarginContainer = MarginContainer.new()
+	content_margin.add_theme_constant_override("margin_left", CONTENT_HORIZONTAL_MARGIN)
+	content_margin.add_theme_constant_override("margin_top", CONTENT_VERTICAL_MARGIN)
+	content_margin.add_theme_constant_override("margin_right", CONTENT_HORIZONTAL_MARGIN)
+	content_margin.add_theme_constant_override("margin_bottom", CONTENT_VERTICAL_MARGIN)
+	add_child(content_margin)
 	# 根布局容器；纵向排列全部分区。
 	var root_layout: VBoxContainer = VBoxContainer.new()
 	root_layout.add_theme_constant_override("separation", 10)
-	add_child(root_layout)
+	content_margin.add_child(root_layout)
 	# 面板标题；与其他局外面板一致使用 24 号标题。
 	var title_label: Label = Label.new()
 	title_label.text = "统计"

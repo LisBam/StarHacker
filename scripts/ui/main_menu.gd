@@ -58,6 +58,10 @@ const MULTIPLAYER_PANEL_SCRIPT: Script = preload("res://scripts/ui/multiplayer_l
 const DEVELOPER_MENU_SCRIPT: Script = preload("res://scripts/ui/developer_menu.gd")
 ## 开发者模式解锁序列；默认由六个英文字母组成，输入错误会按首字母重新匹配。
 const DEVELOPER_UNLOCK_SEQUENCE: String = "LISBAM"
+## 底部分类展开面板与所属按钮的垂直间距；默认 10 像素，保证展开面板从按钮上方升起时保留清晰边界。
+const CATEGORY_EXPANSION_GAP: float = 10.0
+## 底部分类展开动画时长；默认 0.18 秒，使用从下向上的缩放让纵向入口列表快速且清晰地出现。
+const CATEGORY_EXPANSION_ANIMATION_DURATION: float = 0.18
 ## 大厅正式骇入动作标识；固定 hack，由实体交互协议映射到现有骇入入口。
 const LOBBY_ACTION_HACK: String = "hack"
 ## 大厅训练场动作标识；固定 training，由实体交互协议映射到现有训练场入口。
@@ -174,12 +178,12 @@ const LOBBY_ACTION_QUIT: String = "quit"
 @onready var _center_menu: Control = get_node("Center") as Control
 ## 主菜单底部功能栏缓存；大厅宿主模式下隐藏，局外面板继续由同一脚本动态创建。
 @onready var _bottom_menu_margin: Control = get_node("BottomMenuMargin") as Control
-## 主菜单底部分类展开区缓存；仅在金融或统计分类展开时显示，并位于底部功能栏正上方。
+## 主菜单底部分类展开层缓存；仅在金融或统计分类展开时显示，面板位置由所属按钮在运行时计算。
 @onready var _bottom_category_expansion_margin: Control = get_node("BottomCategoryExpansionMargin") as Control
 ## 金融分类展开面板缓存；内部承载炒股、矿场、保险和银行四个既有入口。
-@onready var _finance_category_panel: PanelContainer = get_node("BottomCategoryExpansionMargin/BottomCategoryExpansionHost/FinanceCategoryPanel") as PanelContainer
+@onready var _finance_category_panel: PanelContainer = get_node("BottomCategoryExpansionMargin/FinanceCategoryPanel") as PanelContainer
 ## 统计分类展开面板缓存；内部承载图鉴与生涯两个既有入口。
-@onready var _statistics_category_panel: PanelContainer = get_node("BottomCategoryExpansionMargin/BottomCategoryExpansionHost/StatisticsCategoryPanel") as PanelContainer
+@onready var _statistics_category_panel: PanelContainer = get_node("BottomCategoryExpansionMargin/StatisticsCategoryPanel") as PanelContainer
 
 ## Master 音频总线索引；取值为 -1 或有效总线下标，默认 -1 表示尚未解析，修改会影响音量应用目标。
 var _master_bus_index: int = -1
@@ -270,6 +274,10 @@ var _developer_sequence_index: int = 0
 var _last_reported_modal_visibility: bool = false
 ## 设置面板聚焦遮罩；运行时创建并跟随设置面板显示，使设置页与其他局外面板拥有一致的暗化背景。
 var _settings_dim_overlay: ColorRect = null
+## 金融分类展开动画缓存；默认 null，重新点击或切换分类时停止旧动画以避免面板缩放状态互相覆盖。
+var _finance_category_expansion_tween: Tween = null
+## 统计分类展开动画缓存；默认 null，职责与金融动画分离，保证两组互斥入口能独立复位。
+var _statistics_category_expansion_tween: Tween = null
 
 
 func _ready() -> void:
@@ -283,8 +291,7 @@ func _ready() -> void:
 	UI_STYLE_GUIDE.apply_screen_background(_background)
 	_build_settings_dim_overlay()
 	UI_STYLE_GUIDE.apply_primary_button(_switch_lobby_menu_button)
-	UI_STYLE_GUIDE.apply_primary_button(_finance_category_button)
-	UI_STYLE_GUIDE.apply_primary_button(_statistics_category_button)
+	# 底部分类按钮保持普通按钮样式；它们与角色、背包等同级入口共用场景主题，只以三角形表达展开状态。
 	UI_STYLE_GUIDE.apply_section_panel(_finance_category_panel)
 	UI_STYLE_GUIDE.apply_section_panel(_statistics_category_panel)
 	PROGRESS_SLIDER_VISUAL_SCRIPT.install(_master_volume_slider)
@@ -332,6 +339,7 @@ func _ready() -> void:
 	_build_developer_overlay()
 	_settings_panel.visible = false
 	_set_bottom_category_visibility(false, false)
+	resized.connect(_on_main_menu_resized)
 	_show_key_binding_page(false)
 	_sync_master_volume_slider()
 	_apply_lobby_host_mode()
@@ -409,14 +417,89 @@ func _on_statistics_category_button_pressed() -> void:
 
 
 func _set_bottom_category_visibility(show_finance: bool, show_statistics: bool) -> void:
-	## 统一维护底部分类展开状态；金融与统计互斥，保证展开区始终只有一组入口且分类文字与箭头一致。
+	## 统一维护底部分类展开状态；金融与统计互斥，展开列表始终从各自按钮的上方纵向出现并同步三角形方向。
 	if _finance_category_panel == null or _statistics_category_panel == null or _bottom_category_expansion_margin == null:
 		return
-	_finance_category_panel.visible = show_finance
-	_statistics_category_panel.visible = show_statistics
-	_bottom_category_expansion_margin.visible = show_finance or show_statistics
-	_finance_category_button.text = "金融 ▼" if show_finance else "金融 ▲"
-	_statistics_category_button.text = "统计 ▼" if show_statistics else "统计 ▲"
+	# 实际展开状态；统计与金融互斥时优先保留金融参数，避免异常调用让两组列表同时遮挡底部按钮。
+	var should_show_finance: bool = show_finance
+	var should_show_statistics: bool = show_statistics and not should_show_finance
+	_bottom_category_expansion_margin.visible = should_show_finance or should_show_statistics
+	_set_category_panel_open(_finance_category_panel, _finance_category_button, should_show_finance)
+	_set_category_panel_open(_statistics_category_panel, _statistics_category_button, should_show_statistics)
+	_finance_category_button.text = "金融 ▼" if should_show_finance else "金融 ▲"
+	_statistics_category_button.text = "统计 ▼" if should_show_statistics else "统计 ▲"
+
+
+func _set_category_panel_open(panel: PanelContainer, source_button: Button, should_show: bool) -> void:
+	## 设置单个底部分类面板的可见状态；展开时以所属按钮为锚点从下向上缩放为一列，收起时立即复位避免残留动画状态。
+	if panel == null or source_button == null:
+		return
+	_stop_category_panel_animation(panel)
+	if not should_show:
+		panel.visible = false
+		panel.scale = Vector2.ONE
+		return
+	# 面板最小尺寸；纵向按钮容器按内容决定宽高，脱离容器布局后由这里写入实际尺寸。
+	panel.size = panel.get_combined_minimum_size()
+	_position_category_panel(panel, source_button)
+	# 动画基准点；底部中心固定在按钮上方，缩放高度时所有入口会从上方按钮处逐项向上展开。
+	panel.pivot_offset = Vector2(panel.size.x * 0.5, panel.size.y)
+	panel.visible = true
+	panel.scale = Vector2(1.0, 0.0)
+	# 展开补间；只缩放纵向高度，横向宽度保持完整，视觉上形成自下而上的单列展开动画。
+	var expansion_tween: Tween = create_tween()
+	_set_category_panel_animation(panel, expansion_tween)
+	expansion_tween.tween_property(panel, "scale", Vector2.ONE, CATEGORY_EXPANSION_ANIMATION_DURATION).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+
+func _position_category_panel(panel: PanelContainer, source_button: Button) -> void:
+	## 把分类面板居中定位至所属按钮正上方；窗口尺寸变化时重算并限制在主菜单可见范围内。
+	if _bottom_category_expansion_margin == null or panel == null or source_button == null:
+		return
+	# 按钮局部坐标；将所属按钮的全局位置换算到展开层，避免底部边距容器改变时出现横向偏移。
+	var button_position: Vector2 = _bottom_category_expansion_margin.to_local(source_button.global_position)
+	# 期望位置；面板水平中心与按钮中心对齐，底边与按钮顶边之间保持固定留白。
+	var desired_position: Vector2 = Vector2(
+		button_position.x + (source_button.size.x - panel.size.x) * 0.5,
+		button_position.y - panel.size.y - CATEGORY_EXPANSION_GAP
+	)
+	# 可用宽高；窗口过小时仍保证夹取上限非负，防止 clampf 传入反向范围。
+	var maximum_x: float = maxf(_bottom_category_expansion_margin.size.x - panel.size.x, 0.0)
+	var maximum_y: float = maxf(_bottom_category_expansion_margin.size.y - panel.size.y, 0.0)
+	panel.position = Vector2(clampf(desired_position.x, 0.0, maximum_x), clampf(desired_position.y, 0.0, maximum_y))
+
+
+func _stop_category_panel_animation(panel: PanelContainer) -> void:
+	## 停止指定分类的旧补间；连续点击或在两类之间切换时确保只有当前请求能控制面板缩放。
+	var active_tween: Tween = _get_category_panel_animation(panel)
+	if active_tween != null and active_tween.is_valid():
+		active_tween.kill()
+	_set_category_panel_animation(panel, null)
+
+
+func _get_category_panel_animation(panel: PanelContainer) -> Tween:
+	## 返回指定分类面板当前补间；未识别面板返回 null，保持辅助函数对未来分类扩展的安全性。
+	if panel == _finance_category_panel:
+		return _finance_category_expansion_tween
+	if panel == _statistics_category_panel:
+		return _statistics_category_expansion_tween
+	return null
+
+
+func _set_category_panel_animation(panel: PanelContainer, animation_tween: Tween) -> void:
+	## 保存指定分类面板的当前补间引用；金融与统计分别持有，避免字典键或节点生命周期造成无效引用。
+	if panel == _finance_category_panel:
+		_finance_category_expansion_tween = animation_tween
+	elif panel == _statistics_category_panel:
+		_statistics_category_expansion_tween = animation_tween
+
+
+func _on_main_menu_resized() -> void:
+	## 主菜单尺寸改变后重新锚定已展开列表；全屏或窗口模式切换时仍保持面板位于所属按钮正上方。
+	if _finance_category_panel != null and _finance_category_panel.visible:
+		_position_category_panel(_finance_category_panel, _finance_category_button)
+	if _statistics_category_panel != null and _statistics_category_panel.visible:
+		_position_category_panel(_statistics_category_panel, _statistics_category_button)
 
 
 func _collapse_bottom_categories() -> void:

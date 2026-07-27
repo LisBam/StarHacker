@@ -13,6 +13,10 @@ const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
 const COMPLETED_TEXT_COLOR: Color = Color(0.35, 1.0, 0.72, 1.0)
 ## 进度条最小尺寸；宽度自适应卡片，固定 14 像素高度保证纤细但可读。
 const PROGRESS_BAR_MINIMUM_HEIGHT: float = 14.0
+## 悬赏窗口内容横向页边距；默认 18 像素，避免滚动列表和悬赏卡边框贴住或遮盖最外层窗口描边。
+const CONTENT_HORIZONTAL_MARGIN: int = 18
+## 悬赏窗口内容纵向页边距；默认 16 像素，保证标题、列表和返回按钮与最外层窗口边框保持稳定留白。
+const CONTENT_VERTICAL_MARGIN: int = 16
 
 ## 悬赏服务缓存；ready 时解析，缺失时面板显示服务不可用提示。
 var _bounty_service: Node = null
@@ -60,10 +64,17 @@ func refresh() -> void:
 
 func _build_content() -> void:
 	## 构建面板完整内容；标题、日期提示、悬赏滚动列表与返回按钮。
+	# 内容页边距容器；将全部内部控件与最外层窗口描边隔开，滚动列表与卡片扩展时也不会覆盖边框。
+	var content_margin: MarginContainer = MarginContainer.new()
+	content_margin.add_theme_constant_override("margin_left", CONTENT_HORIZONTAL_MARGIN)
+	content_margin.add_theme_constant_override("margin_top", CONTENT_VERTICAL_MARGIN)
+	content_margin.add_theme_constant_override("margin_right", CONTENT_HORIZONTAL_MARGIN)
+	content_margin.add_theme_constant_override("margin_bottom", CONTENT_VERTICAL_MARGIN)
+	add_child(content_margin)
 	# 根布局容器；纵向排列全部分区。
 	var root_layout: VBoxContainer = VBoxContainer.new()
 	root_layout.add_theme_constant_override("separation", 10)
-	add_child(root_layout)
+	content_margin.add_child(root_layout)
 	# 面板标题；与其他局外面板一致使用 24 号标题。
 	var title_label: Label = Label.new()
 	title_label.text = "悬赏"

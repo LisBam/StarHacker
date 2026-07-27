@@ -6,7 +6,7 @@
 
 | 入口 | 实现 | 职责 |
 | --- | --- | --- |
-| 主菜单 | `res://scenes/ui/main_menu.tscn`、`res://scripts/ui/main_menu.gd` | 项目主场景；打开角色、图鉴、背包、仓库、商店、锻造、股市、矿场、保险、银行、据点、派遣、悬赏、统计及模式入口；点击“骇入”先打开骇入模式选择面板（标准/零装/超频，规则表见 `HackModeRules`）；同一场景可作为大厅局外面板宿主 |
+| 主菜单 | `res://scenes/ui/main_menu.tscn`、`res://scripts/ui/main_menu.gd` | 项目主场景；底部直接打开角色、背包、仓库、商店、锻造、据点、派遣、悬赏及模式入口；“金融”可展开股市、矿场、保险、银行，“统计”可展开图鉴、生涯统计；点击“骇入”先打开骇入模式选择面板（标准/零装/超频，规则表见 `HackModeRules`）；同一场景可作为大厅局外面板宿主 |
 | 主大厅 | `res://scenes/game/main_lobby.tscn`、`res://scripts/game/lobby_world.gd` | 承载当前角色自由移动、攻击、技能、静态交互设施与大厅 HUD；不创建敌人、掉落、撤离或战斗结算 |
 | 联机大厅 | `res://scenes/game/multiplayer_lobby.tscn`、`res://scripts/game/multiplayer_lobby_world.gd`（继承 `LobbyWorld`） | 主菜单“联机”入口目标场景；进场自动打开联机面板，左上角提供“联机设置”入口，房间成员经 `NetworkLobbySync` 在同一大厅内互相可见；玩法约束与主大厅一致 |
 | 角色系统 | `res://scenes/ui/character_select.tscn`、`res://scripts/ui/character_select.gd` | 完整模式展示可选角色并持久化确认结果；当前角色模式隐藏角色列表，供战斗内只读查看同一套属性与技能详情 |
@@ -54,7 +54,7 @@
 - `EnhancementStoneData` 保存强化石品质、目标类型和词条方向；逐属性强化幅度、兼容规则与正式词条池集中在 `EnhancementRules`。特化品质额外在资源中保存散射、穿透、弹射或连击的 `+1/+2` 离散点数；四项机制不进入普通四品质词条池。
 - `EnhancementRules` 同时声明单件武器或装备最多使用 20 颗强化石；`WeaponData` 与 `EquipmentData` 分别在数据层记录已使用次数、返回剩余次数并拒绝第 21 次强化。
 - `InventoryLimits` 集中声明背包 50 组容量与资源单组 10 件现行上限；库存、地面掉落和 UI 不各自复制这些数字。历史 99 件常量只保留未调用兼容接口，不参与当前读档。
-- `SecondHandItemGenerator` 集中执行武器装备 30% 二手判定、1 至 20 颗正式概率历史强化石与 1% 至 99% 耐久消耗；怪物、宝箱和普通商店只负责提供新物品实例与随机源。
+- `SecondHandItemGenerator` 集中执行武器装备 30% 二手判定、1 至 20 次按 `21 - 次数` 递减权重抽取的历史强化，以及 1% 至 99% 耐久消耗；怪物、宝箱和普通商店只负责提供新物品实例与随机源。
 - `.tres` 保存单个内容的基础数值。脚本默认值只作为缺省值，场景或资源覆盖值优先。
 - 新内容通过 `ContentCatalog` 自动注册，创建流程见 `docs/content_authoring.md`。
 
@@ -104,10 +104,10 @@
 
 ### 3.4 UI 层
 
-- `CombatHud` 负责局内信息、暂停、地图、拾取提示、物资撤离和结算编排，不直接拥有库存数据。
+- `CombatHud` 负责局内信息、暂停、地图、拾取提示、物资撤离和结算编排，不直接拥有库存数据。物资撤离面板由 `SupplyExtractionPanel` 在左侧武器栏和右侧防具栏中展示全部已装备槽位，两个分区只向 `GlobalInventory` 的统一报价与原子送回接口发起操作。
 - `LobbyHud` 负责大厅左上切换按钮、最近设施提示、角色生命能量、主动技能和武器快照；它不处理 F 输入、设施距离或场景动作。主菜单以 `lobby_host_mode` 嵌入更高 CanvasLayer，只复用局外面板，不复制背包、仓库、商店等业务 UI。
 - `EncyclopediaPanel` 读取 `ContentCatalog` 的全量武器、装备、道具与怪物模板，并通过 `GlobalInventory` 的稳定发现记录决定显示正式信息或“？？？”。怪物只在离树场景实例中读取稳定 ID、说明和基础属性，首次有效遇敌后解锁；左侧列表只负责选择当前条目，右侧物品详情复用 `ItemDetailFormatter`，怪物详情显示其固定基础数值。关键词筛选匹配名称、类型和说明，条目固定按基础内容、`stelle`（星）扩展包、其余扩展包目录顺序分组，并在每个扩展包前显示标题分割。组内装备按套装聚合并固定为头部、躯干、腿部、脚部；资源按初级、中级、高级、极品排列，无法识别品质时回退名称排序。它不复制物品数值或规则、不修改库存，也不把浏览、商店预览或临时快照视为获得。图鉴条目名称行最右侧与详情首行显示 `StatsService` 提供的获得数量或击杀数量，图鉴只读取计数不写入统计。
-- `HackModeSelectPanel` 按 `HackModeRules` 定义表构建“战斗模式 / 娱乐模式”两组模式卡并派发 `mode_selected`；写入会话状态与场景切换由主菜单宿主完成。`BountyPanel` 只读取 `BountyService` 快照并订阅其变化信号；`StatsPanel` 只读取 `StatsService` 快照，财富曲线由面板内部类 `WealthCurveChart` 按采样数组绘制。三个面板都通过主菜单遮罩复用，不直接访问战斗节点。
+- `HackModeSelectPanel` 按 `HackModeRules` 定义表构建“战斗模式 / 娱乐模式”两组模式卡并派发 `mode_selected`；写入会话状态与场景切换由主菜单宿主完成。`MainMenu` 自身只维护金融与统计两个互斥分类的可见状态和箭头文本，分类子按钮仍复用原有面板打开回调；`BountyPanel` 只读取 `BountyService` 快照并订阅其变化信号；`StatsPanel` 只读取 `StatsService` 快照，财富曲线由面板内部类 `WealthCurveChart` 按采样数组绘制。三个面板都通过主菜单遮罩复用，不直接访问战斗节点。
 - `CombatHud` 运行时实例化角色系统的当前角色模式，负责 O 键打开、关闭、输入锁定和场景树暂停；角色档案、属性条与技能卡片仍由角色系统从 `SessionState` 读取，HUD 不保存副本。
 - 战斗常驻 HUD 将技能栏放在屏幕左下角、武器栏放在屏幕右下角，角色名字、生命与能量独立保留在底部中心；常驻 HUD 节点必须位于全部交互遮罩之前，菜单显示时不依赖逐项隐藏也不会覆盖菜单内容。
 - 右下常驻武器栏由 `CombatHud` 直接创建 `CombatHudSlotView` 并读取装备组件快照，顶部使用与技能按键相同的居中区域显示“远程 1 / 远程 2 / 近战”，下方显示武器名、能耗、耐久、当前手持高亮和攻击冷却；它不复用 `WeaponSlotControl` 或 `ItemCardView`，装备、卸下、修复、强化和拖拽操作只存在于背包等交互界面。

@@ -139,15 +139,17 @@ const LOBBY_ACTION_QUIT: String = "quit"
 @onready var _hideout_button: Button = %HideoutButton
 ## 派遣按钮缓存；默认位于据点按钮右侧，点击后打开佣兵派遣委托界面。
 @onready var _dispatch_button: Button = %DispatchButton
-## 图鉴按钮缓存；默认位于主菜单底部功能栏末位，点击后查看武器、装备与资源的永久收集状态。
+## 金融分类按钮缓存；默认位于主菜单底部，点击后展开或收起炒股、矿场、保险和银行入口。
+@onready var _finance_category_button: Button = %FinanceCategoryButton
+## 统计分类按钮缓存；默认位于主菜单底部，点击后展开或收起图鉴与生涯入口。
+@onready var _statistics_category_button: Button = %StatisticsCategoryButton
+## 图鉴按钮缓存；默认位于“统计”展开分类中，点击后查看武器、装备与资源的永久收集状态。
 ## 怪物图鉴补充；同一入口还会展示按基础内容和扩展包分组的永久怪物遇敌收集状态。
 @onready var _encyclopedia_button: Button = %EncyclopediaButton
-## 悬赏按钮缓存；位于右侧竖列图鉴上方第一位，点击后打开每日随机悬赏面板。
+## 悬赏按钮缓存；默认位于主菜单底部功能栏，点击后打开每日随机悬赏面板。
 @onready var _bounty_button: Button = %BountyButton
-## 统计按钮缓存；位于右侧竖列图鉴上方第二位，点击后打开生涯统计与财富曲线面板。
+## 生涯按钮缓存；默认位于“统计”展开分类中，点击后打开生涯统计与财富曲线面板。
 @onready var _stats_button: Button = %StatsButton
-## 右侧按钮列外框缓存；与底部功能栏同宽同边距，内部用等宽占位把按钮列对齐到“图鉴”正上方。
-@onready var _side_menu_margin: Control = get_node("SideMenuMargin") as Control
 ## 设置面板缓存；默认绑定唯一名 SettingsPanel，控制主菜单设置界面的显示和隐藏。
 @onready var _settings_panel: Control = %SettingsPanel
 ## 设置内容容器缓存；默认通过场景路径绑定，用于动态挂载按键绑定面板。
@@ -172,6 +174,12 @@ const LOBBY_ACTION_QUIT: String = "quit"
 @onready var _center_menu: Control = get_node("Center") as Control
 ## 主菜单底部功能栏缓存；大厅宿主模式下隐藏，局外面板继续由同一脚本动态创建。
 @onready var _bottom_menu_margin: Control = get_node("BottomMenuMargin") as Control
+## 主菜单底部分类展开区缓存；仅在金融或统计分类展开时显示，并位于底部功能栏正上方。
+@onready var _bottom_category_expansion_margin: Control = get_node("BottomCategoryExpansionMargin") as Control
+## 金融分类展开面板缓存；内部承载炒股、矿场、保险和银行四个既有入口。
+@onready var _finance_category_panel: PanelContainer = get_node("BottomCategoryExpansionMargin/BottomCategoryExpansionHost/FinanceCategoryPanel") as PanelContainer
+## 统计分类展开面板缓存；内部承载图鉴与生涯两个既有入口。
+@onready var _statistics_category_panel: PanelContainer = get_node("BottomCategoryExpansionMargin/BottomCategoryExpansionHost/StatisticsCategoryPanel") as PanelContainer
 
 ## Master 音频总线索引；取值为 -1 或有效总线下标，默认 -1 表示尚未解析，修改会影响音量应用目标。
 var _master_bus_index: int = -1
@@ -275,6 +283,10 @@ func _ready() -> void:
 	UI_STYLE_GUIDE.apply_screen_background(_background)
 	_build_settings_dim_overlay()
 	UI_STYLE_GUIDE.apply_primary_button(_switch_lobby_menu_button)
+	UI_STYLE_GUIDE.apply_primary_button(_finance_category_button)
+	UI_STYLE_GUIDE.apply_primary_button(_statistics_category_button)
+	UI_STYLE_GUIDE.apply_section_panel(_finance_category_panel)
+	UI_STYLE_GUIDE.apply_section_panel(_statistics_category_panel)
 	PROGRESS_SLIDER_VISUAL_SCRIPT.install(_master_volume_slider)
 	_master_bus_index = AudioServer.get_bus_index("Master")
 	_start_button.pressed.connect(_on_start_button_pressed)
@@ -293,6 +305,8 @@ func _ready() -> void:
 	_bank_button.pressed.connect(_on_bank_button_pressed)
 	_hideout_button.pressed.connect(_on_hideout_button_pressed)
 	_dispatch_button.pressed.connect(_on_dispatch_button_pressed)
+	_finance_category_button.pressed.connect(_on_finance_category_button_pressed)
+	_statistics_category_button.pressed.connect(_on_statistics_category_button_pressed)
 	_encyclopedia_button.pressed.connect(_on_encyclopedia_button_pressed)
 	_bounty_button.pressed.connect(_on_bounty_button_pressed)
 	_stats_button.pressed.connect(_on_stats_button_pressed)
@@ -317,6 +331,7 @@ func _ready() -> void:
 	_build_hack_mode_overlay()
 	_build_developer_overlay()
 	_settings_panel.visible = false
+	_set_bottom_category_visibility(false, false)
 	_show_key_binding_page(false)
 	_sync_master_volume_slider()
 	_apply_lobby_host_mode()
@@ -358,6 +373,10 @@ func _process(_delta: float) -> void:
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel") and _is_bottom_category_expanded():
+		_collapse_bottom_categories()
+		get_viewport().set_input_as_handled()
+		return
 	if not (event is InputEventKey):
 		return
 	# 键盘事件；只处理首次按下且具有 Unicode 字符的字母键，长按重复不会推进序列。
@@ -377,6 +396,37 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	_developer_sequence_index = 0
 	_open_developer_menu()
 	get_viewport().set_input_as_handled()
+
+
+func _on_finance_category_button_pressed() -> void:
+	## 切换金融分类；展开时只显示金融入口，并同步把向上三角形翻转为向下三角形。
+	_set_bottom_category_visibility(not _finance_category_panel.visible, false)
+
+
+func _on_statistics_category_button_pressed() -> void:
+	## 切换统计分类；展开时只显示图鉴和生涯入口，并同步把向上三角形翻转为向下三角形。
+	_set_bottom_category_visibility(false, not _statistics_category_panel.visible)
+
+
+func _set_bottom_category_visibility(show_finance: bool, show_statistics: bool) -> void:
+	## 统一维护底部分类展开状态；金融与统计互斥，保证展开区始终只有一组入口且分类文字与箭头一致。
+	if _finance_category_panel == null or _statistics_category_panel == null or _bottom_category_expansion_margin == null:
+		return
+	_finance_category_panel.visible = show_finance
+	_statistics_category_panel.visible = show_statistics
+	_bottom_category_expansion_margin.visible = show_finance or show_statistics
+	_finance_category_button.text = "金融 ▼" if show_finance else "金融 ▲"
+	_statistics_category_button.text = "统计 ▼" if show_statistics else "统计 ▲"
+
+
+func _collapse_bottom_categories() -> void:
+	## 收起全部底部分类；从分类中的入口打开功能页或按取消键时调用，使返回主菜单后保持紧凑布局。
+	_set_bottom_category_visibility(false, false)
+
+
+func _is_bottom_category_expanded() -> bool:
+	## 返回是否存在已展开的底部分类；仅供取消键优先收起菜单使用，不参与大厅模态状态。
+	return _bottom_category_expansion_margin != null and _bottom_category_expansion_margin.visible
 
 
 func _on_start_button_pressed() -> void:
@@ -508,9 +558,10 @@ func _apply_lobby_host_mode() -> void:
 	_background.visible = not lobby_host_mode
 	_center_menu.visible = not lobby_host_mode
 	_bottom_menu_margin.visible = not lobby_host_mode
-	# 右侧按钮列；与底部功能栏同属完整主菜单本体，大厅宿主模式下一并隐藏。
-	if _side_menu_margin != null:
-		_side_menu_margin.visible = not lobby_host_mode
+	# 底部分类展开区；与功能栏同属完整主菜单本体，大厅宿主模式下一并隐藏并复位为收起状态。
+	if lobby_host_mode:
+		_collapse_bottom_categories()
+	_bottom_category_expansion_margin.visible = not lobby_host_mode and _is_bottom_category_expanded()
 	_switch_lobby_menu_button.visible = not lobby_host_mode
 	mouse_filter = Control.MOUSE_FILTER_IGNORE if lobby_host_mode else Control.MOUSE_FILTER_STOP
 	if lobby_host_mode:
@@ -564,6 +615,7 @@ func _on_forge_button_pressed() -> void:
 func _on_stock_market_button_pressed() -> void:
 	if _stock_market_overlay == null:
 		return
+	_collapse_bottom_categories()
 	_settings_panel.visible = false
 	_stock_market_overlay.visible = true
 	if _stock_market_panel != null and _stock_market_panel.has_method("set_market_display_active"):
@@ -573,6 +625,7 @@ func _on_stock_market_button_pressed() -> void:
 func _on_mining_farm_button_pressed() -> void:
 	if _mining_farm_overlay == null:
 		return
+	_collapse_bottom_categories()
 	_settings_panel.visible = false
 	_mining_farm_overlay.visible = true
 	if _mining_farm_panel != null and _mining_farm_panel.has_method("present"):
@@ -582,6 +635,7 @@ func _on_mining_farm_button_pressed() -> void:
 func _on_insurance_button_pressed() -> void:
 	if _insurance_overlay == null:
 		return
+	_collapse_bottom_categories()
 	_settings_panel.visible = false
 	_insurance_overlay.visible = true
 	if _insurance_panel != null and _insurance_panel.has_method("refresh"):
@@ -591,6 +645,7 @@ func _on_insurance_button_pressed() -> void:
 func _on_bank_button_pressed() -> void:
 	if _bank_overlay == null:
 		return
+	_collapse_bottom_categories()
 	_settings_panel.visible = false
 	_bank_overlay.visible = true
 	if _bank_panel != null and _bank_panel.has_method("refresh"):
@@ -618,6 +673,7 @@ func _on_dispatch_button_pressed() -> void:
 func _on_encyclopedia_button_pressed() -> void:
 	if _encyclopedia_overlay == null:
 		return
+	_collapse_bottom_categories()
 	_settings_panel.visible = false
 	_encyclopedia_overlay.visible = true
 	if _encyclopedia_panel != null and _encyclopedia_panel.has_method("refresh"):
@@ -636,6 +692,7 @@ func _on_bounty_button_pressed() -> void:
 func _on_stats_button_pressed() -> void:
 	if _stats_overlay == null:
 		return
+	_collapse_bottom_categories()
 	_settings_panel.visible = false
 	_stats_overlay.visible = true
 	if _stats_panel != null and _stats_panel.has_method("refresh"):
@@ -1221,7 +1278,7 @@ func _on_bounty_closed() -> void:
 func _on_stats_closed() -> void:
 	if _stats_overlay != null:
 		_stats_overlay.visible = false
-	_stats_button.grab_focus()
+	_statistics_category_button.grab_focus()
 
 
 func _build_developer_overlay() -> void:
@@ -1335,25 +1392,25 @@ func _on_stock_market_closed() -> void:
 		_stock_market_overlay.visible = false
 	if _stock_market_panel != null and _stock_market_panel.has_method("set_market_display_active"):
 		_stock_market_panel.call("set_market_display_active", false)
-	_stock_market_button.grab_focus()
+	_finance_category_button.grab_focus()
 
 
 func _on_mining_farm_closed() -> void:
 	if _mining_farm_overlay != null:
 		_mining_farm_overlay.visible = false
-	_mining_farm_button.grab_focus()
+	_finance_category_button.grab_focus()
 
 
 func _on_insurance_closed() -> void:
 	if _insurance_overlay != null:
 		_insurance_overlay.visible = false
-	_insurance_button.grab_focus()
+	_finance_category_button.grab_focus()
 
 
 func _on_bank_closed() -> void:
 	if _bank_overlay != null:
 		_bank_overlay.visible = false
-	_bank_button.grab_focus()
+	_finance_category_button.grab_focus()
 
 
 func _on_hideout_closed() -> void:
@@ -1371,7 +1428,7 @@ func _on_dispatch_closed() -> void:
 func _on_encyclopedia_closed() -> void:
 	if _encyclopedia_overlay != null:
 		_encyclopedia_overlay.visible = false
-	_encyclopedia_button.grab_focus()
+	_statistics_category_button.grab_focus()
 
 
 func _on_master_volume_slider_value_changed(value: float) -> void:

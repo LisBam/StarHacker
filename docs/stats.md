@@ -7,8 +7,9 @@
 | 模块 | 实现 | 职责 |
 | --- | --- | --- |
 | 统计服务 | `scripts/game/stats_service.gd`（AutoLoad `StatsService`） | 集中记录怪物击杀计数、物品获得计数、对局与撤离统计、单局之最与财富曲线采样；对外提供只读查询与事实信号，独立持久化 |
-| 统计面板 | `scripts/ui/stats_panel.gd`（`StatsPanel`） | 880×600 居中窗口；展示对局统计、单局之最与财富曲线，折线由内部类 `WealthCurveChart` 绘制 |
-| 图鉴计数 | `EncyclopediaPanel` 读取 `get_monster_kill_count` / `get_item_acquire_count` / `get_enhancement_stone_acquire_count` | 条目名称行右缘数字与详情首行统计行，只读展示 |
+| 统计分类入口 | `scenes/ui/main_menu.tscn`、`scripts/ui/main_menu.gd` | 底部“统计 ▲”展开后显示“图鉴、生涯”；展开时箭头翻为“▼”，再次点击、按 ESC 或打开子入口后收起 |
+| 生涯面板 | `scripts/ui/stats_panel.gd`（`StatsPanel`） | 由统计分类中的“生涯”按钮打开；使用 880×600 居中窗口展示对局统计、单局之最与财富曲线，折线由内部类 `WealthCurveChart` 绘制 |
+| 图鉴计数 | `EncyclopediaPanel` 读取 `get_monster_kill_count` / `get_item_acquire_count` / `get_enhancement_stone_acquire_count` | 由统计分类中的“图鉴”按钮打开；条目名称行右缘数字与详情首行统计行只读展示 |
 | 悬赏进度 | `BountyService` 订阅统计事实信号 | 见 `docs/bounty.md` |
 
 ## 2. 事实事件挂点

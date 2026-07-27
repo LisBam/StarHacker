@@ -14,7 +14,7 @@
 | --- | --- | --- |
 | 保险服务 | `res://scripts/game/insurance_service.gd`（AutoLoad `InsuranceService`） | 维护保单、随身价值统计、死亡理赔、账户统计、记录与股票行为累计 |
 | 保险面板 | `res://scripts/ui/insurance_panel.gd` | 展示保单卡/投保报价卡、账户统计与最近 30 条记录；投保走二次确认 |
-| 主菜单入口 | `main_menu.gd` 底部“保险”按钮与大厅 `insurance` 动作 | 动态创建遮罩与面板 |
+| 主菜单入口 | `main_menu.gd` 底部“金融 ▲”展开分类中的“保险”按钮与大厅 `insurance` 动作 | 动态创建遮罩与面板 |
 
 ## 3. 保单生命周期
 

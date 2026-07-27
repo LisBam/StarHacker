@@ -9,6 +9,8 @@ signal closed
 
 ## 全局窗口样式指南；面板窗口、分区、按钮与文字统一从这里取色。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+## 模式扩展选择面板脚本；联机房主使用与单人开局相同的多选与风险合约配置组件。
+const MODE_EXTENSION_SELECT_PANEL_SCRIPT: Script = preload("res://scripts/ui/mode_extension_select_panel.gd")
 ## 成员列表刷新用的准备状态文本；下标 0 为未准备、1 为已准备。
 const READY_STATE_TEXTS: Array[String] = ["未准备", "已准备"]
 ## 组队骇入模式标识；与 NetworkSession.COMBAT_MODE_TEAM 保持一致，对应模式下拉框下标 0。
@@ -47,6 +49,12 @@ var _mode_option_button: OptionButton = null
 var _hack_variant_option_button: OptionButton = null
 ## 骇入模式选项标识缓存；与下拉框下标一一对应，选择回调据此把下标映射回稳定模式标识。
 var _hack_variant_option_ids: Array[String] = []
+## 模式扩展设置按钮；显示当前配置摘要，仅房主在房间内可打开设置窗口。
+var _mode_extension_button: Button = null
+## 模式扩展全屏遮罩；作为联机面板内部模态层，防止配置时误触名册与准备按钮。
+var _mode_extension_overlay: Control = null
+## 模式扩展选择面板实例；复用单人开局组件并把确认结果写入 NetworkSession。
+var _mode_extension_panel: Control = null
 ## 准备按钮；切换本机准备状态，文本随状态变化。
 var _ready_button: Button = null
 ## 开始骇入按钮；仅主机可见，全员准备后可点击并统一开局。
@@ -75,6 +83,8 @@ func _ready() -> void:
 
 func refresh() -> void:
 	## 面板打开时的统一刷新入口；重新提交本机档案（同步最新角色选择）并重建全部界面状态。
+	if _mode_extension_overlay != null:
+		_mode_extension_overlay.visible = false
 	if _network_session == null:
 		if _status_label != null:
 			_status_label.text = "联机服务不可用"
@@ -137,6 +147,7 @@ func _build_content() -> void:
 	close_button.custom_minimum_size = Vector2(0.0, 42.0)
 	close_button.pressed.connect(_on_close_button_pressed)
 	root_layout.add_child(close_button)
+	_build_mode_extension_overlay()
 
 
 func _build_room_section() -> Control:
@@ -262,6 +273,22 @@ func _build_team_section() -> Control:
 		_hack_variant_option_ids.append(str(mode_definition.get("variant", HackModeRules.VARIANT_STANDARD)))
 	_hack_variant_option_button.item_selected.connect(_on_hack_variant_option_selected)
 	hack_variant_row.add_child(_hack_variant_option_button)
+	# 模式扩展设置行；与多人模式、骇入模式构成第三个独立规则维度。
+	var mode_extension_row: HBoxContainer = HBoxContainer.new()
+	mode_extension_row.add_theme_constant_override("separation", 8)
+	section_layout.add_child(mode_extension_row)
+	# 模式扩展行标签；与上方两个模式标签同宽，保持控件左缘对齐。
+	var mode_extension_caption: Label = Label.new()
+	mode_extension_caption.text = "模式扩展"
+	mode_extension_caption.custom_minimum_size = Vector2(64.0, 0.0)
+	UI_STYLE_GUIDE.apply_secondary_label(mode_extension_caption)
+	mode_extension_row.add_child(mode_extension_caption)
+	_mode_extension_button = Button.new()
+	_mode_extension_button.text = "未开启"
+	_mode_extension_button.custom_minimum_size = Vector2(0.0, 36.0)
+	_mode_extension_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_mode_extension_button.pressed.connect(_on_mode_extension_button_pressed)
+	mode_extension_row.add_child(_mode_extension_button)
 	_member_list = VBoxContainer.new()
 	_member_list.add_theme_constant_override("separation", 6)
 	_member_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -296,6 +323,44 @@ func _build_team_section() -> Control:
 	return section_panel
 
 
+func _build_mode_extension_overlay() -> void:
+	## 构建联机面板内部的模式扩展模态层；房主确认前不会修改权威房间配置。
+	if _mode_extension_overlay != null:
+		return
+	# 模态遮罩；覆盖整个联机面板并拦截底层鼠标输入。
+	var mode_extension_overlay: Control = Control.new()
+	mode_extension_overlay.name = "ModeExtensionOverlay"
+	mode_extension_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	mode_extension_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(mode_extension_overlay)
+	_mode_extension_overlay = mode_extension_overlay
+	# 遮罩暗层；复用全局弹窗遮罩样式，使嵌套设置仍有清晰层级。
+	var mode_extension_dim: ColorRect = ColorRect.new()
+	mode_extension_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	mode_extension_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	UI_STYLE_GUIDE.apply_overlay_dim(mode_extension_dim)
+	mode_extension_overlay.add_child(mode_extension_dim)
+	# 模式扩展面板；尺寸略小于联机宿主窗口，内容过高时由组件内部滚动区处理。
+	var mode_extension_panel: Control = MODE_EXTENSION_SELECT_PANEL_SCRIPT.new() as Control
+	if mode_extension_panel == null:
+		mode_extension_overlay.visible = false
+		return
+	mode_extension_panel.name = "ModeExtensionSelectPanel"
+	mode_extension_panel.anchor_left = 0.5
+	mode_extension_panel.anchor_top = 0.5
+	mode_extension_panel.anchor_right = 0.5
+	mode_extension_panel.anchor_bottom = 0.5
+	mode_extension_panel.offset_left = -370.0
+	mode_extension_panel.offset_top = -290.0
+	mode_extension_panel.offset_right = 370.0
+	mode_extension_panel.offset_bottom = 290.0
+	mode_extension_panel.connect("configuration_confirmed", Callable(self, "_on_mode_extension_configuration_confirmed"))
+	mode_extension_panel.connect("closed", Callable(self, "_on_mode_extension_panel_closed"))
+	mode_extension_overlay.add_child(mode_extension_panel)
+	_mode_extension_panel = mode_extension_panel
+	mode_extension_overlay.visible = false
+
+
 # ---------------------------------------------------------------------------
 # 界面刷新
 # ---------------------------------------------------------------------------
@@ -313,23 +378,34 @@ func _refresh_room_list() -> void:
 			previously_selected_ip = str(_discovered_room_cache[selected_index].get("ip", ""))
 	_room_list.clear()
 	_discovered_room_cache = _network_session.call("get_discovered_rooms")
+	# 本地协议版本；缺少查询接口时使用零，避免把未知版本房间误判为兼容。
+	var local_protocol_version: int = int(_network_session.call("get_protocol_version")) if _network_session.has_method("get_protocol_version") else 0
 	for room_index in range(_discovered_room_cache.size()):
 		# 单个房间信息；包含房名、IP、人数与是否在战斗中。
 		var room_info: Dictionary = _discovered_room_cache[room_index]
+		# 房间协议版本；版本不同意味着开局 RPC 字段布局可能不一致，列表必须阻止直接加入。
+		var room_protocol_version: int = int(room_info.get("version", 0))
+		# 协议是否兼容；当前只接受完全相同的版本，不对缺失模式扩展字段进行静默降级。
+		var room_protocol_compatible: bool = room_protocol_version == local_protocol_version
 		# 房间骇入模式标注；标准骇入不额外占用列表宽度，零装与超频显示模式名帮助玩家入房前识别规则。
 		var room_hack_variant: String = HackModeRules.normalize_variant(str(room_info.get("hack_variant", HackModeRules.VARIANT_STANDARD)))
+		# 房间模式扩展摘要；发现协议携带稳定 ID，列表按本地规则表显示一致名称与总掉落奖励。
+		var room_extension_summary: String = ModeExtensionRules.get_configuration_summary(room_info.get("mode_extensions", []), room_info.get("risk_modifiers", []))
 		# 房间展示文本；附带当前多人模式与非标准骇入模式，战斗中的房间标注不可中途加入。
-		var room_text: String = "%s（%s）%d/%d·%s%s%s" % [
+		var room_text: String = "%s（%s）%d/%d·%s%s%s%s%s" % [
 			str(room_info.get("room_name", "未命名房间")),
 			str(room_info.get("ip", "?")),
 			int(room_info.get("player_count", 0)),
 			int(room_info.get("max_players", 4)),
 			str(COMBAT_MODE_DISPLAY_NAMES.get(str(room_info.get("mode", COMBAT_MODE_TEAM)), "组队骇入")),
 			"" if room_hack_variant == HackModeRules.VARIANT_STANDARD else "·%s" % HackModeRules.get_display_name(room_hack_variant),
+			"" if room_extension_summary == "未开启" else "·%s" % room_extension_summary,
 			"·战斗中" if bool(room_info.get("in_combat", false)) else "",
+			"" if room_protocol_compatible else "·版本不兼容",
 		]
 		_room_list.add_item(room_text)
-		if str(room_info.get("ip", "")) == previously_selected_ip:
+		_room_list.set_item_disabled(room_index, not room_protocol_compatible)
+		if room_protocol_compatible and str(room_info.get("ip", "")) == previously_selected_ip:
 			_room_list.select(room_index)
 	if _discovered_room_cache.is_empty():
 		_room_list.add_item("未发现房间；可让主机先创建房间，或直接输入 IP 加入")
@@ -370,11 +446,13 @@ func _refresh_team_section() -> void:
 		# 会话骇入模式标识；由主机同步，未知取值回退标准骇入。
 		var session_hack_variant: String = HackModeRules.normalize_variant(str(_network_session.call("get_session_hack_variant")))
 		if session_hack_variant != HackModeRules.VARIANT_STANDARD:
-			hack_variant_description = "%s：%s" % [HackModeRules.get_display_name(session_hack_variant), HackModeRules.get_description(session_hack_variant)]
+			hack_variant_description = "\n%s：%s" % [HackModeRules.get_display_name(session_hack_variant), HackModeRules.get_description(session_hack_variant)]
+	# 当前模式扩展说明；所有成员都显示房主权威配置，未启用时也明确标记为“未开启”。
+	var mode_extension_description: String = "\n模式扩展：%s。" % str(_network_session.call("get_session_mode_extension_summary")) if _network_session.has_method("get_session_mode_extension_summary") else "\n模式扩展：未开启。"
 	if bool(_network_session.call("is_session_host")):
-		_team_hint_label.text = "%s%s全员准备后可开始（至少 2 名成员）；切换模式会清空全员准备。" % [mode_description, hack_variant_description]
+		_team_hint_label.text = "%s%s%s全员准备后可开始（至少 2 名成员）；切换模式会清空全员准备。" % [mode_description, hack_variant_description, mode_extension_description]
 	else:
-		_team_hint_label.text = "%s%s等待主机开始；请先点击“准备”。" % [mode_description, hack_variant_description]
+		_team_hint_label.text = "%s%s%s等待主机开始；请先点击“准备”。" % [mode_description, hack_variant_description, mode_extension_description]
 
 
 func _refresh_action_states() -> void:
@@ -404,6 +482,10 @@ func _refresh_action_states() -> void:
 		# 当前会话骇入模式下标；按选项标识缓存反查，未找到时回退第一项（标准骇入）。
 		var session_hack_variant_index: int = _hack_variant_option_ids.find(HackModeRules.normalize_variant(str(_network_session.call("get_session_hack_variant")))) if _network_session.has_method("get_session_hack_variant") else 0
 		_hack_variant_option_button.select(maxi(session_hack_variant_index, 0))
+	if _mode_extension_button != null:
+		# 模式扩展按钮状态；客户端只读显示房主配置，房主入房后才能打开模态设置。
+		_mode_extension_button.disabled = not (session_active and bool(_network_session.call("is_session_host")))
+		_mode_extension_button.text = str(_network_session.call("get_session_mode_extension_summary")) if _network_session.has_method("get_session_mode_extension_summary") else "未开启"
 	if _start_button != null:
 		_start_button.visible = session_active and bool(_network_session.call("is_session_host"))
 		_start_button.disabled = not bool(_network_session.call("is_everyone_ready"))
@@ -480,7 +562,14 @@ func _on_join_button_pressed() -> void:
 		# 列表选中下标；映射回缓存房间信息。
 		var selected_index: int = _room_list.get_selected_items()[0]
 		if selected_index >= 0 and selected_index < _discovered_room_cache.size():
-			target_ip = str(_discovered_room_cache[selected_index].get("ip", ""))
+			# 选中房间信息；协议版本必须与本地完全一致，避免旧端无法解析模式扩展开局字段。
+			var selected_room_info: Dictionary = _discovered_room_cache[selected_index]
+			# 本地协议版本；发现列表只能加入同版本房间，直连 IP 仍由玩家自行保证双方版本一致。
+			var local_protocol_version: int = int(_network_session.call("get_protocol_version")) if _network_session.has_method("get_protocol_version") else 0
+			if int(selected_room_info.get("version", 0)) != local_protocol_version:
+				_status_label.text = "该房间协议版本不兼容，请让双方更新到相同游戏版本"
+				return
+			target_ip = str(selected_room_info.get("ip", ""))
 	if target_ip.is_empty():
 		_status_label.text = "请先选择一个房间或输入主机 IP"
 		return
@@ -505,6 +594,38 @@ func _on_hack_variant_option_selected(selected_index: int) -> void:
 	var selected_hack_variant: String = _hack_variant_option_ids[selected_index] if selected_index >= 0 and selected_index < _hack_variant_option_ids.size() else HackModeRules.VARIANT_STANDARD
 	_network_session.call("set_session_hack_variant", selected_hack_variant)
 	_refresh_team_section()
+
+
+func _on_mode_extension_button_pressed() -> void:
+	## 房主打开模式扩展设置；使用当前权威配置作为初始值，取消时不写回任何变化。
+	if _network_session == null or _mode_extension_overlay == null or _mode_extension_panel == null:
+		return
+	if not bool(_network_session.call("is_session_active")) or not bool(_network_session.call("is_session_host")):
+		return
+	# 当前骇入模式；决定风险合约是否与本房间规则兼容。
+	var session_hack_variant: String = HackModeRules.normalize_variant(str(_network_session.call("get_session_hack_variant")))
+	# 当前模式扩展 ID；重新打开时恢复房主上次已经确认的选择。
+	var extension_ids: Array = _network_session.call("get_session_mode_extension_ids") if _network_session.has_method("get_session_mode_extension_ids") else []
+	# 当前风险词条 ID；选择面板会保留已选项并随机补足到四个候选。
+	var risk_modifier_ids: Array = _network_session.call("get_session_risk_modifier_ids") if _network_session.has_method("get_session_risk_modifier_ids") else []
+	_mode_extension_panel.call("configure", session_hack_variant, extension_ids, risk_modifier_ids, "应用设置")
+	_mode_extension_overlay.visible = true
+
+
+func _on_mode_extension_configuration_confirmed(extension_ids: Array[String], risk_modifier_ids: Array[String]) -> void:
+	## 房主确认模式扩展配置；先关闭模态层，再由 NetworkSession 校验、清空准备并同步全员。
+	if _mode_extension_overlay != null:
+		_mode_extension_overlay.visible = false
+	if _network_session != null and _network_session.has_method("set_session_mode_extensions"):
+		_network_session.call("set_session_mode_extensions", extension_ids, risk_modifier_ids)
+	_refresh_team_section()
+	_refresh_action_states()
+
+
+func _on_mode_extension_panel_closed() -> void:
+	## 关闭模式扩展编辑且不提交；房间中的权威设置保持不变。
+	if _mode_extension_overlay != null:
+		_mode_extension_overlay.visible = false
 
 
 func _on_ready_button_pressed() -> void:

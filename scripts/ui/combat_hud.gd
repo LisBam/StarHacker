@@ -382,6 +382,8 @@ var _settlement_subcategory: String = InventoryQuery.SUBCATEGORY_ALL
 
 ## HUD 根控件缓存；默认绑定 Root，用于动态挂载附近掉落物面板。
 @onready var _root_control: Control = get_node("Root") as Control
+## 右上角小地图缓存；默认绑定 Root/MiniMap，风险合约“禁用小地图”只隐藏此节点，不影响 Q 键大地图。
+@onready var _mini_map: Control = get_node_or_null("Root/MiniMap") as Control
 ## 角色名称文本缓存；默认绑定 CharacterNameLabel，显示当前选择角色名称，节点缺失会导致 HUD 无法展示角色名。
 @onready var _character_name_label: Label = %CharacterNameLabel
 ## 生命文本缓存；默认绑定 HealthLabel，显示当前生命和最大生命，节点缺失会导致生命文本无法刷新。
@@ -640,8 +642,11 @@ func _bind_game_world() -> void:
 
 func _refresh_mode_state_after_game_world_initialized() -> void:
 	## 在 GameWorld 应用会话模式后重新读取 HUD 模式状态；保证超频骇入从首帧起使用娱乐模式的离开与拾取规则。
+	## 模式扩展补充：同一延后刷新同时应用风险合约的右上角小地图可见性。
 	_is_training_mode = _resolve_training_mode()
 	_is_casual_mode = _resolve_casual_mode()
+	if _mini_map != null:
+		_mini_map.visible = not (_game_world != null and _game_world.has_method("is_minimap_disabled_by_mode_extension") and bool(_game_world.call("is_minimap_disabled_by_mode_extension")))
 	_sync_mode_controls()
 
 

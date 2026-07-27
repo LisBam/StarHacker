@@ -45,6 +45,8 @@ var _update_remaining: float = 0.0
 var _materialized_count: int = 0
 ## 额外物化锚点列表；默认空，联机主机把远程队友化身注册为锚点，靠近任一锚点的虚拟敌人同样会实例化参战，单机流程不使用。
 var _additional_anchor_nodes: Array[Node2D] = []
+## 模式扩展效果倍率；默认空字典由怪物接口按中性值解析，GameWorld 初始化后写入风险合约整局配置。
+var _mode_extension_multipliers: Dictionary = {}
 
 
 func initialize(player: Node2D, monster_parent: Node = null, target: Node = null, monster_group: StringName = &"") -> void:
@@ -58,6 +60,11 @@ func initialize(player: Node2D, monster_parent: Node = null, target: Node = null
 func set_additional_simulation_anchors(anchor_nodes: Array[Node2D]) -> void:
 	## 注册除玩家外的物化锚点；由联机战斗同步器在队友化身增减时调用，锚点失效会在距离计算时自动跳过。
 	_additional_anchor_nodes = anchor_nodes
+
+
+func set_mode_extension_multipliers(effect_multipliers: Dictionary) -> void:
+	## 缓存整局模式扩展倍率；虚拟人口每次实体化都重新应用，卸载记录只需继续保存生命比例。
+	_mode_extension_multipliers = effect_multipliers.duplicate(true)
 
 
 func _get_min_anchor_distance_squared(world_position: Vector2) -> float:
@@ -251,6 +258,8 @@ func _materialize_record(record: Dictionary) -> bool:
 		monster.call("apply_spawn_variation", size_multiplier, attribute_multiplier)
 	else:
 		monster.scale *= Vector2(size_multiplier, size_multiplier)
+	if monster.has_method("apply_mode_extension_multipliers"):
+		monster.call("apply_mode_extension_multipliers", _mode_extension_multipliers)
 	if not _monster_group.is_empty():
 		monster.add_to_group(_monster_group)
 

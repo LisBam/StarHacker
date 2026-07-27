@@ -52,6 +52,8 @@ const BOUNTY_PANEL_SCRIPT: Script = preload("res://scripts/ui/bounty_panel.gd")
 const STATS_PANEL_SCRIPT: Script = preload("res://scripts/ui/stats_panel.gd")
 ## 骇入模式选择面板脚本；点击“骇入”后先打开该面板选择标准、零装或超频模式再进入战斗。
 const HACK_MODE_SELECT_PANEL_SCRIPT: Script = preload("res://scripts/ui/hack_mode_select_panel.gd")
+## 模式扩展选择面板脚本；骇入模式确定后继续配置可多选扩展与风险合约词条，再进入正式战斗。
+const MODE_EXTENSION_SELECT_PANEL_SCRIPT: Script = preload("res://scripts/ui/mode_extension_select_panel.gd")
 ## 联机组队面板脚本；默认在主菜单点击联机组队按钮后动态创建，调用 NetworkSession 完成建房、发现、加入与统一开局。
 const MULTIPLAYER_PANEL_SCRIPT: Script = preload("res://scripts/ui/multiplayer_lobby_panel.gd")
 ## 隐藏开发者菜单脚本；默认只在主菜单依次输入 LISBAM 后显示。
@@ -264,6 +266,12 @@ var _stats_panel: Control
 var _hack_mode_overlay: Control
 ## 骇入模式选择面板实例；关闭后复用，模式清单与说明由 HackModeRules 规则表提供。
 var _hack_mode_panel: Control
+## 模式扩展选择全屏遮罩；骇入模式确定后显示，阻止主菜单其他入口接收输入。
+var _mode_extension_overlay: Control
+## 模式扩展选择面板实例；单人流程每次打开时使用空配置，允许多选扩展或不选择。
+var _mode_extension_panel: Control
+## 等待模式扩展确认的骇入模式标识；默认标准骇入，确认后写入 SessionState 并进入战斗。
+var _pending_hack_variant: String = HackModeRules.VARIANT_STANDARD
 ## 开发者菜单全屏遮罩；默认运行时创建并隐藏，解锁后阻止其他主菜单控件接收输入。
 var _developer_overlay: Control
 ## 开发者菜单实例；默认由 DeveloperMenu 脚本动态创建并在关闭后复用。
@@ -336,6 +344,7 @@ func _ready() -> void:
 	_build_bounty_overlay()
 	_build_stats_overlay()
 	_build_hack_mode_overlay()
+	_build_mode_extension_overlay()
 	_build_developer_overlay()
 	_settings_panel.visible = false
 	_set_bottom_category_visibility(false, false)
@@ -528,19 +537,47 @@ func _on_training_button_pressed() -> void:
 
 func _on_hack_mode_selected(hack_variant: String) -> void:
 	## 模式面板选择回调；写入所选骇入模式变体后按正式骇入流程进入战斗。
+	## 模式扩展补充：正式骇入流程会先打开扩展窗口，只有确认扩展配置后才切换战斗场景。
 	if _hack_mode_overlay != null:
 		_hack_mode_overlay.visible = false
+	_pending_hack_variant = HackModeRules.normalize_variant(hack_variant)
 	# 会话状态节点；缺失时仍按标准流程进入，模式变体留待战斗世界按标准骇入兜底。
+	# 模式扩展补充：先写入骇入模式，使扩展规则能正确判断超频等无结算模式的兼容性。
 	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
 	if session_state != null and session_state.has_method("set_hack_variant"):
-		session_state.call("set_hack_variant", hack_variant)
-	_start_game(GAME_MODE_HACK)
+		session_state.call("set_hack_variant", _pending_hack_variant)
+	if _mode_extension_panel != null and _mode_extension_panel.has_method("configure"):
+		# 单人每次模式选择都从空扩展开始；玩家必须主动确认本局配置，不继承上一局风险词条。
+		_mode_extension_panel.call("configure", _pending_hack_variant, [], [], "进入游戏")
+	if _mode_extension_overlay != null:
+		_mode_extension_overlay.visible = true
 
 
 func _on_hack_mode_select_closed() -> void:
 	if _hack_mode_overlay != null:
 		_hack_mode_overlay.visible = false
 	_start_button.grab_focus()
+
+
+func _on_mode_extension_configuration_confirmed(extension_ids: Array[String], risk_modifier_ids: Array[String]) -> void:
+	## 模式扩展确认回调；把骇入模式与扩展配置一并写入会话状态后进入正式战斗。
+	if _mode_extension_overlay != null:
+		_mode_extension_overlay.visible = false
+	# 会话状态节点；缺失时仍可进入战斗，GameWorld 会按标准无扩展规则安全回退。
+	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
+	if session_state != null and session_state.has_method("set_hack_variant"):
+		session_state.call("set_hack_variant", _pending_hack_variant)
+	if session_state != null and session_state.has_method("configure_mode_extensions"):
+		session_state.call("configure_mode_extensions", extension_ids, risk_modifier_ids)
+	_start_game(GAME_MODE_HACK)
+
+
+func _on_mode_extension_select_closed() -> void:
+	## 返回骇入模式选择界面；未确认的扩展与风险词条不会写入 SessionState。
+	if _mode_extension_overlay != null:
+		_mode_extension_overlay.visible = false
+	if _hack_mode_overlay != null:
+		_hack_mode_overlay.visible = true
 
 
 func _on_character_button_pressed() -> void:
@@ -634,6 +671,7 @@ func is_modal_open() -> bool:
 		or (_bounty_overlay != null and _bounty_overlay.visible)
 		or (_stats_overlay != null and _stats_overlay.visible)
 		or (_hack_mode_overlay != null and _hack_mode_overlay.visible)
+		or (_mode_extension_overlay != null and _mode_extension_overlay.visible)
 		or (_developer_overlay != null and _developer_overlay.visible)
 	)
 
@@ -1354,6 +1392,44 @@ func _build_hack_mode_overlay() -> void:
 	hack_mode_overlay.visible = false
 
 
+func _build_mode_extension_overlay() -> void:
+	## 构建单人模式扩展遮罩；骇入模式选择完成后显示，配置确认或返回时隐藏并复用。
+	if _mode_extension_overlay != null:
+		return
+	# 模式扩展遮罩；覆盖完整主菜单并拦截鼠标输入。
+	var mode_extension_overlay: Control = Control.new()
+	mode_extension_overlay.name = "ModeExtensionOverlay"
+	mode_extension_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	mode_extension_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(mode_extension_overlay)
+	_mode_extension_overlay = mode_extension_overlay
+	# 模式扩展背景遮罩；使用与其他局外窗口一致的深色透明层。
+	var mode_extension_dim: ColorRect = ColorRect.new()
+	mode_extension_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UI_STYLE_GUIDE.apply_overlay_dim(mode_extension_dim)
+	mode_extension_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	mode_extension_overlay.add_child(mode_extension_dim)
+	# 模式扩展选择面板；固定 780×620 像素，容纳扩展卡、四项风险词条与底部校验提示。
+	var mode_extension_panel: Control = MODE_EXTENSION_SELECT_PANEL_SCRIPT.new() as Control
+	if mode_extension_panel == null:
+		mode_extension_overlay.visible = false
+		return
+	mode_extension_panel.name = "ModeExtensionSelectPanel"
+	mode_extension_panel.anchor_left = 0.5
+	mode_extension_panel.anchor_top = 0.5
+	mode_extension_panel.anchor_right = 0.5
+	mode_extension_panel.anchor_bottom = 0.5
+	mode_extension_panel.offset_left = -390.0
+	mode_extension_panel.offset_top = -310.0
+	mode_extension_panel.offset_right = 390.0
+	mode_extension_panel.offset_bottom = 310.0
+	mode_extension_panel.connect("configuration_confirmed", Callable(self, "_on_mode_extension_configuration_confirmed"))
+	mode_extension_panel.connect("closed", Callable(self, "_on_mode_extension_select_closed"))
+	mode_extension_overlay.add_child(mode_extension_panel)
+	_mode_extension_panel = mode_extension_panel
+	mode_extension_overlay.visible = false
+
+
 func _on_bounty_closed() -> void:
 	if _bounty_overlay != null:
 		_bounty_overlay.visible = false
@@ -1432,6 +1508,8 @@ func _open_developer_menu() -> void:
 		_stats_overlay.visible = false
 	if _hack_mode_overlay != null:
 		_hack_mode_overlay.visible = false
+	if _mode_extension_overlay != null:
+		_mode_extension_overlay.visible = false
 	_developer_overlay.visible = true
 
 
@@ -1539,6 +1617,8 @@ func _start_game(game_mode: String) -> void:
 		var session_state: Node = get_tree().root.get_node_or_null("SessionState")
 		if session_state != null and session_state.has_method("set_hack_variant"):
 			session_state.call("set_hack_variant", "standard")
+		if session_state != null and session_state.has_method("clear_mode_extensions"):
+			session_state.call("clear_mode_extensions")
 	_change_scene_with_transition(game_scene_path)
 
 

@@ -58,6 +58,10 @@ var _equipment_vision_range_ratio: float = 0.0
 var _global_inventory: Node
 ## 是否由骇入模式规则禁用防具耐久消耗；默认 false，超频骇入由 GameWorld 入场时开启，场景销毁后自动失效。
 var _armor_durability_consumption_disabled_by_mode: bool = false
+## 模式扩展防具耐久消耗倍率；默认 1.0，风险合约“耐久消耗翻倍”在入场时写入 2.0。
+var _armor_durability_consumption_multiplier_by_mode_extension: float = 1.0
+## 模式扩展玩家视野倍率；默认 1.0，风险合约可写入 0.75 或 0.5，并与装备视野加成相乘。
+var _vision_multiplier_by_mode_extension: float = 1.0
 
 
 func _ready() -> void:
@@ -276,12 +280,14 @@ func consume_armor_durability_on_hit() -> void:
 	var total_consumed_durability: float = 0.0
 	# 本次新损坏防具数量；只统计从正耐久降到零的部位，避免后续受击重复计数。
 	var newly_broken_count: int = 0
+	# 单件防具最终耐久成本；基础检查器参数先限制为非负值，再乘模式扩展整局倍率。
+	var resolved_durability_cost: float = maxf(armor_durability_cost_per_hit, 0.0) * _armor_durability_consumption_multiplier_by_mode_extension
 	for armor_slot in ["head", "body", "legs", "feet"]:
 		var equipment_data: Resource = get_armor_equipment(armor_slot)
 		if equipment_data == null or armor_durability_cost_per_hit <= 0.0:
 			continue
 		var durability_before: float = maxf(float(equipment_data.get("current_durability")), 0.0)
-		equipment_data.call("set_current_durability", durability_before - armor_durability_cost_per_hit)
+		equipment_data.call("set_current_durability", durability_before - resolved_durability_cost)
 		# 扣除后耐久；用于统计真实消耗并识别首次归零。
 		var durability_after: float = maxf(float(equipment_data.get("current_durability")), 0.0)
 		total_consumed_durability += maxf(durability_before - durability_after, 0.0)
@@ -304,6 +310,17 @@ func consume_armor_durability_on_hit() -> void:
 func set_armor_durability_consumption_disabled_by_mode(enabled: bool) -> void:
 	## 写入骇入模式级防具耐久豁免；超频骇入入场时由 GameWorld 开启，与训练场跳过规则互不影响。
 	_armor_durability_consumption_disabled_by_mode = enabled
+
+
+func set_armor_durability_consumption_multiplier_by_mode_extension(multiplier: float) -> void:
+	## 写入整局模式扩展防具耐久倍率；每次受击的所有已装备防具共用该倍率。
+	_armor_durability_consumption_multiplier_by_mode_extension = maxf(multiplier, 0.0)
+
+
+func set_vision_multiplier_by_mode_extension(multiplier: float) -> void:
+	## 写入整局模式扩展视野倍率并立即重算相机；倍率与头部装备视野加成相乘。
+	_vision_multiplier_by_mode_extension = maxf(multiplier, 0.01)
+	_apply_movement_and_vision_attributes()
 
 
 func _should_skip_armor_durability_consumption() -> bool:
@@ -440,7 +457,8 @@ func _apply_movement_and_vision_attributes() -> void:
 		_movement_component.call("configure_max_speed", _base_move_speed * (1.0 + _equipment_move_speed_ratio))
 	if _combat_camera != null:
 		# 相机缩放越小视野越广；按 1 + 视野百分比反比缩放，8% 视野对应缩放除以 1.08。
-		var vision_multiplier: float = 1.0 + _equipment_vision_range_ratio
+		# 模式扩展补充：装备视野加成与风险合约倍率相乘，降低 50% 表示最终可见范围线性减半。
+		var vision_multiplier: float = (1.0 + _equipment_vision_range_ratio) * _vision_multiplier_by_mode_extension
 		_combat_camera.zoom = _base_camera_zoom / vision_multiplier
 
 

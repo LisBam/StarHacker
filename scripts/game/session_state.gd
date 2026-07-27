@@ -32,6 +32,10 @@ var game_mode: String = MODE_HACK
 ## 当前骇入模式变体；取值为 standard、bare 或 overclock，仅在 game_mode 为 hack 时生效。
 ## 仅运行期有效不写入存档；主菜单模式选择、训练场入口与联机统一开局都会显式写入该值。
 var hack_variant: String = HACK_VARIANT_STANDARD
+## 当前启用的模式扩展 ID；仅运行期有效，单人由进入游戏前的扩展面板写入，联机由房主开局指令同步。
+var mode_extension_ids: Array[String] = []
+## 当前风险合约负面词条 ID；仅在 mode_extension_ids 包含 risk_contract 时生效，至少包含一项才构成合法合约。
+var risk_contract_modifier_ids: Array[String] = []
 ## 当前选择角色；取值为 stelle、caelus 或 silver_wolf，默认 stelle 作为未选择时的兜底角色。
 var selected_character_id: String = CHARACTER_STELLE
 ## 已解锁角色标识；启动时合并角色档案中的默认解锁项与存档项，运行时只允许通过 unlock_character 增加。
@@ -129,6 +133,10 @@ func get_unlocked_content_pack_ids() -> Array[String]:
 func set_hack_variant(next_hack_variant: String) -> void:
 	## 写入当前骇入模式变体；未知取值回退标准骇入，训练场入口应显式传入标准值避免残留上一局变体。
 	hack_variant = normalize_hack_variant(next_hack_variant)
+	# 兼容配置；切换到超频等无结算模式时清除风险合约，防止无奖励词条在本局静默生效。
+	var sanitized_configuration: Dictionary = ModeExtensionRules.sanitize_configuration(mode_extension_ids, risk_contract_modifier_ids, hack_variant)
+	mode_extension_ids = _to_string_array(sanitized_configuration.get("extension_ids", []))
+	risk_contract_modifier_ids = _to_string_array(sanitized_configuration.get("risk_modifier_ids", []))
 
 
 func get_hack_variant() -> String:
@@ -136,11 +144,53 @@ func get_hack_variant() -> String:
 	return hack_variant
 
 
+func configure_mode_extensions(next_extension_ids: Array, next_risk_modifier_ids: Array) -> void:
+	## 写入当前战斗的模式扩展配置；未知 ID、同类多档、无词条风险合约与当前模式不兼容项会被统一移除。
+	# 标准配置；由纯规则表完成全部校验，SessionState 只保存本局稳定 ID。
+	var sanitized_configuration: Dictionary = ModeExtensionRules.sanitize_configuration(next_extension_ids, next_risk_modifier_ids, hack_variant)
+	mode_extension_ids = _to_string_array(sanitized_configuration.get("extension_ids", []))
+	risk_contract_modifier_ids = _to_string_array(sanitized_configuration.get("risk_modifier_ids", []))
+
+
+func clear_mode_extensions() -> void:
+	## 清空全部模式扩展与风险词条；训练场入口和未选择扩展的正式骇入使用该接口避免继承上一局配置。
+	mode_extension_ids.clear()
+	risk_contract_modifier_ids.clear()
+
+
+func get_mode_extension_ids() -> Array[String]:
+	## 返回当前模式扩展 ID 副本；调用方不得直接修改 SessionState 内部数组。
+	return mode_extension_ids.duplicate()
+
+
+func get_risk_contract_modifier_ids() -> Array[String]:
+	## 返回当前风险合约词条 ID 副本；词条顺序已由规则表规范化。
+	return risk_contract_modifier_ids.duplicate()
+
+
+func get_mode_extension_effect_multipliers() -> Dictionary:
+	## 返回当前模式扩展的汇总局内倍率；风险合约未启用或当前为训练场时返回全部中性值。
+	if game_mode != MODE_HACK or not mode_extension_ids.has(ModeExtensionRules.EXTENSION_RISK_CONTRACT):
+		return ModeExtensionRules.get_effect_multipliers([])
+	return ModeExtensionRules.get_effect_multipliers(risk_contract_modifier_ids)
+
+
 func normalize_hack_variant(value: String) -> String:
 	## 规范化骇入模式变体；与 HackModeRules.normalize_variant 语义一致，未知取值回退标准骇入。
 	if value == HACK_VARIANT_BARE or value == HACK_VARIANT_OVERCLOCK:
 		return value
 	return HACK_VARIANT_STANDARD
+
+
+func _to_string_array(raw_values: Variant) -> Array[String]:
+	## 把规则表返回的 Variant 数组转换为强类型字符串数组；异常结构返回空数组。
+	# 字符串结果；保持规则表已经确定的稳定顺序。
+	var string_values: Array[String] = []
+	if not (raw_values is Array):
+		return string_values
+	for raw_value in raw_values:
+		string_values.append(str(raw_value))
+	return string_values
 
 
 func is_bare_hack_variant() -> bool:

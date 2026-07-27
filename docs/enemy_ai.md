@@ -29,6 +29,7 @@ GameWorld 建立整图虚拟记录
 ```
 
 - 虚拟记录只保存重建敌人所需的最小状态，不执行 AI、物理、绘制或远距离掉落。
+- 真实敌人实体化时先恢复记录中的尺寸/属性出生波动，再调用 `apply_mode_extension_multipliers()` 应用整局风险合约生命、移速与攻击力倍率，最后按记录生命比例恢复当前生命。每次实体化都是新节点，因此不会在同一实例上重复叠乘；完整数值见机制总表第 29 章。
 - 活跃敌人的物理移动逐帧执行；感知、射线、战术、寻路决策与远程攻击冷却按独立 AI 间隔错峰更新。远程怪物不再额外注册一个只递减冷却的渲染帧回调，冷却仍按两次 AI 决策之间累计的真实秒数推进。
 - 期望速度与外部击退速度都接近零的敌人跳过 `move_and_slide()` 物理提交，卡住检测按零位移推进；攻击范围内待机、战术驻守与巡逻等待状态不再产生物理服务器调用。
 - 感知、移动与战术组件拥有 `EnemyPerceptionComponent`、`EnemyMovementComponent`、`EnemyTacticalComponent` 全局类名；`BasicMonster` 通过强类型成员直接调用组件方法，热路径不使用字符串 `call()` 动态分发。
@@ -111,7 +112,7 @@ GameWorld 建立整图虚拟记录
 - 新敌人优先继承 `BasicMonster`，只覆写差异行为，不复制感知、战术或人口生命周期。
 - 感知组件不得调用攻击、动画或移动代码；战术组件不得读取其他怪物状态；移动组件只接收目的地、速度和导航请求。
 - 新实心遮挡物必须同时位于正确环境碰撞层、加入 `environment_obstacles`，并向 `GameWorld` 注册障碍矩形。
-- 新敌人场景应可实例化为 `Node2D`，并兼容 `set_target()`、`set_primary_target()`、`apply_spawn_variation()`、模拟启停和 `died` 信号；需要进入怪物图鉴的场景还必须声明非空 `monster_id`、`display_name`、`description` 并发出 `player_encountered`。
+- 新敌人场景应可实例化为 `Node2D`，并兼容 `set_target()`、`set_primary_target()`、`apply_spawn_variation()`、`apply_mode_extension_multipliers()`、模拟启停和 `died` 信号；需要进入怪物图鉴的场景还必须声明非空 `monster_id`、`display_name`、`description` 并发出 `player_encountered`。
 - 死亡只由 `GameWorld` 结算一次掉落；敌人脚本不得直接访问库存、强化或商店服务。敌人可在派发死亡信号后保留仅用于视觉的尸体动画，但必须关闭物理、AI 与重复伤害入口。
 - 若未来重新引入协同 AI，应建立独立通信组件和明确的数据生命周期，不得把共享状态塞回感知组件。
 

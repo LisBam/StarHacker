@@ -6,14 +6,14 @@
 
 | 入口 | 实现 | 职责 |
 | --- | --- | --- |
-| 主菜单 | `res://scenes/ui/main_menu.tscn`、`res://scripts/ui/main_menu.gd` | 项目主场景；底部直接打开角色、背包、仓库、商店、锻造、据点、派遣、悬赏及模式入口；普通样式“金融 ▲”位于“统计 ▲”左侧，两者分别向上展开单列的股市/矿场/保险/银行和图鉴/生涯入口；点击“骇入”先打开骇入模式选择面板（标准/零装/超频，规则表见 `HackModeRules`）；同一场景可作为大厅局外面板宿主 |
+| 主菜单 | `res://scenes/ui/main_menu.tscn`、`res://scripts/ui/main_menu.gd` | 项目主场景；底部直接打开角色、背包、仓库、商店、锻造、据点、派遣、悬赏及模式入口；普通样式“金融 ▲”位于“统计 ▲”左侧，两者分别向上展开单列的股市/矿场/保险/银行和图鉴/生涯入口；点击“骇入”先选择标准/零装/超频骇入，再进入可多选或不选的模式扩展窗口；同一场景可作为大厅局外面板宿主 |
 | 主大厅 | `res://scenes/game/main_lobby.tscn`、`res://scripts/game/lobby_world.gd` | 承载当前角色自由移动、攻击、技能、静态交互设施与大厅 HUD；不创建敌人、掉落、撤离或战斗结算 |
 | 联机大厅 | `res://scenes/game/multiplayer_lobby.tscn`、`res://scripts/game/multiplayer_lobby_world.gd`（继承 `LobbyWorld`） | 主菜单“联机”入口目标场景；进场自动打开联机面板，左上角提供“联机设置”入口，房间成员经 `NetworkLobbySync` 在同一大厅内互相可见；玩法约束与主大厅一致 |
 | 角色系统 | `res://scenes/ui/character_select.tscn`、`res://scripts/ui/character_select.gd` | 完整模式展示可选角色并持久化确认结果；当前角色模式隐藏角色列表，供战斗内只读查看同一套属性与技能详情 |
 | 战斗世界 | `res://scenes/game/game_world.tscn`、`res://scripts/game/game_world.gd` | 承载玩家、地图、环境、敌人人口、宝箱、掉落与撤离流程 |
 | 玩家预制体 | `res://scenes/characters/player.tscn`、`res://scripts/player/player_controller.gd` | 组合输入、移动、战斗属性、装备和攻击组件 |
 
-主菜单和主大厅进入正式骇入或训练场前，只把模式与骇入模式变体写入 `SessionState`（变体取值 standard/bare/overclock，仅运行期有效；训练场入口显式复位为 standard，联机开局由 `NetworkSession` 按主机同步值写入）。三种骇入模式的分组、文案与全部数值倍率集中在 `scripts/game/hack_mode_rules.gd`（`HackModeRules` 静态规则表），`GameWorld` 入场时据此应用人口倍率、二手概率覆盖与超频玩家豁免（通过 `player_stats_component_path` 的无限能量、模式级武器/防具耐久豁免、技能冷却倍率），`CombatHud` 在 GameWorld 完成会话状态应用后的延后帧重新读取娱乐模式标识，零装封存由 `GlobalInventory.begin_combat_run(bare_loadout)` 负责。已确认角色由同一服务跨场景保存；角色页的一次性返回场景同样由该服务持有但不写入存档，使主菜单与大厅入口能各自原路返回。所有主场景切换统一经 `SceneTransition` 执行，业务 UI 不直接维护过渡动画。
+主菜单和主大厅进入正式骇入前，把模式、骇入模式变体、模式扩展 ID 与扩展专属配置写入 `SessionState`；这些字段都只在运行期有效。训练场入口显式复位为 standard 并清空扩展，联机开局由 `NetworkSession` 按房主最终权威值写入。三种骇入模式的分组、文案与倍率集中在 `HackModeRules`，模式扩展与风险词条集中在 `ModeExtensionRules`。`GameWorld` 入场时取得两份规则结果：骇入模式负责人口、二手概率与超频豁免，模式扩展通过汇总字典把人口、怪物属性、耐久、视野、背包、小地图和掉落倍率分发给各数据所有者。`CombatHud` 在 GameWorld 完成状态应用后的延后帧重新读取娱乐模式与小地图禁用状态，零装封存由 `GlobalInventory.begin_combat_run(bare_loadout)` 负责。完整模式扩展边界见 `docs/mode_extensions.md`。已确认角色由同一服务跨场景保存；角色页的一次性返回场景同样由该服务持有但不写入存档，使主菜单与大厅入口能各自原路返回。所有主场景切换统一经 `SceneTransition` 执行，业务 UI 不直接维护过渡动画。
 
 ## 2. AutoLoad 服务
 
@@ -24,7 +24,7 @@
 | `SaveArchiveService` | 作为首个 AutoLoad，按白名单导出、导入或删除全部活动存档；导入前备份，导入或删除成功后重启，删除重启时在其他服务读档前完成保护性清理 | 玩家选择的 `.lisbamsave`；导入备份位于 `user://save_import_backup_<时间戳>/`；删除保护标记位于 `user://save_delete_pending_v1.marker` |
 | `SaveLocationMigration` | 历史迁移实现占位；未在 `project.godot` 注册，不参与当前 AutoLoad 启动 | 无新增持久化；既有完成标记不再读取 |
 | `ContentCatalog` | 启动时扫描角色、武器、装备、道具、怪物和扩展包清单，按角色解锁状态过滤内容池 | 无 |
-| `SessionState` | 保存当前游戏模式、已确认角色、永久角色/扩展包解锁状态及角色页一次性返回目标 | `user://character_unlocks.json`；角色选择和解锁永久保存，模式与返回目标仅运行期 |
+| `SessionState` | 保存当前游戏模式、骇入模式、模式扩展与风险词条、已确认角色、永久角色/扩展包解锁状态及角色页一次性返回目标 | `user://character_unlocks.json`；角色选择和解锁永久保存，模式、扩展配置与返回目标仅运行期 |
 | `InputBindings` | 管理默认与自定义输入映射 | `user://input_bindings.cfg` |
 | `UiStyleSettings` | 管理“黑蓝科技风 / 黑白简约风”选择与通用控件主题即时刷新，不覆盖业务语义颜色或节点材质 | `user://ui_style_settings.cfg` |
 | `DebugSettings` | 管理开发者调试选项 | `user://debug_settings.cfg` |
@@ -191,6 +191,19 @@ ContentCatalog 模板
 
 `InputBindings` 直接更新 Godot `InputMap`，技能一、二、三、角色展示与移动、武器和其他界面操作共用同一改键与持久化流程。大厅交互复用 `pickup_nearby` 动作并由 `LobbyInteractionComponent` 转为设施 action ID；玩家显式解除绑定后不得回退到默认物理键，只有动作缺失或尚未初始化时才允许组件兜底。任意界面关闭战斗输入后，移动意图、攻击、技能、冲刺与切枪同时失效。默认操作及玩家可见规则以机制总表为准。
 
+### 4.6 模式扩展
+
+```text
+HackModeRules + ModeExtensionRules
+        -> ModeExtensionSelectPanel（单人或房主编辑）
+        -> SessionState / NetworkSession（只保存稳定 ID）
+        -> GameWorld 获取中性键齐全的效果字典
+        -> 人口 / BasicMonster / PlayerController / EquipmentComponent
+        -> GlobalInventory / CombatHud / 怪物掉落
+```
+
+规则层只返回数据，不持有 UI、场景树或存档。`GameWorld` 是整局配置的协调边界，但具体状态仍由最近的数据所有者维护：怪物属性由 `BasicMonster` 应用，虚拟人口由 `MonsterSimulationManager` 补齐，耐久由玩家与装备组件结算，容量由 `GlobalInventory` 原子校验，小地图由 `CombatHud` 显隐。新扩展必须保持中性默认值，使无配置、训练场和旧调用路径无需增加分支。
+
 ## 5. 存档边界
 
 - 每个服务只写入自己拥有的文件；跨服务交易先完成业务校验，再分别持久化相关资产。
@@ -271,3 +284,11 @@ ContentCatalog 模板
 - 玩家预制体固定挂载护盾组件；`BasicMonster` 会为敌人及其派生单位动态补齐同一组件，因此旧场景无需复制承伤逻辑。
 - 友方单位继承 `BasicMonster` 的感知、寻路、攻击、承伤和死亡流程，`FriendlyUnit` 负责敌对目标组、玩家目标注入拒绝、攻击前阵营复核、玩家跟随、可移动开关和远距回传。
 - `CharacterData.derived_units` 保存角色技能衍生单位的只读资料。角色展示按需显示“衍生单位”，运行时实例仍由具体召唤技能创建和清理。
+
+### 7.8 模式扩展
+
+- 新模式扩展先登记稳定扩展 ID 与兼容条件；扩展专属词条必须登记稳定词条 ID、显示名、类别、效果字段与奖励，不得由选择面板反向成为规则来源。
+- 单人、联机、晚加入补发和最终开局必须共同经过 `ModeExtensionRules.sanitize_configuration()`，未知 ID、空风险合约、同类多档和超额词条不能进入战斗。
+- 效果字典的每个键必须定义中性值。消费组件只读取自身负责的键，并提供公开设置接口；不得让一个全能脚本长期维护所有效果细节。
+- 模式扩展只保存运行期稳定 ID，不进入永久存档。需要永久进度的未来扩展必须另建明确的数据所有者，不能直接扩大 `SessionState` 职责。
+- 完整随机规则、乘算顺序、掉落边界与验证清单见 `docs/mode_extensions.md`。

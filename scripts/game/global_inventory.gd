@@ -135,6 +135,8 @@ var _acquisition_sequence: int = 0
 var _last_extraction_epoch: int = 0
 ## 当前是否处于正式战斗局；默认 false，只有 GameWorld 正式骇入模式会开启损失与撤离结算。
 var _run_active: bool = false
+## 本局背包物品组容量倍率；默认 1.0，风险合约可在正式战斗开始前写入 0.75、0.5 或 0.25，结算后恢复。
+var _combat_backpack_capacity_multiplier: float = 1.0
 ## 本局已经持有过的资源实例集合；键为 Resource 实例编号，值为 true，用于排除自己丢弃后重新捡回的开局物品。
 var _run_seen_resource_instance_ids: Dictionary = {}
 ## 本局首次从战场获得的资源；元素为稳定 Resource 引用，同一实例反复丢弃和捡回只记录一次。
@@ -210,6 +212,12 @@ func begin_combat_run(bare_loadout: bool = false) -> void:
 			_run_seen_resource_instance_ids[item_resource.get_instance_id()] = true
 	_last_run_outcome.clear()
 	run_state_changed.emit()
+
+
+func set_combat_backpack_capacity_multiplier(multiplier: float) -> void:
+	## 设置本局背包组数倍率；只改变新增物品的容量校验，不删除或迁移设置前已经存在的物品。
+	_combat_backpack_capacity_multiplier = clampf(multiplier, 0.01, 1.0)
+	inventory_changed.emit()
 
 
 func is_combat_run_active() -> bool:
@@ -363,6 +371,7 @@ func complete_combat_run_success() -> Dictionary:
 	# 成功撤离只保留背包现状，不自动转入仓库；玩家需要在局外仓库手动整理安全物品。
 	# 零装骇入例外补充：零装局的收尾已把本局所得存入仓库，恢复后的背包与装备为入场前的真实资产。
 	_run_active = false
+	_combat_backpack_capacity_multiplier = 1.0
 	_run_seen_resource_instance_ids.clear()
 	_run_gained_resources.clear()
 	_last_run_outcome = {
@@ -459,6 +468,7 @@ func complete_combat_run_failure(reason: String = "战斗失败", retained_ratio
 	# 零装骇入收尾；失败概率判定后的幸存所得全部转入仓库并恢复封存的真实资产，标准模式为空操作。
 	_finalize_bare_run_ownership()
 	_run_active = false
+	_combat_backpack_capacity_multiplier = 1.0
 	_run_seen_resource_instance_ids.clear()
 	_run_gained_resources.clear()
 	_last_run_outcome = {
@@ -1601,17 +1611,18 @@ func get_backpack_count() -> int:
 
 func get_backpack_max_groups() -> int:
 	## 返回背包物品组数上限；界面和外部系统不得另行硬编码容量数值。
-	return BACKPACK_MAX_GROUPS
+	## 模式扩展补充：风险合约倍率按基础 50 组四舍五入，最低保留 1 组。
+	return maxi(roundi(float(BACKPACK_MAX_GROUPS) * _combat_backpack_capacity_multiplier), 1)
 
 
 func get_backpack_remaining_groups() -> int:
 	## 返回当前仍可新增的物品组数；相同签名资源填充已有未满堆叠时不会消耗该数值。
-	return maxi(BACKPACK_MAX_GROUPS - get_backpack_count(), 0)
+	return maxi(get_backpack_max_groups() - get_backpack_count(), 0)
 
 
 func can_add_backpack_resource(item_resource: Resource, quantity: int = 1) -> bool:
 	## 判断指定物品与数量是否能完整加入背包；返回 false 时调用方不得执行部分加入或移除来源物品。
-	return _can_insert_record_quantity(_backpack_records, item_resource, quantity, BACKPACK_MAX_GROUPS)
+	return _can_insert_record_quantity(_backpack_records, item_resource, quantity, get_backpack_max_groups())
 
 
 func has_backpack_resource(item_resource: Resource) -> bool:
@@ -2214,9 +2225,11 @@ func _insert_storage_record(location: String, record: Dictionary, target_index: 
 		var item_resource: Resource = record.get("resource") as Resource
 		# 待插入数量；武器装备固定为 1，历史堆叠迁移可大于现行单组上限。
 		var record_quantity: int = maxi(int(record.get("quantity", 1)), 1)
-		if not _can_insert_record_quantity(_backpack_records, item_resource, record_quantity, BACKPACK_MAX_GROUPS):
+		# 当前背包组数上限；正式战斗风险合约使用折算后容量，局外与读档恢复保持基础 50 组。
+		var maximum_group_count: int = get_backpack_max_groups()
+		if not _can_insert_record_quantity(_backpack_records, item_resource, record_quantity, maximum_group_count):
 			return false
-		_insert_record_with_stack_merge(_backpack_records, record, target_index, BACKPACK_MAX_GROUPS)
+		_insert_record_with_stack_merge(_backpack_records, record, target_index, maximum_group_count)
 		return true
 	return false
 

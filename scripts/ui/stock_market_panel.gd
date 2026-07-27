@@ -9,6 +9,7 @@ signal closed
 ## 通用物品卡片脚本；股票和持仓通过空资源展示模式复用标准 160×72 卡片视觉与交互动效。
 const ITEM_CARD_VIEW_SCRIPT: Script = preload("res://scripts/ui/item_card_view.gd")
 ## 行情图脚本；只接收价格历史并绘制折线，不持有服务引用。
+## 价格标记扩展；面板会额外传入已整理的通用止盈止损标记，图表仍不持有服务引用。
 const STOCK_CHART_CONTROL_SCRIPT: Script = preload("res://scripts/ui/stock_chart_control.gd")
 ## 数量选择弹窗脚本；复用出售数量滑条和数字输入交互。
 const SELL_QUANTITY_DIALOG_SCRIPT: Script = preload("res://scripts/ui/sell_quantity_dialog.gd")
@@ -56,6 +57,7 @@ var _selected_title_label: Label
 ## 当前行情摘要；显示单价、最近涨跌幅和当前大盘状态。
 var _selected_summary_label: RichTextLabel
 ## 行情折线图；显示最近 30 次刷新价格。
+## 历史扩容与交互扩展；当前显示服务提供的最近行情、有效止盈止损价格线，并支持鼠标长按读取纵轴价格。
 var _chart: Control
 ## 星穹余额标签；监听 GlobalInventory.coins_changed 后即时刷新。
 var _coins_label: Label
@@ -597,6 +599,7 @@ func _refresh_selected_stock() -> void:
 		# 调试偏离率；当前价格相对中枢的比例，用于验证分段回归力度。
 		var debug_deviation: float = (float(snapshot.get("price", 0.0)) / debug_center - 1.0) if debug_center > 0.0 else 0.0
 		_selected_summary_label.text += "\n调试：中枢 %.2f · 偏离 %+.2f%% · 行为贡献 %.1f%% · 漂移 %.0f%% · 运行累计 %.0f%%" % [debug_center, debug_deviation * 100.0, float(snapshot.get("last_player_contribution_ratio", 0.0)) * 100.0, float(snapshot.get("next_drift_probability", 0.25)) * 100.0, float(market_snapshot.get("runtime_progress", 0.0)) * 100.0]
+	_chart.call("configure_price_levels", _build_chart_price_levels())
 	_chart.call("configure_history", snapshot.get("history", []) as Array, int(signf(change_ratio)))
 	# 当前股票持仓；缺失时按零持仓显示并禁用卖出。
 	var holding: Dictionary = _get_holding(_selected_stock_id)
@@ -691,6 +694,43 @@ func _format_stop_order_line(order: Dictionary) -> String:
 	# 止损目标价；0 表示该方向未启用。
 	var stop_loss: float = float(order.get("stop_loss", 0.0))
 	return "止盈 %s / 止损 %s" % ["%.2f" % take_profit if take_profit > 0.0 else "—", "%.2f" % stop_loss if stop_loss > 0.0 else "—"]
+
+
+func _build_chart_price_levels() -> Array[Dictionary]:
+	## 把当前股票的现货与杠杆止盈止损档案整理为通用价格标记；图表无需理解服务档案或仓位方向。
+	# 图表价格标记列表；每项只包含绘图所需的 price、label 与 type 字段。
+	var price_levels: Array[Dictionary] = []
+	if _stock_market_service == null or not _stock_market_service.has_method("get_stop_order"):
+		return price_levels
+	# 当前股票现货止盈止损档案；空字典表示没有有效现货目标。
+	var spot_order: Dictionary = _stock_market_service.call("get_stop_order", _selected_stock_id, "spot") as Dictionary
+	# 当前股票杠杆止盈止损档案；空字典表示没有有效杠杆目标。
+	var leverage_order: Dictionary = _stock_market_service.call("get_stop_order", _selected_stock_id, "leverage") as Dictionary
+	_append_stop_order_price_levels(price_levels, "现货", spot_order)
+	_append_stop_order_price_levels(price_levels, "杠杆", leverage_order)
+	return price_levels
+
+
+func _append_stop_order_price_levels(price_levels: Array[Dictionary], target_name: String, order: Dictionary) -> void:
+	## 把一份止盈止损档案追加为零至两条通用价格标记；未启用的方向不绘制占位线。
+	if order.is_empty():
+		return
+	# 当前档案止盈价；大于 0 时绘制绿色止盈线。
+	var take_profit: float = float(order.get("take_profit", 0.0))
+	if take_profit > 0.0:
+		price_levels.append({
+			"price": take_profit,
+			"label": "%s止盈" % target_name,
+			"type": "take_profit",
+		})
+	# 当前档案止损价；大于 0 时绘制红色止损线。
+	var stop_loss: float = float(order.get("stop_loss", 0.0))
+	if stop_loss > 0.0:
+		price_levels.append({
+			"price": stop_loss,
+			"label": "%s止损" % target_name,
+			"type": "stop_loss",
+		})
 
 
 func _refresh_holdings() -> void:

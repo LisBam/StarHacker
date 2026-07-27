@@ -106,6 +106,8 @@ var _has_last_redraw_player_position: bool = false
 var _last_redraw_extraction_visible: bool = false
 ## 上次请求重绘时撤离点位置；取值为世界坐标，默认零向量，用于撤离点位置变化时刷新地图。
 var _last_redraw_extraction_position: Vector2 = Vector2.ZERO
+## 上次请求重绘时全部撤离点位置；默认空数组，多撤离点生成、风险合约切换或位置变化时触发地图重绘。
+var _last_redraw_extraction_positions: Array[Vector2] = []
 ## 上次请求重绘时控件尺寸；取值为 Control.size，默认零向量，用于窗口或布局变化时刷新地图。
 var _last_redraw_size: Vector2 = Vector2.ZERO
 ## 上次请求重绘时是否存在导航标点；默认 false，用于标点创建或取消后立即刷新大小地图。
@@ -122,6 +124,8 @@ var _world_has_explored_readonly_method: bool = false
 var _world_has_extraction_marked_method: bool = false
 ## GameWorld 是否提供撤离点位置接口；节点解析后缓存，撤离点状态采样不再重复查找方法名。
 var _world_has_extraction_position_method: bool = false
+## GameWorld 是否提供撤离点位置列表接口；节点解析后缓存，多点显示优先读取该接口并回退旧单点接口。
+var _world_has_extraction_positions_method: bool = false
 ## GameWorld 是否提供导航标点状态接口；节点解析后缓存，导航点状态采样不再重复查找方法名。
 var _world_has_navigation_marker_method: bool = false
 ## GameWorld 是否提供导航标点位置接口；节点解析后缓存，指示线终点采样不再重复查找方法名。
@@ -132,6 +136,8 @@ var _world_has_position_explored_method: bool = false
 var _redraw_sample_extraction_visible: bool = false
 ## 本帧采样的撤离点位置；仅在采样撤离点可见时有效，不可见时固定零向量，与原状态记录规则保持一致。
 var _redraw_sample_extraction_position: Vector2 = Vector2.ZERO
+## 本帧采样的全部撤离点位置；仅在撤离点可见时有效，供绘制和重绘判定共用且不修改世界返回数组。
+var _redraw_sample_extraction_positions: Array[Vector2] = []
 ## 本帧采样的导航标点可见状态；标点创建或取消仍会在当帧触发重绘。
 var _redraw_sample_navigation_visible: bool = false
 ## 本帧采样的导航标点位置；仅在采样标点可见时有效，不可见时固定零向量。
@@ -157,6 +163,7 @@ func _ready() -> void:
 	_world_has_explored_readonly_method = _game_world != null and _game_world.has_method("get_explored_cells_readonly")
 	_world_has_extraction_marked_method = _game_world != null and _game_world.has_method("is_extraction_point_marked_on_map")
 	_world_has_extraction_position_method = _game_world != null and _game_world.has_method("get_extraction_point_position")
+	_world_has_extraction_positions_method = _game_world != null and _game_world.has_method("get_extraction_point_positions")
 	_world_has_navigation_marker_method = _game_world != null and _game_world.has_method("has_navigation_marker")
 	_world_has_navigation_position_method = _game_world != null and _game_world.has_method("get_navigation_marker_position")
 	_world_has_position_explored_method = _game_world != null and _game_world.has_method("is_world_position_explored")
@@ -289,19 +296,20 @@ func _draw_extraction_marker(world_view_rect: Rect2) -> void:
 	if not _is_extraction_marker_visible():
 		return
 
-	# 撤离点世界坐标；达到 300 秒地图标记时间后直接使用，不再要求所在探索格已经发现。
-	var extraction_position: Vector2 = _get_extraction_marker_position()
+	# 撤离点世界坐标列表；达到地图标记时间后直接使用，不再要求所在探索格已经发现。
+	var extraction_positions: Array[Vector2] = _get_extraction_marker_positions()
 	# 标记半径；取值至少为 2，默认让撤离点比玩家点更易识别。
 	var marker_radius: float = maxf(extraction_marker_radius, 2.0)
-	# 撤离点小地图坐标；完整地图映射真实位置，局部小地图范围外点位会夹取到边缘形成方向提示。
-	var marker_position: Vector2 = _world_position_to_minimap_position(extraction_position, world_view_rect)
 	# 标记边缘留白；保证范围外撤离点映射到小地图边缘时圆形与十字不会被边框裁掉。
 	var marker_margin: float = marker_radius * 1.9
-	marker_position.x = clampf(marker_position.x, marker_margin, maxf(size.x - marker_margin, marker_margin))
-	marker_position.y = clampf(marker_position.y, marker_margin, maxf(size.y - marker_margin, marker_margin))
-	draw_circle(marker_position, marker_radius, extraction_marker_color)
-	draw_line(marker_position + Vector2(-marker_radius * 1.7, 0.0), marker_position + Vector2(marker_radius * 1.7, 0.0), extraction_marker_color, 2.0)
-	draw_line(marker_position + Vector2(0.0, -marker_radius * 1.7), marker_position + Vector2(0.0, marker_radius * 1.7), extraction_marker_color, 2.0)
+	for extraction_position in extraction_positions:
+		# 当前撤离点小地图坐标；完整地图映射真实位置，局部小地图范围外点位会夹取到边缘形成方向提示。
+		var marker_position: Vector2 = _world_position_to_minimap_position(extraction_position, world_view_rect)
+		marker_position.x = clampf(marker_position.x, marker_margin, maxf(size.x - marker_margin, marker_margin))
+		marker_position.y = clampf(marker_position.y, marker_margin, maxf(size.y - marker_margin, marker_margin))
+		draw_circle(marker_position, marker_radius, extraction_marker_color)
+		draw_line(marker_position + Vector2(-marker_radius * 1.7, 0.0), marker_position + Vector2(marker_radius * 1.7, 0.0), extraction_marker_color, 2.0)
+		draw_line(marker_position + Vector2(0.0, -marker_radius * 1.7), marker_position + Vector2(0.0, marker_radius * 1.7), extraction_marker_color, 2.0)
 
 
 func _draw_supply_extraction_markers(world_view_rect: Rect2) -> void:
@@ -438,6 +446,8 @@ func _should_redraw_map() -> bool:
 
 	if extraction_visible and _redraw_sample_extraction_position != _last_redraw_extraction_position:
 		return true
+	if extraction_visible and _redraw_sample_extraction_positions != _last_redraw_extraction_positions:
+		return true
 
 	# 当前导航标点可见状态；取值来自 GameWorld，用于创建或取消标点时立即刷新。
 	# 采样来源补充：与撤离点相同，读取本帧统一采样结果。
@@ -462,6 +472,7 @@ func _remember_redraw_state() -> void:
 	# 采样来源补充：记录与判定共用 _process 顶部的同一份采样，记录内容与原直接动态调用结果一致。
 	_last_redraw_extraction_visible = _redraw_sample_extraction_visible
 	_last_redraw_extraction_position = _redraw_sample_extraction_position
+	_last_redraw_extraction_positions = _redraw_sample_extraction_positions.duplicate()
 	_last_redraw_navigation_marker_visible = _redraw_sample_navigation_visible
 	_last_redraw_navigation_marker_position = _redraw_sample_navigation_position
 	_last_redraw_size = size
@@ -471,6 +482,10 @@ func _sample_redraw_state() -> void:
 	## 采样本帧撤离点与导航标点状态；每帧只执行一轮 GameWorld 动态调用，重绘判定与状态记录共用同一份数据，不改变任何刷新条件语义。
 	_redraw_sample_extraction_visible = _is_extraction_marker_visible()
 	_redraw_sample_extraction_position = _get_extraction_marker_position() if _redraw_sample_extraction_visible else Vector2.ZERO
+	if _redraw_sample_extraction_visible:
+		_redraw_sample_extraction_positions = _get_extraction_marker_positions()
+	else:
+		_redraw_sample_extraction_positions.clear()
 	_redraw_sample_navigation_visible = _has_navigation_marker()
 	_redraw_sample_navigation_position = _get_navigation_marker_position() if _redraw_sample_navigation_visible else Vector2.ZERO
 
@@ -576,6 +591,25 @@ func _get_extraction_marker_position() -> Vector2:
 		return raw_position
 
 	return Vector2.ZERO
+
+
+func _get_extraction_marker_positions() -> Array[Vector2]:
+	## 返回当前所有可见正式撤离点位置；优先读取多点接口，历史 GameWorld 或测试桩回退为单点数组。
+	# 标准位置列表；只接收 Vector2 项，避免动态接口异常数据进入绘制坐标换算。
+	var positions: Array[Vector2] = []
+	if _game_world != null and _world_has_extraction_positions_method:
+		# 原始多点列表；正式 GameWorld 返回副本，地图控件只遍历且不修改其内容。
+		var raw_positions: Array = _game_world.call("get_extraction_point_positions")
+		for raw_position in raw_positions:
+			if raw_position is Vector2:
+				positions.append(raw_position)
+	if not positions.is_empty():
+		return positions
+	# 单点兼容位置；多点接口不可用或返回空数组时保持旧版地图标记行为。
+	var legacy_position: Vector2 = _get_extraction_marker_position()
+	if legacy_position != Vector2.ZERO:
+		positions.append(legacy_position)
+	return positions
 
 
 func _has_navigation_marker() -> bool:

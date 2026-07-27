@@ -27,6 +27,8 @@ const FAMILY_MONSTER_ATTACK_POWER: String = "monster_attack_power"
 const FAMILY_PLAYER_VISION: String = "player_vision"
 ## 背包容量词条类别；同一批候选最多出现一个容量降低强度档位。
 const FAMILY_BACKPACK_CAPACITY: String = "backpack_capacity"
+## 正式撤离词条类别；同一批候选最多出现一个撤离点数量限制，避免同局叠加多个出口规则。
+const FAMILY_EXTRACTION: String = "extraction"
 
 ## 默认风险候选数量；固定为四项，与风险合约界面和玩法规则一致。
 const RISK_OFFER_COUNT: int = 4
@@ -175,6 +177,13 @@ const RISK_DEFINITIONS: Array[Dictionary] = [
 		"family": FAMILY_BACKPACK_CAPACITY,
 		"drop_bonus_ratio": 0.60,
 		"backpack_capacity_multiplier": 0.25,
+	},
+	{
+		"id": "extraction_points_one",
+		"display_name": "撤离点减少至1个",
+		"family": FAMILY_EXTRACTION,
+		"drop_bonus_ratio": 0.35,
+		"extraction_point_count": 1,
 	},
 ]
 
@@ -358,6 +367,7 @@ static func get_effect_multipliers(modifier_ids: Array) -> Dictionary:
 		"durability_consumption_multiplier": 1.0,
 		"player_vision_multiplier": 1.0,
 		"backpack_capacity_multiplier": 1.0,
+		"extraction_point_count": 0,
 		"drop_chance_multiplier": 1.0 + get_total_drop_bonus_ratio(modifier_ids),
 		"disable_minimap": false,
 	}
@@ -372,6 +382,7 @@ static func get_effect_multipliers(modifier_ids: Array) -> Dictionary:
 			"durability_consumption_multiplier",
 			"player_vision_multiplier",
 			"backpack_capacity_multiplier",
+			"extraction_point_count",
 		]:
 			if risk_definition.has(multiplier_key):
 				multipliers[multiplier_key] = float(risk_definition.get(multiplier_key, 1.0))

@@ -13,7 +13,7 @@
 | 战斗世界 | `res://scenes/game/game_world.tscn`、`res://scripts/game/game_world.gd` | 承载玩家、地图、环境、敌人人口、宝箱、掉落与撤离流程 |
 | 玩家预制体 | `res://scenes/characters/player.tscn`、`res://scripts/player/player_controller.gd` | 组合输入、移动、战斗属性、装备和攻击组件 |
 
-主菜单和主大厅进入正式骇入前，把模式、骇入模式变体、模式扩展 ID 与扩展专属配置写入 `SessionState`；这些字段都只在运行期有效。训练场入口显式复位为 standard 并清空扩展，联机开局由 `NetworkSession` 按房主最终权威值写入。三种骇入模式的分组、文案与倍率集中在 `HackModeRules`，模式扩展与风险词条集中在 `ModeExtensionRules`，31 项局内协议与碎片/代价数值集中在 `HackProtocolRules`。`GameWorld` 入场时取得模式结果并按需动态创建 `HackProtocolComponent`：骇入模式负责人口、二手概率与超频豁免，风险合约汇总字典把怪物属性、耐久、视野、背包、小地图和掉落倍率分发给各数据所有者，骇入协议组件只维护本机本局状态。`CombatHud` 在 GameWorld 完成状态应用后的延后帧重新读取娱乐模式、小地图禁用状态与协议组件，零装封存由 `GlobalInventory.begin_combat_run(bare_loadout)` 负责。完整模式扩展边界见 `docs/mode_extensions.md`。已确认角色由同一服务跨场景保存；角色页的一次性返回场景同样由该服务持有但不写入存档，使主菜单与大厅入口能各自原路返回。所有主场景切换统一经 `SceneTransition` 执行，业务 UI 不直接维护过渡动画。
+主菜单和主大厅进入正式骇入前，把模式、骇入模式变体、模式扩展 ID 与扩展专属配置写入 `SessionState`；这些字段都只在运行期有效。训练场入口显式复位为 standard 并清空扩展，联机开局由 `NetworkSession` 按房主最终权威值写入。三种骇入模式的分组、文案与倍率集中在 `HackModeRules`，模式扩展与风险词条集中在 `ModeExtensionRules`，31 项局内协议与碎片/代价数值集中在 `HackProtocolRules`。`GameWorld` 入场时取得模式结果并按需动态创建 `HackProtocolComponent`：骇入模式负责人口、二手概率与超频豁免，风险合约汇总字典把怪物属性、耐久、视野、背包、小地图、正式撤离点数量和掉落倍率分发给各数据所有者；无撤离限制时 `GameWorld` 生成 3 个尽量远距的点位，`extraction_points_one` 覆盖为 1 个。骇入协议组件只维护本机本局状态。`CombatHud` 在 GameWorld 完成状态应用后的延后帧重新读取娱乐模式、小地图禁用状态与协议组件，零装封存由 `GlobalInventory.begin_combat_run(bare_loadout)` 负责。完整模式扩展边界见 `docs/mode_extensions.md`。已确认角色由同一服务跨场景保存；角色页的一次性返回场景同样由该服务持有但不写入存档，使主菜单与大厅入口能各自原路返回。所有主场景切换统一经 `SceneTransition` 执行，业务 UI 不直接维护过渡动画。
 
 ## 2. AutoLoad 服务
 
@@ -99,7 +99,7 @@
 - 虚拟敌人物化时优先调用 `set_primary_target()`，确保组合根同时保存长期玩家目标与当前目标；只有不支持该协议的自定义节点才回退 `set_target()`。带有稳定 `monster_id` 的基础怪物会在有效玩家目标注入时发出遇敌信号，重复物化由库存服务按 ID 去重。
 - 未交互宝箱不注册逐帧处理；HUD 以 0.12 秒默认批次刷新附近掉落物与宝箱目标，并在同一批次复用掉落物查询结果。按下或松开拾取键仍即时开始或停止已选宝箱交互，长按期间继续逐帧复核新掉落物以维持拾取优先级。
 
-- 联机骇入时 `GameWorld` 动态创建 `NetworkCombatSync`（节点组 `network_combat_sync`）作为局内唯一实体复制协调者：主机权威产出敌人并向客户端复制傀儡，队友以 `RemotePlayerAvatar` 化身互相可见且可被敌人索敌命中，掉落与宝箱由主机先到先得仲裁；客户端 `GameWorld` 跳过虚拟人口初始化与补充。骇入协议仅互播每名成员已获得的稳定 ID，主机用有效成员平均层数结算动态人口和掉落代价。地图、宝箱布点与撤离点位置依靠共享种子在各端确定性复现，不经网络传输。架构与消息协议见 `docs/multiplayer.md`。
+- 联机骇入时 `GameWorld` 动态创建 `NetworkCombatSync`（节点组 `network_combat_sync`）作为局内唯一实体复制协调者：主机权威产出敌人并向客户端复制傀儡，队友以 `RemotePlayerAvatar` 化身互相可见且可被敌人索敌命中，掉落与宝箱由主机先到先得仲裁；客户端 `GameWorld` 跳过虚拟人口初始化与补充。骇入协议仅互播每名成员已获得的稳定 ID，主机用有效成员平均层数结算动态人口和掉落代价。地图、宝箱布点与全部正式撤离点位置依靠共享种子在各端确定性复现，不经网络传输。架构与消息协议见 `docs/multiplayer.md`。
 
 敌人状态机与加载协议见 `docs/enemy_ai.md`，掉落概率、人口曲线和撤离数值见机制总表。
 

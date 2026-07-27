@@ -238,6 +238,10 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 @export_range(0.0, 8000.0, 1.0) var extraction_spawn_min_distance_from_player: float = 900.0
 ## 撤离点生成尝试次数；取值建议 1 到 128，默认 36，用于寻找不被环境障碍覆盖的位置。
 @export_range(1, 128, 1) var extraction_spawn_attempt_count: int = 36
+## 常规局正式撤离点数量；默认 3 个，风险合约可在本局覆盖为 1 个，运行时通常不动态修改。
+@export_range(1, 8, 1) var extraction_point_count: int = 3
+## 正式撤离点优先最小间距；默认 4000 像素，生成器在有效候选中最大化最近点距离，无法满足时才回退最远合法点。
+@export_range(0.0, 16000.0, 1.0) var extraction_point_preferred_minimum_spacing: float = 4000.0
 ## 撤离点填充颜色；默认青绿色半透明，修改只影响撤离范围视觉反馈。
 @export var extraction_fill_color: Color = Color(0.1, 0.9, 0.62, 0.18)
 ## 撤离点边框颜色；默认亮青绿色，修改只影响撤离范围边界视觉反馈。
@@ -345,8 +349,12 @@ var _selected_character_id: String = CHARACTER_STELLE
 var _survival_time_seconds: float = 0.0
 ## 撤离点节点缓存；取值为运行时生成的 Node2D 或 null，默认 null 表示撤离点尚未生成。
 var _extraction_point_node: Node2D
+## 正式撤离点节点列表；默认空数组，生成后每个点各拥有独立的范围视觉节点，首项同步给旧单点缓存。
+var _extraction_point_nodes: Array[Node2D] = []
 ## 撤离点位置缓存；取值为世界坐标，默认零向量，仅在 _has_extraction_point 为 true 时有效。
 var _extraction_point_position: Vector2 = Vector2.ZERO
+## 正式撤离点位置列表；默认空数组，常规局保存 3 个远距点位，风险合约可将其覆盖为 1 个。
+var _extraction_point_positions: Array[Vector2] = []
 ## 是否已经生成撤离点；取值为 true/false，默认 false，避免 2 分钟后重复生成多个撤离点。
 var _has_extraction_point: bool = false
 ## 撤离点是否已经显示在地图上；取值为 true/false，默认 false，达到地图标记时间后变为 true。
@@ -357,6 +365,8 @@ var _player_inside_extraction_area: bool = false
 var _extraction_hold_elapsed_seconds: float = 0.0
 ## 是否已经满足撤离条件；取值为 true/false，默认 false，达到驻留时长且仍在范围内时变为 true。
 var _extraction_ready_to_leave: bool = false
+## 当前玩家所在正式撤离点下标；默认 -1 表示不在任一撤离范围内，用于多点驻留计时切换时正确清零。
+var _active_extraction_point_index: int = -1
 ## 物资撤离点位置列表；默认空数组，进入地图时按 2 至 5 个递减概率生成。
 var _supply_extraction_positions: Array[Vector2] = []
 ## 当前玩家所在物资撤离点下标；默认 -1 表示未进入任一点位范围。
@@ -385,8 +395,12 @@ var _network_is_host: bool = false
 var _network_combat_sync: Node2D = null
 ## 联机撤离点专用随机源；默认 null，联机时以共享种子派生，与主随机流隔离保证各端撤离点一致。
 var _network_extraction_random: RandomNumberGenerator = null
+## 联机预生成的正式撤离点位置列表；默认空数组，使用共享种子专用随机流推导，保证全端得到相同的多点布局。
+var _network_extraction_positions: Array[Vector2] = []
 ## 联机预生成撤离点位置；进入地图时以专用随机流立即推导（此时全员世界状态一致），120 秒后直接使用。
 var _network_extraction_position: Vector2 = Vector2.ZERO
+## 联机是否已经预生成正式撤离点位置列表；默认 false，仅联机战斗置 true，首点同时兼容旧布尔缓存。
+var _has_network_extraction_positions: bool = false
 ## 是否已经预生成联机撤离点位置；默认 false，仅联机战斗置 true。
 var _has_network_extraction_position: bool = false
 ## 联机大逃杀模式是否激活；默认 false，进入场景时从 NetworkSession 解析，影响出生点分散与玩家互伤。
@@ -439,8 +453,11 @@ func _ready() -> void:
 	if _network_combat_active:
 		# 联机撤离点预推导；此刻全员环境障碍、宝箱缓存与玩家位置（出生原点）完全一致，专用随机流保证各端得到同一位置。
 		# 注意必须先于大逃杀传送执行：撤离点校验读取玩家位置，传送后各端玩家位置不同会破坏确定性。
-		_network_extraction_position = _get_random_extraction_position()
-		_has_network_extraction_position = true
+		_network_extraction_positions = _get_random_extraction_positions(_get_effective_extraction_point_count())
+		_has_network_extraction_positions = not _network_extraction_positions.is_empty()
+		# 首个联机撤离点；继续同步旧单点缓存，保证尚未升级的读取接口仍能获得有效位置。
+		_network_extraction_position = _network_extraction_positions.front() if _has_network_extraction_positions else Vector2.ZERO
+		_has_network_extraction_position = _has_network_extraction_positions
 		if _network_battle_royale_active:
 			# 大逃杀出生点表必须先于开局布怪推导；主机布怪据此避开每名玩家出生点周围的安全距离，防止玩家降生在怪堆中。
 			_compute_battle_royale_spawn_positions()
@@ -553,6 +570,10 @@ func _resolve_network_combat_session() -> void:
 	_network_spawn_positions.clear()
 	_network_population_multiplier = 1.0
 	_network_extraction_random = null
+	_network_extraction_positions.clear()
+	_has_network_extraction_positions = false
+	_network_extraction_position = Vector2.ZERO
+	_has_network_extraction_position = false
 	# 联机会话服务；由自动加载提供，缺失或战斗会话未激活时保持单机流程。
 	var network_session: Node = get_tree().root.get_node_or_null("NetworkSession")
 	if network_session == null or not network_session.has_method("is_combat_session_active"):
@@ -917,7 +938,13 @@ func get_extraction_hold_duration_seconds() -> float:
 
 
 func get_extraction_point_position() -> Vector2:
+	## 旧单点位置读取接口；多点模式下始终返回排序生成的首个撤离点，供历史调用方平滑兼容。
 	return _extraction_point_position
+
+
+func get_extraction_point_positions() -> Array[Vector2]:
+	## 返回全部正式撤离点位置副本；小地图和联机显示应使用该接口，不得修改世界内部列表。
+	return _extraction_point_positions.duplicate()
 
 
 func get_supply_extraction_positions() -> Array[Vector2]:
@@ -1494,15 +1521,26 @@ func _update_extraction_timeline() -> void:
 func _update_extraction_state(delta: float) -> void:
 	if not _has_extraction_point or _player == null or _is_player_dead():
 		_player_inside_extraction_area = false
+		_active_extraction_point_index = -1
 		_extraction_hold_elapsed_seconds = 0.0
 		_extraction_ready_to_leave = false
 		return
 
-	_player_inside_extraction_area = _player.global_position.distance_to(_extraction_point_position) <= maxf(extraction_radius, 1.0)
+	# 当前命中的撤离点下标；多点布局已按优先间距分离，正常情况下不会同时命中多个范围。
+	var next_active_extraction_point_index: int = -1
+	for point_index in range(_extraction_point_positions.size()):
+		if _player.global_position.distance_to(_extraction_point_positions[point_index]) <= maxf(extraction_radius, 1.0):
+			next_active_extraction_point_index = point_index
+			break
+	_player_inside_extraction_area = next_active_extraction_point_index >= 0
 	if not _player_inside_extraction_area:
+		_active_extraction_point_index = -1
 		_extraction_hold_elapsed_seconds = 0.0
 		_extraction_ready_to_leave = false
 		return
+	if next_active_extraction_point_index != _active_extraction_point_index:
+		_active_extraction_point_index = next_active_extraction_point_index
+		_extraction_hold_elapsed_seconds = 0.0
 
 	_extraction_hold_elapsed_seconds = minf(_extraction_hold_elapsed_seconds + maxf(delta, 0.0), get_extraction_hold_duration_seconds())
 	_extraction_ready_to_leave = _extraction_hold_elapsed_seconds >= get_extraction_hold_duration_seconds()
@@ -1512,20 +1550,31 @@ func _spawn_extraction_point() -> void:
 	if _has_extraction_point:
 		return
 
-	# 撤离点最终位置；联机时使用进图预推导的确定性位置，单机保持实时随机。
-	_extraction_point_position = _network_extraction_position if _has_network_extraction_position else _get_random_extraction_position()
-	_extraction_point_node = _create_extraction_point_node(_extraction_point_position)
+	# 撤离点最终位置；联机时使用进图预推导的确定性列表，单机按远距生成器实时选取全部点位。
+	_extraction_point_positions = _network_extraction_positions.duplicate() if _has_network_extraction_positions else _get_random_extraction_positions(_get_effective_extraction_point_count())
+	# 生成失败兜底；任何异常配置至少保留一个合法尝试结果，避免撤离流程永久不可用。
+	if _extraction_point_positions.is_empty():
+		_extraction_point_positions.append(_get_random_extraction_position())
+	_extraction_point_nodes.clear()
+	for point_index in range(_extraction_point_positions.size()):
+		# 当前撤离点位置；每个位置创建独立视觉节点并按序加入撤离点组。
+		var point_position: Vector2 = _extraction_point_positions[point_index]
+		_extraction_point_nodes.append(_create_extraction_point_node(point_position, point_index))
+	# 首个撤离点；继续更新历史单点缓存，兼容旧 HUD、测试桩与外部调用方。
+	_extraction_point_position = _extraction_point_positions.front()
+	_extraction_point_node = _extraction_point_nodes.front() if not _extraction_point_nodes.is_empty() else null
 	_has_extraction_point = true
 	_extraction_point_marked_on_map = _survival_time_seconds >= maxf(extraction_map_marker_time_seconds, 1.0)
 	_player_inside_extraction_area = false
+	_active_extraction_point_index = -1
 	_extraction_hold_elapsed_seconds = 0.0
 	_extraction_ready_to_leave = false
 
 
-func _create_extraction_point_node(point_position: Vector2) -> Node2D:
+func _create_extraction_point_node(point_position: Vector2, point_index: int = 0) -> Node2D:
 	# 撤离点根节点；取值为运行时创建的 Node2D，默认挂在 GameWorld 下并显示撤离范围。
 	var extraction_point: Node2D = Node2D.new()
-	extraction_point.name = "ExtractionPoint"
+	extraction_point.name = "ExtractionPoint%d" % (point_index + 1)
 	extraction_point.add_to_group("extraction_points")
 	add_child(extraction_point)
 	extraction_point.global_position = point_position
@@ -1696,6 +1745,78 @@ func _build_circle_points(radius: float, point_count: int, close_loop: bool) -> 
 		points.append(points[0])
 
 	return points
+
+
+func _get_effective_extraction_point_count() -> int:
+	## 返回本局正式撤离点数量；常规局使用检查器配置，风险合约的有效数量字段可将其覆盖为 1。
+	# 风险合约指定数量；中性值 0 表示未限制，正数表示本局强制使用该数量。
+	var contracted_count: int = int(_mode_extension_effect_multipliers.get("extraction_point_count", 0))
+	if contracted_count > 0:
+		return contracted_count
+	return maxi(extraction_point_count, 1)
+
+
+func _get_random_extraction_positions(point_count: int) -> Array[Vector2]:
+	## 生成多个尽量远离的正式撤离点；每个新点从有效候选中选择与已选点最近距离最大的候选，优先满足期望间距。
+	# 目标点位数量；至少生成一个，避免错误配置把撤离流程变为无出口状态。
+	var resolved_point_count: int = maxi(point_count, 1)
+	# 已选点位；按生成顺序保存，每轮都会作为下一点距离评分的参照集合。
+	var positions: Array[Vector2] = []
+	for _point_index in range(resolved_point_count):
+		# 当前最远合法候选；环境或玩家距离无解时仍由旧单点回退路径保证输出。
+		positions.append(_get_farthest_extraction_position(positions))
+	return positions
+
+
+func _get_farthest_extraction_position(existing_positions: Array[Vector2]) -> Vector2:
+	## 选择与已有撤离点最分散的合法候选；先偏好达到配置间距的点，候选不足时仍返回距离最远的合法点。
+	# 每点候选采样数量；复用正式撤离点尝试配置，默认 36 次以平衡分布质量与生成成本。
+	var resolved_attempt_count: int = maxi(extraction_spawn_attempt_count, 1)
+	# 期望最近间距；仅作为优先目标而非硬失败条件，极端地图配置下仍能生成全部出口。
+	var preferred_spacing: float = maxf(extraction_point_preferred_minimum_spacing, 0.0)
+	# 最佳优先候选；满足期望间距后继续比较最近距离，默认未找到。
+	var best_preferred_position: Vector2 = Vector2.ZERO
+	# 最佳优先候选是否存在；默认 false，用于与退化候选区分。
+	var has_best_preferred_position: bool = false
+	# 最佳退化候选；无法满足期望间距时保留距离最远的环境合法点。
+	var best_fallback_position: Vector2 = Vector2.ZERO
+	# 最佳退化候选是否存在；默认 false，全部候选无效时调用历史回退逻辑。
+	var has_best_fallback_position: bool = false
+	# 当前已知最佳最近距离；默认 -1，任何合法候选都可替换。
+	var best_minimum_distance: float = -1.0
+	# 当前已知最佳退化最近距离；默认 -1，任何合法候选都可替换。
+	var best_fallback_minimum_distance: float = -1.0
+	for _attempt_index in range(resolved_attempt_count):
+		# 当前候选位置；先沿用旧校验，确保不贴玩家或环境障碍。
+		var candidate_position: Vector2 = _get_random_extraction_candidate()
+		if not _is_extraction_position_valid(candidate_position):
+			continue
+		# 候选到最近已选点的距离；首个点没有参照时视为无穷远，随机合法点即可成为起点。
+		var nearest_distance: float = _get_nearest_extraction_position_distance(candidate_position, existing_positions)
+		if nearest_distance > best_fallback_minimum_distance:
+			best_fallback_minimum_distance = nearest_distance
+			best_fallback_position = candidate_position
+			has_best_fallback_position = true
+		if nearest_distance >= preferred_spacing and nearest_distance > best_minimum_distance:
+			best_minimum_distance = nearest_distance
+			best_preferred_position = candidate_position
+			has_best_preferred_position = true
+	if has_best_preferred_position:
+		return best_preferred_position
+	if has_best_fallback_position:
+		return best_fallback_position
+	return _get_random_extraction_position()
+
+
+func _get_nearest_extraction_position_distance(candidate_position: Vector2, existing_positions: Array[Vector2]) -> float:
+	## 计算候选点到已选撤离点的最短中心距离；没有已选点时返回无穷大，使首点只受环境和玩家限制。
+	if existing_positions.is_empty():
+		return INF
+	# 当前最短距离；默认无穷大，在遍历中收敛为候选点与任一已选点的最近距离。
+	var nearest_distance: float = INF
+	for existing_position in existing_positions:
+		nearest_distance = minf(nearest_distance, candidate_position.distance_to(existing_position))
+	return nearest_distance
 
 
 func _get_random_extraction_position() -> Vector2:

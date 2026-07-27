@@ -46,7 +46,7 @@ const MODE_DEFINITIONS: Array[Dictionary] = [
 		"variant": VARIANT_OVERCLOCK,
 		"display_name": "超频骇入",
 		"category": CATEGORY_CASUAL,
-		"description": "技能冷却 ×0.2、能量与武器装备耐久不消耗、怪物密度翻倍；与训练场一致不产出物品结算。",
+		"description": "技能冷却 ×0.2、无限能量（始终保持满值）、武器装备耐久不消耗、怪物密度翻倍；与训练场一致不产出物品结算。",
 	},
 ]
 

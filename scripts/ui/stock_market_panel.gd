@@ -306,19 +306,25 @@ func _build_interface() -> void:
 	_leverage_close_button.pressed.connect(_on_leverage_close_pressed)
 	leverage_row.add_child(_leverage_close_button)
 	# 持仓区标题；位于主体与横向持仓列表之间。
+	# 标题操作行；将“全部持仓”标题与其关联的历史记录入口保持在同一水平行，避免记录入口脱离持仓语境。
+	var holdings_title_row: HBoxContainer = HBoxContainer.new()
+	holdings_title_row.add_theme_constant_override("separation", 10)
+	root_content.add_child(holdings_title_row)
 	var holdings_title: Label = Label.new()
 	holdings_title.text = "全部持仓"
 	holdings_title.add_theme_font_size_override("font_size", 18)
-	root_content.add_child(holdings_title)
+	holdings_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	holdings_title_row.add_child(holdings_title)
 	# 历史记录按钮；悬浮显示在“全部持仓”标题上方的既有空白区，打开交易历史窗口查看买卖、杠杆与资金转账记录。
 	# 布局无侵入补充；按钮挂载在标题标签下作为手动定位子控件，不占用竖向布局行，面板整体尺寸与原有布局保持不变。
+	# 位置调整补充：历史记录现作为标题操作行的右侧按钮，与“全部持仓”处于同一基线，便于先看持仓再查看成交历史。
 	_trade_history_button = Button.new()
 	_trade_history_button.text = "历史记录"
 	_trade_history_button.size = Vector2(110.0, 30.0)
 	# 悬浮位置；相对标题左上角向上偏移 36 像素，与标题保持 6 像素间距并落在左列股票卡下方的空白区域。
-	_trade_history_button.position = Vector2(0.0, -36.0)
+	_trade_history_button.custom_minimum_size = Vector2(110.0, 30.0)
 	_trade_history_button.pressed.connect(_on_trade_history_button_pressed)
-	holdings_title.add_child(_trade_history_button)
+	holdings_title_row.add_child(_trade_history_button)
 	# 持仓横向滚动容器；五只股票同时持仓时仍可访问全部标准卡片。
 	var holdings_scroll: ScrollContainer = ScrollContainer.new()
 	holdings_scroll.custom_minimum_size = Vector2(0.0, 92.0)

@@ -7,8 +7,8 @@
 | 模块 | 实现 | 职责 |
 | --- | --- | --- |
 | 统计服务 | `scripts/game/stats_service.gd`（AutoLoad `StatsService`） | 集中记录怪物击杀计数、物品获得计数、对局与撤离统计、单局之最与财富曲线采样；对外提供只读查询与事实信号，独立持久化 |
-| 统计分类入口 | `scenes/ui/main_menu.tscn`、`scripts/ui/main_menu.gd` | 底部“统计 ▲”展开后显示“图鉴、生涯”；展开时箭头翻为“▼”，再次点击、按 ESC 或打开子入口后收起 |
-| 生涯面板 | `scripts/ui/stats_panel.gd`（`StatsPanel`） | 由统计分类中的“生涯”按钮打开；使用 880×600 居中窗口展示对局统计、单局之最与财富曲线，折线由内部类 `WealthCurveChart` 绘制 |
+| 统计分类入口 | `scenes/ui/main_menu.tscn`、`scripts/ui/main_menu.gd` | 底部普通样式“统计 ▲”按钮位于“金融 ▲”右侧；展开时箭头翻为“▼”，图鉴与生涯按钮以 120×36 像素单列从按钮上方展开，动画时长 0.18 秒，再次点击、按 ESC 或打开子入口后收起 |
+| 生涯面板 | `scripts/ui/stats_panel.gd`（`StatsPanel`） | 由统计分类中的“生涯”按钮打开；使用 880×600 居中窗口展示对局统计、单局之最与财富曲线，窗口内容四周使用左右 18、上下 16 像素页边距，折线由内部类 `WealthCurveChart` 绘制 |
 | 图鉴计数 | `EncyclopediaPanel` 读取 `get_monster_kill_count` / `get_item_acquire_count` / `get_enhancement_stone_acquire_count` | 由统计分类中的“图鉴”按钮打开；条目名称行右缘数字与详情首行统计行只读展示 |
 | 悬赏进度 | `BountyService` 订阅统计事实信号 | 见 `docs/bounty.md` |
 
@@ -26,6 +26,7 @@
 | 对局结束 `record_run_finished` | `CombatHud._record_stats_run_finished`（成功撤离 / 死亡 / 逃跑，须在库存正式结算前调用） | 娱乐模式结算入口已提前返回主菜单 |
 
 - 物品统计键与图鉴发现键同构（`item_kind:稳定ID`，强化石统一 `enhancement_stone:any`），两套口径可互相对照。
+- 怪物图鉴发现由 `GameWorld._on_monster_encountered` 统一转交 `GlobalInventory.register_monster_encounter`；该入口先以 `is_settlement_disabled_mode()` 排除训练场与超频骇入，因此两类娱乐模式的遇敌、击杀和掉落物消费都不会写入生涯统计或永久图鉴。
 - 财富采样在服务启动与每局结束时各执行一次，口径复用 `BankService.get_asset_breakdown().total`（银行缺失时回退局外星穹），上限 240 个点先进先出。
 
 ## 3. 持久化边界

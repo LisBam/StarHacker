@@ -7,7 +7,7 @@
 | 模块 | 实现 | 职责 |
 | --- | --- | --- |
 | 悬赏服务 | `scripts/game/bounty_service.gd`（AutoLoad `BountyService`） | 每日按本地日期刷新随机悬赏、订阅统计服务事实信号推进进度、完成后自动发奖并广播完成信号、独立持久化 |
-| 悬赏面板 | `scripts/ui/bounty_panel.gd`（`BountyPanel`） | 840×560 居中窗口；按服务快照展示悬赏卡（标题、说明、进度条、奖励与完成状态），只读不推进 |
+| 悬赏面板 | `scripts/ui/bounty_panel.gd`（`BountyPanel`） | 840×560 居中窗口；四周使用左右 18、上下 16 像素内容页边距，按服务快照展示悬赏卡（标题、说明、进度条、奖励与完成状态），只读不推进 |
 | 横幅播报 | `BannerNotificationService` 订阅 `bounty_completed` | 完成时播出“【悬赏完成】标题：奖励结果”全局横幅；悬赏服务不反向依赖横幅 |
 
 ## 2. 数据流

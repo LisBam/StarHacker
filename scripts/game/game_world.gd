@@ -2623,6 +2623,9 @@ func _apply_population_scales(base_population: int) -> int:
 
 func _on_monster_encountered(monster_id: String) -> void:
 	## 接收战斗怪物的首次遇敌事件并转交永久图鉴服务；GameWorld 是战斗节点与局外存档之间的协调边界。
+	# 娱乐模式图鉴豁免；训练场与超频骇入均不产生正式进度，首次遇敌也不能解锁永久怪物图鉴。
+	if is_settlement_disabled_mode():
+		return
 	# 全局库存服务；由自动加载创建，缺失时保持战斗可运行，避免独立场景预览依赖完整游戏启动顺序。
 	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
 	if global_inventory != null and global_inventory.has_method("register_monster_encounter"):

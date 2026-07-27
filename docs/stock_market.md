@@ -149,7 +149,7 @@
 - `StockMarketService` 是交易历史记录与通知记录的唯一所有者；两条列表随股市状态持久化，索引 0 恒为最新记录。
 - 交易记录覆盖现货买入、现货卖出、杠杆开仓、杠杆加仓、主动平仓、强制平仓、证券币充值与提现；每条包含 Unix 时间、本地格式化时间文本、类型标识与说明文本，上限 80 条，超出丢弃最旧。
 - 通知记录当前只写入强制平仓事件，上限 50 条；记录在结算路径内与仓位状态同一次保存落盘。
-- 面板底部“历史记录”按钮（悬浮在“全部持仓”标题上方的既有空白区，不占布局行、不改变面板尺寸）与标题栏“通知”按钮（关闭左侧）复用同一 `StockRecordListDialog`；窗口打开期间收到 `trade_records_changed` / `notification_records_changed` 信号时原位更新文本，不重建窗口。
+- 面板底部“历史记录”按钮位于“全部持仓”标题右侧的同一标题行，与标题栏“通知”按钮（关闭左侧）复用同一 `StockRecordListDialog`；窗口打开期间收到 `trade_records_changed` / `notification_records_changed` 信号时原位更新文本，不重建窗口。
 - 强制平仓额外广播 `leverage_position_liquidated(stock_id, message)`；横幅通知服务订阅该信号在屏幕顶端提醒，股市服务与面板都不依赖横幅实现。
 
 ## 7. UI 约定

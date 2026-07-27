@@ -21,12 +21,12 @@ current_health = 100.0
 attack_damage = 40.0
 attack_power = 100.0
 defense_power = 100.0
-attack_impact_force = 40.0
+attack_impact_force = 50.0
 move_speed = 110.0
 vision_range = 500.0
 attack_range = 45.0
 attack_cooldown = 0.8
-attack_front_recoil_force = 50.0
+attack_front_recoil_force = 20.0
 
 [node name="Body" type="Polygon2D" parent="." unique_id=1785419081]
 color = Color(0.956863, 0.286275, 0.360784, 1)

@@ -36,7 +36,7 @@
 | `MiningFarmService` | 维护算力币、矿场资产、在线收益和临时增益 | `user://mining_farm_state.json` |
 | `BankService` | 维护活期账户、定期存单、信用贷款、违约冻结与到期级联扣款 | `user://bank_state.json` |
 | `DispatchService` | 维护按角色并行的派遣委托、在线倒计时、大成功判定、近期完成报告与角色锁定查询 | `user://dispatch_state.json` |
-| `StatsService` | 生涯统计：怪物击杀计数、物品获得计数、对局与撤离统计、单局之最与财富曲线采样；战斗与库存挂点上报事实事件，图鉴计数、统计面板与悬赏系统只读取本服务或订阅其信号 | `user://stats_state.json` |
+| `StatsService` | 生涯统计：怪物击杀计数、物品获得计数、对局与撤离统计、单局之最与财富曲线采样；聚合 `GlobalInventory` 的累计获得星穹并转发变化通知，图鉴计数、统计面板与悬赏系统只读取本服务或订阅其信号 | `user://stats_state.json`；累计获得星穹仍只保存于 `user://global_inventory.json` |
 | `NewcomerProtectionService` | 维护首次成功撤离前的新手保护状态，订阅正式结算并向怪物生成路径提供 0.50 战斗属性倍率；首次引入时从既有成功撤离统计迁移 | `user://newcomer_protection_state.json` |
 | `BountyService` | 每日悬赏：按本地日期刷新随机悬赏、订阅 `StatsService` 事实信号推进进度、完成后自动发放星穹或稀有强化石；必须注册在 `StatsService` 之后 | `user://bounty_state.json` |
 | `BannerNotificationService` | 屏幕顶端全局横幅通知：CanvasLayer 图层 `1200` 高于场景过渡层，`process_mode = ALWAYS` 战斗内外与暂停期间均可播放；持有横幅开关并订阅强平等业务信号，业务服务不反向依赖 | `user://banner_notification_settings.cfg` |
@@ -110,7 +110,7 @@
 - `CombatHud` 负责局内信息、暂停、地图、模式扩展查看入口、拾取提示、物资撤离和结算编排，不直接拥有库存或模式扩展数据。暂停左栏只为本局已启用扩展显示入口：`RiskContractViewPanel` 从 `SessionState` 读取风险 ID，`HackProtocolViewPanel` 从本机组件读取协议 ID；生命能量面板上方的数据碎片条读取组件快照与 `InputBindings` 实际键位，长按达标才显示不暂停世界的 `HackProtocolSelectPanel`。物资撤离面板由 `SupplyExtractionPanel` 在左侧武器栏和右侧防具栏中展示全部已装备槽位，两个分区只向 `GlobalInventory` 的统一报价与原子送回接口发起操作。
 - `LobbyHud` 负责大厅左上切换按钮、最近设施提示、角色生命能量、主动技能和武器快照；它不处理 F 输入、设施距离或场景动作。主菜单以 `lobby_host_mode` 嵌入更高 CanvasLayer，只复用局外面板，不复制背包、仓库、商店等业务 UI。
 - `EncyclopediaPanel` 读取 `ContentCatalog` 的全量武器、装备、道具与怪物模板，并通过 `GlobalInventory` 的稳定发现记录决定显示正式信息或“？？？”。怪物只在离树场景实例中读取稳定 ID、说明和基础属性，首次有效遇敌后解锁；左侧列表只负责选择当前条目，右侧物品详情复用 `ItemDetailFormatter`，怪物详情显示其固定基础数值。关键词筛选匹配名称、类型和说明，条目固定按基础内容、`stelle`（星）扩展包、其余扩展包目录顺序分组，并在每个扩展包前显示标题分割。组内装备按套装聚合并固定为头部、躯干、腿部、脚部；资源按初级、中级、高级、极品排列，无法识别品质时回退名称排序。它不复制物品数值或规则、不修改库存，也不把浏览、商店预览或临时快照视为获得。图鉴条目名称行最右侧与详情首行显示 `StatsService` 提供的获得数量或击杀数量，图鉴只读取计数不写入统计。
-- `HackModeSelectPanel` 按 `HackModeRules` 定义表构建“战斗模式 / 娱乐模式”两组模式卡并派发 `mode_selected`；窗口内容四周使用左右 18、上下 16 像素页边距，写入会话状态与场景切换由主菜单宿主完成。`MainMenu` 自身维护金融与统计两个互斥分类：普通样式的分类按钮展开时在所属按钮正上方以 0.18 秒动画打开纵向列表，分类子按钮仍复用原有面板打开回调；`BountyPanel` 与 `StatsPanel` 同样使用左右 18、上下 16 像素页边距，前者只读取 `BountyService` 快照并订阅其变化信号，后者只读取 `StatsService` 快照，财富曲线由面板内部类 `WealthCurveChart` 按采样数组绘制。三个面板都通过主菜单遮罩复用，不直接访问战斗节点。
+- `HackModeSelectPanel` 按 `HackModeRules` 定义表构建“战斗模式 / 娱乐模式”两组模式卡并派发 `mode_selected`；窗口内容四周使用左右 18、上下 16 像素页边距，写入会话状态与场景切换由主菜单宿主完成。`MainMenu` 自身维护金融与统计两个互斥分类：普通样式的分类按钮展开时在所属按钮正上方以 0.18 秒动画打开纵向列表，分类子按钮仍复用原有面板打开回调；`BountyPanel` 与 `StatsPanel` 同样使用左右 18、上下 16 像素页边距，前者只读取 `BountyService` 快照并订阅其变化信号，后者只读取 `StatsService` 快照，包括由该服务从 `GlobalInventory` 聚合的累计获得星穹；财富曲线由面板内部类 `WealthCurveChart` 按采样数组绘制。三个面板都通过主菜单遮罩复用，不直接访问战斗节点。
 - `CombatHud` 运行时实例化角色系统的当前角色模式，负责 O 键打开、关闭、输入锁定和场景树暂停；角色档案、属性条与技能卡片仍由角色系统从 `SessionState` 读取，HUD 不保存副本。
 - 战斗常驻 HUD 将技能栏放在屏幕左下角、武器栏放在屏幕右下角，角色名字、生命与能量独立保留在底部中心；常驻 HUD 节点必须位于全部交互遮罩之前，菜单显示时不依赖逐项隐藏也不会覆盖菜单内容。
 - 右下常驻武器栏由 `CombatHud` 直接创建 `CombatHudSlotView` 并读取装备组件快照，顶部使用与技能按键相同的居中区域显示“远程 1 / 远程 2 / 近战”，下方显示武器名、能耗、耐久、当前手持高亮和攻击冷却；它不复用 `WeaponSlotControl` 或 `ItemCardView`，装备、卸下、修复、强化和拖拽操作只存在于背包等交互界面。

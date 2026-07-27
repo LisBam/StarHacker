@@ -97,7 +97,7 @@ custom_minimum_size = Vector2(0, 44)
 layout_mode = 2
 text = "退出游戏"
 
-[node name="BottomCategoryExpansionMargin" type="Control" parent="."]
+[node name="BottomCategoryExpansionMargin" type="Control" parent="." unique_id=257556755]
 visible = false
 layout_mode = 1
 anchors_preset = 15
@@ -107,19 +107,19 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
-[node name="FinanceCategoryPanel" type="PanelContainer" parent="BottomCategoryExpansionMargin"]
+[node name="FinanceCategoryPanel" type="PanelContainer" parent="BottomCategoryExpansionMargin" unique_id=226745657]
 visible = false
 layout_mode = 0
 
-[node name="Margin" type="MarginContainer" parent="BottomCategoryExpansionMargin/FinanceCategoryPanel"]
-layout_mode = 0
+[node name="Margin" type="MarginContainer" parent="BottomCategoryExpansionMargin/FinanceCategoryPanel" unique_id=1815061010]
+layout_mode = 2
 theme_override_constants/margin_left = 8
 theme_override_constants/margin_top = 6
 theme_override_constants/margin_right = 8
 theme_override_constants/margin_bottom = 6
 
-[node name="Buttons" type="VBoxContainer" parent="BottomCategoryExpansionMargin/FinanceCategoryPanel/Margin"]
-layout_mode = 0
+[node name="Buttons" type="VBoxContainer" parent="BottomCategoryExpansionMargin/FinanceCategoryPanel/Margin" unique_id=1076245413]
+layout_mode = 2
 theme_override_constants/separation = 6
 
 [node name="InsuranceButton" type="Button" parent="BottomCategoryExpansionMargin/FinanceCategoryPanel/Margin/Buttons" unique_id=1599930243]
@@ -150,19 +150,19 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "炒股"
 
-[node name="StatisticsCategoryPanel" type="PanelContainer" parent="BottomCategoryExpansionMargin"]
+[node name="StatisticsCategoryPanel" type="PanelContainer" parent="BottomCategoryExpansionMargin" unique_id=337617965]
 visible = false
 layout_mode = 0
 
-[node name="Margin" type="MarginContainer" parent="BottomCategoryExpansionMargin/StatisticsCategoryPanel"]
-layout_mode = 0
+[node name="Margin" type="MarginContainer" parent="BottomCategoryExpansionMargin/StatisticsCategoryPanel" unique_id=944339084]
+layout_mode = 2
 theme_override_constants/margin_left = 8
 theme_override_constants/margin_top = 6
 theme_override_constants/margin_right = 8
 theme_override_constants/margin_bottom = 6
 
-[node name="Buttons" type="VBoxContainer" parent="BottomCategoryExpansionMargin/StatisticsCategoryPanel/Margin"]
-layout_mode = 0
+[node name="Buttons" type="VBoxContainer" parent="BottomCategoryExpansionMargin/StatisticsCategoryPanel/Margin" unique_id=804503194]
+layout_mode = 2
 theme_override_constants/separation = 6
 
 [node name="EncyclopediaButton" type="Button" parent="BottomCategoryExpansionMargin/StatisticsCategoryPanel/Margin/Buttons" unique_id=1828126173]
@@ -172,7 +172,7 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "图鉴"
 
-[node name="StatsButton" type="Button" parent="BottomCategoryExpansionMargin/StatisticsCategoryPanel/Margin/Buttons"]
+[node name="StatsButton" type="Button" parent="BottomCategoryExpansionMargin/StatisticsCategoryPanel/Margin/Buttons" unique_id=1919172769]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(120, 36)
 layout_mode = 2
@@ -239,19 +239,19 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "派遣"
 
-[node name="BountyButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons"]
+[node name="BountyButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons" unique_id=1084935348]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 text = "悬赏"
 
-[node name="FinanceCategoryButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons"]
+[node name="FinanceCategoryButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons" unique_id=1832985599]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 text = "金融 ▲"
 
-[node name="StatisticsCategoryButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons"]
+[node name="StatisticsCategoryButton" type="Button" parent="BottomMenuMargin/BottomMenuButtons" unique_id=400503219]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3

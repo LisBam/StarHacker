@@ -1,7 +1,7 @@
 extends PanelContainer
 class_name StatsPanel
 
-## 统计面板：展示生涯对局统计（击杀数、撤离率）、单局之最与财富曲线。
+## 统计面板：展示累计获得星穹、生涯对局统计（击杀数、撤离率）、单局之最与财富曲线。
 ## 面板只读取 StatsService 快照并响应其信号；不修改任何统计数据，也不保存副本。
 
 ## 面板关闭信号；宿主收到后隐藏遮罩并恢复焦点。
@@ -101,6 +101,7 @@ func refresh() -> void:
 	_set_summary_text("total_monster_kills", "%d 只" % int(snapshot.get("total_monster_kills", 0)))
 	_set_summary_text("total_chests_opened", "%d 个" % int(snapshot.get("total_chests_opened", 0)))
 	_set_summary_text("total_shipped_value", "%d 星穹" % int(snapshot.get("total_shipped_value", 0)))
+	_set_summary_text("total_coins_earned", "%d 星穹" % int(snapshot.get("total_coins_earned", 0)))
 	# 单局之最标签写入；存活时长转为分秒格式。
 	_set_best_text("best_run_kills", "%d 只" % int(snapshot.get("best_run_kills", 0)))
 	_set_best_text("best_run_survival_seconds", _format_duration(float(snapshot.get("best_run_survival_seconds", 0.0))))
@@ -145,6 +146,7 @@ func _build_content() -> void:
 		["total_monster_kills", "累计击杀"],
 		["total_chests_opened", "累计开箱"],
 		["total_shipped_value", "累计送回价值"],
+		["total_coins_earned", "累计获得星穹"],
 	], _summary_value_labels))
 	# 右侧单局之最分区；只在对局结束时刷新纪录。
 	summary_split.add_child(_build_stat_section("单局之最", [

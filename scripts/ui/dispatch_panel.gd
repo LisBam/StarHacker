@@ -29,6 +29,10 @@ var _pending_mission_id: String = ""
 var _status_poll_accumulator: float = 0.0
 ## 上次倒计时文本；默认空字符串，轮询刷新时文本未变化则跳过标签重写。
 var _last_countdown_text: String = ""
+## 多委托倒计时标签表；以角色 ID 为键，页面重建时重新捕获全部进行中委托的标签引用。
+var _countdown_labels: Dictionary = {}
+## 多委托上次倒计时文本表；以角色 ID 为键，文本未变化时跳过对应标签重写。
+var _last_countdown_texts: Dictionary = {}
 ## 内容重建是否已排队；默认 false，同帧多个服务信号合并为一次延迟重建。
 var _content_rebuild_queued: bool = false
 
@@ -157,7 +161,7 @@ func _build_interface() -> void:
 	rule_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	rule_label.add_theme_font_size_override("font_size", 12)
 	UI_STYLE_GUIDE.apply_secondary_label(rule_label)
-	rule_label.text = "委托仅消耗在线时间，同一时间一个委托  |  大成功报酬 ×1.5，概率随角色适性属性提高  |  佣兵联络站每级报酬 +4%"
+	rule_label.text = "委托仅消耗在线时间，每名未上场角色可同时执行一项  |  大成功报酬 ×1.5，概率随角色适性属性提高  |  佣兵联络站每级报酬 +4%"
 	root.add_child(rule_label)
 	# 二次确认弹窗；确认与取消分别路由到派遣执行与挂起清理。
 	_confirmation_dialog = COMMON_CONFIRMATION_DIALOG_SCRIPT.new() as CommonConfirmationDialog
@@ -190,12 +194,21 @@ func _rebuild_status_section() -> void:
 	# 倒计时引用清理；旧标签随子节点释放，避免轮询刷新访问已销毁控件。
 	_countdown_label = null
 	_last_countdown_text = ""
+	_countdown_labels.clear()
+	_last_countdown_texts.clear()
 	for child in _status_container.get_children():
 		child.queue_free()
-	# 进行中派遣快照；非空时展示进行中卡片并隐藏完成报告。
-	var snapshot: Dictionary = _service.call("get_active_dispatch_snapshot") as Dictionary if _service.has_method("get_active_dispatch_snapshot") else {}
-	if not snapshot.is_empty():
-		_status_container.add_child(_create_active_dispatch_card(snapshot))
+	# 进行中派遣快照；多角色并行时为每条有效快照展示独立卡片，并隐藏完成报告。
+	var snapshots: Array = _service.call("get_active_dispatch_snapshots") as Array if _service.has_method("get_active_dispatch_snapshots") else []
+	if snapshots.is_empty() and _service.has_method("get_active_dispatch_snapshot"):
+		# 旧服务回退：仍可展示单条快照，便于面板在历史测试桩中使用。
+		var legacy_snapshot: Dictionary = _service.call("get_active_dispatch_snapshot") as Dictionary
+		if not legacy_snapshot.is_empty():
+			snapshots.append(legacy_snapshot)
+	if not snapshots.is_empty():
+		for raw_snapshot in snapshots:
+			if raw_snapshot is Dictionary:
+				_status_container.add_child(_create_active_dispatch_card(raw_snapshot as Dictionary))
 		return
 	# 最近完成报告；非空时展示报告卡片，签订新委托后由服务清空。
 	var report: Dictionary = _service.call("get_last_report") as Dictionary if _service.has_method("get_last_report") else {}
@@ -218,10 +231,16 @@ func _create_active_dispatch_card(snapshot: Dictionary) -> Control:
 	detail_label.text = "预期报酬：%d 星穹  |  大成功率：%d%%（大成功 ×1.5）" % [int(snapshot.get("reward_amount", 0)), int(round(float(snapshot.get("crit_chance", 0.0)) * 100.0))]
 	content.add_child(detail_label)
 	# 倒计时标签；文本由轮询按剩余整数秒刷新。
-	_countdown_label = Label.new()
-	_countdown_label.add_theme_font_size_override("font_size", 14)
-	_countdown_label.add_theme_color_override("font_color", Color(0.46, 0.92, 0.72, 1.0))
-	content.add_child(_countdown_label)
+	var countdown_label: Label = Label.new()
+	countdown_label.add_theme_font_size_override("font_size", 14)
+	countdown_label.add_theme_color_override("font_color", Color(0.46, 0.92, 0.72, 1.0))
+	# 倒计时角色标识；用于将本卡片标签与对应委托快照稳定关联。
+	var character_id: String = str(snapshot.get("character_id", ""))
+	if not character_id.is_empty():
+		_countdown_labels[character_id] = countdown_label
+	if _countdown_label == null:
+		_countdown_label = countdown_label
+	content.add_child(countdown_label)
 	_refresh_countdown()
 	var note_label: Label = Label.new()
 	note_label.add_theme_font_size_override("font_size", 11)
@@ -325,8 +344,8 @@ func _rebuild_mission_cards() -> void:
 		return
 	for child in _mission_container.get_children():
 		child.queue_free()
-	# 是否存在进行中派遣；占用期间全部委托的签订按钮统一禁用。
-	var dispatch_occupied: bool = _service.has_method("has_active_dispatch") and bool(_service.call("has_active_dispatch"))
+	# 是否存在进行中派遣；多角色并行扩展后仅检查当前所选角色，其他未上场角色仍可继续签订委托。
+	var dispatch_occupied: bool = not _selected_character_id.is_empty() and _service.has_method("is_character_dispatched") and bool(_service.call("is_character_dispatched", _selected_character_id))
 	# 委托定义副本；卡片只读取快照，签订时服务仍会再次校验角色与占用。
 	var definitions: Array = _service.call("get_mission_definitions") as Array if _service.has_method("get_mission_definitions") else []
 	for raw_definition in definitions:
@@ -338,7 +357,7 @@ func _rebuild_mission_cards() -> void:
 func _create_mission_card(definition: Dictionary, dispatch_occupied: bool) -> Control:
 	# 委托卡片；固定 302×190 并以独立 PanelContainer 承载，每行最多三张，超出后由流式容器自动换行并配合滚动容器展示。
 	var mission_id: String = str(definition.get("id", ""))
-	# 卡片可用状态；被占用或没有可派遣角色时使用暗色语义。
+	# 卡片可用状态；当前所选角色被占用或没有可派遣角色时使用暗色语义。
 	var card_active: bool = not dispatch_occupied and not _selected_character_id.is_empty()
 	var card: PanelContainer = _create_card_base(card_active, Vector2(302.0, 190.0))
 	card.name = mission_id
@@ -368,7 +387,7 @@ func _create_mission_card(definition: Dictionary, dispatch_occupied: bool) -> Co
 	var action_button: Button = Button.new()
 	action_button.custom_minimum_size = Vector2(0.0, 32.0)
 	if dispatch_occupied:
-		action_button.text = "已有进行中委托"
+		action_button.text = "所选角色已有进行中委托"
 		action_button.disabled = true
 	elif _selected_character_id.is_empty():
 		action_button.text = "没有可派遣的角色"
@@ -414,18 +433,32 @@ func _get_card_content(card: PanelContainer) -> VBoxContainer:
 
 func _refresh_countdown() -> void:
 	## 按进行中派遣快照刷新倒计时标签；标签只在派遣进行中卡片存在时有效。
-	if _countdown_label == null or not is_instance_valid(_countdown_label) or _service == null:
+	if _service == null:
 		return
 	# 进行中派遣快照；为空表示委托刚完成，页面重建由派遣状态信号负责。
-	var snapshot: Dictionary = _service.call("get_active_dispatch_snapshot") as Dictionary
-	if snapshot.is_empty():
-		return
-	# 目标倒计时文本；按剩余整数秒生成，未变化时跳过标签重写。
-	var countdown_text: String = "剩余在线 %s" % _format_duration(float(snapshot.get("remaining_seconds", 0.0)))
-	if countdown_text == _last_countdown_text:
-		return
-	_last_countdown_text = countdown_text
-	_countdown_label.text = countdown_text
+	var snapshots: Array = _service.call("get_active_dispatch_snapshots") as Array if _service.has_method("get_active_dispatch_snapshots") else []
+	if snapshots.is_empty() and _service.has_method("get_active_dispatch_snapshot"):
+		# 旧服务回退：兼容只提供单条快照的测试桩或历史服务版本。
+		var legacy_snapshot: Dictionary = _service.call("get_active_dispatch_snapshot") as Dictionary
+		if not legacy_snapshot.is_empty():
+			snapshots.append(legacy_snapshot)
+	for raw_snapshot in snapshots:
+		if not (raw_snapshot is Dictionary):
+			continue
+		# 当前委托快照；角色 ID 用于查找其卡片专属倒计时标签。
+		var snapshot: Dictionary = raw_snapshot as Dictionary
+		var character_id: String = str(snapshot.get("character_id", ""))
+		var countdown_label: Label = _countdown_labels.get(character_id, null) as Label
+		if countdown_label == null or not is_instance_valid(countdown_label):
+			continue
+		# 目标倒计时文本；按剩余整数秒生成，未变化时跳过对应标签重写。
+		var countdown_text: String = "剩余在线 %s" % _format_duration(float(snapshot.get("remaining_seconds", 0.0)))
+		if countdown_text == str(_last_countdown_texts.get(character_id, "")):
+			continue
+		_last_countdown_texts[character_id] = countdown_text
+		countdown_label.text = countdown_text
+		if countdown_label == _countdown_label:
+			_last_countdown_text = countdown_text
 
 
 func _open_dispatch_confirmation(mission_id: String) -> void:

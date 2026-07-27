@@ -456,8 +456,10 @@ func _position_category_panel(panel: PanelContainer, source_button: Button) -> v
 	## 把分类面板居中定位至所属按钮正上方；窗口尺寸变化时重算并限制在主菜单可见范围内。
 	if _bottom_category_expansion_margin == null or panel == null or source_button == null:
 		return
-	# 按钮局部坐标；将所属按钮的全局位置换算到展开层，避免底部边距容器改变时出现横向偏移。
-	var button_position: Vector2 = _bottom_category_expansion_margin.to_local(source_button.global_position)
+	# 展开层全局逆变换；CanvasItem 提供坐标变换，避免把 Node2D 专属的 to_local 接口误用于 Control。
+	var expansion_layer_inverse_transform: Transform2D = _bottom_category_expansion_margin.get_global_transform_with_canvas().affine_inverse()
+	# 按钮局部坐标；将所属按钮的全局画布坐标换算到展开层，避免底部边距容器改变时出现横向偏移。
+	var button_position: Vector2 = expansion_layer_inverse_transform * source_button.get_global_transform_with_canvas().origin
 	# 期望位置；面板水平中心与按钮中心对齐，底边与按钮顶边之间保持固定留白。
 	var desired_position: Vector2 = Vector2(
 		button_position.x + (source_button.size.x - panel.size.x) * 0.5,

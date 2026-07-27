@@ -330,6 +330,9 @@ var _is_training_mode: bool = false
 ## 当前骇入模式变体；取值为 HackModeRules 定义的 standard、bare 或 overclock，训练场固定回退 standard。
 ## 入场时从 SessionState 读取一次并缓存整局；决定人口倍率、二手概率覆盖、结算资格与玩家规则豁免。
 var _hack_variant: String = HackModeRules.VARIANT_STANDARD
+## 当前模式扩展汇总效果；键由 ModeExtensionRules 定义，入场时从 SessionState 读取一次并缓存整局。
+## 中性配置的数值倍率均为 1.0、布尔开关均为 false，训练场与无扩展骇入不会改变现有规则。
+var _mode_extension_effect_multipliers: Dictionary = ModeExtensionRules.get_effect_multipliers([])
 ## 当前选择角色标识；取值为 stelle、caelus 或 silver_wolf，默认 stelle，用于角色切换和属性随机。
 var _selected_character_id: String = CHARACTER_STELLE
 ## 当前战斗存活时间；取值为进入 GameWorld 后玩家未死亡的累计秒数，默认 0 用于 HUD 计时显示。
@@ -442,6 +445,9 @@ func _ready() -> void:
 				_monster_simulation_manager.connect("virtual_monster_died", Callable(self, "_on_monster_died"))
 			if _monster_simulation_manager.has_signal("monster_encountered") and not _monster_simulation_manager.is_connected("monster_encountered", Callable(self, "_on_monster_encountered")):
 				_monster_simulation_manager.connect("monster_encountered", Callable(self, "_on_monster_encountered"))
+			if _monster_simulation_manager.has_method("set_mode_extension_multipliers"):
+				# 怪物扩展倍率；虚拟人口每次物化时统一应用，反复卸载与恢复不会重复叠加。
+				_monster_simulation_manager.call("set_mode_extension_multipliers", _mode_extension_effect_multipliers)
 			# 同时活跃敌人上限缩放；骇入模式倍率（零装 0.6、超频 2.0）与联机成员倍率统一应用，标准单机保持原值。
 			_monster_simulation_manager.set("max_materialized_monsters", _apply_population_scales(int(_monster_simulation_manager.get("max_materialized_monsters"))))
 		_spawn_monster_batch()
@@ -668,6 +674,11 @@ func get_hack_variant() -> String:
 	return _hack_variant
 
 
+func is_minimap_disabled_by_mode_extension() -> bool:
+	## 返回右上角局部小地图是否被模式扩展禁用；完整大地图与暂停地图不受“禁用小地图”词条影响。
+	return bool(_mode_extension_effect_multipliers.get("disable_minimap", false))
+
+
 func is_settlement_disabled_mode() -> bool:
 	## 返回本局是否不产出物品得失结算；训练场与超频骇入（娱乐模式）都返回 true。
 	## HUD 据此切换“离开”按钮、死亡复活与拾取消耗行为，库存服务在这些模式下不开启战斗快照。
@@ -676,8 +687,9 @@ func is_settlement_disabled_mode() -> bool:
 
 func _apply_hack_variant_player_rules() -> void:
 	## 把当前骇入模式的玩家规则豁免写入玩家组件；标准与零装模式全部保持默认值，超频模式开启三类豁免。
+	## 模式扩展补充：汇总倍率同时写入对应独立组件，各组件不解析具体词条。
 	## 该函数只在入场时调用一次；全部开关都属于场景内组件状态，离开战斗后自动失效，不写入任何存档。
-	if _player == null or _hack_variant != HackModeRules.VARIANT_OVERCLOCK:
+	if _player == null:
 		return
 	# 战斗属性组件；通过已导出的玩家属性路径解析，避免预制体节点名变动使超频无限能量开关失效。
 	var stats_component: Node = _player.get_node_or_null(player_stats_component_path)
@@ -686,10 +698,19 @@ func _apply_hack_variant_player_rules() -> void:
 	# 武器耐久豁免；写入玩家控制器的模式级开关，与开发者调试开关互不覆盖。
 	if HackModeRules.is_durability_consumption_disabled(_hack_variant) and _player.has_method("set_weapon_durability_consumption_disabled_by_mode"):
 		_player.call("set_weapon_durability_consumption_disabled_by_mode", true)
+	if _player.has_method("set_weapon_durability_consumption_multiplier_by_mode_extension"):
+		# 武器耐久消耗倍率；风险合约“耐久消耗翻倍”写入 2.0，其余配置保持 1.0。
+		_player.call("set_weapon_durability_consumption_multiplier_by_mode_extension", float(_mode_extension_effect_multipliers.get("durability_consumption_multiplier", 1.0)))
 	# 装备组件；防具耐久豁免与武器豁免分开挂载，保持两类耐久规则各自可测试。
 	var equipment_component: Node = _player.get_node_or_null("EquipmentComponent")
 	if HackModeRules.is_durability_consumption_disabled(_hack_variant) and equipment_component != null and equipment_component.has_method("set_armor_durability_consumption_disabled_by_mode"):
 		equipment_component.call("set_armor_durability_consumption_disabled_by_mode", true)
+	if equipment_component != null and equipment_component.has_method("set_armor_durability_consumption_multiplier_by_mode_extension"):
+		# 防具耐久消耗倍率；与武器使用同一风险词条汇总值，保证两类耐久都准确翻倍。
+		equipment_component.call("set_armor_durability_consumption_multiplier_by_mode_extension", float(_mode_extension_effect_multipliers.get("durability_consumption_multiplier", 1.0)))
+	if equipment_component != null and equipment_component.has_method("set_vision_multiplier_by_mode_extension"):
+		# 玩家视野倍率；作为最终视野独立乘区，0.75 与 0.50 分别表示总视野降低 25% 与 50%。
+		equipment_component.call("set_vision_multiplier_by_mode_extension", float(_mode_extension_effect_multipliers.get("player_vision_multiplier", 1.0)))
 	# 主动技能组件；超频模式把技能冷却写入倍率降到规则表配置值，训练场无冷却开关优先级更高。
 	var active_skill_component: Node = _player.get_node_or_null("ActiveSkillComponent")
 	if active_skill_component != null and active_skill_component.has_method("set_mode_cooldown_scale"):
@@ -1114,6 +1135,7 @@ func _apply_session_state() -> void:
 	if session_state == null:
 		_is_training_mode = false
 		_hack_variant = HackModeRules.VARIANT_STANDARD
+		_mode_extension_effect_multipliers = ModeExtensionRules.get_effect_multipliers([])
 		_selected_character_id = CHARACTER_STELLE
 		_apply_selected_character()
 		return
@@ -1126,6 +1148,8 @@ func _apply_session_state() -> void:
 		_is_training_mode = session_mode == GAME_MODE_TRAINING
 	# 骇入模式变体；训练场固定使用标准值，正式骇入按会话状态读取，缺少接口时按标准骇入兜底。
 	_hack_variant = HackModeRules.normalize_variant(str(session_state.call("get_hack_variant"))) if not _is_training_mode and session_state.has_method("get_hack_variant") else HackModeRules.VARIANT_STANDARD
+	# 模式扩展效果；训练场固定使用中性值，正式骇入从 SessionState 获取已经规范化的整局汇总倍率。
+	_mode_extension_effect_multipliers = session_state.call("get_mode_extension_effect_multipliers") as Dictionary if not _is_training_mode and session_state.has_method("get_mode_extension_effect_multipliers") else ModeExtensionRules.get_effect_multipliers([])
 	# 二手概率模式覆盖；零装骇入把局内掉落武器装备的二手概率从基础值提高到规则表覆盖值，负值表示不覆盖。
 	var second_hand_override: float = HackModeRules.get_second_hand_chance_override(_hack_variant)
 	if second_hand_override >= 0.0:
@@ -1146,13 +1170,18 @@ func _get_session_state() -> Node:
 
 
 func _begin_global_inventory_run() -> void:
+	# 全局背包服务；模式扩展容量倍率在正式对局开始前写入，训练场与娱乐模式显式恢复为标准容量。
+	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+	if global_inventory != null and global_inventory.has_method("set_combat_backpack_capacity_multiplier"):
+		# 本局容量倍率；风险合约只在有结算的正式骇入生效，其他入口固定为 1.0。
+		var capacity_multiplier: float = float(_mode_extension_effect_multipliers.get("backpack_capacity_multiplier", 1.0)) if not _is_training_mode and not is_settlement_disabled_mode() else 1.0
+		global_inventory.call("set_combat_backpack_capacity_multiplier", capacity_multiplier)
 	# 娱乐模式补充：训练场与超频骇入都不开启正式战斗库存快照，拾取与死亡都不影响正式库存。
 	if _is_training_mode or is_settlement_disabled_mode():
 		return
 
 	# 全局背包服务；默认由自动加载提供，正式骇入开始时记录本局物品快照用于撤离和失败结算。
 	# 零装骇入补充：传入 true 让库存服务先封存真实背包与装备，再以空所有权开始本局。
-	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
 	if global_inventory != null and global_inventory.has_method("begin_combat_run"):
 		global_inventory.call("begin_combat_run", HackModeRules.is_bare_loadout(_hack_variant))
 	# 生涯统计服务；只有产出结算的战斗模式会走到这里，对局开始计入总局数并清零本局临时计数。
@@ -2584,6 +2613,15 @@ func _apply_monster_spawn_variation_values(monster: Node2D, size_multiplier: flo
 		monster.call("apply_spawn_variation", size_multiplier, attribute_multiplier)
 	else:
 		monster.scale *= Vector2(size_multiplier, size_multiplier)
+	_apply_mode_extension_monster_effects(monster)
+
+
+func _apply_mode_extension_monster_effects(monster: Node2D) -> void:
+	## 把风险合约的怪物属性倍率交给怪物自身处理；直接生成与虚拟人口实体化路径均使用同一接口。
+	if monster == null:
+		return
+	if monster.has_method("apply_mode_extension_multipliers"):
+		monster.call("apply_mode_extension_multipliers", _mode_extension_effect_multipliers)
 
 
 func _get_target_monster_population() -> int:
@@ -2613,12 +2651,17 @@ func _apply_network_population_scale(base_population: int) -> int:
 
 func _apply_population_scales(base_population: int) -> int:
 	## 统一应用骇入模式人口倍率与联机成员倍率；先按模式缩放（零装 0.6、超频 2.0），再按联机人数放大。
+	## 模式扩展补充：风险合约数量倍率插入骇入模式与联机成员倍率之间，各层依次取整。
 	## 开局布怪数量、人口曲线目标与同时活跃真实敌人上限都必须经过本函数，保证三处口径一致。
 	# 模式人口倍率；标准骇入与训练场为 1.0，直接透传避免无意义的取整误差。
 	var variant_population_multiplier: float = HackModeRules.get_population_multiplier(_hack_variant)
 	# 模式缩放结果；四舍五入为整数后再交给联机倍率，保持与联机缩放相同的取整策略。
 	var variant_scaled_population: int = base_population if variant_population_multiplier == 1.0 else roundi(float(base_population) * variant_population_multiplier)
-	return _apply_network_population_scale(variant_scaled_population)
+	# 模式扩展人口倍率；风险合约数量词条在骇入变体之后生效，训练场与无词条配置均为 1.0。
+	var extension_population_multiplier: float = maxf(float(_mode_extension_effect_multipliers.get("population_multiplier", 1.0)), 0.0)
+	# 模式扩展缩放结果；独立取整后再应用联机人数倍率，避免三个调用点出现不同计算顺序。
+	var extension_scaled_population: int = variant_scaled_population if extension_population_multiplier == 1.0 else roundi(float(variant_scaled_population) * extension_population_multiplier)
+	return _apply_network_population_scale(extension_scaled_population)
 
 
 func _on_monster_encountered(monster_id: String) -> void:
@@ -2752,7 +2795,9 @@ func _get_effective_monster_drop_chance(monster_node: Node, base_chance: float) 
 	var resolved_drop_multiplier: float = 1.0
 	if monster_node != null and "drop_multiplier" in monster_node:
 		resolved_drop_multiplier = maxf(float(monster_node.get("drop_multiplier")), 0.0)
-	return clampf(clampf(base_chance, 0.0, 1.0) * resolved_drop_multiplier, 0.0, 1.0)
+	# 风险合约掉落倍率；所有已选词条奖励先在规则表中加算，再统一乘到怪物的四类独立掉落概率。
+	var extension_drop_multiplier: float = maxf(float(_mode_extension_effect_multipliers.get("drop_chance_multiplier", 1.0)), 0.0)
+	return clampf(clampf(base_chance, 0.0, 1.0) * resolved_drop_multiplier * extension_drop_multiplier, 0.0, 1.0)
 
 
 func _spawn_monster_drop_with_animation(item_data: Resource, monster_position: Vector2) -> bool:

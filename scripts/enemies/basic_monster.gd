@@ -325,6 +325,24 @@ func apply_spawn_variation(size_multiplier: float, attribute_multiplier: float) 
 		health_changed.emit(current_health, max_health)
 
 
+func apply_mode_extension_multipliers(effect_multipliers: Dictionary) -> void:
+	## 应用整局模式扩展对怪物的独立倍率；出生随机波动先结算，本函数随后只处理生命、移速与攻击力。
+	## 攻击力倍率只作用于 attack_power 属性乘区，不额外放大武器或技能配置中的基础伤害，避免重复乘算。
+	# 生命倍率；最小限制为 0.01，风险合约当前只提供 1.25、1.5 或 2.0。
+	var health_multiplier: float = maxf(float(effect_multipliers.get("monster_health_multiplier", 1.0)), 0.01)
+	# 移速倍率；最小限制为 0.01，风险合约当前只提供 1.25、1.5 或 2.0。
+	var move_speed_multiplier: float = maxf(float(effect_multipliers.get("monster_move_speed_multiplier", 1.0)), 0.01)
+	# 攻击力倍率；最小限制为 0，风险合约当前只提供 1.5 或 2.0。
+	var attack_power_multiplier: float = maxf(float(effect_multipliers.get("monster_attack_power_multiplier", 1.0)), 0.0)
+	max_health *= health_multiplier
+	current_health = max_health
+	move_speed *= move_speed_multiplier
+	attack_power *= attack_power_multiplier
+	if is_inside_tree():
+		refresh_ai_configuration()
+		health_changed.emit(current_health, max_health)
+
+
 func _ready() -> void:
 	# 怪物实体碰撞只保留环境层；即使旧场景或运行时生成路径仍包含玩家层，也会在进入场景树时统一清除。
 	collision_mask &= ~PLAYER_PHYSICS_LAYER_MASK

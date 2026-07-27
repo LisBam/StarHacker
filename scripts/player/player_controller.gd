@@ -108,6 +108,8 @@ var _damage_interval_remaining: float = 0.0
 var _durability_consumption_disabled_by_debug: bool = false
 ## 是否由骇入模式规则禁用耐久消耗；默认 false，超频骇入由 GameWorld 入场时开启，与开发者开关互不覆盖。
 var _durability_consumption_disabled_by_mode: bool = false
+## 模式扩展武器耐久消耗倍率；默认 1.0，风险合约“耐久消耗翻倍”在入场时写入 2.0。
+var _durability_consumption_multiplier_by_mode_extension: float = 1.0
 ## 外部移动倍率来源；键为稳定效果 ID、值为非负倍率，默认空字典，主动技能蓄力等临时效果分别写入并连乘。
 var _movement_speed_multiplier_sources: Dictionary = {}
 ## 临时移动速度属性点来源；键为稳定来源 ID、值为可正向叠加的属性点，银狼技能等效果结束时按来源精确移除。
@@ -499,6 +501,11 @@ func set_weapon_durability_consumption_disabled_by_mode(enabled: bool) -> void:
 	_durability_consumption_disabled_by_mode = enabled
 
 
+func set_weapon_durability_consumption_multiplier_by_mode_extension(multiplier: float) -> void:
+	## 写入整局模式扩展武器耐久倍率；普通与混合武器都在各自基础成本之后统一乘算。
+	_durability_consumption_multiplier_by_mode_extension = maxf(multiplier, 0.0)
+
+
 func is_weapon_durability_consumption_disabled_by_debug() -> bool:
 	return _durability_consumption_disabled_by_debug
 
@@ -510,7 +517,10 @@ func _consume_weapon_durability(weapon_data: Resource, durability_cost: float = 
 	# 固定消耗补充：普通武器成功使用扣除 1 点、混合武器完整攻击扣除 2 点，此返回值只用于识别损坏武器等未发生变化的情况。
 	# 消耗前耐久；用于股市指标记录真实变化，混合武器剩余 1 点时只能记录 1 点而不是固定 2 点。
 	var durability_before: float = maxf(float(weapon_data.get("current_durability")), 0.0)
-	var durability_changed: bool = bool(weapon_data.call("consume_durability", durability_cost))
+	# 最终请求成本；基础成本先限制为非负值，再乘风险合约倍率，翻倍时普通武器扣 2 点、混合武器扣 4 点。
+	var resolved_durability_cost: float = maxf(durability_cost, 0.0) * _durability_consumption_multiplier_by_mode_extension
+	# 耐久是否变化；资源层会按剩余耐久截断实际扣除量，归零武器返回 false。
+	var durability_changed: bool = bool(weapon_data.call("consume_durability", resolved_durability_cost))
 	if not durability_changed:
 		return
 	# 实际耐久变化；资源会限制在零以上，因此该值始终非负且不超过请求成本。

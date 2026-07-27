@@ -34,7 +34,7 @@ const DISCOVERY_REQUEST_MAGIC: String = "star_hacker_room_probe_v1"
 ## 房间探测回复魔法字符串；客户端只接受携带该标识的回复。
 const DISCOVERY_REPLY_MAGIC: String = "star_hacker_room_reply_v1"
 ## 联机协议版本；建房与发现回复都会携带，版本不一致的房间会显示为不可加入。
-const PROTOCOL_VERSION: int = 1
+const PROTOCOL_VERSION: int = 2
 ## 房间最大成员数量；默认 4 人小队，超出后主机会拒绝新的连接。
 const MAX_PLAYERS: int = 4
 ## 房间探测广播间隔；单位秒，发现开启期间按该周期向局域网发送探测请求。
@@ -67,6 +67,10 @@ var _session_combat_mode: String = COMBAT_MODE_TEAM
 ## 当前联机骇入模式；取值为 HackModeRules 定义的 standard、bare 或 overclock，由主机选择并同步给全体成员。
 ## 与多人模式（组队/对抗）为两个独立维度；开局指令再次携带该值作为最终权威，成员各自写入 SessionState。
 var _session_hack_variant: String = HackModeRules.VARIANT_STANDARD
+## 当前联机模式扩展 ID；由房主选择并同步给全体成员，当前可包含 risk_contract。
+var _session_mode_extension_ids: Array[String] = []
+## 当前联机风险合约词条 ID；只有启用 risk_contract 且至少一项合法时有效，开局指令再次携带。
+var _session_risk_modifier_ids: Array[String] = []
 ## 主机侧房间发现监听套接字；仅主机绑定发现端口，收到探测请求后回复房间信息。
 var _discovery_server_socket: PacketPeerUDP = null
 ## 客户端房间探测套接字；仅发现模式开启时存在，负责广播探测与接收回复。
@@ -164,6 +168,8 @@ func _reset_session_state() -> void:
 	_shared_map_seed = 0
 	_session_combat_mode = COMBAT_MODE_TEAM
 	_session_hack_variant = HackModeRules.VARIANT_STANDARD
+	_session_mode_extension_ids.clear()
+	_session_risk_modifier_ids.clear()
 	_roster.clear()
 
 
@@ -221,8 +227,13 @@ func set_session_hack_variant(hack_variant: String) -> void:
 	if resolved_hack_variant == _session_hack_variant:
 		return
 	_session_hack_variant = resolved_hack_variant
+	# 重新校验的扩展配置；切换到无结算的超频模式时自动清除风险合约，切回其他模式不会恢复旧配置。
+	var sanitized_configuration: Dictionary = ModeExtensionRules.sanitize_configuration(_session_mode_extension_ids, _session_risk_modifier_ids, _session_hack_variant)
+	_session_mode_extension_ids = _to_string_array(sanitized_configuration.get("extension_ids", []))
+	_session_risk_modifier_ids = _to_string_array(sanitized_configuration.get("risk_modifier_ids", []))
 	_set_all_ready_false()
 	_rpc_sync_hack_variant.rpc(resolved_hack_variant)
+	_rpc_sync_mode_extensions.rpc(_session_mode_extension_ids, _session_risk_modifier_ids)
 	_broadcast_roster()
 	session_state_changed.emit()
 
@@ -231,12 +242,66 @@ func set_session_hack_variant(hack_variant: String) -> void:
 func _rpc_sync_hack_variant(hack_variant: String) -> void:
 	## 客户端接收主机的联机骇入模式；同步后刷新界面提示。
 	_session_hack_variant = HackModeRules.normalize_variant(hack_variant)
+	# 客户端当前扩展配置；先按新骇入模式本地校验，随后主机的扩展同步消息会提供最终权威值。
+	var sanitized_configuration: Dictionary = ModeExtensionRules.sanitize_configuration(_session_mode_extension_ids, _session_risk_modifier_ids, _session_hack_variant)
+	_session_mode_extension_ids = _to_string_array(sanitized_configuration.get("extension_ids", []))
+	_session_risk_modifier_ids = _to_string_array(sanitized_configuration.get("risk_modifier_ids", []))
+	session_state_changed.emit()
+
+
+func set_session_mode_extensions(extension_ids: Array, risk_modifier_ids: Array) -> void:
+	## 房主更新模式扩展配置；任何有效变化都会清空全员准备，客户端与战斗进行中调用无效。
+	if _session_state != SESSION_STATE_HOSTING or _combat_session_active:
+		return
+	# 规范化配置；规则表统一过滤未知扩展、同类重复风险词条与当前骇入模式不兼容项。
+	var sanitized_configuration: Dictionary = ModeExtensionRules.sanitize_configuration(extension_ids, risk_modifier_ids, _session_hack_variant)
+	# 有效扩展 ID；使用强类型副本，避免调用方后续修改原数组影响房间状态。
+	var resolved_extension_ids: Array[String] = _to_string_array(sanitized_configuration.get("extension_ids", []))
+	# 有效风险词条 ID；只有风险合约合法启用时保留。
+	var resolved_risk_modifier_ids: Array[String] = _to_string_array(sanitized_configuration.get("risk_modifier_ids", []))
+	if resolved_extension_ids == _session_mode_extension_ids and resolved_risk_modifier_ids == _session_risk_modifier_ids:
+		return
+	_session_mode_extension_ids = resolved_extension_ids
+	_session_risk_modifier_ids = resolved_risk_modifier_ids
+	_set_all_ready_false()
+	_rpc_sync_mode_extensions.rpc(_session_mode_extension_ids, _session_risk_modifier_ids)
+	_broadcast_roster()
+	session_state_changed.emit()
+
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_sync_mode_extensions(extension_ids: Array, risk_modifier_ids: Array) -> void:
+	## 客户端接收房主的模式扩展权威配置；收到后再次校验稳定 ID 与当前骇入模式兼容性。
+	# 规范化配置；网络消息不直接信任，避免异常 ID 写入本地会话。
+	var sanitized_configuration: Dictionary = ModeExtensionRules.sanitize_configuration(extension_ids, risk_modifier_ids, _session_hack_variant)
+	_session_mode_extension_ids = _to_string_array(sanitized_configuration.get("extension_ids", []))
+	_session_risk_modifier_ids = _to_string_array(sanitized_configuration.get("risk_modifier_ids", []))
 	session_state_changed.emit()
 
 
 func get_session_hack_variant() -> String:
 	## 返回当前联机骇入模式标识；联机面板下拉框与开局流程共用该查询。
 	return _session_hack_variant
+
+
+func get_session_mode_extension_ids() -> Array[String]:
+	## 返回当前联机模式扩展 ID 副本；联机界面和开局流程不得直接改写内部数组。
+	return _session_mode_extension_ids.duplicate()
+
+
+func get_session_risk_modifier_ids() -> Array[String]:
+	## 返回当前联机风险合约词条 ID 副本；未启用风险合约时为空。
+	return _session_risk_modifier_ids.duplicate()
+
+
+func get_session_mode_extension_summary() -> String:
+	## 返回适合房间界面展示的模式扩展摘要；未启用时明确显示“未开启”。
+	return ModeExtensionRules.get_configuration_summary(_session_mode_extension_ids, _session_risk_modifier_ids)
+
+
+func get_protocol_version() -> int:
+	## 返回当前联机会话协议版本；房间列表据此禁用无法安全解析模式扩展字段的旧版本房间。
+	return PROTOCOL_VERSION
 
 
 func get_session_combat_mode() -> String:
@@ -312,6 +377,8 @@ func _rpc_submit_profile(profile: Dictionary) -> void:
 		_rpc_sync_combat_mode.rpc_id(sender_peer_id, _session_combat_mode)
 		# 新成员骇入模式补发；保证晚加入者的骇入模式下拉框与主机当前选择一致。
 		_rpc_sync_hack_variant.rpc_id(sender_peer_id, _session_hack_variant)
+		# 新成员模式扩展补发；必须在骇入模式之后发送，使客户端按正确兼容条件校验风险合约。
+		_rpc_sync_mode_extensions.rpc_id(sender_peer_id, _session_mode_extension_ids, _session_risk_modifier_ids)
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -335,20 +402,25 @@ func request_start_combat() -> bool:
 		return false
 	# 共享地图种子；取非零随机整数，全员用同一种子复现地图、宝箱与物资撤离点。
 	var shared_seed: int = int(randi()) | 1
-	_rpc_begin_combat.rpc(shared_seed, _session_combat_mode, _session_hack_variant)
-	_rpc_begin_combat(shared_seed, _session_combat_mode, _session_hack_variant)
+	_rpc_begin_combat.rpc(shared_seed, _session_combat_mode, _session_hack_variant, _session_mode_extension_ids, _session_risk_modifier_ids)
+	_rpc_begin_combat(shared_seed, _session_combat_mode, _session_hack_variant, _session_mode_extension_ids, _session_risk_modifier_ids)
 	return true
 
 
 @rpc("authority", "call_remote", "reliable")
-func _rpc_begin_combat(shared_seed: int, combat_mode: String, hack_variant: String = "standard") -> void:
+func _rpc_begin_combat(shared_seed: int, combat_mode: String, hack_variant: String = "standard", extension_ids: Array = [], risk_modifier_ids: Array = []) -> void:
 	## 接收主机统一开局指令；写入共享种子、战斗模式与骇入模式后经全局过渡切入战斗场景。
+	## 模式扩展补充：开局指令同时携带扩展与风险词条，作为全员本局配置的最终权威。
 	if _is_local_scene_busy():
 		return
 	_shared_map_seed = shared_seed
 	_session_combat_mode = COMBAT_MODE_BATTLE_ROYALE if combat_mode == COMBAT_MODE_BATTLE_ROYALE else COMBAT_MODE_TEAM
 	# 开局骇入模式；开局指令携带的值为最终权威，防止同步消息与开局指令乱序导致模式不一致。
 	_session_hack_variant = HackModeRules.normalize_variant(hack_variant)
+	# 开局模式扩展配置；与开局骇入模式一起重新校验，作为所有客户端本局规则的最终权威。
+	var sanitized_configuration: Dictionary = ModeExtensionRules.sanitize_configuration(extension_ids, risk_modifier_ids, _session_hack_variant)
+	_session_mode_extension_ids = _to_string_array(sanitized_configuration.get("extension_ids", []))
+	_session_risk_modifier_ids = _to_string_array(sanitized_configuration.get("risk_modifier_ids", []))
 	_combat_session_active = true
 	_set_all_ready_false()
 	# 会话状态服务；开局统一写入正式骇入模式与主机选择的骇入模式变体，当前角色保持各自选择。
@@ -357,6 +429,8 @@ func _rpc_begin_combat(shared_seed: int, combat_mode: String, hack_variant: Stri
 		session_state.call("set_game_mode", GAME_MODE_HACK)
 	if session_state != null and session_state.has_method("set_hack_variant"):
 		session_state.call("set_hack_variant", _session_hack_variant)
+	if session_state != null and session_state.has_method("configure_mode_extensions"):
+		session_state.call("configure_mode_extensions", _session_mode_extension_ids, _session_risk_modifier_ids)
 	combat_session_started.emit()
 	roster_changed.emit()
 	# 全局场景过渡服务；与单机入口使用同一 0.3 秒黑屏过渡进入战斗。
@@ -503,6 +577,8 @@ func _poll_discovery_server() -> void:
 			"in_combat": _combat_session_active,
 			"mode": _session_combat_mode,
 			"hack_variant": _session_hack_variant,
+			"mode_extensions": _session_mode_extension_ids,
+			"risk_modifiers": _session_risk_modifier_ids,
 		}
 		_discovery_server_socket.set_dest_address(request_ip, request_port)
 		_discovery_server_socket.put_packet(JSON.stringify(reply_payload).to_utf8_buffer())
@@ -541,6 +617,8 @@ func _poll_discovery_client(delta: float) -> void:
 			"in_combat": bool(reply_payload.get("in_combat", false)),
 			"mode": str(reply_payload.get("mode", COMBAT_MODE_TEAM)),
 			"hack_variant": HackModeRules.normalize_variant(str(reply_payload.get("hack_variant", HackModeRules.VARIANT_STANDARD))),
+			"mode_extensions": _to_string_array(reply_payload.get("mode_extensions", [])),
+			"risk_modifiers": _to_string_array(reply_payload.get("risk_modifiers", [])),
 			"last_seen": Time.get_ticks_msec() * 0.001,
 		}
 		rooms_changed = true
@@ -697,6 +775,17 @@ func get_peer_character_id(peer_id: int) -> String:
 	if member_profile is Dictionary:
 		return str((member_profile as Dictionary).get("character_id", "stelle"))
 	return "stelle"
+
+
+func _to_string_array(raw_values: Variant) -> Array[String]:
+	## 把本地或网络传入的普通数组转换为强类型字符串数组；非数组输入返回空列表。
+	# 转换结果；逐项转为字符串，保留原顺序供规则表继续规范化。
+	var result: Array[String] = []
+	if not (raw_values is Array):
+		return result
+	for raw_value in raw_values:
+		result.append(str(raw_value))
+	return result
 
 
 func _get_default_player_name() -> String:

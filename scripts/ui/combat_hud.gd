@@ -104,6 +104,10 @@ const RISK_CONTRACT_VIEW_BUTTON_BOTTOM_RIGHT: Vector2 = Vector2(-200.0, -6.0)
 const HACK_PROTOCOL_VIEW_BUTTON_TOP_LEFT: Vector2 = Vector2(-620.0, 6.0)
 ## 骇入协议入口按钮右下偏移；相对屏幕中心为 (-200, 50)，形成固定 420×44 按钮。
 const HACK_PROTOCOL_VIEW_BUTTON_BOTTOM_RIGHT: Vector2 = Vector2(-200.0, 50.0)
+## 单个模式扩展入口顶部偏移；相对屏幕中心为 -22，使唯一启用的扩展按钮在左栏垂直居中。
+const SINGLE_MODE_EXTENSION_VIEW_BUTTON_TOP: float = -22.0
+## 单个模式扩展入口底部偏移；相对屏幕中心为 22，与顶部共同形成固定 44 像素高度。
+const SINGLE_MODE_EXTENSION_VIEW_BUTTON_BOTTOM: float = 22.0
 ## 骇入协议选择窗口半尺寸；默认 390×250，完整窗口为 780×500 并容纳三张等宽候选卡。
 const HACK_PROTOCOL_SELECT_PANEL_HALF_SIZE: Vector2 = Vector2(390.0, 250.0)
 
@@ -2336,7 +2340,7 @@ func _build_hack_protocol_view() -> void:
 	## 构建暂停界面左栏的骇入协议入口与只读面板；与风险合约入口上下排列并共享同一查看区域。
 	if _hack_protocol_view_button != null or _hack_protocol_view_panel != null:
 		return
-	# 左栏查看按钮；两种模式扩展入口同时可见，任一面板展开后共同隐藏。
+	# 左栏查看按钮；只在本局启用骇入协议时可见，与其他已启用扩展共享入口布局。
 	var view_button: Button = Button.new()
 	view_button.name = "HackProtocolViewButton"
 	view_button.text = "查看骇入协议"
@@ -2388,6 +2392,17 @@ func _get_current_hack_protocol_ids() -> Array[String]:
 	return HackProtocolRules.normalize_protocol_ids(_hack_protocol_component.call("get_acquired_protocol_ids") as Array)
 
 
+func _is_risk_contract_extension_enabled() -> bool:
+	## 返回本局风险合约扩展开关；入口显隐只读取稳定扩展 ID，不以词条数组是否为空替代启用状态。
+	# 会话状态服务；模式扩展由其保存为本局运行期配置，缺失时按未启用处理。
+	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
+	if session_state == null or not session_state.has_method("get_mode_extension_ids"):
+		return false
+	# 本局模式扩展 ID；只有显式包含风险合约时才允许暂停左栏显示对应入口。
+	var extension_ids: Array = session_state.call("get_mode_extension_ids")
+	return extension_ids.has(ModeExtensionRules.EXTENSION_RISK_CONTRACT)
+
+
 func _is_hack_protocol_extension_enabled() -> bool:
 	## 返回本局骇入协议扩展开关；优先读取 GameWorld 已缓存状态，独立 UI 场景回退组件是否存在。
 	if _game_world != null and _game_world.has_method("is_hack_protocol_enabled"):
@@ -2398,6 +2413,8 @@ func _is_hack_protocol_extension_enabled() -> bool:
 func _show_risk_contract_view(visible: bool) -> void:
 	## 打开或关闭左栏只读面板；中央暂停菜单与右侧地图保持可见，战斗继续处于暂停状态。
 	if _risk_contract_view_panel == null:
+		return
+	if visible and not _is_risk_contract_extension_enabled():
 		return
 	if visible and _risk_contract_view_panel.has_method("present"):
 		if _hack_protocol_view_panel != null:
@@ -2411,6 +2428,8 @@ func _show_risk_contract_view(visible: bool) -> void:
 func _show_hack_protocol_view(visible: bool) -> void:
 	## 打开或关闭本机协议只读面板；多人不会展示其他成员的协议、碎片或候选。
 	if _hack_protocol_view_panel == null:
+		return
+	if visible and not _is_hack_protocol_extension_enabled():
 		return
 	if visible and _hack_protocol_view_panel.has_method("present"):
 		if _risk_contract_view_panel != null:
@@ -2431,17 +2450,25 @@ func _hide_mode_extension_views() -> void:
 
 
 func _sync_risk_contract_view_visibility() -> void:
-	## 根据暂停页层级切换左栏入口；任一查看面板展开时隐藏两个入口，避免按钮覆盖共享查看区域。
+	## 根据暂停页层级和本局扩展开关切换左栏入口；未启用的扩展永远不显示，唯一入口自动居中。
 	if _risk_contract_view_button == null and _hack_protocol_view_button == null:
 		return
 	# 查看面板是否展开；风险合约与骇入协议共享左栏区域，任一展开时两个入口都隐藏。
 	var view_panel_visible: bool = (_risk_contract_view_panel != null and _risk_contract_view_panel.visible) or (_hack_protocol_view_panel != null and _hack_protocol_view_panel.visible)
 	# 入口基础可见条件；只在暂停主页且开发者菜单关闭时成立。
 	var entry_visible: bool = _pause_overlay.visible and _pause_menu_panel.visible and not view_panel_visible and not _is_combat_developer_menu_visible()
+	# 风险合约入口最终可见性；必须同时满足暂停主页条件与本局扩展已启用。
+	var risk_entry_visible: bool = entry_visible and _is_risk_contract_extension_enabled()
+	# 骇入协议入口最终可见性；必须同时满足暂停主页条件与本局扩展已启用。
+	var hack_entry_visible: bool = entry_visible and _is_hack_protocol_extension_enabled()
 	if _risk_contract_view_button != null:
-		_risk_contract_view_button.visible = entry_visible
+		_risk_contract_view_button.visible = risk_entry_visible
+		_risk_contract_view_button.offset_top = SINGLE_MODE_EXTENSION_VIEW_BUTTON_TOP if risk_entry_visible and not hack_entry_visible else RISK_CONTRACT_VIEW_BUTTON_TOP_LEFT.y
+		_risk_contract_view_button.offset_bottom = SINGLE_MODE_EXTENSION_VIEW_BUTTON_BOTTOM if risk_entry_visible and not hack_entry_visible else RISK_CONTRACT_VIEW_BUTTON_BOTTOM_RIGHT.y
 	if _hack_protocol_view_button != null:
-		_hack_protocol_view_button.visible = entry_visible
+		_hack_protocol_view_button.visible = hack_entry_visible
+		_hack_protocol_view_button.offset_top = SINGLE_MODE_EXTENSION_VIEW_BUTTON_TOP if hack_entry_visible and not risk_entry_visible else HACK_PROTOCOL_VIEW_BUTTON_TOP_LEFT.y
+		_hack_protocol_view_button.offset_bottom = SINGLE_MODE_EXTENSION_VIEW_BUTTON_BOTTOM if hack_entry_visible and not risk_entry_visible else HACK_PROTOCOL_VIEW_BUTTON_BOTTOM_RIGHT.y
 
 
 func _build_escape_confirmation_dialog() -> void:
@@ -4059,7 +4086,7 @@ func _on_hack_protocol_view_button_pressed() -> void:
 
 
 func _on_hack_protocol_view_closed() -> void:
-	## 关闭骇入协议查看面板后恢复两个模式扩展入口。
+	## 关闭骇入协议查看面板后恢复本局已经启用的模式扩展入口。
 	_sync_risk_contract_view_visibility()
 	if _hack_protocol_view_button != null and _hack_protocol_view_button.visible:
 		_hack_protocol_view_button.grab_focus()

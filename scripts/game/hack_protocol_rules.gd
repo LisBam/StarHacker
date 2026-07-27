@@ -9,18 +9,18 @@ class_name HackProtocolRules
 const OFFER_COUNT: int = 3
 ## 打开协议选择窗口所需持续按住时间；默认 3 秒，松开、界面受阻或碎片不足都会清空本次进度。
 const HOLD_DURATION_SECONDS: float = 3.0
-## 首次获得协议需要的数据碎片；默认 100，使正常战斗约 1.5 至 2.5 分钟出现第一次选择。
+## 首次获得协议需要的数据碎片；默认 100，配合翻倍后的三类来源使正常战斗约 0.75 至 1.25 分钟出现第一次选择。
 const BASE_FRAGMENT_REQUIREMENT: float = 100.0
 ## 每获得一项协议后增加的碎片需求；默认每层 +75，控制中后期协议成长速度不会失控。
 const FRAGMENT_REQUIREMENT_INCREMENT: float = 75.0
-## 存活获得 1 点碎片的时间间隔；默认每 5 秒结算一次，死亡和结算状态不累计。
+## 存活获得碎片的时间间隔；默认每 5 秒结算一次，死亡和结算状态不累计。
 const SURVIVAL_FRAGMENT_INTERVAL_SECONDS: float = 5.0
-## 每个完整存活结算间隔获得的碎片；默认 1 点，作为不依赖击杀能力的保底来源。
-const SURVIVAL_FRAGMENT_AMOUNT: float = 1.0
-## 本机确认击杀一名敌人获得的碎片；默认 3 点，多人模式只奖励最终击杀者。
-const KILL_FRAGMENT_AMOUNT: float = 3.0
-## 成功认领并释放一个宝箱获得的碎片；默认 18 点，主动开启与击毁开启使用相同事实口径。
-const CHEST_FRAGMENT_AMOUNT: float = 18.0
+## 每个完整存活结算间隔获得的碎片；默认 2 点，是原效率的两倍并作为不依赖击杀能力的保底来源。
+const SURVIVAL_FRAGMENT_AMOUNT: float = 2.0
+## 本机确认击杀一名敌人获得的碎片；默认 6 点，是原效率的两倍且多人模式只奖励最终击杀者。
+const KILL_FRAGMENT_AMOUNT: float = 6.0
+## 成功认领并释放一个宝箱获得的碎片；默认 36 点，是原效率的两倍且主动开启与击毁开启使用相同事实口径。
+const CHEST_FRAGMENT_AMOUNT: float = 36.0
 ## 每个团队平均协议层级提供的目标怪物人口增幅；默认 +12%，协议数为 0 时严格保持中性值。
 const POPULATION_BONUS_PER_AVERAGE_PROTOCOL: float = 0.12
 ## 骇入协议带来的目标怪物人口最大增幅；默认 +72%，防止长局人口和实体化上限无限增长。
@@ -33,36 +33,36 @@ const MAXIMUM_DROP_REDUCTION: float = 0.35
 ## 全部骇入协议定义；value、threshold、duration 等字段的含义由稳定 kind 决定。
 ## 同一协议重复获得时，数值型效果按层数加算；阈值、持续时间和布尔效果不会随层数改变。
 const PROTOCOL_DEFINITIONS: Array[Dictionary] = [
-	{"id": "kill_energy_restore", "display_name": "回收供能", "description": "每次击杀敌人回复 8 点能量。", "kind": "kill_energy_restore", "value": 8.0},
-	{"id": "weapon_bounce_bonus", "display_name": "折返路由", "description": "所有远程武器弹射次数 +1。", "kind": "weapon_bounce_bonus", "value": 1},
-	{"id": "weapon_piercing_bonus", "display_name": "贯穿指令", "description": "所有远程武器穿透次数 +1。", "kind": "weapon_piercing_bonus", "value": 1},
-	{"id": "weapon_combo_bonus", "display_name": "连发覆写", "description": "所有远程武器连击轮数 +1。", "kind": "weapon_combo_bonus", "value": 1},
-	{"id": "weapon_scatter_bonus", "display_name": "分形散射", "description": "所有远程武器每轮散射弹体 +1。", "kind": "weapon_scatter_bonus", "value": 1},
-	{"id": "attack_power_bonus", "display_name": "攻击增幅", "description": "攻击力提高 12%。", "kind": "attack_power_bonus", "value": 0.12},
-	{"id": "defense_power_bonus", "display_name": "防御增幅", "description": "防御力提高 15%。", "kind": "defense_power_bonus", "value": 0.15},
-	{"id": "move_speed_bonus", "display_name": "超频步进", "description": "移动速度提高 10%。", "kind": "move_speed_bonus", "value": 0.10},
-	{"id": "max_health_bonus", "display_name": "生命扩容", "description": "生命上限提高 15%，获得时保持当前生命比例。", "kind": "max_health_bonus", "value": 0.15},
-	{"id": "max_energy_bonus", "display_name": "能量扩容", "description": "能量上限提高 15%，获得时保持当前能量比例。", "kind": "max_energy_bonus", "value": 0.15},
-	{"id": "outgoing_damage_bonus", "display_name": "输出增幅", "description": "造成的伤害提高 10%。", "kind": "outgoing_damage_bonus", "value": 0.10},
-	{"id": "damage_reduction", "display_name": "损伤过滤", "description": "受到的伤害降低 8%。", "kind": "damage_reduction", "value": 0.08},
-	{"id": "kill_drop_chance_bonus", "display_name": "战利品嗅探", "description": "由你击杀的敌人物品掉落概率提高 12%。", "kind": "kill_drop_chance_bonus", "value": 0.12},
-	{"id": "kill_health_restore", "display_name": "生命回收", "description": "每次击杀敌人回复 6 点生命值。", "kind": "kill_health_restore", "value": 6.0},
-	{"id": "dodge_energy_reduction", "display_name": "冲刺节流", "description": "冲刺消耗的能量降低 20%。", "kind": "dodge_energy_reduction", "value": 0.20},
-	{"id": "sprint_energy_reduction", "display_name": "疾跑节流", "description": "疾跑消耗的能量降低 20%。", "kind": "sprint_energy_reduction", "value": 0.20},
-	{"id": "kill_skill_cooldown_reduction", "display_name": "终止回路", "description": "每次击杀敌人使全部主动技能当前剩余冷却缩短 10%。", "kind": "kill_skill_cooldown_reduction", "value": 0.10},
-	{"id": "attack_speed_bonus", "display_name": "攻速超频", "description": "武器攻击速度提高 12%。", "kind": "attack_speed_bonus", "value": 0.12},
-	{"id": "critical_chance_bonus", "display_name": "暴击注入", "description": "暴击率提高 8 个百分点。", "kind": "critical_chance_bonus", "value": 0.08},
-	{"id": "critical_damage_bonus", "display_name": "暴伤注入", "description": "暴击伤害倍率提高 0.30。", "kind": "critical_damage_bonus", "value": 0.30},
-	{"id": "low_health_shield", "display_name": "濒危防火墙", "description": "生命值首次降至 30% 以下时，获得 18（+10% 最大生命值）护盾；生命恢复到 30% 以上后可再次触发。", "kind": "low_health_shield", "threshold": 0.30, "flat_value": 18.0, "max_health_ratio": 0.10},
-	{"id": "dodge_damage_reduction", "display_name": "冲刺残影", "description": "冲刺后 2 秒内获得 20% 伤害减免。", "kind": "dodge_damage_reduction", "duration": 2.0, "value": 0.20},
-	{"id": "damage_energy_restore", "display_name": "受击充能", "description": "每次实际受到伤害回复 7 点能量。", "kind": "damage_energy_restore", "value": 7.0},
-	{"id": "high_energy_damage_bonus", "display_name": "高能输出", "description": "能量高于 70% 时，造成的伤害提高 15%。", "kind": "high_energy_damage_bonus", "threshold": 0.70, "value": 0.15},
-	{"id": "overheal_to_shield", "display_name": "冗余治疗缓存", "description": "将 50% 的溢出治疗转化为持续 6 秒的护盾。", "kind": "overheal_to_shield", "value": 0.50, "duration": 6.0},
-	{"id": "shield_damage_bonus", "display_name": "护盾火力链路", "description": "持有护盾时，造成的伤害提高 15%。", "kind": "shield_damage_bonus", "value": 0.15},
-	{"id": "shield_break_knockback", "display_name": "破盾震荡", "description": "护盾被击破时击退 220 像素内的敌人，理论击退距离 280 像素。", "kind": "shield_break_knockback", "radius": 220.0, "force": 280.0},
-	{"id": "execute_damage_bonus", "display_name": "终结算法", "description": "对生命值低于 30% 的敌人造成的伤害提高 25%。", "kind": "execute_damage_bonus", "threshold": 0.30, "value": 0.25},
-	{"id": "miss_energy_refund", "display_name": "空弹回收", "description": "弹体未命中敌人时，返还该弹体分摊能耗的 40%。", "kind": "miss_energy_refund", "value": 0.40},
-	{"id": "low_health_attack_speed", "display_name": "濒危超频", "description": "生命值低于 30% 时，武器攻击速度提高 25%。", "kind": "low_health_attack_speed", "threshold": 0.30, "value": 0.25},
+	{"id": "kill_energy_restore", "display_name": "回收供能", "description": "每次击杀敌人回复8点能量。", "kind": "kill_energy_restore", "value": 8.0},
+	{"id": "weapon_bounce_bonus", "display_name": "折返路由", "description": "所有武器弹射+1。", "kind": "weapon_bounce_bonus", "value": 1},
+	{"id": "weapon_piercing_bonus", "display_name": "贯穿指令", "description": "所有武器穿透+1。", "kind": "weapon_piercing_bonus", "value": 1},
+	{"id": "weapon_combo_bonus", "display_name": "连发覆写", "description": "所有武器连击+1。", "kind": "weapon_combo_bonus", "value": 1},
+	{"id": "weapon_scatter_bonus", "display_name": "分形散射", "description": "所有武器散射+1。", "kind": "weapon_scatter_bonus", "value": 1},
+	{"id": "attack_power_bonus", "display_name": "攻击增幅", "description": "攻击力+12%。", "kind": "attack_power_bonus", "value": 0.12},
+	{"id": "defense_power_bonus", "display_name": "防御增幅", "description": "防御力+15%。", "kind": "defense_power_bonus", "value": 0.15},
+	{"id": "move_speed_bonus", "display_name": "超频步进", "description": "速度+10%。", "kind": "move_speed_bonus", "value": 0.10},
+	{"id": "max_health_bonus", "display_name": "生命扩容", "description": "生命上限+15%。", "kind": "max_health_bonus", "value": 0.15},
+	{"id": "max_energy_bonus", "display_name": "能量扩容", "description": "能量上限+15%。", "kind": "max_energy_bonus", "value": 0.15},
+	{"id": "outgoing_damage_bonus", "display_name": "输出增幅", "description": "造成的伤害+10%。", "kind": "outgoing_damage_bonus", "value": 0.10},
+	{"id": "damage_reduction", "display_name": "损伤过滤", "description": "受到的伤害降低8%。", "kind": "damage_reduction", "value": 0.08},
+	{"id": "kill_drop_chance_bonus", "display_name": "战利品嗅探", "description": "击杀敌人的物品掉落概率+12%。", "kind": "kill_drop_chance_bonus", "value": 0.12},
+	{"id": "kill_health_restore", "display_name": "生命回收", "description": "击杀敌人回复6点生命值。", "kind": "kill_health_restore", "value": 6.0},
+	{"id": "dodge_energy_reduction", "display_name": "冲刺节流", "description": "闪避消耗的能量-20%。", "kind": "dodge_energy_reduction", "value": 0.20},
+	{"id": "sprint_energy_reduction", "display_name": "疾跑节流", "description": "冲刺消耗的能量-20%。", "kind": "sprint_energy_reduction", "value": 0.20},
+	{"id": "kill_skill_cooldown_reduction", "display_name": "终止回路", "description": "击杀敌人缩短主动技能10%的冷却。", "kind": "kill_skill_cooldown_reduction", "value": 0.10},
+	{"id": "attack_speed_bonus", "display_name": "攻速超频", "description": "攻速+12%。", "kind": "attack_speed_bonus", "value": 0.12},
+	{"id": "critical_chance_bonus", "display_name": "暴击注入", "description": "暴击率+8%。", "kind": "critical_chance_bonus", "value": 0.08},
+	{"id": "critical_damage_bonus", "display_name": "暴伤注入", "description": "暴击伤害+30%。", "kind": "critical_damage_bonus", "value": 0.30},
+	{"id": "low_health_shield", "display_name": "濒危防火墙", "description": "生命值低于30%时获得18（+10%最大生命值）的护盾。", "kind": "low_health_shield", "threshold": 0.30, "flat_value": 18.0, "max_health_ratio": 0.10},
+	{"id": "dodge_damage_reduction", "display_name": "冲刺残影", "description": "冲刺后获得2秒的20%减伤。", "kind": "dodge_damage_reduction", "duration": 2.0, "value": 0.20},
+	{"id": "damage_energy_restore", "display_name": "受击充能", "description": "受到伤害回复7点能量。", "kind": "damage_energy_restore", "value": 7.0},
+	{"id": "high_energy_damage_bonus", "display_name": "高能输出", "description": "当能量高于70%时提高15%的伤害。", "kind": "high_energy_damage_bonus", "threshold": 0.70, "value": 0.15},
+	{"id": "overheal_to_shield", "display_name": "冗余治疗缓存", "description": "将溢出的50%的治疗转化为持续6秒的护盾。", "kind": "overheal_to_shield", "value": 0.50, "duration": 6.0},
+	{"id": "shield_damage_bonus", "display_name": "护盾火力链路", "description": "持有护盾时，伤害提高15%。", "kind": "shield_damage_bonus", "value": 0.15},
+	{"id": "shield_break_knockback", "display_name": "破盾震荡", "description": "护盾被击破时击退周围的敌人。", "kind": "shield_break_knockback", "radius": 220.0, "force": 280.0},
+	{"id": "execute_damage_bonus", "display_name": "终结算法", "description": "对生命值低于30%的敌人造成的伤害提高25%。", "kind": "execute_damage_bonus", "threshold": 0.30, "value": 0.25},
+	{"id": "miss_energy_refund", "display_name": "空弹回收", "description": "弹体未命中敌人时，返回40%的能耗。", "kind": "miss_energy_refund", "value": 0.40},
+	{"id": "low_health_attack_speed", "display_name": "濒危超频", "description": "生命值低于30%时，攻速提高25%。", "kind": "low_health_attack_speed", "threshold": 0.30, "value": 0.25},
 	{"id": "full_health_guaranteed_critical", "display_name": "首击漏洞", "description": "对满血敌人造成的伤害必定暴击。", "kind": "full_health_guaranteed_critical"},
 ]
 

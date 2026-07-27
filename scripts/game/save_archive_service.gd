@@ -29,6 +29,7 @@ const SAVE_FILE_NAMES: Array[String] = [
 	"banner_notification_settings.cfg",
 	"debug_settings.cfg",
 	"global_inventory.json",
+	"newcomer_protection_state.json",
 	"shop_state.json",
 	"stock_market_state.json",
 	"mining_farm_state.json",

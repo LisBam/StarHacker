@@ -29,7 +29,7 @@ GameWorld 建立整图虚拟记录
 ```
 
 - 虚拟记录只保存重建敌人所需的最小状态，不执行 AI、物理、绘制或远距离掉落。
-- 真实敌人实体化时先恢复记录中的尺寸/属性出生波动，再调用 `apply_mode_extension_multipliers()` 应用整局风险合约生命、移速与攻击力倍率，最后按记录生命比例恢复当前生命。每次实体化都是新节点，因此不会在同一实例上重复叠乘；完整数值见机制总表第 29 章。
+- 真实敌人实体化时先恢复记录中的尺寸/属性出生波动，再调用 `apply_mode_extension_multipliers()` 应用整局风险合约生命、移速与攻击力倍率，随后调用 `apply_newcomer_protection_multiplier()` 叠加当前主机的新手保护战斗属性倍率，最后按记录生命比例恢复当前生命。每次实体化都是新节点，因此不会在同一实例上重复叠乘；完整数值见机制总表第 8、9、29 章。
 - 活跃敌人的物理移动逐帧执行；感知、射线、战术、寻路决策与远程攻击冷却按独立 AI 间隔错峰更新。远程怪物不再额外注册一个只递减冷却的渲染帧回调，冷却仍按两次 AI 决策之间累计的真实秒数推进。
 - 期望速度与外部击退速度都接近零的敌人跳过 `move_and_slide()` 物理提交，卡住检测按零位移推进；攻击范围内待机、战术驻守与巡逻等待状态不再产生物理服务器调用。
 - 感知、移动与战术组件拥有 `EnemyPerceptionComponent`、`EnemyMovementComponent`、`EnemyTacticalComponent` 全局类名；`BasicMonster` 通过强类型成员直接调用组件方法，热路径不使用字符串 `call()` 动态分发。
@@ -99,7 +99,7 @@ GameWorld 建立整图虚拟记录
 | 参数组 | 主要所有者 |
 | --- | --- |
 | 人口物化、休眠、扫描批次和真实节点上限 | `MonsterSimulationManager` |
-| 生命、攻击、个体倍率、AI 更新间隔和组件路径 | `BasicMonster` / `RangedMonster` |
+| 生命、攻击、个体倍率、新手保护倍率、AI 更新间隔和组件路径 | `BasicMonster` / `RangedMonster` |
 | 视野、记忆、卡墙与状态转换 | `EnemyPerceptionComponent`，配置由敌人组合根注入 |
 | 搜查半径、预测、伏击和候选点尝试 | `EnemyTacticalComponent`，配置由敌人组合根注入 |
 | 巡逻、绕障、路径重算和卡住检测 | `EnemyMovementComponent`，配置由敌人组合根注入 |

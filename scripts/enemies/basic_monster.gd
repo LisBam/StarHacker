@@ -286,6 +286,8 @@ var _shield_component: Node
 var _spawn_size_multiplier: float = 1.0
 ## 出生属性倍率；取值通常为 0.7 到 1.3，默认 1，统一作用于生命、伤害、移速、攻击距离和攻击节奏。
 var _spawn_attribute_multiplier: float = 1.0
+## 新手保护战斗属性倍率；取值为 0.01 到 1，默认 1 表示不降级，生成路径在首次成功撤离前写入 0.5。
+var _newcomer_protection_multiplier: float = 1.0
 ## AI 决策剩余时间；默认 0 表示首次物理帧立即决策，ready 后会随机错峰避免所有怪物同帧射线和寻路。
 var _ai_update_remaining: float = 0.0
 ## AI 决策累计时间；默认 0，低频更新时累加真实经过时间供记忆、冷却和巡逻计时使用。
@@ -338,6 +340,37 @@ func apply_mode_extension_multipliers(effect_multipliers: Dictionary) -> void:
 	current_health = max_health
 	move_speed *= move_speed_multiplier
 	attack_power *= attack_power_multiplier
+	if is_inside_tree():
+		refresh_ai_configuration()
+		health_changed.emit(current_health, max_health)
+
+
+func apply_newcomer_protection_multiplier(attribute_multiplier: float) -> void:
+	## 应用首次成功撤离前的统一怪物战斗属性降级；本函数在出生随机与风险合约后仅调用一次。
+	## 冷却使用倍率的倒数，使 0.5 表示每秒攻击次数降为 50%，而不是把等待时间缩短为一半。
+	# 标准化保护倍率；最高限制为 1 防止配置错误把新手保护变成怪物强化。
+	var resolved_multiplier: float = clampf(attribute_multiplier, 0.01, 1.0)
+	_newcomer_protection_multiplier = resolved_multiplier
+	max_health *= resolved_multiplier
+	current_health = minf(current_health * resolved_multiplier, max_health)
+	max_shield *= resolved_multiplier
+	current_shield = minf(current_shield * resolved_multiplier, max_shield)
+	attack_damage *= resolved_multiplier
+	attack_power *= resolved_multiplier
+	defense_power *= resolved_multiplier
+	toughness *= resolved_multiplier
+	attack_impact_force *= resolved_multiplier
+	attack_front_recoil_force *= resolved_multiplier
+	attack_recoil_force *= resolved_multiplier
+	move_speed *= resolved_multiplier
+	vision_range *= resolved_multiplier
+	attack_range *= resolved_multiplier
+	attack_cooldown /= resolved_multiplier
+	# 已存在的护盾组件；直接实例化以外的运行时调用也同步更新组件，避免组件仍保留旧上限。
+	if _shield_component != null and _shield_component.has_method("configure_shield"):
+		_shield_component.call("configure_shield", max_shield, false)
+		if _shield_component.has_method("set_shield"):
+			_shield_component.call("set_shield", current_shield)
 	if is_inside_tree():
 		refresh_ai_configuration()
 		health_changed.emit(current_health, max_health)

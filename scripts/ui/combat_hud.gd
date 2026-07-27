@@ -421,6 +421,8 @@ var _developer_sequence_index: int = 0
 var _developer_training_access_unlocked: bool = false
 ## 逃跑二次确认弹窗；默认运行时创建并在暂停状态处理输入，确认后才执行正式战斗损失结算。
 var _escape_confirmation_dialog: CommonConfirmationDialog
+## 新手保护结束提示弹窗；默认运行时创建，仅在玩家本档首次成功撤离的结算后展示一次。
+var _newcomer_protection_ended_dialog: CommonConfirmationDialog
 ## 当前结算结构化结果；默认空字典，结算弹窗打开后缓存获得与丢失条目供分类按钮重复重建。
 var _settlement_outcome: Dictionary = {}
 ## 结算获得物品主分类；取值为 all、weapons 或 resources，默认全部与战斗背包分类入口一致。
@@ -569,6 +571,7 @@ func _ready() -> void:
 	_build_risk_contract_view()
 	_build_hack_protocol_view()
 	_build_escape_confirmation_dialog()
+	_build_newcomer_protection_ended_dialog()
 	_build_combat_status_panel()
 	_build_nearby_drop_panel()
 	_build_supply_extraction_overlay()
@@ -2480,6 +2483,15 @@ func _build_escape_confirmation_dialog() -> void:
 	_root_control.add_child(_escape_confirmation_dialog)
 
 
+func _build_newcomer_protection_ended_dialog() -> void:
+	## 创建首次成功撤离后的单按钮信息弹窗；与逃跑确认分离实例，避免两个结算流程复用时状态串扰。
+	if _newcomer_protection_ended_dialog != null:
+		return
+	_newcomer_protection_ended_dialog = COMMON_CONFIRMATION_DIALOG_SCRIPT.new() as CommonConfirmationDialog
+	_newcomer_protection_ended_dialog.process_mode = Node.PROCESS_MODE_ALWAYS
+	_root_control.add_child(_newcomer_protection_ended_dialog)
+
+
 func _build_pause_key_binding_navigation() -> void:
 	if _pause_settings_content == null:
 		return
@@ -4335,6 +4347,7 @@ func _show_success_settlement() -> void:
 	if global_inventory != null and global_inventory.has_method("complete_combat_run_success"):
 		outcome = global_inventory.call("complete_combat_run_success")
 	_present_run_outcome(outcome)
+	_show_newcomer_protection_end_notice_if_needed()
 
 
 func _show_failure_settlement(reason: String, retained_ratio: float = -1.0, equipment_retained_ratio: float = -1.0) -> void:
@@ -4417,6 +4430,19 @@ func _present_run_outcome(outcome: Dictionary) -> void:
 	else:
 		_death_title_label.add_theme_color_override("font_color", Color(1.0, 0.46, 0.52, 1.0))
 	_set_death_overlay_visible(true)
+
+
+func _show_newcomer_protection_end_notice_if_needed() -> void:
+	## 在首次成功撤离结算遮罩就绪后展示结束提示；保护期内不创建任何 HUD 文案或战斗内提示。
+	if _newcomer_protection_ended_dialog == null:
+		return
+	# 新手保护服务；负责保证该通知只被当前首次撤离结算消费一次。
+	var newcomer_protection_service: Node = get_tree().root.get_node_or_null("NewcomerProtectionService")
+	if newcomer_protection_service == null or not newcomer_protection_service.has_method("consume_completion_notice"):
+		return
+	if not bool(newcomer_protection_service.call("consume_completion_notice")):
+		return
+	_newcomer_protection_ended_dialog.present_information("提示", "首次成功撤离，新手保护结束！")
 
 
 func _rebuild_settlement_list() -> void:

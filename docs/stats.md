@@ -18,15 +18,16 @@
 
 | 事件 | 挂点 | 口径守卫 |
 | --- | --- | --- |
-| 对局开始 `record_run_started` | `GameWorld._begin_global_inventory_run` | 训练场与超频骇入在挂点前提前返回，天然不计 |
+| 对局开始 `record_run_started` | `GameWorld._begin_global_inventory_run` | 训练场与超频骇入在挂点前提前返回，首次战斗引导也不调用 |
 | 击杀 `record_monster_killed` | 单机：`GameWorld._on_monster_died`（联机时跳过）；联机主机：`NetworkCombatSync._on_host_monster_died`（伤害归属为 0 即主机击杀）；联机客户端：`NetworkCombatSync._remove_puppet_enemy`（`kp` 等于本机） | “本机确认击杀”口径；联机侧另经 `SessionState.is_item_settlement_disabled()` 排除超频局 |
-| 开箱 `record_chest_opened` | `LootChest._release_loot`（携带品质标识） | 经 `SessionState.is_item_settlement_disabled()` 排除训练场与超频；联机只有实际出货的认领端执行 |
+| 开箱 `record_chest_opened` | `LootChest._release_loot`（携带品质标识） | 经 `SessionState.is_permanent_progression_suppressed()` 排除训练场、超频与首次战斗引导；联机只有实际出货的认领端执行 |
 | 送回 `record_shipped_value` | `GlobalInventory.ship_combat_resource_to_warehouse` | 仅正式对局可达该路径 |
 | 物品获得 `record_item_acquired` | `GlobalInventory._track_combat_acquisition`（战场首次获得）、`GlobalInventory.purchase_resource_to_warehouse`（商店与灰市购买）、`BountyService` 强化石奖励 | 读档恢复、容器转移与送回不经过这些入口，不会重复计数 |
-| 对局结束 `record_run_finished` | `CombatHud._record_stats_run_finished`（成功撤离 / 死亡 / 逃跑，须在库存正式结算前调用） | 娱乐模式结算入口已提前返回主菜单 |
+| 对局结束 `record_run_finished` | `CombatHud._record_stats_run_finished`（成功撤离 / 死亡 / 逃跑，须在库存正式结算前调用） | 娱乐模式与首次引导使用各自提前返回路径 |
 
+- `StatsService` 的六个事实入口都会再次读取 `SessionState.is_permanent_progression_suppressed()` 防御性拒绝首次引导和娱乐模式，因此战斗拾取、开箱等较深挂点也不会误推进生涯或悬赏。
 - 物品统计键与图鉴发现键同构（`item_kind:稳定ID`，强化石统一 `enhancement_stone:any`），两套口径可互相对照。
-- 怪物图鉴发现由 `GameWorld._on_monster_encountered` 统一转交 `GlobalInventory.register_monster_encounter`；该入口先以 `is_settlement_disabled_mode()` 排除训练场与超频骇入，因此两类娱乐模式的遇敌、击杀和掉落物消费都不会写入生涯统计或永久图鉴。
+- 怪物图鉴发现由 `GameWorld._on_monster_encountered` 统一转交 `GlobalInventory.register_monster_encounter`；该入口排除训练场、超频骇入与首次战斗引导，因此这些非正式进度模式的遇敌和击杀不会写入永久怪物图鉴。
 - 财富采样在服务启动与每局结束时各执行一次，口径复用 `BankService.get_asset_breakdown().total`（银行缺失时回退局外星穹），上限 240 个点先进先出。
 - 生涯快照的 `total_coins_earned` 直接读取 `GlobalInventory.get_total_coins_earned()`。外部收益变化时，统计服务把 `total_coins_earned_changed` 转发为 `stats_changed`，使已经打开的生涯面板即时刷新；统计服务不复制该数值。
 
@@ -39,4 +40,4 @@
 ## 4. 扩展协议
 
 - 新增统计维度时优先在本服务补充计数字段、快照字段与（按需）事实信号；面板与图鉴只消费快照或查询，不得各自维护第二份计数。
-- 新增挂点必须自带模式口径守卫（训练场与超频骇入不计），并在本文件的挂点表中登记。
+- 新增挂点必须自带模式口径守卫（首次战斗引导、训练场与超频骇入不计），并在本文件的挂点表中登记。

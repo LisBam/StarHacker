@@ -110,6 +110,10 @@ const SINGLE_MODE_EXTENSION_VIEW_BUTTON_TOP: float = -22.0
 const SINGLE_MODE_EXTENSION_VIEW_BUTTON_BOTTOM: float = 22.0
 ## 骇入协议选择窗口半尺寸；默认 390×250，完整窗口为 780×500 并容纳三张等宽候选卡。
 const HACK_PROTOCOL_SELECT_PANEL_HALF_SIZE: Vector2 = Vector2(390.0, 250.0)
+## 首次新手引导目标面板左上偏移；相对屏幕顶部中央为 (-420, 76)，避开上方计时与撤离状态。
+const FIRST_RUN_TUTORIAL_PANEL_TOP_LEFT: Vector2 = Vector2(-420.0, 76.0)
+## 首次新手引导目标面板右下偏移；相对屏幕顶部中央为 (420, 140)，提供单行长目标的稳定宽度。
+const FIRST_RUN_TUTORIAL_PANEL_BOTTOM_RIGHT: Vector2 = Vector2(420.0, 140.0)
 
 ## 玩家节点路径；默认指向同一游戏世界下的 Player，必须解析到玩家根节点，运行时通常不修改。
 @export var player_path: NodePath = ^"../Player"
@@ -325,6 +329,8 @@ var _is_training_mode: bool = false
 ## 当前是否为无结算娱乐模式；训练场与超频骇入均为 true，控制离开按钮文本、死亡复活与拾取消耗行为。
 ## 训练场专属工具（测试设置、角色切换）仍只看 _is_training_mode，本变量不扩大工具入口范围。
 var _is_casual_mode: bool = false
+## 当前是否为一次性首次战斗新手引导；默认 false，决定目标面板、死亡复活、首轮协议暂停和独立结算。
+var _is_first_run_tutorial: bool = false
 ## 玩家是否已经死亡；取值为 true/false，默认 false，生命归零后用于阻止继续打开暂停、背包和大地图。
 var _is_player_dead: bool = false
 ## 本局结算是否已经完成；默认 false，成功撤离、死亡或主动退出只允许执行一次全局背包结算。
@@ -386,6 +392,14 @@ var _survival_timer_label: Label
 var _monster_count_label: Label
 ## 撤离状态文本缓存；默认运行时创建，撤离点未出现时隐藏。
 var _extraction_status_label: Label
+## 首次新手引导目标面板；默认运行时创建并隐藏，只在 GameWorld 明确返回引导模式时显示。
+var _first_run_tutorial_panel: PanelContainer
+## 首次新手引导目标文本；默认运行时创建，每次战斗状态刷新时从 GameWorld 读取单一行动目标。
+var _first_run_tutorial_objective_label: Label
+## 最近一次显示的新手引导目标；默认空字符串，用于避免轮询期间重复写入相同 Label 文本。
+var _last_first_run_tutorial_objective_text: String = ""
+## 首轮新手协议窗口是否暂停了单机战斗树；默认 false，仅由自动弹出的首次选择设置，关闭时精确恢复。
+var _first_run_tutorial_protocol_pause_active: bool = false
 ## 暂停设置按键绑定面板缓存；默认运行时创建，显示并修改 InputMap 的玩家操作绑定。
 var _pause_key_binding_panel: Control
 ## 暂停设置按键绑定入口按钮缓存；默认运行时插入设置首页，点击后切换到按键绑定页面。
@@ -573,6 +587,7 @@ func _ready() -> void:
 	_build_escape_confirmation_dialog()
 	_build_newcomer_protection_ended_dialog()
 	_build_combat_status_panel()
+	_build_first_run_tutorial_panel()
 	_build_nearby_drop_panel()
 	_build_supply_extraction_overlay()
 	_build_character_showcase_view()
@@ -694,6 +709,7 @@ func _bind_game_world() -> void:
 	_game_world = get_node_or_null(game_world_path)
 	_is_training_mode = _resolve_training_mode()
 	_is_casual_mode = _resolve_casual_mode()
+	_is_first_run_tutorial = _resolve_first_run_tutorial()
 
 
 func _refresh_mode_state_after_game_world_initialized() -> void:
@@ -701,6 +717,7 @@ func _refresh_mode_state_after_game_world_initialized() -> void:
 	## 模式扩展补充：同一延后刷新同时应用风险合约的右上角小地图可见性。
 	_is_training_mode = _resolve_training_mode()
 	_is_casual_mode = _resolve_casual_mode()
+	_is_first_run_tutorial = _resolve_first_run_tutorial()
 	if _mini_map != null:
 		_mini_map.visible = not (_game_world != null and _game_world.has_method("is_minimap_disabled_by_mode_extension") and bool(_game_world.call("is_minimap_disabled_by_mode_extension")))
 	_bind_hack_protocol_component()
@@ -870,6 +887,10 @@ func _open_hack_protocol_select() -> void:
 		return
 	if not _hack_protocol_component.has_method("is_offer_ready") or not bool(_hack_protocol_component.call("is_offer_ready")):
 		return
+	if _is_first_run_tutorial and _hack_protocol_component.has_method("get_acquired_protocol_count") and int(_hack_protocol_component.call("get_acquired_protocol_count")) == 0:
+		# 首轮教学暂停；只暂停单机引导的第一次协议选择，普通局与后续协议仍保持实时战斗取舍。
+		_first_run_tutorial_protocol_pause_active = true
+		_set_battle_tree_paused(true)
 	_hack_protocol_select_overlay.visible = true
 	if _hack_protocol_select_panel.has_method("present"):
 		_hack_protocol_select_panel.call("present", _hack_protocol_component)
@@ -883,6 +904,9 @@ func _close_hack_protocol_select() -> void:
 	if _hack_protocol_select_panel != null and _hack_protocol_select_panel.has_method("dismiss"):
 		_hack_protocol_select_panel.call("dismiss")
 	_hack_protocol_hold_elapsed = 0.0
+	if _first_run_tutorial_protocol_pause_active:
+		_first_run_tutorial_protocol_pause_active = false
+		_set_battle_tree_paused(false)
 	_refresh_hack_protocol_progress()
 	_refresh_combat_input_state()
 
@@ -933,6 +957,9 @@ func _on_hack_protocol_fragments_changed(_current_fragments: float, _required_fr
 func _on_hack_protocol_offer_ready() -> void:
 	## 候选生成回调；只更新长按提示，不自动弹出窗口。
 	_refresh_hack_protocol_progress()
+	if _is_first_run_tutorial and _hack_protocol_component != null and _hack_protocol_component.has_method("get_acquired_protocol_count") and int(_hack_protocol_component.call("get_acquired_protocol_count")) == 0:
+		# 首轮协议自动展示；延后一帧等待碎片与候选信号链完成，窗口打开后暂停战斗供新玩家阅读。
+		call_deferred("_open_hack_protocol_select")
 
 
 func _on_hack_protocols_changed(_protocol_ids: Array[String]) -> void:
@@ -1423,6 +1450,47 @@ func _build_combat_status_panel() -> void:
 	monster_count_label.add_theme_constant_override("outline_size", 4)
 	_root_control.add_child(monster_count_label)
 	_monster_count_label = monster_count_label
+
+
+func _build_first_run_tutorial_panel() -> void:
+	## 创建首次战斗引导的单目标面板；面板只展示当前一步，不用多页说明遮挡真实战斗。
+	if _root_control == null or _first_run_tutorial_panel != null:
+		return
+	# 引导外层面板；锚定顶部中央并忽略鼠标，所有教学操作继续直接作用于战斗。
+	var tutorial_panel: PanelContainer = PanelContainer.new()
+	tutorial_panel.name = "FirstRunTutorialPanel"
+	tutorial_panel.visible = false
+	tutorial_panel.anchor_left = 0.5
+	tutorial_panel.anchor_top = 0.0
+	tutorial_panel.anchor_right = 0.5
+	tutorial_panel.anchor_bottom = 0.0
+	tutorial_panel.offset_left = FIRST_RUN_TUTORIAL_PANEL_TOP_LEFT.x
+	tutorial_panel.offset_top = FIRST_RUN_TUTORIAL_PANEL_TOP_LEFT.y
+	tutorial_panel.offset_right = FIRST_RUN_TUTORIAL_PANEL_BOTTOM_RIGHT.x
+	tutorial_panel.offset_bottom = FIRST_RUN_TUTORIAL_PANEL_BOTTOM_RIGHT.y
+	tutorial_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UI_STYLE_GUIDE.apply_section_panel(tutorial_panel)
+	_root_control.add_child(tutorial_panel)
+	_first_run_tutorial_panel = tutorial_panel
+	# 引导内容容器；只承载固定标题和随阶段变化的一行动目标。
+	var tutorial_content: VBoxContainer = VBoxContainer.new()
+	tutorial_content.add_theme_constant_override("separation", 4)
+	tutorial_panel.add_child(tutorial_content)
+	# 引导标题；明确当前撤离是教学，不会被误认为已经完成首次正式撤离。
+	var tutorial_title_label: Label = Label.new()
+	tutorial_title_label.text = "首次战斗引导 · 本次撤离不计入正式首撤"
+	tutorial_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tutorial_title_label.add_theme_font_size_override("font_size", 14)
+	tutorial_title_label.add_theme_color_override("font_color", Color(0.45, 0.92, 1.0, 1.0))
+	tutorial_content.add_child(tutorial_title_label)
+	# 引导目标文本；允许自动换行，窄分辨率下仍能完整显示当前操作。
+	var tutorial_objective_label: Label = Label.new()
+	tutorial_objective_label.text = ""
+	tutorial_objective_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tutorial_objective_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tutorial_objective_label.add_theme_font_size_override("font_size", 16)
+	tutorial_content.add_child(tutorial_objective_label)
+	_first_run_tutorial_objective_label = tutorial_objective_label
 
 
 func _build_nearby_drop_panel() -> void:
@@ -1957,6 +2025,22 @@ func _refresh_combat_status() -> void:
 			_survival_timer_label.text = _format_survival_time(float(survival_time_whole_seconds))
 
 	_refresh_extraction_status()
+	_refresh_first_run_tutorial_objective()
+
+
+func _refresh_first_run_tutorial_objective() -> void:
+	## 同步首次引导面板可见性与当前单一目标；世界缺失或非引导局时立即隐藏。
+	if _first_run_tutorial_panel == null or _first_run_tutorial_objective_label == null:
+		return
+	_first_run_tutorial_panel.visible = _is_first_run_tutorial
+	if not _is_first_run_tutorial or _game_world == null or not _game_world.has_method("get_first_run_tutorial_objective_text"):
+		return
+	# 当前引导目标；由 GameWorld 的击杀、开箱、协议和撤离事实实时推导。
+	var objective_text: String = str(_game_world.call("get_first_run_tutorial_objective_text"))
+	if objective_text == _last_first_run_tutorial_objective_text:
+		return
+	_last_first_run_tutorial_objective_text = objective_text
+	_first_run_tutorial_objective_label.text = objective_text
 
 
 func _get_survival_time_seconds() -> float:
@@ -2596,10 +2680,20 @@ func _resolve_casual_mode() -> bool:
 	return _resolve_training_mode()
 
 
+func _resolve_first_run_tutorial() -> bool:
+	## 解析本局是否为一次性首次战斗引导；只信任 GameWorld 显式接口，普通新手保护不会显示教学 UI。
+	return _game_world != null and _game_world.has_method("is_first_run_tutorial") and bool(_game_world.call("is_first_run_tutorial"))
+
+
 func _sync_mode_controls() -> void:
 	_test_settings_button.visible = _is_training_mode
 	# 返回主菜单按钮文本；训练场与超频骇入没有物品损失结算，因此使用“离开”并直接返回主菜单。
-	_return_main_menu_button.text = "离开" if _is_casual_mode else "逃跑"
+	_return_main_menu_button.text = "结束引导" if _is_first_run_tutorial else ("离开" if _is_casual_mode else "逃跑")
+	if _first_run_tutorial_panel != null:
+		_first_run_tutorial_panel.visible = _is_first_run_tutorial
+	if _monster_count_label != null:
+		# 引导信息减负；首次教学隐藏全图人口数字，普通战斗继续显示完整虚拟人口。
+		_monster_count_label.visible = not _is_first_run_tutorial
 	if not _can_use_training_tools():
 		_test_settings_panel.visible = false
 		_character_switch_panel.visible = false
@@ -3502,8 +3596,9 @@ func _on_weapon_attack_succeeded(source_kind: String, source_index: int, _weapon
 
 func _on_player_died() -> void:
 	_is_player_dead = true
-	if _is_casual_mode:
+	if _is_casual_mode or _is_first_run_tutorial:
 		# 训练场与超频骇入不进入正式结算；下一空闲帧恢复玩家生命并重新开放输入，避免死亡标记永久锁死 HUD。
+		# 首次引导复活补充：教学死亡同样不结算损失，保留当前阶段与拾取物继续练习直至完成撤离。
 		call_deferred("_revive_training_player")
 		return
 	# 联机观战分支；仍有存活队友时由战斗同步器接管视角并推迟死亡结算，观战结束后经回调恢复原结算流程，单机无同步器时直接结算。
@@ -3515,14 +3610,15 @@ func _on_player_died() -> void:
 
 func _show_deferred_death_settlement() -> void:
 	## 观战结束回调；执行被推迟的死亡结算，参数与即时死亡结算完全一致，重复结算由结算完成标记保护。
-	if _is_casual_mode or not _is_player_dead:
+	if _is_casual_mode or _is_first_run_tutorial or not _is_player_dead:
 		return
 	_show_failure_settlement("角色死亡", 1.0 - clampf(failure_backpack_loss_ratio, 0.0, 1.0), 1.0 - clampf(failure_equipment_loss_ratio, 0.0, 1.0))
 
 
 func _revive_training_player() -> void:
 	# 娱乐模式复活补充：训练场与超频骇入共用本复活流程，正式模式不允许触发。
-	if not _is_casual_mode or _stats_component == null:
+	# 首次引导复活补充：引导局与娱乐模式共用满血恢复，但仍保留正式拾取库存和独立成功结算。
+	if (not _is_casual_mode and not _is_first_run_tutorial) or _stats_component == null:
 		return
 	# 最大生命；训练场复活直接恢复满血，不修改角色或装备提供的生命上限。
 	var maximum_health: float = maxf(float(_stats_component.get("max_health")), 1.0)
@@ -4118,6 +4214,10 @@ func _on_unstuck_button_pressed() -> void:
 
 
 func _on_return_main_menu_button_pressed() -> void:
+	if _is_first_run_tutorial:
+		if _escape_confirmation_dialog != null:
+			_escape_confirmation_dialog.present_adaptive("结束新手引导", "确认结束本次新手引导并保留已经获得的物品吗？\n本次不会计入首次正式撤离，新手保护和功能解锁仍保留到下次正式撤离成功。", "结束引导", "继续教学", true)
+		return
 	# 娱乐模式离开；训练场与超频骇入没有物品得失结算，直接返回主菜单且不显示二次确认。
 	# 离开确认补充：娱乐模式同样保留二次确认以防误触，但正文不展示正式模式的物品丢失概率。
 	if _is_casual_mode:
@@ -4136,10 +4236,25 @@ func _on_return_main_menu_button_pressed() -> void:
 
 
 func _on_escape_confirmed() -> void:
+	if _is_first_run_tutorial:
+		_complete_first_run_tutorial_without_settlement()
+		return
 	if _is_casual_mode:
 		_return_to_main_menu()
 		return
 	_show_failure_settlement("逃跑", 1.0 - _get_current_escape_loss_ratio(), 1.0 - _get_current_escape_equipment_loss_ratio())
+
+
+func _complete_first_run_tutorial_without_settlement() -> void:
+	## 主动结束首次引导并保留当前物品；写入独立 tutorial_success 后直接返回主菜单，不触发任何正式失败或撤离统计。
+	if _run_outcome_resolved:
+		return
+	_run_outcome_resolved = true
+	# 全局库存服务；结束教学时沿用引导保留结算，服务信号会同步永久完成一次性引导状态。
+	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+	if global_inventory != null and global_inventory.has_method("complete_combat_run_tutorial"):
+		global_inventory.call("complete_combat_run_tutorial", "新手引导已结束")
+	_return_to_main_menu()
 
 
 func _get_current_escape_loss_ratio() -> float:
@@ -4326,6 +4441,16 @@ func _return_to_main_menu() -> void:
 func _show_success_settlement() -> void:
 	if _run_outcome_resolved:
 		return
+	if _is_first_run_tutorial:
+		_run_outcome_resolved = true
+		# 引导成功结算；保留全部拾取物但不写正式撤离编号，NewcomerProtectionService 只完成一次性引导状态。
+		var tutorial_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+		# 引导结算结果；服务缺失时使用相同结果标识的空收益兜底，仍不会落入正式 success 分支。
+		var tutorial_outcome: Dictionary = {"result": "tutorial_success", "title": "新手引导完成", "gained_entries": [], "lost_entries": [], "gained_items": [], "lost_items": [], "progression_eligible": false}
+		if tutorial_inventory != null and tutorial_inventory.has_method("complete_combat_run_tutorial"):
+			tutorial_outcome = tutorial_inventory.call("complete_combat_run_tutorial")
+		_present_run_outcome(tutorial_outcome)
+		return
 	# 娱乐模式撤离；训练场与超频骇入不产出结算，进入撤离点确认后直接返回主菜单，不展示结算窗口。
 	if _is_casual_mode:
 		_run_outcome_resolved = true
@@ -4422,10 +4547,10 @@ func _present_run_outcome(outcome: Dictionary) -> void:
 	_settlement_primary_category = InventoryQuery.PRIMARY_ALL
 	_settlement_subcategory = InventoryQuery.SUBCATEGORY_ALL
 	# 结算窗口标题；统一只显示“结算”，具体获得与损失结果继续由下方物品分区呈现。
-	_death_title_label.text = "结算"
+	_death_title_label.text = "新手引导完成" if result_type == "tutorial_success" else "结算"
 	_rebuild_settlement_list()
 	_death_return_main_menu_button.text = "确定"
-	if result_type == "success":
+	if result_type in ["success", "tutorial_success"]:
 		_death_title_label.add_theme_color_override("font_color", Color(0.35, 1.0, 0.72, 1.0))
 	else:
 		_death_title_label.add_theme_color_override("font_color", Color(1.0, 0.46, 0.52, 1.0))
@@ -4466,7 +4591,7 @@ func _rebuild_settlement_list() -> void:
 	# 现行规则补充：数组同时包含从武器栏与防具装备栏实际移除的物品。
 	var lost_entries: Array = _settlement_outcome.get("lost_entries", [])
 	_build_settlement_section("本局获得", filtered_gained_entries, "当前分类没有获得物品", Color(0.35, 1.0, 0.72, 1.0))
-	if result_type != "success":
+	if result_type not in ["success", "tutorial_success"]:
 		_build_settlement_section("丢失物品", lost_entries, "本次没有丢失物品", Color(1.0, 0.46, 0.52, 1.0))
 
 

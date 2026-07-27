@@ -134,7 +134,7 @@ func shutdown() -> void
 
 | 技能 | 类型 | 资源 | 行为 |
 | --- | --- | --- | --- |
-| 开拓！ | 被动 | `res://data/skills/stelle/farthest_chest.tres` | 初始宝箱生成完成后选取距离星最远者，写入独立金色宝箱地图标记；目标移除时清理 |
+| 开拓！ | 被动 | `res://data/skills/stelle/farthest_chest.tres` | 初始宝箱生成完成后选取距离星最远者，写入独立金色宝箱地图标记；首次战斗引导改选最近宝箱以缩短教学路线；目标移除时清理 |
 | 开拓！！ | 被动 | `res://data/skills/stelle/presence.tres` | 每 0.15 秒按相机实际世界视野统计其他单位与宝箱，逐个提高攻防 2%，最高 20% |
 | 银河全垒打 | 指向主动、可蓄力 | `res://data/skills/stelle/galactic_grand_slam.tres` | 单次能耗 20；45° 半角、180 像素方向扇形；15 秒冷却；蓄力期间移动速度为 50%；释放前坐力从 80 线性提高到 150 像素；冲击力从 150 线性提高到 270，并由命中目标统一结算击退 |
 

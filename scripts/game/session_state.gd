@@ -38,6 +38,8 @@ var mode_extension_ids: Array[String] = []
 var risk_contract_modifier_ids: Array[String] = []
 ## 当前选择角色；取值为 stelle、caelus 或 silver_wolf，默认 stelle 作为未选择时的兜底角色。
 var selected_character_id: String = CHARACTER_STELLE
+## 当前是否为一次性首次战斗新手引导；默认 false，仅由启动路由所在进程设置，返回主菜单后清除且不写入角色存档。
+var _first_run_tutorial_active: bool = false
 ## 已解锁角色标识；启动时合并角色档案中的默认解锁项与存档项，运行时只允许通过 unlock_character 增加。
 var _unlocked_character_ids: Array[String] = []
 ## 角色选择页一次性返回场景；默认空字符串表示使用页面检查器中的主菜单路径，仅在跨场景导航期间保留且不写入存档。
@@ -211,6 +213,21 @@ func is_overclock_hack_variant() -> bool:
 func is_item_settlement_disabled() -> bool:
 	## 返回当前会话是否不产出物品得失结算；训练场与超频骇入（娱乐模式）都返回 true。
 	return game_mode == MODE_TRAINING or is_overclock_hack_variant()
+
+
+func set_first_run_tutorial_active(active: bool) -> void:
+	## 设置本进程的一次性首次战斗引导标志；只改变运行期路由上下文，不写入任何永久角色或模式配置。
+	_first_run_tutorial_active = active
+
+
+func is_first_run_tutorial_active() -> bool:
+	## 返回当前会话是否正在运行首次战斗引导；正式模式消费者用它隔离统计、结算与教学专属规则。
+	return _first_run_tutorial_active
+
+
+func is_permanent_progression_suppressed() -> bool:
+	## 返回当前会话是否应禁止生涯统计、悬赏与正式撤离解锁；娱乐模式和首次新手引导都不产生永久进度。
+	return is_item_settlement_disabled() or _first_run_tutorial_active
 
 
 func is_training_mode() -> bool:

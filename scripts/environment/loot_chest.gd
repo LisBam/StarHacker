@@ -190,9 +190,13 @@ func _release_loot(broken_open: bool) -> void:
 	var drop_count: int = _random.randi_range(int(quality_config.get("drop_min", 2)), int(quality_config.get("drop_max", 4)))
 	# 最低高品质掉落数量；不会超过本次实际总掉落数。
 	var minimum_high_quality_count: int = mini(int(quality_config.get("minimum_high_quality_count", 0)), drop_count)
+	# 永久进度抑制状态；首次战斗引导与娱乐模式都不向股市运行指标写入开箱事实。
+	var progression_session_state: Node = get_tree().root.get_node_or_null("SessionState")
+	# 是否抑制永久进度；服务缺失时维持历史正式统计行为。
+	var progression_suppressed: bool = progression_session_state != null and progression_session_state.has_method("is_permanent_progression_suppressed") and bool(progression_session_state.call("is_permanent_progression_suppressed"))
 	# 股市统计服务；宝箱打开只上报一次，不关心手动开启或击破方式。
 	var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")
-	if stock_market_service != null and stock_market_service.has_method("record_run_metric"):
+	if not progression_suppressed and stock_market_service != null and stock_market_service.has_method("record_run_metric"):
 		stock_market_service.call("record_run_metric", "chests_opened", 1.0)
 	# 生涯统计与悬赏开箱上报；训练场与超频骇入不产出结算，因此不计入统计与悬赏进度。
 	# 联机口径补充：只有实际出货的认领端执行本函数，其余成员走静默移除，天然按人头各自计数。

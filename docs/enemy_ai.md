@@ -38,6 +38,7 @@ GameWorld 建立整图虚拟记录
 - 所有活跃敌人复用 `GameWorld` 缓存的 A* 网格。单个敌人只缓存自身路径和重算时机。
 - 目标刷新先做距离平方剔除再执行合法性校验；友方目标组为空时通过组计数短路，不分配组数组。
 - 内容目录扫描出的怪物场景会与场景检查器池去重合并。自定义敌人必须遵守实例化、目标、变体、死亡和注销协议。
+- 首次战斗引导在玩家附近约 `520` 像素处额外登记一只普通虚卒·掠夺者记录，并从 `32` 个均匀方向中选择无障碍候选，以保证首个战斗目标容易发现。该入口只读取普通 `monster_scene`，不创建、不替换也不调用精英怪内容；地图其余普通虚拟人口继续遵循原曲线。
 - 人口管理器创建真实敌人时优先使用 `set_primary_target()`，使玩家长期引用不会因仅设置当前目标而丢失；兼容节点可以只实现 `set_target()`。
 - `BasicMonster.set_primary_target()` 在获得有效玩家目标且 `monster_id` 非空时发出 `player_encountered(monster_id)`；`MonsterSimulationManager` 仅转发为 `monster_encountered(monster_id)`，`GameWorld` 再调用 `GlobalInventory.register_monster_encounter()`。这条单向信号链让敌人和人口组件不读取存档服务，并让重复物化由稳定 ID 去重。
 

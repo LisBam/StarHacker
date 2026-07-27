@@ -11,6 +11,10 @@ const RANGED_MONSTER_SCRIPT: Script = preload("res://scripts/enemies/ranged_mons
 const NEWCOMER_PROTECTION_SERVICE_SCRIPT: Script = preload("res://scripts/game/newcomer_protection_service.gd")
 ## 主菜单场景；用于验证锻造、据点、派遣与悬赏在首次成功撤离前锁定并在完成后实时开放。
 const MAIN_MENU_SCENE: PackedScene = preload("res://scenes/ui/main_menu.tscn")
+## 正式战斗场景；用于验证首次引导两分钟单出口、阶段目标与三项固定保底内容。
+const GAME_WORLD_SCENE: PackedScene = preload("res://scenes/game/game_world.tscn")
+## 骇入协议组件脚本；用于纯内存验证首次引导固定候选不会影响后续随机规则。
+const HACK_PROTOCOL_COMPONENT_SCRIPT: Script = preload("res://scripts/components/hack_protocol_component.gd")
 ## 联机会话脚本；用于读取新增敌人保护倍率后要求的协议版本。
 const NETWORK_SESSION_SCRIPT: Script = preload("res://scripts/game/network_session.gd")
 
@@ -21,6 +25,7 @@ var _failure_count: int = 0
 func _ready() -> void:
 	## 顺序执行属性与正式结算验证；测试命令必须指定隔离 APPDATA，保证实际持久化事件不触及日常用户存档。
 	_test_newcomer_service_default_state()
+	await _test_first_run_tutorial_transition()
 	await _test_first_successful_extraction_transition()
 	_test_basic_monster_protection_attributes()
 	_test_ranged_monster_protection_attributes()
@@ -42,7 +47,74 @@ func _test_newcomer_service_default_state() -> void:
 		return
 	_check(bool(protection_service.call("is_newcomer_protection_active")), "新档默认必须启用新手保护。")
 	_check(is_equal_approx(float(protection_service.call("get_monster_attribute_multiplier")), 0.75), "新手保护怪物属性倍率必须固定为 0.75。")
+	_check(bool(protection_service.call("should_start_first_run_tutorial")), "新档第一次启动必须进入一次性首次战斗引导。")
+	_check(not bool(protection_service.call("has_completed_first_run_tutorial")), "新档不得提前完成首次战斗引导。")
 	protection_service.free()
+
+
+func _test_first_run_tutorial_transition() -> void:
+	## 验证启动引导配置、0 至 8 分钟阶段规则、固定协议候选与 tutorial_success 结算不会结束新手保护或解锁正式功能。
+	# 全局库存服务；本测试运行于隔离用户目录，用于验证独立引导结算结果与永久字段。
+	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+	# 新手保护服务；负责开始与完成一次性引导，同时保持首次正式撤离资格为 false。
+	var protection_service: Node = get_tree().root.get_node_or_null("NewcomerProtectionService")
+	# 会话状态服务；引导开始后应固定标准骇入、星角色、骇入协议与运行期教学标志。
+	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
+	_check(global_inventory != null and protection_service != null and session_state != null, "首次引导测试必须取得库存、新手保护与会话三个 AutoLoad。")
+	if global_inventory == null or protection_service == null or session_state == null:
+		return
+	protection_service.call("begin_first_run_tutorial")
+	_check(bool(session_state.call("is_first_run_tutorial_active")), "首次启动必须写入引导会话标志。")
+	_check(str(session_state.get("game_mode")) == "hack" and str(session_state.call("get_hack_variant")) == "standard", "首次引导必须固定使用标准骇入。")
+	_check(str(session_state.call("get_selected_character_id")) == "stelle", "首次引导必须固定使用星角色。")
+	_check(bool(session_state.call("is_hack_protocol_enabled")), "首次引导必须启用骇入协议扩展。")
+	# 脱离场景树的战斗世界；只验证纯规则与导出资源，不启动真实人口、库存或 UI。
+	var tutorial_world: Node = GAME_WORLD_SCENE.instantiate()
+	_check(tutorial_world != null, "首次引导规则测试必须可以实例化战斗世界。")
+	if tutorial_world != null:
+		tutorial_world.set("_is_first_run_tutorial", true)
+		_check(int(tutorial_world.call("_get_effective_extraction_point_count")) == 1, "首次引导只能生成 1 个正式撤离点。")
+		_check(is_equal_approx(float(tutorial_world.call("_get_effective_extraction_spawn_time_seconds")), 120.0), "首次引导撤离点必须在 120 秒出现。")
+		_check(is_equal_approx(float(tutorial_world.call("_get_effective_extraction_map_marker_time_seconds")), 120.0), "首次引导撤离点出现时必须立即在地图标记。")
+		_check(str(tutorial_world.call("get_first_run_tutorial_objective_text")).contains("普通敌人"), "首次引导第一阶段必须明确要求击败普通敌人。")
+		# 首杀武器模板；稳定 ID 必须为 formation_breaker，对应玩家可见名称“陷阵”。
+		var tutorial_weapon: Resource = tutorial_world.get("tutorial_first_kill_weapon") as Resource
+		# 首箱防具模板；稳定 ID 必须为 origin_armor，对应玩家可见名称“起源护甲”。
+		var tutorial_equipment: Resource = tutorial_world.get("tutorial_first_chest_equipment") as Resource
+		_check(tutorial_weapon != null and str(tutorial_weapon.get("weapon_id")) == "formation_breaker", "首次击杀必须保底掉落“陷阵”。")
+		_check(tutorial_equipment != null and str(tutorial_equipment.get("equipment_id")) == "origin_armor", "首次开箱必须保底掉落“起源护甲”。")
+		tutorial_world.free()
+	# 临时协议组件；不加入场景树，不读取玩家组件或写入存档，只验证固定首轮候选。
+	var protocol_component: Node = HACK_PROTOCOL_COMPONENT_SCRIPT.new() as Node
+	_check(protocol_component != null, "首次引导固定协议候选测试必须可以实例化组件。")
+	if protocol_component != null:
+		# 预期首轮候选；按设计顺序提供连发、散射与击杀回血。
+		var expected_offer_ids: Array[String] = ["weapon_combo_bonus", "weapon_scatter_bonus", "kill_health_restore"]
+		_check(bool(protocol_component.call("set_first_offer_override_ids", expected_offer_ids)), "首轮固定协议候选必须可在碎片满足前注入。")
+		protocol_component.call("add_fragments", HackProtocolRules.BASE_FRAGMENT_REQUIREMENT)
+		# 实际首轮候选；规范为强类型列表后与设计顺序逐项比较。
+		var actual_offer_ids: Array[String] = HackProtocolRules.normalize_protocol_ids(protocol_component.call("get_offer_ids") as Array)
+		_check(actual_offer_ids == expected_offer_ids, "首次引导协议候选必须严格保持设计顺序且不随机，实际为 %s。" % str(actual_offer_ids))
+		protocol_component.free()
+	global_inventory.call("begin_combat_run", false, true)
+	# 引导结算结果；保留物品但显式声明不参与永久进度。
+	var tutorial_outcome: Dictionary = global_inventory.call("complete_combat_run_tutorial") as Dictionary
+	_check(str(tutorial_outcome.get("result", "")) == "tutorial_success", "首次引导撤离必须产生独立 tutorial_success 结果。")
+	_check(not bool(tutorial_outcome.get("progression_eligible", true)), "首次引导结算必须禁止正式统计、行情和解锁进度。")
+	_check(bool(protection_service.call("has_completed_first_run_tutorial")), "引导撤离后必须永久完成一次性教学。")
+	_check(not bool(protection_service.call("has_completed_first_successful_extraction")), "引导撤离不得计为首次正式成功撤离。")
+	_check(bool(protection_service.call("is_newcomer_protection_active")), "引导撤离后新手保护必须继续有效。")
+	_check(not bool(session_state.call("is_first_run_tutorial_active")), "引导结束后必须清除运行期教学标志。")
+	await get_tree().process_frame
+	# 引导状态存档；必须只写教学完成，正式首次撤离字段仍为 false。
+	var tutorial_save_file: FileAccess = FileAccess.open("user://newcomer_protection_state.json", FileAccess.READ)
+	_check(tutorial_save_file != null, "首次引导完成状态必须写入新手成长存档。")
+	if tutorial_save_file != null:
+		# 引导存档数据；只读验证两个永久字段彼此独立。
+		var tutorial_save_data: Variant = JSON.parse_string(tutorial_save_file.get_as_text())
+		tutorial_save_file.close()
+		_check(tutorial_save_data is Dictionary and bool((tutorial_save_data as Dictionary).get("has_completed_first_run_tutorial", false)), "新手成长存档必须保存首次引导完成状态。")
+		_check(tutorial_save_data is Dictionary and not bool((tutorial_save_data as Dictionary).get("has_completed_first_successful_extraction", true)), "首次引导存档不得提前写入正式首撤完成状态。")
 
 
 func _test_first_successful_extraction_transition() -> void:
@@ -123,6 +195,7 @@ func _test_first_successful_extraction_transition() -> void:
 		var save_data: Variant = JSON.parse_string(save_file.get_as_text())
 		save_file.close()
 		_check(save_data is Dictionary and bool((save_data as Dictionary).get("has_completed_first_successful_extraction", false)), "新手成长存档必须永久保存首次成功撤离完成状态。")
+		_check(save_data is Dictionary and bool((save_data as Dictionary).get("has_completed_first_run_tutorial", false)), "正式首撤完成后不得丢失已经完成的一次性引导状态。")
 	main_menu.queue_free()
 
 

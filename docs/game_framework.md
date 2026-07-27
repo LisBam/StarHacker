@@ -6,14 +6,15 @@
 
 | 入口 | 实现 | 职责 |
 | --- | --- | --- |
-| 主菜单 | `res://scenes/ui/main_menu.tscn`、`res://scripts/ui/main_menu.gd` | 项目主场景；底部直接打开角色、背包、仓库、商店及局外成长入口，锻造、据点、派遣和悬赏共用首次成功撤离资格；普通样式“金融 ▲”位于“统计 ▲”左侧，两者分别向上展开单列的股市/矿场/保险/银行和图鉴/生涯入口；点击“骇入”先选择标准/零装/超频骇入，再进入可多选或不选的模式扩展窗口；同一场景可作为大厅局外面板宿主 |
+| 启动路由 | `res://scenes/game/startup_router.tscn`、`res://scripts/game/startup_router.gd` | 项目主场景；在可见 UI 出现前查询一次性首次战斗引导资格，新档直接配置标准骇入、星与骇入协议并进入战斗，已完成引导的档案进入主菜单 |
+| 主菜单 | `res://scenes/ui/main_menu.tscn`、`res://scripts/ui/main_menu.gd` | 常规启动落点；底部直接打开角色、背包、仓库、商店及局外成长入口，锻造、据点、派遣和悬赏共用首次成功撤离资格；普通样式“金融 ▲”位于“统计 ▲”左侧，两者分别向上展开单列的股市/矿场/保险/银行和图鉴/生涯入口；点击“骇入”先选择标准/零装/超频骇入，再进入可多选或不选的模式扩展窗口；同一场景可作为大厅局外面板宿主 |
 | 主大厅 | `res://scenes/game/main_lobby.tscn`、`res://scripts/game/lobby_world.gd` | 承载当前角色自由移动、攻击、技能、静态交互设施与大厅 HUD；不创建敌人、掉落、撤离或战斗结算 |
 | 联机大厅 | `res://scenes/game/multiplayer_lobby.tscn`、`res://scripts/game/multiplayer_lobby_world.gd`（继承 `LobbyWorld`） | 主菜单“联机”入口目标场景；进场自动打开联机面板，左上角提供“联机设置”入口，房间成员经 `NetworkLobbySync` 在同一大厅内互相可见；玩法约束与主大厅一致 |
 | 角色系统 | `res://scenes/ui/character_select.tscn`、`res://scripts/ui/character_select.gd` | 完整模式展示可选角色并持久化确认结果；当前角色模式隐藏角色列表，供战斗内只读查看同一套属性与技能详情 |
 | 战斗世界 | `res://scenes/game/game_world.tscn`、`res://scripts/game/game_world.gd` | 承载玩家、地图、环境、敌人人口、宝箱、掉落与撤离流程 |
 | 玩家预制体 | `res://scenes/characters/player.tscn`、`res://scripts/player/player_controller.gd` | 组合输入、移动、战斗属性、装备和攻击组件 |
 
-主菜单和主大厅进入正式骇入前，把模式、骇入模式变体、模式扩展 ID 与扩展专属配置写入 `SessionState`；这些字段都只在运行期有效。训练场入口显式复位为 standard 并清空扩展，联机开局由 `NetworkSession` 按房主最终权威值写入。三种骇入模式的分组、文案与倍率集中在 `HackModeRules`，模式扩展与风险词条集中在 `ModeExtensionRules`，31 项局内协议与碎片/代价数值集中在 `HackProtocolRules`。`GameWorld` 入场时取得模式结果并按需动态创建 `HackProtocolComponent`：骇入模式负责人口、二手概率与超频豁免，风险合约汇总字典把怪物属性、耐久、视野、背包、小地图、正式撤离点数量和掉落倍率分发给各数据所有者；无撤离限制时 `GameWorld` 生成 3 个尽量远距的点位，`extraction_points_one` 覆盖为 1 个。骇入协议组件只维护本机本局状态。`CombatHud` 在 GameWorld 完成状态应用后的延后帧重新读取娱乐模式、小地图禁用状态与协议组件，零装封存由 `GlobalInventory.begin_combat_run(bare_loadout)` 负责。完整模式扩展边界见 `docs/mode_extensions.md`。已确认角色由同一服务跨场景保存；角色页的一次性返回场景同样由该服务持有但不写入存档，使主菜单与大厅入口能各自原路返回。所有主场景切换统一经 `SceneTransition` 执行，业务 UI 不直接维护过渡动画。
+主菜单和主大厅进入正式骇入前，把模式、骇入模式变体、模式扩展 ID 与扩展专属配置写入 `SessionState`；这些字段都只在运行期有效。首次启动由 `StartupRouter` 调用 `NewcomerProtectionService.begin_first_run_tutorial()` 写入独立运行期引导标志并直接切入战斗。训练场入口显式复位为 standard 并清空扩展，联机开局由 `NetworkSession` 按房主最终权威值写入。三种骇入模式的分组、文案与倍率集中在 `HackModeRules`，模式扩展与风险词条集中在 `ModeExtensionRules`，31 项局内协议与碎片/代价数值集中在 `HackProtocolRules`。`GameWorld` 入场时取得模式结果并按需动态创建 `HackProtocolComponent`：骇入模式负责人口、二手概率与超频豁免，风险合约汇总字典把怪物属性、耐久、视野、背包、小地图、正式撤离点数量和掉落倍率分发给各数据所有者；无撤离限制时 `GameWorld` 生成 3 个尽量远距的点位，`extraction_points_one` 和首次引导分别覆盖为 1 个。骇入协议组件只维护本机本局状态。`CombatHud` 在 GameWorld 完成状态应用后的延后帧重新读取娱乐模式、首次引导、小地图禁用状态与协议组件，零装与引导上下文分别由 `GlobalInventory.begin_combat_run(bare_loadout, tutorial_run)` 接收。完整模式扩展边界见 `docs/mode_extensions.md`。已确认角色由同一服务跨场景保存；角色页的一次性返回场景同样由该服务持有但不写入存档，使主菜单与大厅入口能各自原路返回。所有业务场景切换统一经 `SceneTransition` 执行；仅无可见内容的启动路由直接替换首个场景。
 
 ## 2. AutoLoad 服务
 
@@ -24,7 +25,7 @@
 | `SaveArchiveService` | 作为首个 AutoLoad，按白名单导出、导入或删除全部活动存档；导入前备份，导入或删除成功后重启，删除重启时在其他服务读档前完成保护性清理 | 玩家选择的 `.lisbamsave`；导入备份位于 `user://save_import_backup_<时间戳>/`；删除保护标记位于 `user://save_delete_pending_v1.marker` |
 | `SaveLocationMigration` | 历史迁移实现占位；未在 `project.godot` 注册，不参与当前 AutoLoad 启动 | 无新增持久化；既有完成标记不再读取 |
 | `ContentCatalog` | 启动时扫描角色、武器、装备、道具、怪物和扩展包清单，按角色解锁状态过滤内容池 | 无 |
-| `SessionState` | 保存当前游戏模式、骇入模式、模式扩展与风险词条、已确认角色、永久角色/扩展包解锁状态及角色页一次性返回目标 | `user://character_unlocks.json`；角色选择和解锁永久保存，模式、扩展配置与返回目标仅运行期 |
+| `SessionState` | 保存当前游戏模式、骇入模式、模式扩展与风险词条、首次引导运行标志、已确认角色、永久角色/扩展包解锁状态及角色页一次性返回目标 | `user://character_unlocks.json`；角色选择和解锁永久保存，模式、扩展、首次引导标志与返回目标仅运行期 |
 | `InputBindings` | 管理默认与自定义输入映射 | `user://input_bindings.cfg` |
 | `UiStyleSettings` | 管理“黑蓝科技风 / 黑白简约风”选择与通用控件主题即时刷新，不覆盖业务语义颜色或节点材质 | `user://ui_style_settings.cfg` |
 | `DebugSettings` | 管理开发者调试选项 | `user://debug_settings.cfg` |
@@ -37,7 +38,7 @@
 | `BankService` | 维护活期账户、定期存单、信用贷款、违约冻结与到期级联扣款 | `user://bank_state.json` |
 | `DispatchService` | 维护按角色并行的派遣委托、在线倒计时、大成功判定、近期完成报告与角色锁定查询 | `user://dispatch_state.json` |
 | `StatsService` | 生涯统计：怪物击杀计数、物品获得计数、对局与撤离统计、单局之最与财富曲线采样；聚合 `GlobalInventory` 的累计获得星穹并转发变化通知，图鉴计数、统计面板与悬赏系统只读取本服务或订阅其信号 | `user://stats_state.json`；累计获得星穹仍只保存于 `user://global_inventory.json` |
-| `NewcomerProtectionService` | 维护首次成功撤离永久进度，订阅正式结算并向怪物生成路径提供撤离前 0.75 战斗属性倍率，同时为锻造、据点、派遣与悬赏提供统一局外成长资格；首次引入时从既有成功撤离统计迁移 | `user://newcomer_protection_state.json` |
+| `NewcomerProtectionService` | 分别维护一次性首次战斗引导与首次正式成功撤离两项永久进度；配置新档直入战斗，订阅 `tutorial_success` 只完成引导，订阅正式 `success` 才结束 0.75 新手保护并开放锻造、据点、派遣与悬赏；版本 1 旧档视为已完成引导，无状态文件但已有成功撤离统计的老档同时迁移两项完成状态 | `user://newcomer_protection_state.json` |
 | `BountyService` | 每日悬赏：按本地日期刷新随机悬赏、订阅 `StatsService` 事实信号推进进度、完成后自动发放星穹或稀有强化石；必须注册在 `StatsService` 之后 | `user://bounty_state.json` |
 | `BannerNotificationService` | 屏幕顶端全局横幅通知：CanvasLayer 图层 `1200` 高于场景过渡层，`process_mode = ALWAYS` 战斗内外与暂停期间均可播放；持有横幅开关并订阅强平等业务信号，业务服务不反向依赖 | `user://banner_notification_settings.cfg` |
 | `SceneTransition` | 统一场景切换和黑屏过渡 | 无 |
@@ -219,6 +220,7 @@ HackModeRules + ModeExtensionRules + HackProtocolRules
 - 普通高频变化可合并写入；货币兑换、股票成交等跨资产操作应立即保存，缩短文件间状态不一致窗口。
 - `GlobalInventory` 在 `global_inventory.json` 保存 `total_coins_earned`。该值只通过战利品出售与明确外部奖励增长，消费和跨账户转移不回退；只有缺失该字段的旧档会以当前局外星穹初始化一次，现行存档读档时不再用余额覆盖累计值。
 - 零装骇入封存：`GlobalInventory` 在零装局开局时把真实背包与装备序列化为存档内 `bare_run_stash` 字段并立即落盘，结算收尾恢复后清除该字段；读档发现残留封存快照即视为零装局异常中断，恢复真实资产并放弃局内临时所得。该字段只在零装局进行中的存档内出现，不改变其他模块存档结构。
+- 首次引导结算：`GlobalInventory.complete_combat_run_tutorial()` 保留当前背包与装备并返回 `tutorial_success`，但不增加 `last_extraction_epoch`、不标记“上次撤离”物品，且以 `progression_eligible = false` 阻止生涯、悬赏和股市正式结算。窗口关闭也使用同一保留路径并完成一次性引导，避免教学局产生正式死亡损失。
 - 测试不得直接覆盖日常 `user://` 数据，具体隔离要求见 `docs/功能验证测试规范.md`。
 - 存档导出使用默认名 `Star_Hacker_save_<本地时间>.lisbamsave`，保存 `character_unlocks.json`、`input_bindings.cfg`、`ui_style_settings.cfg`、`banner_notification_settings.cfg`、`debug_settings.cfg`、`global_inventory.json`、`shop_state.json`、`stock_market_state.json`、`mining_farm_state.json`、`hideout_state.json`、`insurance_state.json`、`bank_state.json`、`dispatch_state.json`、`stats_state.json`、`newcomer_protection_state.json` 与 `bounty_state.json` 的原始字节；尚未生成的文件不写入归档。根元数据同时保存项目中文名与英文名，只用于人工识别，不参与兼容校验。
 - 存档导入只接受格式版本 1 与固定文件白名单。服务先完成 JSON、文件名和 Base64 内容校验，再写入同目录临时文件，完整备份当前存档后替换正式文件；归档中缺失的模块文件会按快照语义移除，成功后重启游戏统一加载。

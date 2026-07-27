@@ -1,6 +1,6 @@
 extends Node
 
-## 生涯统计服务：集中记录怪物击杀计数、物品获得计数、对局与撤离统计、单局之最和财富曲线采样。
+## 生涯统计服务：集中记录怪物击杀计数、物品获得计数、对局与撤离统计、单局之最和财富曲线采样，并聚合全局库存维护的累计获得星穹。
 ## 战斗与库存挂点只上报事实事件，本服务负责口径判定、累计与独立持久化；
 ## 统计面板、图鉴计数与悬赏系统都只读取本服务或订阅其信号，不各自维护第二份计数。
 ## 统计口径：只有产出结算的战斗模式（标准骇入、零装骇入，含联机）计入；训练场与超频骇入不计。
@@ -64,12 +64,17 @@ var _wealth_samples: Array[Dictionary] = []
 var _current_run_kills: int = 0
 ## 当前对局送回价值累计；对局开始清零，供“单局送回价值”悬赏与单局之最使用。
 var _current_run_shipped_value: int = 0
+## 全局库存服务缓存；只读取永久累计获得星穹并转发变化通知，不复制或持久化第二份累计值。
+var _global_inventory: Node = null
 ## 存档是否已排队；默认 false，同一帧多次事件只在帧末写盘一次。
 var _save_queued: bool = false
 
 
 func _ready() -> void:
 	_load_state()
+	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
+	if _global_inventory != null and _global_inventory.has_signal("total_coins_earned_changed"):
+		_global_inventory.connect("total_coins_earned_changed", Callable(self, "_on_total_coins_earned_changed"))
 	# 启动财富采样；每次启动补一个当前总资产点，保证长时间未进战斗时曲线仍随离线收益更新。
 	record_wealth_sample()
 
@@ -211,6 +216,7 @@ func get_statistics_snapshot() -> Dictionary:
 		"total_monster_kills": _total_monster_kills,
 		"total_chests_opened": _total_chests_opened,
 		"total_shipped_value": _total_shipped_value,
+		"total_coins_earned": _get_total_coins_earned(),
 		"best_run_kills": _best_run_kills,
 		"best_run_survival_seconds": _best_run_survival_seconds,
 		"best_run_extracted_value": _best_run_extracted_value,
@@ -233,6 +239,13 @@ func get_current_run_shipped_value() -> int:
 	return _current_run_shipped_value
 
 
+func _get_total_coins_earned() -> int:
+	## 返回全局库存维护的永久累计获得星穹；服务缺失时安全回退为 0，且不在统计存档中保存副本。
+	if _global_inventory != null and _global_inventory.has_method("get_total_coins_earned"):
+		return maxi(int(_global_inventory.call("get_total_coins_earned")), 0)
+	return 0
+
+
 func _get_current_total_assets() -> int:
 	## 计算当前总资产；优先复用银行授信口径避免重复维护资产公式，银行服务缺失时回退局外星穹余额。
 	# 银行服务节点；提供与授信一致的总资产分项接口。
@@ -244,6 +257,11 @@ func _get_current_total_assets() -> int:
 	if global_inventory != null and global_inventory.has_method("get_coins"):
 		return maxi(int(global_inventory.call("get_coins")), 0)
 	return 0
+
+
+func _on_total_coins_earned_changed(_total_coins_earned: int) -> void:
+	## 转发累计获得星穹变化，使已打开的生涯面板立即读取最新快照；信号参数不作为第二份状态保存。
+	stats_changed.emit()
 
 
 # ---------------------------------------------------------------------------

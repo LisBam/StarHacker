@@ -1,6 +1,6 @@
 extends Node
 
-## 金融解锁专项自动验证覆盖规则门槛、累计获得口径、资金转移防刷、主菜单按钮顺序、纯黑锁定样式与实时解锁。
+## 金融解锁专项自动验证覆盖规则门槛、累计获得口径、生涯统计展示、资金转移防刷、主菜单按钮顺序、纯黑锁定样式与实时解锁。
 ## 测试会访问 GlobalInventory AutoLoad，必须在独立用户数据目录运行，避免修改开发者日常存档。
 
 ## 金融解锁规则脚本；用于验证四档门槛和未知功能的安全锁定行为。
@@ -43,7 +43,12 @@ func _test_inventory_and_main_menu_integration() -> void:
 	_check(global_inventory != null, "金融解锁测试必须取得 GlobalInventory。")
 	if global_inventory == null:
 		return
+	# 生涯统计服务；快照必须聚合 GlobalInventory 的永久累计值，而不是维护第二份独立计数。
+	var stats_service: Node = get_tree().root.get_node_or_null("StatsService")
+	_check(stats_service != null, "金融解锁测试必须取得 StatsService。")
 	_check(int(global_inventory.call("get_total_coins_earned")) == 0, "全新档案累计获得星穹必须为 0。")
+	if stats_service != null:
+		_check(int((stats_service.call("get_statistics_snapshot") as Dictionary).get("total_coins_earned", -1)) == 0, "全新档案的生涯统计必须显示 0 累计获得星穹。")
 	# 账户转移模拟；adjust_coins 只改余额，不得推进永久金融成长。
 	global_inventory.call("adjust_coins", 5000)
 	_check(int(global_inventory.call("get_total_coins_earned")) == 0, "账户转入与兼容余额调整不得计入累计获得星穹。")
@@ -85,8 +90,20 @@ func _test_inventory_and_main_menu_integration() -> void:
 	_check(not bank_button.disabled and mining_button.disabled, "累计 3000 时必须继续解锁银行。")
 	global_inventory.call("grant_coins", 3000)
 	_check(not mining_button.disabled and stock_button.disabled, "累计 6000 时必须继续解锁矿场。")
+	main_menu.call("_on_stats_button_pressed")
+	# 生涯统计面板；打开后必须创建“累计获得星穹”行，并在后续收入变化时即时刷新。
+	var stats_panel: Control = main_menu.get_node("StatsOverlay/StatsPanel") as Control
+	_check(stats_panel.get_combined_minimum_size().y <= stats_panel.size.y, "新增累计获得星穹后生涯统计内容不得超出固定窗口高度。")
+	# 生涯统计标签表；测试只读取得正式面板构建出的字段与数值标签。
+	var stats_summary_labels: Dictionary = stats_panel.get("_summary_value_labels") as Dictionary
+	# 累计获得星穹标签；达到 6000 时应与解锁数据源完全一致。
+	var total_coins_earned_label: Label = stats_summary_labels.get("total_coins_earned") as Label
+	_check(total_coins_earned_label != null and total_coins_earned_label.text == "6000 星穹", "生涯统计必须展示当前累计获得星穹。")
 	global_inventory.call("grant_coins", 4000)
 	_check(not stock_button.disabled, "累计 10000 时必须解锁炒股。")
+	_check(total_coins_earned_label != null and total_coins_earned_label.text == "10000 星穹", "生涯统计必须随外部收益实时刷新累计获得星穹。")
+	if stats_service != null:
+		_check(int((stats_service.call("get_statistics_snapshot") as Dictionary).get("total_coins_earned", -1)) == 10000, "生涯统计快照必须读取 10000 累计获得星穹。")
 	_check(insurance_button.tooltip_text.is_empty() and bank_button.tooltip_text.is_empty() and mining_button.tooltip_text.is_empty() and stock_button.tooltip_text.is_empty(), "已解锁金融按钮必须清除门槛提示。")
 	global_inventory.call("spend_coins", 10000)
 	_check(not insurance_button.disabled and not bank_button.disabled and not mining_button.disabled and not stock_button.disabled, "消费全部当前星穹后所有永久解锁必须保持。")

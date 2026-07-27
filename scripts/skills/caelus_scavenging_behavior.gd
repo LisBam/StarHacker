@@ -14,7 +14,7 @@ func configure(_caster: Node2D, _stats_component: Node, skill_data: Resource, _p
 
 func apply_successful_extraction_bonus(global_inventory: Node, game_world: Node) -> int:
 	## 发放一次成功撤离星穹并返回实际增加量；服务或世界接口缺失时安全返回 0。
-	if _skill_data == null or global_inventory == null or game_world == null or not global_inventory.has_method("adjust_coins") or not game_world.has_method("get_world_drop_total_value"):
+	if _skill_data == null or global_inventory == null or game_world == null or (not global_inventory.has_method("grant_coins") and not global_inventory.has_method("adjust_coins")) or not game_world.has_method("get_world_drop_total_value"):
 		return 0
 	# 地图剩余掉落物总价值；只统计仍处于 item_drops 组的可拾取物，堆叠节点按实际数量计价。
 	var world_drop_total_value: int = maxi(int(game_world.call("get_world_drop_total_value")), 0)
@@ -23,5 +23,8 @@ func apply_successful_extraction_bonus(global_inventory: Node, game_world: Node)
 	# 实际奖励星穹；小于 1 星穹的零碎价值不会发放，也不会累计到后续对局。
 	var bonus_coins: int = floori(float(world_drop_total_value) * gold_ratio)
 	if bonus_coins > 0:
-		global_inventory.call("adjust_coins", bonus_coins)
+		if global_inventory.has_method("grant_coins"):
+			global_inventory.call("grant_coins", bonus_coins)
+		else:
+			global_inventory.call("adjust_coins", bonus_coins)
 	return bonus_coins

@@ -8,6 +8,8 @@ signal equipment_changed
 signal run_state_changed
 signal warehouse_changed
 signal coins_changed
+## 生涯累计获得星穹变化信号；参数为只增不减的最新累计值，金融入口据此即时刷新永久解锁状态。
+signal total_coins_earned_changed(total_coins_earned: int)
 ## 图鉴发现状态变化信号；只有首次获得新的稳定物品条目时派发，图鉴 UI 据此刷新已解锁卡片。
 signal encyclopedia_changed
 ## 股票持仓变化信号；买入、卖出、旧存档迁移或开发者清空持仓后通知股市 UI 刷新。
@@ -24,9 +26,11 @@ const SAVE_PATH: String = "user://global_inventory.json"
 ## 版本 9 补充；当前值升级为 9，用于保存股票持仓数量和加权平均成本，旧存档自动初始化为空持仓。
 ## 星内容精简补充：当前值升级为 10，用于在旧内容资源移除后为旧存档补齐星扩展包的可用初始装备。
 ## 强化石词条清理补充：版本 12 会移除旧强化石中的散射、穿透、弹射和连击词条并回写有效结果。
-const SAVE_VERSION: int = 12
+## 金融成长补充：版本 13 新增生涯累计获得星穹字段，用于永久判定金融功能解锁。
+const SAVE_VERSION: int = 13
 ## 图鉴系统补充：当前库存存档版本为 11，新增永久图鉴发现记录；旧存档会从当前持有与已装备物品初始化已发现条目。
 ## 当前版本说明：库存版本现为 12；版本 11 的图鉴发现迁移继续保留，版本 12 在其后追加强化石词条清理。
+## 现行版本补充：库存版本现为 13；版本 12 的说明作为历史记录保留，版本 13 只新增累计获得星穹字段。
 ## 强化公式存档版本；版本 2 起暴击率、暴击伤害和闪避率的累计值按直接百分点保存。
 const ENHANCEMENT_FORMULA_VERSION: int = 2
 ## 旧版耐久上限；固定 100.0，用于把版本 5 的当前耐久按比例迁移到新版上限。
@@ -161,7 +165,10 @@ var _stock_trade_save_queued: bool = false
 ## 现行失败结算补充：同一随机源分别按背包 40% 与装备栏 80% 默认保留率逐件判定，堆叠资源继续逐个单位判定。
 var _random: RandomNumberGenerator = RandomNumberGenerator.new()
 ## 局外星穹余额；取值大于等于 0，默认 0，只在主菜单仓库出售永久物品时增加。
+## 现行余额来源补充：物品出售、玩法奖励和金融资金流均可改变余额；是否计入生涯累计由 grant_coins 与普通余额接口明确区分。
 var _coins: int = DEFAULT_STARTING_COINS
+## 生涯累计获得星穹；取值大于等于 0 且只增不减，只记录外部收益，不记录账户转移、贷款、退款或开发者改值。
+var _total_coins_earned: int = DEFAULT_STARTING_COINS
 ## 股票持仓表；键为稳定股票标识，值包含非负整数 quantity 与非负浮点 average_cost。
 var _stock_holdings: Dictionary = {}
 ## 已发现图鉴条目表；键为“物品类型:稳定 ID”或强化石统一键，值为 true，物品出售、消耗与战斗失败都不会移除记录。
@@ -537,6 +544,11 @@ func get_coins() -> int:
 	return _coins
 
 
+func get_total_coins_earned() -> int:
+	## 返回永久累计获得星穹；消费、投资或转移余额不会降低该值。
+	return _total_coins_earned
+
+
 func is_resource_discovered(item_resource: Resource) -> bool:
 	## 查询静态物品模板是否已在图鉴中发现；只读取稳定类型与 ID，不比较运行时强化、耐久或资源实例身份。
 	# 图鉴稳定键；空键表示资源没有可持久化的物品标识，不能被图鉴错误解锁。
@@ -589,6 +601,17 @@ func spend_coins(amount: int) -> bool:
 	_queue_save_inventory()
 	coins_changed.emit()
 	return true
+
+
+func grant_coins(amount: int) -> int:
+	## 发放外部新增星穹并计入生涯累计；战利品外的悬赏、派遣、角色奖励与保险赔付统一使用本入口。
+	if amount <= 0:
+		return _coins
+	_coins += amount
+	_record_coins_earned(amount)
+	_queue_save_inventory()
+	coins_changed.emit()
+	return _coins
 
 
 func add_stock_holding_without_currency(stock_id: String, quantity: int, transaction_unit_cost: float) -> bool:
@@ -842,6 +865,7 @@ func ship_combat_resource_to_warehouse(item_resource: Resource, source_location:
 
 
 func adjust_coins(amount: int) -> int:
+	## 调整余额但不计入生涯累计；用于账户转移、贷款、退款及兼容旧调用，新增玩法奖励应改用 grant_coins。
 	# 调整后星穹；取值至少为 0，开发者减少星穹时不会形成负数余额。
 	var adjusted_coins: int = maxi(_coins + amount, 0)
 	if adjusted_coins == _coins:
@@ -850,6 +874,14 @@ func adjust_coins(amount: int) -> int:
 	_queue_save_inventory()
 	coins_changed.emit()
 	return _coins
+
+
+func _record_coins_earned(amount: int) -> void:
+	## 累加一次已经确认的外部星穹收益；私有入口保证余额转移不会误触发金融成长。
+	if amount <= 0:
+		return
+	_total_coins_earned += amount
+	total_coins_earned_changed.emit(_total_coins_earned)
 
 
 func set_coins(amount: int) -> int:
@@ -1307,6 +1339,7 @@ func sell_storage_resource_quantity(item_resource: Resource, source_location: St
 	else:
 		source_records.remove_at(record_index)
 	_coins += total_value
+	_record_coins_earned(total_value)
 	_queue_save_inventory()
 	_emit_storage_changed(source_location)
 	coins_changed.emit()
@@ -1890,6 +1923,7 @@ func _initialize_default_inventory() -> void:
 	_current_ranged_slot = 0
 	_last_extraction_epoch = 0
 	_coins = DEFAULT_STARTING_COINS
+	_total_coins_earned = DEFAULT_STARTING_COINS
 
 	# 默认背包武器标识；取值来自项目初始配置，逐项加载为独立资源记录。
 	# 仓库初始化补充：历史常量名称保持兼容，当前这些未装备武器默认放入仓库而不是背包。
@@ -2572,6 +2606,7 @@ func _save_inventory() -> void:
 		"last_extraction_epoch": _last_extraction_epoch,
 		"current_ranged_slot": _current_ranged_slot,
 		"coins": _coins,
+		"total_coins_earned": _total_coins_earned,
 		"stock_holdings": _stock_holdings,
 		"encyclopedia_discovered_entries": _get_serialized_encyclopedia_discoveries(),
 		"warehouse": serialized_warehouse,
@@ -2644,6 +2679,8 @@ func _load_inventory() -> bool:
 	_last_extraction_epoch = maxi(int(save_data.get("last_extraction_epoch", 0)), 0)
 	_current_ranged_slot = clampi(int(save_data.get("current_ranged_slot", 0)), 0, DEFAULT_RANGED_SLOT_COUNT - 1)
 	_coins = maxi(int(save_data.get("coins", DEFAULT_STARTING_COINS)), 0)
+	# 累计获得星穹；只有旧存档缺失字段时才以当前余额初始化，现行存档必须信任独立字段，避免账户转入余额在重启后被误算为外部收益。
+	_total_coins_earned = maxi(int(save_data.get("total_coins_earned", _coins)), 0)
 	_stock_holdings.clear()
 	# 图鉴发现迁移停用；当前版本只恢复显式保存的发现记录，不再根据现有持有物品补建旧账本。
 	# var has_encyclopedia_discoveries: bool = save_data.has("encyclopedia_discovered_entries")

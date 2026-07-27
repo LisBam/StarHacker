@@ -122,20 +122,6 @@ theme_override_constants/margin_bottom = 6
 layout_mode = 0
 theme_override_constants/separation = 6
 
-[node name="StockMarketButton" type="Button" parent="BottomCategoryExpansionMargin/FinanceCategoryPanel/Margin/Buttons" unique_id=106598226]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(120, 36)
-layout_mode = 2
-size_flags_horizontal = 3
-text = "炒股"
-
-[node name="MiningFarmButton" type="Button" parent="BottomCategoryExpansionMargin/FinanceCategoryPanel/Margin/Buttons" unique_id=213572583]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(120, 36)
-layout_mode = 2
-size_flags_horizontal = 3
-text = "矿场"
-
 [node name="InsuranceButton" type="Button" parent="BottomCategoryExpansionMargin/FinanceCategoryPanel/Margin/Buttons" unique_id=1599930243]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(120, 36)
@@ -149,6 +135,20 @@ custom_minimum_size = Vector2(120, 36)
 layout_mode = 2
 size_flags_horizontal = 3
 text = "银行"
+
+[node name="MiningFarmButton" type="Button" parent="BottomCategoryExpansionMargin/FinanceCategoryPanel/Margin/Buttons" unique_id=213572583]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 36)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "矿场"
+
+[node name="StockMarketButton" type="Button" parent="BottomCategoryExpansionMargin/FinanceCategoryPanel/Margin/Buttons" unique_id=106598226]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 36)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "炒股"
 
 [node name="StatisticsCategoryPanel" type="PanelContainer" parent="BottomCategoryExpansionMargin"]
 visible = false

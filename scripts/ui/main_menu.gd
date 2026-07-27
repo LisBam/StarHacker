@@ -18,6 +18,8 @@ const KEY_BINDING_PANEL_SCRIPT: Script = preload("res://scripts/ui/key_binding_p
 const SAVE_TRANSFER_CONTROL_SCRIPT: Script = preload("res://scripts/ui/save_transfer_control.gd")
 ## 全局窗口样式指南；统一主菜单、设置页和全部局外遮罩窗口的主题与语义按钮颜色。
 const UI_STYLE_GUIDE: Script = preload("res://scripts/ui/ui_style_guide.gd")
+## 金融解锁规则；统一提供保险、银行、矿场与炒股的成长顺序和累计获得星穹门槛。
+const FINANCE_UNLOCK_RULES: Script = preload("res://scripts/data/finance_unlock_rules.gd")
 ## 可视进度拖动条组件；为主音量滑条绘制完整轨道、当前进度和实时滑块位置，不改变音量业务逻辑。
 const PROGRESS_SLIDER_VISUAL_SCRIPT: Script = preload("res://scripts/ui/progress_slider_visual.gd")
 ## UI 风格选择组件；主菜单设置复用其选项构建、服务绑定、即时保存与全局刷新逻辑。
@@ -203,6 +205,8 @@ var _settings_home_controls: Array[Control] = []
 var _ui_style_selector: Control
 ## 主菜单横幅通知开关组件；默认运行时插入 UI 风格行下方并即时保存全局横幅设置。
 var _banner_notification_toggle: Control
+## 全局库存服务缓存；读取只增不减的累计获得星穹并监听变化，不直接修改金融资产。
+var _global_inventory: Node
 ## 主菜单存档传输控件；默认运行时插入设置首页，导入成功后由全局服务重启游戏。
 ## 删除功能补充：删除成功后同样由全局服务重启，并在其他业务服务读档前清理活动存档。
 var _save_transfer_control: Control
@@ -325,6 +329,10 @@ func _ready() -> void:
 	_encyclopedia_button.pressed.connect(_on_encyclopedia_button_pressed)
 	_bounty_button.pressed.connect(_on_bounty_button_pressed)
 	_stats_button.pressed.connect(_on_stats_button_pressed)
+	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
+	if _global_inventory != null and _global_inventory.has_signal("total_coins_earned_changed"):
+		_global_inventory.connect("total_coins_earned_changed", Callable(self, "_refresh_finance_unlock_buttons"))
+	_refresh_finance_unlock_buttons()
 	_master_volume_slider.value_changed.connect(_on_master_volume_slider_value_changed)
 	_settings_back_button.pressed.connect(_on_settings_back_button_pressed)
 	_switch_lobby_menu_button.pressed.connect(_on_switch_lobby_menu_button_pressed)
@@ -355,6 +363,34 @@ func _ready() -> void:
 	set_process(lobby_host_mode)
 	if not lobby_host_mode:
 		_start_button.grab_focus()
+
+
+func _refresh_finance_unlock_buttons(_total_coins_earned: int = -1) -> void:
+	## 按永久累计获得星穹刷新四个金融入口；信号参数只用于触发，实际值始终重新读取唯一库存所有者。
+	# 当前累计获得星穹；服务缺失或接口不可用时按 0 处理，避免独立场景错误开放金融功能。
+	var total_coins_earned: int = int(_global_inventory.call("get_total_coins_earned")) if _global_inventory != null and _global_inventory.has_method("get_total_coins_earned") else 0
+	_apply_finance_button_unlock_state(_insurance_button, FINANCE_UNLOCK_RULES.FEATURE_INSURANCE, total_coins_earned)
+	_apply_finance_button_unlock_state(_bank_button, FINANCE_UNLOCK_RULES.FEATURE_BANK, total_coins_earned)
+	_apply_finance_button_unlock_state(_mining_farm_button, FINANCE_UNLOCK_RULES.FEATURE_MINING_FARM, total_coins_earned)
+	_apply_finance_button_unlock_state(_stock_market_button, FINANCE_UNLOCK_RULES.FEATURE_STOCK_MARKET, total_coins_earned)
+
+
+func _apply_finance_button_unlock_state(button: Button, feature_id: String, total_coins_earned: int) -> void:
+	## 把单个金融按钮同步为可用或纯黑禁用状态，并只在锁定时展示统一门槛提示。
+	if button == null:
+		return
+	# 是否已经永久解锁；累计值达到规则门槛后保持可用，不受当前余额变化影响。
+	var is_unlocked: bool = bool(FINANCE_UNLOCK_RULES.is_feature_unlocked(feature_id, total_coins_earned))
+	button.disabled = not is_unlocked
+	button.tooltip_text = "" if is_unlocked else str(FINANCE_UNLOCK_RULES.get_locked_tooltip(feature_id))
+	UI_STYLE_GUIDE.apply_locked_button_visual(button, not is_unlocked)
+
+
+func _is_finance_feature_unlocked(feature_id: String) -> bool:
+	## 返回指定金融功能的当前永久解锁状态；所有按钮与大厅动作在真正打开面板前都执行同一防御检查。
+	if _global_inventory == null or not _global_inventory.has_method("get_total_coins_earned"):
+		return false
+	return bool(FINANCE_UNLOCK_RULES.is_feature_unlocked(feature_id, int(_global_inventory.call("get_total_coins_earned"))))
 
 
 func _build_settings_dim_overlay() -> void:
@@ -736,7 +772,7 @@ func _on_forge_button_pressed() -> void:
 
 
 func _on_stock_market_button_pressed() -> void:
-	if _stock_market_overlay == null:
+	if _stock_market_overlay == null or not _is_finance_feature_unlocked(FINANCE_UNLOCK_RULES.FEATURE_STOCK_MARKET):
 		return
 	_collapse_bottom_categories()
 	_settings_panel.visible = false
@@ -746,7 +782,7 @@ func _on_stock_market_button_pressed() -> void:
 
 
 func _on_mining_farm_button_pressed() -> void:
-	if _mining_farm_overlay == null:
+	if _mining_farm_overlay == null or not _is_finance_feature_unlocked(FINANCE_UNLOCK_RULES.FEATURE_MINING_FARM):
 		return
 	_collapse_bottom_categories()
 	_settings_panel.visible = false
@@ -756,7 +792,7 @@ func _on_mining_farm_button_pressed() -> void:
 
 
 func _on_insurance_button_pressed() -> void:
-	if _insurance_overlay == null:
+	if _insurance_overlay == null or not _is_finance_feature_unlocked(FINANCE_UNLOCK_RULES.FEATURE_INSURANCE):
 		return
 	_collapse_bottom_categories()
 	_settings_panel.visible = false
@@ -766,7 +802,7 @@ func _on_insurance_button_pressed() -> void:
 
 
 func _on_bank_button_pressed() -> void:
-	if _bank_overlay == null:
+	if _bank_overlay == null or not _is_finance_feature_unlocked(FINANCE_UNLOCK_RULES.FEATURE_BANK):
 		return
 	_collapse_bottom_categories()
 	_settings_panel.visible = false

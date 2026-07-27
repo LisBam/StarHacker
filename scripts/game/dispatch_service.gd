@@ -312,7 +312,9 @@ func _complete_dispatch(character_id: String) -> Dictionary:
 	while _recent_reports.size() > RECENT_REPORT_LIMIT:
 		_recent_reports.pop_back()
 	_last_report = report.duplicate(true)
-	if _global_inventory != null and _global_inventory.has_method("adjust_coins"):
+	if _global_inventory != null and _global_inventory.has_method("grant_coins"):
+		_global_inventory.call("grant_coins", payout)
+	elif _global_inventory != null and _global_inventory.has_method("adjust_coins"):
 		_global_inventory.call("adjust_coins", payout)
 	return report
 

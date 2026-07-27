@@ -16,13 +16,14 @@
 战斗与库存挂点（击杀 / 开箱 / 送回 / 结算）
         -> StatsService 事实信号（monster_kill_recorded / chest_open_recorded / run_shipped_value_changed / run_finished）
         -> BountyService 匹配悬赏类型并推进进度
-        -> 达标后 _try_complete_bounty：GlobalInventory 入账（adjust_coins / add_storage_resource）
+        -> 达标后 _try_complete_bounty：GlobalInventory 入账（grant_coins / add_storage_resource）
         -> bounty_completed 信号 -> 横幅播报 / bounties_changed -> 面板刷新
 ```
 
 - 悬赏服务不直接接触战斗节点；统计挂点已经按“产出结算的战斗模式”过滤，训练场与超频骇入天然不推进悬赏。
 - 击杀目标从 `ContentCatalog.get_enemy_scene_paths()`（已按角色解锁过滤）随机抽取，离树实例化只读取 `monster_id` 与 `display_name`，标题与说明在刷新时固化。
 - 稀有强化石奖励复用 `EnhancementStoneData.create_random` 与宝箱高品质保底流程（最多 12 次重试后强制提升高级），入库走 `GlobalInventory.add_storage_resource` 公共接口并回写 `StatsService` 获得计数。
+- 星穹报酬与强化石发放失败补偿统一走 `GlobalInventory.grant_coins()`，因此会增加金融系统使用的生涯累计获得星穹；强化石直接入库本身不增加该累计值。
 
 ## 3. 持久化边界
 

@@ -300,10 +300,14 @@ func _grant_bounty_reward(bounty: Dictionary) -> String:
 				stats_service.call("record_item_acquired", reward_stone, 1)
 			return "稀有强化石「%s」已存入仓库" % str(reward_stone.get("display_name"))
 		# 强化石生成或入库失败兜底；按星穹报酬补偿，保证完成的悬赏不会空手而归。
-		if global_inventory.has_method("adjust_coins"):
+		if global_inventory.has_method("grant_coins"):
+			global_inventory.call("grant_coins", int(bounty.get("reward_gold", 0)))
+		elif global_inventory.has_method("adjust_coins"):
 			global_inventory.call("adjust_coins", int(bounty.get("reward_gold", 0)))
 		return "%d 星穹已入账（强化石发放失败补偿）" % int(bounty.get("reward_gold", 0))
-	if global_inventory.has_method("adjust_coins"):
+	if global_inventory.has_method("grant_coins"):
+		global_inventory.call("grant_coins", int(bounty.get("reward_gold", 0)))
+	elif global_inventory.has_method("adjust_coins"):
 		global_inventory.call("adjust_coins", int(bounty.get("reward_gold", 0)))
 	return "%d 星穹已入账" % int(bounty.get("reward_gold", 0))
 

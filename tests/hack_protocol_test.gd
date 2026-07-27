@@ -118,6 +118,16 @@ func _test_mode_extension_configuration() -> void:
 	var overclock_configuration: Dictionary = ModeExtensionRules.sanitize_configuration([ModeExtensionRules.EXTENSION_HACK_PROTOCOL], [], HackModeRules.VARIANT_OVERCLOCK)
 	_check((overclock_configuration.get("extension_ids", []) as Array).has(ModeExtensionRules.EXTENSION_HACK_PROTOCOL), "超频骇入应保留骇入协议扩展。")
 	_check(ModeExtensionRules.get_configuration_summary([ModeExtensionRules.EXTENSION_HACK_PROTOCOL], []).contains("骇入协议"), "模式扩展摘要应显示骇入协议。")
+	# 撤离点风险词条定义；稳定 ID、类别、单出口数量与掉落补偿必须由规则表统一提供。
+	var extraction_risk_definition: Dictionary = ModeExtensionRules.get_risk_definition("extraction_points_one")
+	_check(str(extraction_risk_definition.get("family", "")) == ModeExtensionRules.FAMILY_EXTRACTION, "撤离点风险词条必须属于独立撤离类别。")
+	_check(int(extraction_risk_definition.get("extraction_point_count", 0)) == 1, "撤离点风险词条必须将本局正式撤离点限制为 1 个。")
+	_check(is_equal_approx(float(extraction_risk_definition.get("drop_bonus_ratio", 0.0)), 0.35), "撤离点风险词条的怪物掉落加成必须为 35%。")
+	# 撤离点风险效果汇总；普通配置保持中性值，启用词条后只覆盖撤离点数量字段。
+	var neutral_risk_effects: Dictionary = ModeExtensionRules.get_effect_multipliers([])
+	var extraction_risk_effects: Dictionary = ModeExtensionRules.get_effect_multipliers(["extraction_points_one"])
+	_check(int(neutral_risk_effects.get("extraction_point_count", -1)) == 0, "未启用撤离点风险时数量覆盖字段必须保持中性值。")
+	_check(int(extraction_risk_effects.get("extraction_point_count", 0)) == 1, "已启用撤离点风险时汇总字段必须为 1。")
 
 
 func _test_runtime_flow() -> void:
@@ -135,6 +145,23 @@ func _test_runtime_flow() -> void:
 	add_child(game_world)
 	await get_tree().process_frame
 	await get_tree().process_frame
+	# 常规撤离点布局；生存时间达到 120 秒后固定生成 3 个点位，候选选择优先满足 4000 像素最近间距。
+	game_world.call("add_training_survival_time")
+	game_world.call("add_training_survival_time")
+	var extraction_positions: Array = game_world.call("get_extraction_point_positions") as Array
+	_check(extraction_positions.size() == 3, "常规局达到撤离时间后必须生成 3 个正式撤离点。")
+	if extraction_positions.size() == 3:
+		# 三点两两距离；默认地图应满足配置的优先最小间距，验证远距分布不会退化为相邻出口。
+		var preferred_spacing: float = float(game_world.get("extraction_point_preferred_minimum_spacing"))
+		for first_index in range(extraction_positions.size()):
+			for second_index in range(first_index + 1, extraction_positions.size()):
+				var first_position: Vector2 = extraction_positions[first_index] as Vector2
+				var second_position: Vector2 = extraction_positions[second_index] as Vector2
+				_check(first_position.distance_to(second_position) >= preferred_spacing, "常规撤离点应优先保持配置的远距分布。")
+	# 风险覆盖接口；同一规则字典传入时，GameWorld 必须把常规三出口覆盖为单出口目标。
+	var extraction_risk_effects: Dictionary = ModeExtensionRules.get_effect_multipliers(["extraction_points_one"])
+	game_world.set("_mode_extension_effect_multipliers", extraction_risk_effects)
+	_check(int(game_world.call("_get_effective_extraction_point_count")) == 1, "撤离点风险合约必须覆盖正式撤离点目标数量。")
 	# 玩家协议组件；必须由 GameWorld 动态挂载且只存在于本局玩家节点。
 	var protocol_component: Node = game_world.call("get_hack_protocol_component") as Node
 	_check(protocol_component != null, "启用扩展后应创建玩家骇入协议组件。")

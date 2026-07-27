@@ -42,6 +42,8 @@ const PROGRESS_SLIDER_VISUAL_SCRIPT: Script = preload("res://scripts/ui/progress
 const UI_STYLE_SELECTOR_SCRIPT: Script = preload("res://scripts/ui/ui_style_selector.gd")
 ## 横幅通知开关组件；暂停设置复用其开关构建、服务绑定与即时保存逻辑。
 const BANNER_NOTIFICATION_TOGGLE_SCRIPT: Script = preload("res://scripts/ui/banner_notification_toggle.gd")
+## 风险合约只读查看面板；暂停界面左栏使用该组件展示本局已确认词条与掉落奖励。
+const RISK_CONTRACT_VIEW_PANEL_SCRIPT: Script = preload("res://scripts/ui/risk_contract_view_panel.gd")
 ## 主动技能栏脚本；动态显示三个技能槽的实际按键、名称和冷却，不接管技能输入状态机。
 const ACTIVE_SKILL_BAR_SCRIPT: Script = preload("res://scripts/ui/active_skill_bar.gd")
 ## 局内共享槽位视图；左侧技能栏和右侧纯展示武器栏直接复用同一视觉组件。
@@ -86,6 +88,14 @@ const CHARACTER_CAEULUS: String = "caelus"
 const CHARACTER_SILVER_WOLF: String = "silver_wolf"
 ## 掉落物列表鼠标交互后的战斗输入抑制时长；默认 0.18 秒，用于覆盖鼠标按下到松开的短暂窗口。
 const DROP_LIST_COMBAT_SUPPRESSION_DURATION: float = 0.18
+## 风险合约左栏左上偏移；相对屏幕中心为 (-620, -210)，与右侧暂停地图构成对称三栏布局。
+const RISK_CONTRACT_VIEW_PANEL_TOP_LEFT: Vector2 = Vector2(-620.0, -210.0)
+## 风险合约左栏右下偏移；相对屏幕中心为 (-200, 210)，形成固定 420×420 查看区域。
+const RISK_CONTRACT_VIEW_PANEL_BOTTOM_RIGHT: Vector2 = Vector2(-200.0, 210.0)
+## 风险合约入口按钮左上偏移；相对屏幕中心为 (-620, -22)，在未展开时垂直居中于左栏。
+const RISK_CONTRACT_VIEW_BUTTON_TOP_LEFT: Vector2 = Vector2(-620.0, -22.0)
+## 风险合约入口按钮右下偏移；相对屏幕中心为 (-200, 22)，形成固定 420×44 按钮。
+const RISK_CONTRACT_VIEW_BUTTON_BOTTOM_RIGHT: Vector2 = Vector2(-200.0, 22.0)
 
 ## 玩家节点路径；默认指向同一游戏世界下的 Player，必须解析到玩家根节点，运行时通常不修改。
 @export var player_path: NodePath = ^"../Player"
@@ -363,6 +373,10 @@ var _pause_banner_notification_toggle: Control
 ## 暂停设置存档传输控件；默认运行时创建，导出仅包含各服务已经落盘的持久化状态。
 ## 删除功能补充：删除会丢弃本局未落盘内存变化，并通过重启恢复到首次启动默认状态。
 var _pause_save_transfer_control: Control
+## 风险合约查看入口按钮；默认运行时创建在暂停界面左栏，其他暂停子页打开时隐藏。
+var _risk_contract_view_button: Button
+## 风险合约只读查看面板；默认运行时创建并隐藏，打开时占用暂停界面左侧 420×420 空栏。
+var _risk_contract_view_panel: Control
 ## 战斗开发者全屏遮罩；默认运行时创建并隐藏，暂停界面完成 LISBAM 序列后显示。
 var _combat_developer_overlay: Control
 ## 战斗开发者菜单实例；默认复用 DeveloperMenu 并切换到无限属性与训练工具上下文。
@@ -516,6 +530,7 @@ func _ready() -> void:
 	_build_active_skill_bar()
 	_build_shared_backpack_panel()
 	_bind_pause_menu()
+	_build_risk_contract_view()
 	_build_escape_confirmation_dialog()
 	_build_combat_status_panel()
 	_build_nearby_drop_panel()
@@ -2048,6 +2063,75 @@ func _bind_pause_menu() -> void:
 	_sync_mode_controls()
 
 
+func _build_risk_contract_view() -> void:
+	## 构建暂停界面左栏的风险合约入口与只读面板；不修改场景文件中的中央菜单和右侧地图职责。
+	if _risk_contract_view_button != null or _risk_contract_view_panel != null:
+		return
+	# 左栏查看按钮；未展开合约面板时显示，固定与右侧地图同宽并垂直居中。
+	var view_button: Button = Button.new()
+	view_button.name = "RiskContractViewButton"
+	view_button.text = "查看风险合约"
+	view_button.set_anchors_preset(Control.PRESET_CENTER)
+	view_button.offset_left = RISK_CONTRACT_VIEW_BUTTON_TOP_LEFT.x
+	view_button.offset_top = RISK_CONTRACT_VIEW_BUTTON_TOP_LEFT.y
+	view_button.offset_right = RISK_CONTRACT_VIEW_BUTTON_BOTTOM_RIGHT.x
+	view_button.offset_bottom = RISK_CONTRACT_VIEW_BUTTON_BOTTOM_RIGHT.y
+	view_button.pressed.connect(_on_risk_contract_view_button_pressed)
+	_pause_overlay.add_child(view_button)
+	_risk_contract_view_button = view_button
+	# 左栏只读面板；与右侧地图同为 420×420，关闭后恢复入口按钮。
+	var view_panel: Control = RISK_CONTRACT_VIEW_PANEL_SCRIPT.new() as Control
+	if view_panel == null:
+		view_button.visible = false
+		return
+	view_panel.name = "RiskContractViewPanel"
+	view_panel.set_anchors_preset(Control.PRESET_CENTER)
+	view_panel.offset_left = RISK_CONTRACT_VIEW_PANEL_TOP_LEFT.x
+	view_panel.offset_top = RISK_CONTRACT_VIEW_PANEL_TOP_LEFT.y
+	view_panel.offset_right = RISK_CONTRACT_VIEW_PANEL_BOTTOM_RIGHT.x
+	view_panel.offset_bottom = RISK_CONTRACT_VIEW_PANEL_BOTTOM_RIGHT.y
+	view_panel.connect("closed", Callable(self, "_on_risk_contract_view_closed"))
+	_pause_overlay.add_child(view_panel)
+	_risk_contract_view_panel = view_panel
+	view_panel.visible = false
+	_sync_risk_contract_view_visibility()
+
+
+func _get_current_risk_contract_modifier_ids() -> Array[String]:
+	## 从运行期会话读取本局风险词条；训练场、未启用合约或服务缺失时返回空数组。
+	# 会话状态服务；只读取本局稳定 ID，不让查看面板依赖 GameWorld 内部倍率缓存。
+	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
+	if session_state == null or not session_state.has_method("get_mode_extension_ids") or not session_state.has_method("get_risk_contract_modifier_ids"):
+		return []
+	# 本局模式扩展 ID；只有显式包含 risk_contract 时才允许展示风险词条。
+	var extension_ids: Array = session_state.call("get_mode_extension_ids")
+	if not extension_ids.has(ModeExtensionRules.EXTENSION_RISK_CONTRACT):
+		return []
+	# 本局风险词条 ID；再次规范化可防止异常运行期数据进入只读界面。
+	var modifier_ids: Array = session_state.call("get_risk_contract_modifier_ids")
+	return ModeExtensionRules.normalize_risk_modifier_ids(modifier_ids)
+
+
+func _show_risk_contract_view(visible: bool) -> void:
+	## 打开或关闭左栏只读面板；中央暂停菜单与右侧地图保持可见，战斗继续处于暂停状态。
+	if _risk_contract_view_panel == null:
+		return
+	if visible and _risk_contract_view_panel.has_method("present"):
+		_risk_contract_view_panel.call("present", _get_current_risk_contract_modifier_ids())
+	else:
+		_risk_contract_view_panel.visible = false
+	_sync_risk_contract_view_visibility()
+
+
+func _sync_risk_contract_view_visibility() -> void:
+	## 根据暂停页层级切换左栏入口；只在中央暂停主页显示，避免与宽版设置页或开发者菜单重叠。
+	if _risk_contract_view_button == null:
+		return
+	# 查看面板是否展开；展开时入口按钮隐藏，关闭后恢复。
+	var view_panel_visible: bool = _risk_contract_view_panel != null and _risk_contract_view_panel.visible
+	_risk_contract_view_button.visible = _pause_overlay.visible and _pause_menu_panel.visible and not view_panel_visible and not _is_combat_developer_menu_visible()
+
+
 func _build_escape_confirmation_dialog() -> void:
 	if _escape_confirmation_dialog != null:
 		return
@@ -2377,12 +2461,14 @@ func _is_combat_developer_menu_visible() -> bool:
 func _open_combat_developer_menu() -> void:
 	if _combat_developer_overlay == null or _combat_developer_menu == null:
 		return
+	_show_risk_contract_view(false)
 	_pause_menu_panel.visible = false
 	_pause_settings_panel.visible = false
 	_test_settings_panel.visible = false
 	_character_switch_panel.visible = false
 	_combat_developer_menu.call("sync_combat_states", _is_infinite_health_enabled(), _is_infinite_energy_enabled(), _is_weapon_durability_consumption_disabled_by_debug())
 	_combat_developer_overlay.visible = true
+	_sync_risk_contract_view_visibility()
 	_refresh_combat_input_state()
 
 
@@ -2578,6 +2664,10 @@ func _toggle_pause_menu() -> void:
 		_on_combat_developer_menu_closed()
 		return
 
+	if _risk_contract_view_panel != null and _risk_contract_view_panel.visible:
+		_show_risk_contract_view(false)
+		return
+
 	if _pause_overlay.visible and _pause_settings_panel.visible and _is_pause_key_binding_page_visible():
 		_show_pause_key_binding_page(false)
 		return
@@ -2610,6 +2700,8 @@ func _set_pause_menu_visible(visible: bool) -> void:
 	_pause_settings_panel.visible = false
 	_test_settings_panel.visible = false
 	_character_switch_panel.visible = false
+	if _risk_contract_view_panel != null:
+		_risk_contract_view_panel.visible = false
 	_sync_mode_controls()
 	_set_battle_tree_paused(visible)
 	if visible:
@@ -2623,9 +2715,11 @@ func _set_pause_menu_visible(visible: bool) -> void:
 		_resume_button.grab_focus()
 	else:
 		_refresh_combat_input_state()
+	_sync_risk_contract_view_visibility()
 
 
 func _show_pause_settings(visible: bool) -> void:
+	_show_risk_contract_view(false)
 	_pause_menu_panel.visible = not visible
 	_pause_settings_panel.visible = visible
 	_test_settings_panel.visible = false
@@ -2636,6 +2730,7 @@ func _show_pause_settings(visible: bool) -> void:
 		_pause_settings_back_button.grab_focus()
 	else:
 		_pause_settings_button.grab_focus()
+	_sync_risk_contract_view_visibility()
 
 
 func _show_pause_key_binding_page(visible: bool) -> void:
@@ -2661,6 +2756,7 @@ func _show_test_settings(visible: bool) -> void:
 	if visible and not _can_use_training_tools():
 		return
 
+	_show_risk_contract_view(false)
 	_pause_menu_panel.visible = not visible
 	_pause_settings_panel.visible = false
 	_test_settings_panel.visible = visible
@@ -2673,12 +2769,14 @@ func _show_test_settings(visible: bool) -> void:
 			_test_settings_button.grab_focus()
 		else:
 			_resume_button.grab_focus()
+	_sync_risk_contract_view_visibility()
 
 
 func _show_character_switch(visible: bool) -> void:
 	if visible and not _can_use_training_tools():
 		return
 
+	_show_risk_contract_view(false)
 	_pause_menu_panel.visible = false
 	_pause_settings_panel.visible = false
 	_test_settings_panel.visible = not visible
@@ -2687,6 +2785,7 @@ func _show_character_switch(visible: bool) -> void:
 		_switch_character_stelle_button.grab_focus()
 	else:
 		_switch_character_button.grab_focus()
+	_sync_risk_contract_view_visibility()
 
 
 func _sync_test_settings_controls() -> void:
@@ -3584,6 +3683,7 @@ func _on_combat_developer_menu_closed() -> void:
 		_test_settings_panel.visible = false
 		_character_switch_panel.visible = false
 		_resume_button.grab_focus()
+	_sync_risk_contract_view_visibility()
 	_refresh_combat_input_state()
 
 
@@ -3618,6 +3718,18 @@ func _on_unlock_map_vision_button_pressed() -> void:
 
 func _on_pause_settings_button_pressed() -> void:
 	_show_pause_settings(true)
+
+
+func _on_risk_contract_view_button_pressed() -> void:
+	## 打开本局风险合约只读面板；不会改变当前合约、刷新候选或恢复战斗运行。
+	_show_risk_contract_view(true)
+
+
+func _on_risk_contract_view_closed() -> void:
+	## 关闭左栏面板后恢复查看入口；中央暂停菜单焦点仍保持原位置。
+	_sync_risk_contract_view_visibility()
+	if _risk_contract_view_button != null and _risk_contract_view_button.visible:
+		_risk_contract_view_button.grab_focus()
 
 
 func _on_test_settings_button_pressed() -> void:

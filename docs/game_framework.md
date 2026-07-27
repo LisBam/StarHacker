@@ -104,7 +104,7 @@
 
 ### 3.4 UI 层
 
-- `CombatHud` 负责局内信息、暂停、地图、拾取提示、物资撤离和结算编排，不直接拥有库存数据。物资撤离面板由 `SupplyExtractionPanel` 在左侧武器栏和右侧防具栏中展示全部已装备槽位，两个分区只向 `GlobalInventory` 的统一报价与原子送回接口发起操作。
+- `CombatHud` 负责局内信息、暂停、地图、风险合约只读入口、拾取提示、物资撤离和结算编排，不直接拥有库存或模式扩展数据。暂停左栏的 `RiskContractViewPanel` 每次打开都从 `SessionState` 取得稳定 ID，再由 `ModeExtensionRules` 解析名称与奖励；物资撤离面板由 `SupplyExtractionPanel` 在左侧武器栏和右侧防具栏中展示全部已装备槽位，两个分区只向 `GlobalInventory` 的统一报价与原子送回接口发起操作。
 - `LobbyHud` 负责大厅左上切换按钮、最近设施提示、角色生命能量、主动技能和武器快照；它不处理 F 输入、设施距离或场景动作。主菜单以 `lobby_host_mode` 嵌入更高 CanvasLayer，只复用局外面板，不复制背包、仓库、商店等业务 UI。
 - `EncyclopediaPanel` 读取 `ContentCatalog` 的全量武器、装备、道具与怪物模板，并通过 `GlobalInventory` 的稳定发现记录决定显示正式信息或“？？？”。怪物只在离树场景实例中读取稳定 ID、说明和基础属性，首次有效遇敌后解锁；左侧列表只负责选择当前条目，右侧物品详情复用 `ItemDetailFormatter`，怪物详情显示其固定基础数值。关键词筛选匹配名称、类型和说明，条目固定按基础内容、`stelle`（星）扩展包、其余扩展包目录顺序分组，并在每个扩展包前显示标题分割。组内装备按套装聚合并固定为头部、躯干、腿部、脚部；资源按初级、中级、高级、极品排列，无法识别品质时回退名称排序。它不复制物品数值或规则、不修改库存，也不把浏览、商店预览或临时快照视为获得。图鉴条目名称行最右侧与详情首行显示 `StatsService` 提供的获得数量或击杀数量，图鉴只读取计数不写入统计。
 - `HackModeSelectPanel` 按 `HackModeRules` 定义表构建“战斗模式 / 娱乐模式”两组模式卡并派发 `mode_selected`；窗口内容四周使用左右 18、上下 16 像素页边距，写入会话状态与场景切换由主菜单宿主完成。`MainMenu` 自身维护金融与统计两个互斥分类：普通样式的分类按钮展开时在所属按钮正上方以 0.18 秒动画打开纵向列表，分类子按钮仍复用原有面板打开回调；`BountyPanel` 与 `StatsPanel` 同样使用左右 18、上下 16 像素页边距，前者只读取 `BountyService` 快照并订阅其变化信号，后者只读取 `StatsService` 快照，财富曲线由面板内部类 `WealthCurveChart` 按采样数组绘制。三个面板都通过主菜单遮罩复用，不直接访问战斗节点。
@@ -203,6 +203,8 @@ HackModeRules + ModeExtensionRules
 ```
 
 规则层只返回数据，不持有 UI、场景树或存档。`GameWorld` 是整局配置的协调边界，但具体状态仍由最近的数据所有者维护：怪物属性由 `BasicMonster` 应用，虚拟人口由 `MonsterSimulationManager` 补齐，耐久由玩家与装备组件结算，容量由 `GlobalInventory` 原子校验，小地图由 `CombatHud` 显隐。新扩展必须保持中性默认值，使无配置、训练场和旧调用路径无需增加分支。
+
+局内查看链路不经过效果字典：`CombatHud` 只在玩家打开暂停左栏时从 `SessionState` 读取扩展和风险词条稳定 ID，`RiskContractViewPanel` 再通过 `ModeExtensionRules` 构建只读文本。这样显示层与实际效果共享同一规则来源，同时不会获得修改本局配置的权限。
 
 ## 5. 存档边界
 

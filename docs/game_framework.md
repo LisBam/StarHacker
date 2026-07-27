@@ -28,7 +28,7 @@
 | `InputBindings` | 管理默认与自定义输入映射 | `user://input_bindings.cfg` |
 | `UiStyleSettings` | 管理“黑蓝科技风 / 黑白简约风”选择与通用控件主题即时刷新，不覆盖业务语义颜色或节点材质 | `user://ui_style_settings.cfg` |
 | `DebugSettings` | 管理开发者调试选项 | `user://debug_settings.cfg` |
-| `GlobalInventory` | 拥有星穹、仓库、背包、装备槽、持仓、永久图鉴发现记录和战斗结算数据 | `user://global_inventory.json` |
+| `GlobalInventory` | 拥有星穹、只增不减的累计获得星穹、仓库、背包、装备槽、持仓、永久图鉴发现记录和战斗结算数据；外部收益使用 `grant_coins()`，账户转移使用不累计的余额接口 | `user://global_inventory.json` |
 | `ShopService` | 生成普通商店与灰市库存，维护刷新状态 | `user://shop_state.json` |
 | `HideoutService` | 维护六座据点设施等级、建造队列与六类只读加成接口 | `user://hideout_state.json` |
 | `InsuranceService` | 维护骇入保单、死亡理赔、账户统计与保险股行为累计；必须注册在 `StockMarketService` 之前，保证对局结束时理赔先于股市正式结算入池 | `user://insurance_state.json` |
@@ -55,6 +55,7 @@
 - `EnhancementStoneData` 保存强化石品质、目标类型和词条方向；逐属性强化幅度、兼容规则与正式词条池集中在 `EnhancementRules`。特化品质额外在资源中保存散射、穿透、弹射或连击的 `+1/+2` 离散点数；四项机制不进入普通四品质词条池。
 - `EnhancementRules` 同时声明单件武器或装备最多使用 20 颗强化石；`WeaponData` 与 `EquipmentData` 分别在数据层记录已使用次数、返回剩余次数并拒绝第 21 次强化。
 - `InventoryLimits` 集中声明背包 50 组容量与资源单组 10 件现行上限；库存、地面掉落和 UI 不各自复制这些数字。历史 99 件常量只保留未调用兼容接口，不参与当前读档。
+- `FinanceUnlockRules` 集中声明保险、银行、矿场与炒股的稳定功能标识、成长顺序和 1000 / 3000 / 6000 / 10000 累计获得星穹门槛；主菜单、测试和后续入口不得复制这些数字。
 - `SecondHandItemGenerator` 集中执行武器装备 30% 二手判定、1 至 20 次按 `21 - 次数` 递减权重抽取的历史强化，以及 1% 至 99% 耐久消耗；怪物、宝箱和普通商店只负责提供新物品实例与随机源。
 - `.tres` 保存单个内容的基础数值。脚本默认值只作为缺省值，场景或资源覆盖值优先。
 - 新内容通过 `ContentCatalog` 自动注册，创建流程见 `docs/content_authoring.md`。
@@ -216,6 +217,7 @@ HackModeRules + ModeExtensionRules + HackProtocolRules
 - 存档版本常量只标识当前写入结构。项目尚未发布正式版本，库存补发、强化公式转换、商店重建、股市进度缩放、旧堆叠拆分、图鉴补账和项目目录复制等迁移入口均已停用。
 - `SaveLocationMigration` 脚本保留为历史实现参考，但未在 `project.godot` 注册且脚本内迁移调用已注释；启动时不会实例化该服务，也不会读取或复制同级旧项目目录文件。
 - 普通高频变化可合并写入；货币兑换、股票成交等跨资产操作应立即保存，缩短文件间状态不一致窗口。
+- `GlobalInventory` 在 `global_inventory.json` 保存 `total_coins_earned`。该值只通过战利品出售与明确外部奖励增长，消费和跨账户转移不回退；只有缺失该字段的旧档会以当前局外星穹初始化一次，现行存档读档时不再用余额覆盖累计值。
 - 零装骇入封存：`GlobalInventory` 在零装局开局时把真实背包与装备序列化为存档内 `bare_run_stash` 字段并立即落盘，结算收尾恢复后清除该字段；读档发现残留封存快照即视为零装局异常中断，恢复真实资产并放弃局内临时所得。该字段只在零装局进行中的存档内出现，不改变其他模块存档结构。
 - 测试不得直接覆盖日常 `user://` 数据，具体隔离要求见 `docs/功能验证测试规范.md`。
 - 存档导出使用默认名 `Star_Hacker_save_<本地时间>.lisbamsave`，保存 `character_unlocks.json`、`input_bindings.cfg`、`ui_style_settings.cfg`、`banner_notification_settings.cfg`、`debug_settings.cfg`、`global_inventory.json`、`shop_state.json`、`stock_market_state.json`、`mining_farm_state.json`、`hideout_state.json`、`insurance_state.json`、`bank_state.json`、`dispatch_state.json`、`stats_state.json`、`newcomer_protection_state.json` 与 `bounty_state.json` 的原始字节；尚未生成的文件不写入归档。根元数据同时保存项目中文名与英文名，只用于人工识别，不参与兼容校验。

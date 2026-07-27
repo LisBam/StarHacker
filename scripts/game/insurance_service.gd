@@ -246,7 +246,9 @@ func _settle_policy_after_run() -> void:
 		policy_changed.emit()
 		insurance_settled.emit("claim", "死亡结算完成，本局没有可赔付的丢失物品")
 		return
-	if _global_inventory.has_method("adjust_coins"):
+	if _global_inventory.has_method("grant_coins"):
+		_global_inventory.call("grant_coins", payout)
+	elif _global_inventory.has_method("adjust_coins"):
 		_global_inventory.call("adjust_coins", payout)
 	_pending_claim_gold += payout
 	_total_claims_paid += payout

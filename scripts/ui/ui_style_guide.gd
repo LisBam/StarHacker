@@ -42,6 +42,12 @@ const DANGER_BUTTON_HOVER_COLOR: Color = Color(0.48, 0.09, 0.12, 1.0)
 const DANGER_BUTTON_PRESSED_COLOR: Color = Color(0.21, 0.035, 0.052, 1.0)
 ## 禁用控件背景色；默认低饱和灰蓝，确保仍可辨认控件边界。
 const DISABLED_BACKGROUND_COLOR: Color = Color(0.055, 0.065, 0.072, 0.82)
+## 永久成长锁定按钮背景色；固定纯黑，用于主菜单尚未达到解锁门槛的功能入口。
+const LOCKED_BUTTON_BACKGROUND_COLOR: Color = Color(0.0, 0.0, 0.0, 1.0)
+## 永久成长锁定按钮边框色；使用低亮灰蓝保留按钮轮廓，同时明显弱于可用入口。
+const LOCKED_BUTTON_BORDER_COLOR: Color = Color(0.12, 0.15, 0.17, 1.0)
+## 永久成长锁定按钮文字色；使用暗灰保证名称仍可辨认但不与可操作按钮竞争视觉焦点。
+const LOCKED_BUTTON_TEXT_COLOR: Color = Color(0.32, 0.35, 0.37, 1.0)
 ## 主要文字色；用于普通标签、按钮和输入内容。
 const PRIMARY_TEXT_COLOR: Color = Color(0.90, 0.96, 0.99, 1.0)
 ## 次要文字色；用于规则说明、占位提示和弱化信息。
@@ -230,6 +236,20 @@ static func apply_danger_button(target: Button) -> void:
 	if target == null:
 		return
 	target.theme_type_variation = &"DangerButton"
+
+
+static func apply_locked_button_visual(target: Button, locked: bool) -> void:
+	## 切换永久成长入口的纯黑锁定表现；解除锁定时移除局部覆盖并恢复当前全局主题。
+	if target == null:
+		return
+	if not locked:
+		target.remove_theme_stylebox_override("disabled")
+		target.remove_theme_color_override("font_disabled_color")
+		return
+	# 锁定按钮样式；内容边距与通用按钮保持一致，切换状态不会改变列表尺寸。
+	var locked_style: StyleBoxFlat = _create_flat_style(LOCKED_BUTTON_BACKGROUND_COLOR, LOCKED_BUTTON_BORDER_COLOR, 1, 5, 11.0, 6.0)
+	target.add_theme_stylebox_override("disabled", locked_style)
+	target.add_theme_color_override("font_disabled_color", LOCKED_BUTTON_TEXT_COLOR)
 
 
 ## 为角色列表按钮启用独立选中与选中悬停状态；按钮必须保持 toggle_mode 才能显示当前角色。

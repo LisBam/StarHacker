@@ -106,6 +106,8 @@ var _knockback_velocity: Vector2 = Vector2.ZERO
 var _damage_interval_remaining: float = 0.0
 ## 是否由战斗开发者工具禁用耐久消耗；默认 false，开启后正式战斗成功攻击也不会扣除武器耐久。
 var _durability_consumption_disabled_by_debug: bool = false
+## 是否由骇入模式规则禁用耐久消耗；默认 false，超频骇入由 GameWorld 入场时开启，与开发者开关互不覆盖。
+var _durability_consumption_disabled_by_mode: bool = false
 ## 外部移动倍率来源；键为稳定效果 ID、值为非负倍率，默认空字典，主动技能蓄力等临时效果分别写入并连乘。
 var _movement_speed_multiplier_sources: Dictionary = {}
 ## 临时移动速度属性点来源；键为稳定来源 ID、值为可正向叠加的属性点，银狼技能等效果结束时按来源精确移除。
@@ -492,6 +494,11 @@ func set_weapon_durability_consumption_disabled(enabled: bool) -> void:
 	_durability_consumption_disabled_by_debug = enabled
 
 
+func set_weapon_durability_consumption_disabled_by_mode(enabled: bool) -> void:
+	## 写入骇入模式级耐久豁免；超频骇入入场时由 GameWorld 开启，独立于开发者调试开关，场景销毁后自动失效。
+	_durability_consumption_disabled_by_mode = enabled
+
+
 func is_weapon_durability_consumption_disabled_by_debug() -> bool:
 	return _durability_consumption_disabled_by_debug
 
@@ -515,7 +522,7 @@ func _consume_weapon_durability(weapon_data: Resource, durability_cost: float = 
 
 
 func _should_skip_weapon_durability_consumption() -> bool:
-	if _durability_consumption_disabled_by_debug:
+	if _durability_consumption_disabled_by_debug or _durability_consumption_disabled_by_mode:
 		return true
 	# 会话状态；训练场固定不消耗武器耐久，缺少 AutoLoad 时按正式战斗处理以保持独立场景测试可预测。
 	var session_state: Node = get_tree().root.get_node_or_null("SessionState")

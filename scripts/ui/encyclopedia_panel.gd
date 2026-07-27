@@ -725,6 +725,19 @@ func _build_entry_card(entry: Dictionary, is_discovered: bool, entry_index: int)
 	entry_button.pressed.connect(_on_entry_button_pressed.bind(entry_index))
 	if not is_discovered:
 		entry_button.add_theme_color_override("font_color", UI_STYLE_GUIDE.get_disabled_text_color())
+	# 条目统计计数标签；名称最右侧固定显示获得数量或击杀数量，未解锁条目按 0 展示，便于玩家横向对比。
+	var entry_count_label: Label = Label.new()
+	entry_count_label.text = str(_get_entry_statistics_count(entry))
+	entry_count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	entry_count_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	entry_count_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	entry_count_label.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+	entry_count_label.offset_left = -76.0
+	entry_count_label.offset_top = -12.0
+	entry_count_label.offset_right = -10.0
+	entry_count_label.offset_bottom = 12.0
+	UI_STYLE_GUIDE.apply_muted_accent_label(entry_count_label)
+	entry_button.add_child(entry_count_label)
 	return entry_button
 
 
@@ -785,17 +798,19 @@ func _refresh_selected_detail() -> void:
 	if not _is_entry_discovered(selected_entry):
 		_detail_label.text = "[center][font_size=28]%s[/font_size][/center]" % UNKNOWN_ENTRY_TEXT
 		return
+	# 条目统计行；击杀或获得数量显示在详细信息之前，与左侧列表右缘数字使用同一统计口径。
+	var statistics_prefix: String = "[color=#9fd8ff]%s：%d[/color]\n\n" % ["击杀数量" if bool(selected_entry.get("is_monster", false)) else "获得数量", _get_entry_statistics_count(selected_entry)]
 	# 已解锁怪物；展示从离树场景快照读取的固定图鉴资料，不实例化 AI 或读取临时战斗状态。
 	if bool(selected_entry.get("is_monster", false)):
-		_detail_label.text = _build_monster_detail_bbcode(selected_entry)
+		_detail_label.text = statistics_prefix + _build_monster_detail_bbcode(selected_entry)
 		return
 	# 已解锁静态资源；使用库存与仓库相同的完整 BBCode，避免图鉴复制耐久、套装与强化属性公式。
 	var item_resource: Resource = selected_entry.get("resource") as Resource
 	if item_resource != null:
-		_detail_label.text = str(ITEM_DETAIL_FORMATTER.call("build_bbcode", item_resource))
+		_detail_label.text = statistics_prefix + str(ITEM_DETAIL_FORMATTER.call("build_bbcode", item_resource))
 		return
 	# 已解锁强化石通用条目；随机强化石没有固定实例，详情仅展示其长期不变的类别说明。
-	_detail_label.text = "[font_size=18][b]%s[/b][/font_size]\n类型：%s\n\n%s" % [str(selected_entry.get("display_name", "强化石")), str(selected_entry.get("type_text", "资源 · 强化石")), str(selected_entry.get("description", ""))]
+	_detail_label.text = statistics_prefix + "[font_size=18][b]%s[/b][/font_size]\n类型：%s\n\n%s" % [str(selected_entry.get("display_name", "强化石")), str(selected_entry.get("type_text", "资源 · 强化石")), str(selected_entry.get("description", ""))]
 
 
 func _build_monster_detail_bbcode(entry: Dictionary) -> String:
@@ -811,6 +826,27 @@ func _build_monster_detail_bbcode(entry: Dictionary) -> String:
 	# 攻击间隔；保留一位小数与近战和远程场景的导出秒数一致。
 	var attack_cooldown: float = float(entry.get("attack_cooldown", 0.0))
 	return "[font_size=18][b]%s[/b][/font_size]\n类型：%s\n\n%s\n\n最大生命：%d\n攻击力：%d\n防御力：%d\n移动速度：%d\n单次伤害：%d\n攻击间隔：%.1f 秒" % [display_name, type_text, description, roundi(float(entry.get("max_health", 0.0))), roundi(float(entry.get("attack_power", 0.0))), roundi(float(entry.get("defense_power", 0.0))), roundi(float(entry.get("move_speed", 0.0))), roundi(float(entry.get("damage_value", 0.0))), attack_cooldown]
+
+
+func _get_entry_statistics_count(entry: Dictionary) -> int:
+	## 返回条目对应的统计计数；怪物为击杀数量，物品为获得数量，强化石读取统一类别键，统计服务缺失时返回 0。
+	# 当前场景树；独立测试场景可能没有统计服务，此时全部计数按 0 展示。
+	var scene_tree: SceneTree = get_tree()
+	if scene_tree == null:
+		return 0
+	# 生涯统计服务节点；图鉴只读取计数，不写入任何统计。
+	var stats_service: Node = scene_tree.root.get_node_or_null("StatsService")
+	if stats_service == null:
+		return 0
+	if bool(entry.get("is_monster", false)):
+		return int(stats_service.call("get_monster_kill_count", str(entry.get("monster_id", "")))) if stats_service.has_method("get_monster_kill_count") else 0
+	if bool(entry.get("is_enhancement_stone", false)):
+		return int(stats_service.call("get_enhancement_stone_acquire_count")) if stats_service.has_method("get_enhancement_stone_acquire_count") else 0
+	# 当前条目模板资源；统计服务按稳定物品键查询累计获得数量。
+	var item_resource: Resource = entry.get("resource") as Resource
+	if item_resource != null and stats_service.has_method("get_item_acquire_count"):
+		return int(stats_service.call("get_item_acquire_count", item_resource))
+	return 0
 
 
 func _clear_entry_grid() -> void:

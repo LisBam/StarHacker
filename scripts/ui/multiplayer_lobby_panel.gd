@@ -14,9 +14,11 @@ const READY_STATE_TEXTS: Array[String] = ["未准备", "已准备"]
 ## 组队骇入模式标识；与 NetworkSession.COMBAT_MODE_TEAM 保持一致，对应模式下拉框下标 0。
 const COMBAT_MODE_TEAM: String = "team"
 ## 大逃杀模式标识；与 NetworkSession.COMBAT_MODE_BATTLE_ROYALE 保持一致，对应模式下拉框下标 1。
+## 展示名调整补充：玩家可见名称已改为“对抗骇入”，内部稳定标识保持 battle_royale 不变以兼容既有协议。
 const COMBAT_MODE_BATTLE_ROYALE: String = "battle_royale"
 ## 模式显示名表；键为模式标识，值为玩家可见名称，房间列表与队伍提示共用。
-const COMBAT_MODE_DISPLAY_NAMES: Dictionary = {"team": "组队骇入", "battle_royale": "大逃杀"}
+## 展示名调整补充：该维度现称“多人模式”，大逃杀展示名更新为“对抗骇入”。
+const COMBAT_MODE_DISPLAY_NAMES: Dictionary = {"team": "组队骇入", "battle_royale": "对抗骇入"}
 
 ## 联机会话服务缓存；ready 时解析，缺失时面板显示服务不可用提示。
 var _network_session: Node = null
@@ -39,7 +41,12 @@ var _member_list: VBoxContainer = null
 ## 队伍提示标签；显示未入房提示或开局条件说明。
 var _team_hint_label: Label = null
 ## 模式下拉框；下标 0 为组队骇入、1 为大逃杀，仅主机可操作，客户端只读显示同步值。
+## 展示名调整补充：该下拉框现对应“多人模式”维度，下标 1 的展示名为“对抗骇入”。
 var _mode_option_button: OptionButton = null
+## 骇入模式下拉框；选项顺序与 HackModeRules 定义表一致（标准/零装/超频），仅主机可操作，客户端只读显示同步值。
+var _hack_variant_option_button: OptionButton = null
+## 骇入模式选项标识缓存；与下拉框下标一一对应，选择回调据此把下标映射回稳定模式标识。
+var _hack_variant_option_ids: Array[String] = []
 ## 准备按钮；切换本机准备状态，文本随状态变化。
 var _ready_button: Button = null
 ## 开始骇入按钮；仅主机可见，全员准备后可点击并统一开局。
@@ -222,8 +229,10 @@ func _build_team_section() -> Control:
 	mode_row.add_theme_constant_override("separation", 8)
 	section_layout.add_child(mode_row)
 	# 模式行标签；固定文本。
+	# 展示名调整补充：该行现为“多人模式”维度（组队骇入 / 对抗骇入），与下方“骇入模式”行相互独立。
 	var mode_caption: Label = Label.new()
-	mode_caption.text = "模式"
+	mode_caption.text = "多人模式"
+	mode_caption.custom_minimum_size = Vector2(64.0, 0.0)
 	UI_STYLE_GUIDE.apply_secondary_label(mode_caption)
 	mode_row.add_child(mode_caption)
 	_mode_option_button = OptionButton.new()
@@ -233,6 +242,26 @@ func _build_team_section() -> Control:
 	_mode_option_button.add_item(str(COMBAT_MODE_DISPLAY_NAMES[COMBAT_MODE_BATTLE_ROYALE]), 1)
 	_mode_option_button.item_selected.connect(_on_mode_option_selected)
 	mode_row.add_child(_mode_option_button)
+	# 骇入模式选择行容器；与多人模式行同规格，左标签右下拉框。
+	var hack_variant_row: HBoxContainer = HBoxContainer.new()
+	hack_variant_row.add_theme_constant_override("separation", 8)
+	section_layout.add_child(hack_variant_row)
+	# 骇入模式行标签；固定文本，与多人模式标签同宽保证两个下拉框左缘对齐。
+	var hack_variant_caption: Label = Label.new()
+	hack_variant_caption.text = "骇入模式"
+	hack_variant_caption.custom_minimum_size = Vector2(64.0, 0.0)
+	UI_STYLE_GUIDE.apply_secondary_label(hack_variant_caption)
+	hack_variant_row.add_child(hack_variant_caption)
+	_hack_variant_option_button = OptionButton.new()
+	_hack_variant_option_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_hack_variant_option_button.custom_minimum_size = Vector2(0.0, 36.0)
+	_hack_variant_option_ids.clear()
+	# 骇入模式定义遍历项；选项顺序、名称与说明全部来自规则表，联机不复制模式清单。
+	for mode_definition in HackModeRules.get_mode_definitions():
+		_hack_variant_option_button.add_item(str(mode_definition.get("display_name", "标准骇入")), _hack_variant_option_ids.size())
+		_hack_variant_option_ids.append(str(mode_definition.get("variant", HackModeRules.VARIANT_STANDARD)))
+	_hack_variant_option_button.item_selected.connect(_on_hack_variant_option_selected)
+	hack_variant_row.add_child(_hack_variant_option_button)
 	_member_list = VBoxContainer.new()
 	_member_list.add_theme_constant_override("separation", 6)
 	_member_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -287,13 +316,16 @@ func _refresh_room_list() -> void:
 	for room_index in range(_discovered_room_cache.size()):
 		# 单个房间信息；包含房名、IP、人数与是否在战斗中。
 		var room_info: Dictionary = _discovered_room_cache[room_index]
-		# 房间展示文本；附带当前模式，战斗中的房间标注不可中途加入。
-		var room_text: String = "%s（%s）%d/%d·%s%s" % [
+		# 房间骇入模式标注；标准骇入不额外占用列表宽度，零装与超频显示模式名帮助玩家入房前识别规则。
+		var room_hack_variant: String = HackModeRules.normalize_variant(str(room_info.get("hack_variant", HackModeRules.VARIANT_STANDARD)))
+		# 房间展示文本；附带当前多人模式与非标准骇入模式，战斗中的房间标注不可中途加入。
+		var room_text: String = "%s（%s）%d/%d·%s%s%s" % [
 			str(room_info.get("room_name", "未命名房间")),
 			str(room_info.get("ip", "?")),
 			int(room_info.get("player_count", 0)),
 			int(room_info.get("max_players", 4)),
 			str(COMBAT_MODE_DISPLAY_NAMES.get(str(room_info.get("mode", COMBAT_MODE_TEAM)), "组队骇入")),
+			"" if room_hack_variant == HackModeRules.VARIANT_STANDARD else "·%s" % HackModeRules.get_display_name(room_hack_variant),
 			"·战斗中" if bool(room_info.get("in_combat", false)) else "",
 		]
 		_room_list.add_item(room_text)
@@ -330,12 +362,19 @@ func _refresh_team_section() -> void:
 		]
 		member_label.add_theme_color_override("font_color", Color(0.45, 0.9, 0.55, 1.0) if member_ready else UI_STYLE_GUIDE.get_secondary_text_color())
 		_member_list.add_child(member_label)
-	# 当前模式说明；大逃杀提示随机分散出生与玩家互伤，组队骇入提示合作规则。
-	var mode_description: String = "大逃杀：全员随机分散出生，玩家可互相攻击。" if str(_network_session.call("get_session_combat_mode")) == COMBAT_MODE_BATTLE_ROYALE else "组队骇入：全员同点出生并肩作战，玩家之间不可互伤。"
+	# 当前多人模式说明；对抗骇入提示随机分散出生与玩家互伤，组队骇入提示合作规则。
+	var mode_description: String = "对抗骇入：全员随机分散出生，玩家可互相攻击。" if str(_network_session.call("get_session_combat_mode")) == COMBAT_MODE_BATTLE_ROYALE else "组队骇入：全员同点出生并肩作战，玩家之间不可互伤。"
+	# 当前骇入模式说明；标准骇入不追加提示，零装与超频展示模式名与完整规则文案。
+	var hack_variant_description: String = ""
+	if _network_session.has_method("get_session_hack_variant"):
+		# 会话骇入模式标识；由主机同步，未知取值回退标准骇入。
+		var session_hack_variant: String = HackModeRules.normalize_variant(str(_network_session.call("get_session_hack_variant")))
+		if session_hack_variant != HackModeRules.VARIANT_STANDARD:
+			hack_variant_description = "%s：%s" % [HackModeRules.get_display_name(session_hack_variant), HackModeRules.get_description(session_hack_variant)]
 	if bool(_network_session.call("is_session_host")):
-		_team_hint_label.text = "%s全员准备后可开始（至少 2 名成员）；切换模式会清空全员准备。" % mode_description
+		_team_hint_label.text = "%s%s全员准备后可开始（至少 2 名成员）；切换模式会清空全员准备。" % [mode_description, hack_variant_description]
 	else:
-		_team_hint_label.text = "%s等待主机开始；请先点击“准备”。" % mode_description
+		_team_hint_label.text = "%s%s等待主机开始；请先点击“准备”。" % [mode_description, hack_variant_description]
 
 
 func _refresh_action_states() -> void:
@@ -359,6 +398,12 @@ func _refresh_action_states() -> void:
 		# 模式下拉框状态；仅主机在房间内可切换，其余情况只读显示当前同步值。
 		_mode_option_button.disabled = not (session_active and bool(_network_session.call("is_session_host")))
 		_mode_option_button.select(1 if str(_network_session.call("get_session_combat_mode")) == COMBAT_MODE_BATTLE_ROYALE else 0)
+	if _hack_variant_option_button != null:
+		# 骇入模式下拉框状态；与多人模式下拉框同规则，仅主机在房间内可切换。
+		_hack_variant_option_button.disabled = not (session_active and bool(_network_session.call("is_session_host")))
+		# 当前会话骇入模式下标；按选项标识缓存反查，未找到时回退第一项（标准骇入）。
+		var session_hack_variant_index: int = _hack_variant_option_ids.find(HackModeRules.normalize_variant(str(_network_session.call("get_session_hack_variant")))) if _network_session.has_method("get_session_hack_variant") else 0
+		_hack_variant_option_button.select(maxi(session_hack_variant_index, 0))
 	if _start_button != null:
 		_start_button.visible = session_active and bool(_network_session.call("is_session_host"))
 		_start_button.disabled = not bool(_network_session.call("is_everyone_ready"))
@@ -445,10 +490,20 @@ func _on_join_button_pressed() -> void:
 
 
 func _on_mode_option_selected(selected_index: int) -> void:
-	## 主机切换联机战斗模式；服务端会清空全员准备并向全体成员同步新模式。
+	## 主机切换联机多人模式（组队骇入 / 对抗骇入）；服务端会清空全员准备并向全体成员同步新模式。
 	if _network_session == null:
 		return
 	_network_session.call("set_session_combat_mode", COMBAT_MODE_BATTLE_ROYALE if selected_index == 1 else COMBAT_MODE_TEAM)
+	_refresh_team_section()
+
+
+func _on_hack_variant_option_selected(selected_index: int) -> void:
+	## 主机切换联机骇入模式（标准/零装/超频）；服务端会清空全员准备并向全体成员同步新模式。
+	if _network_session == null or not _network_session.has_method("set_session_hack_variant"):
+		return
+	# 选中的骇入模式标识；下标越界时回退标准骇入，防止选项表与回调不同步。
+	var selected_hack_variant: String = _hack_variant_option_ids[selected_index] if selected_index >= 0 and selected_index < _hack_variant_option_ids.size() else HackModeRules.VARIANT_STANDARD
+	_network_session.call("set_session_hack_variant", selected_hack_variant)
 	_refresh_team_section()
 
 

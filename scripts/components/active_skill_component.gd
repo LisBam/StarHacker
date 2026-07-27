@@ -64,6 +64,8 @@ var _cooldown_pause_sources: Array[Dictionary] = []
 var _equipment_cooldown_reduction: float = 0.0
 ## 是否由训练场设置禁用主动技能冷却；默认 false，开启时所有技能立即可用且后续释放不会写入冷却，不会保存到角色或装备数据。
 var _cooldown_disabled: bool = false
+## 骇入模式冷却倍率；默认 1.0 不修改冷却，超频骇入入场时由 GameWorld 写入 0.2，训练场无冷却开关优先级更高。
+var _mode_cooldown_scale: float = 1.0
 ## 当前正在瞄准的技能槽；取值 -1 或有效下标，默认 -1 表示没有按住任何主动技能。
 var _active_slot_index: int = -1
 ## 当前技能按住累计蓄力时间；取值大于等于 0 秒，默认 0，只有技能允许蓄力时才参与释放比例。
@@ -534,7 +536,8 @@ func _complete_skill_chain(slot_index: int) -> void:
 	var base_cooldown_duration: float = maxf(float(root_skill_data.get("cooldown_duration")), 0.0) * completion_multiplier if root_skill_data != null else 0.0
 	_cooldown_base_durations[slot_index] = base_cooldown_duration
 	# 实际冷却时长；腿部装备冷却缩减只在整套技能完成并进入 CD 时应用，后续段窗口不受影响。
-	var resolved_cooldown_duration: float = _get_effective_cooldown_duration(base_cooldown_duration)
+	# 骇入模式倍率补充：超频骇入按模式冷却倍率整体缩短写入值，展示时长与剩余时间同步缩短。
+	var resolved_cooldown_duration: float = _get_effective_cooldown_duration(base_cooldown_duration) * maxf(_mode_cooldown_scale, 0.0)
 	_cooldown_durations[slot_index] = resolved_cooldown_duration
 	# 训练场无冷却开关；仅跳过本次进入冷却，资源冷却与装备缩减结果仍保留给关闭开关后的下一次释放使用。
 	_cooldown_remaining[slot_index] = 0.0 if _cooldown_disabled else resolved_cooldown_duration
@@ -642,6 +645,11 @@ func set_cooldown_disabled(enabled: bool) -> void:
 func is_cooldown_disabled() -> bool:
 	## 返回当前是否处于训练场主动技能无冷却状态；仅供训练场界面同步开关，不用于装备冷却缩减计算。
 	return _cooldown_disabled
+
+
+func set_mode_cooldown_scale(cooldown_scale: float) -> void:
+	## 写入骇入模式冷却倍率；超频骇入入场时由 GameWorld 传入 0.2，负值按 0 处理，只影响后续进入冷却的写入值。
+	_mode_cooldown_scale = maxf(cooldown_scale, 0.0)
 
 
 func _get_effective_cooldown_duration(base_cooldown_duration: float) -> float:

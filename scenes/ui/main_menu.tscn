@@ -187,6 +187,96 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "图鉴"
 
+[node name="SideMenuMargin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -188.0
+offset_bottom = -82.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_right = 24
+
+[node name="SideMenuColumns" type="HBoxContainer" parent="SideMenuMargin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="SideSpacer1" type="Control" parent="SideMenuMargin/SideMenuColumns"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="SideSpacer2" type="Control" parent="SideMenuMargin/SideMenuColumns"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="SideSpacer3" type="Control" parent="SideMenuMargin/SideMenuColumns"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="SideSpacer4" type="Control" parent="SideMenuMargin/SideMenuColumns"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="SideSpacer5" type="Control" parent="SideMenuMargin/SideMenuColumns"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="SideSpacer6" type="Control" parent="SideMenuMargin/SideMenuColumns"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="SideSpacer7" type="Control" parent="SideMenuMargin/SideMenuColumns"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="SideSpacer8" type="Control" parent="SideMenuMargin/SideMenuColumns"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="SideSpacer9" type="Control" parent="SideMenuMargin/SideMenuColumns"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="SideSpacer10" type="Control" parent="SideMenuMargin/SideMenuColumns"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="SideSpacer11" type="Control" parent="SideMenuMargin/SideMenuColumns"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="SideButtonColumn" type="VBoxContainer" parent="SideMenuMargin/SideMenuColumns"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+alignment = 2
+
+[node name="StatsButton" type="Button" parent="SideMenuMargin/SideMenuColumns/SideButtonColumn"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+text = "统计"
+
+[node name="BountyButton" type="Button" parent="SideMenuMargin/SideMenuColumns/SideButtonColumn"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+text = "悬赏"
+
 [node name="SettingsPanel" type="PanelContainer" parent="." unique_id=2143343297]
 unique_name_in_owner = true
 visible = false

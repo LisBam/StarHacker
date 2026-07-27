@@ -483,6 +483,10 @@ func _on_host_monster_died(monster: Node2D) -> void:
 	var enemy_id: int = int(_host_enemy_ids_by_instance.get(monster.get_instance_id(), 0))
 	if enemy_id == 0:
 		return
+	# 主机侧生涯统计击杀上报；最后一次网络伤害归属为 0 表示主机自己（或其友方单位）完成击杀。
+	# 归属其他成员的击杀由对应客户端按 enemy_remove 回传的 kp 自行计数，主机不代记，保证每人只统计本人击杀。
+	if int(_last_network_damage_peer_by_enemy_id.get(enemy_id, 0)) == 0:
+		_record_local_kill_statistics(str(monster.get("monster_id")))
 	_host_dead_enemy_ids[enemy_id] = true
 	_host_forget_enemy(enemy_id, true)
 
@@ -591,6 +595,8 @@ func _remove_puppet_enemy(payload: Dictionary) -> void:
 	# 击杀归属；本机击杀时通知套装组件，保持“击杀触发”类效果在联机下生效。
 	if bool(payload.get("died", false)) and _network_session != null and int(payload.get("kp", 0)) == int(_network_session.call("get_local_peer_id")):
 		_notify_local_kill_effects()
+		# 客户端生涯统计击杀上报；只有主机回传击杀归属为本机时计数，与套装击杀通知共用同一确认时机。
+		_record_local_kill_statistics(str(puppet.get("monster_id")))
 
 
 func _notify_local_kill_effects() -> void:
@@ -601,6 +607,18 @@ func _notify_local_kill_effects() -> void:
 	var equipment_set_component: Node = _player.get_node_or_null("EquipmentSetComponent")
 	if equipment_set_component != null and equipment_set_component.has_method("notify_enemy_killed"):
 		equipment_set_component.call("notify_enemy_killed")
+
+
+func _record_local_kill_statistics(monster_id: String) -> void:
+	## 把一次本机确认击杀写入生涯统计；娱乐模式（超频骇入）联机局不产出结算，同样不计入统计与悬赏。
+	# 会话状态服务；缺失时按可统计处理，保持独立测试场景可运行。
+	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
+	if session_state != null and session_state.has_method("is_item_settlement_disabled") and bool(session_state.call("is_item_settlement_disabled")):
+		return
+	# 生涯统计服务；缺失时仅丢失计数，不影响战斗同步。
+	var stats_service: Node = get_tree().root.get_node_or_null("StatsService")
+	if stats_service != null and stats_service.has_method("record_monster_killed"):
+		stats_service.call("record_monster_killed", monster_id)
 
 
 func _on_puppet_damage_forward(puppet: Node2D, final_damage: float, is_critical: bool, impact_force: float, knockback_direction: Vector2) -> void:

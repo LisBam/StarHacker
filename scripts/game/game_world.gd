@@ -327,6 +327,9 @@ var _has_last_exploration_view_rect: bool = false
 var _last_grid_window_signature: Vector4i = Vector4i(-2147483648, -2147483648, -2147483648, -2147483648)
 ## 当前是否为训练场模式；默认 false 表示正式骇入，修改会影响 HUD 是否显示训练场设置。
 var _is_training_mode: bool = false
+## 当前骇入模式变体；取值为 HackModeRules 定义的 standard、bare 或 overclock，训练场固定回退 standard。
+## 入场时从 SessionState 读取一次并缓存整局；决定人口倍率、二手概率覆盖、结算资格与玩家规则豁免。
+var _hack_variant: String = HackModeRules.VARIANT_STANDARD
 ## 当前选择角色标识；取值为 stelle、caelus 或 silver_wolf，默认 stelle，用于角色切换和属性随机。
 var _selected_character_id: String = CHARACTER_STELLE
 ## 当前战斗存活时间；取值为进入 GameWorld 后玩家未死亡的累计秒数，默认 0 用于 HUD 计时显示。
@@ -407,6 +410,8 @@ func _ready() -> void:
 	_random.randomize()
 	_merge_automatically_discovered_content()
 	_apply_session_state()
+	# 骇入模式玩家规则；角色应用完成后立即写入超频等模式的能量、耐久与技能冷却豁免。
+	_apply_hack_variant_player_rules()
 	_resolve_network_combat_session()
 	_begin_global_inventory_run()
 	_prepare_map_seed()
@@ -437,9 +442,8 @@ func _ready() -> void:
 				_monster_simulation_manager.connect("virtual_monster_died", Callable(self, "_on_monster_died"))
 			if _monster_simulation_manager.has_signal("monster_encountered") and not _monster_simulation_manager.is_connected("monster_encountered", Callable(self, "_on_monster_encountered")):
 				_monster_simulation_manager.connect("monster_encountered", Callable(self, "_on_monster_encountered"))
-			if _network_combat_active:
-				# 联机同时活跃敌人上限；随人口倍率同步放大，避免多名玩家分散活动时全局真实节点名额成为各自周边密度瓶颈。
-				_monster_simulation_manager.set("max_materialized_monsters", _apply_network_population_scale(int(_monster_simulation_manager.get("max_materialized_monsters"))))
+			# 同时活跃敌人上限缩放；骇入模式倍率（零装 0.6、超频 2.0）与联机成员倍率统一应用，标准单机保持原值。
+			_monster_simulation_manager.set("max_materialized_monsters", _apply_population_scales(int(_monster_simulation_manager.get("max_materialized_monsters"))))
 		_spawn_monster_batch()
 	_monster_replenish_remaining = monster_replenish_interval
 	if _network_combat_active:
@@ -657,6 +661,39 @@ func is_training_mode() -> bool:
 		return bool(session_state.call("is_training_mode"))
 
 	return _is_training_mode
+
+
+func get_hack_variant() -> String:
+	## 返回本局骇入模式变体；训练场固定返回标准值，HUD、统计与联机侧按需读取。
+	return _hack_variant
+
+
+func is_settlement_disabled_mode() -> bool:
+	## 返回本局是否不产出物品得失结算；训练场与超频骇入（娱乐模式）都返回 true。
+	## HUD 据此切换“离开”按钮、死亡复活与拾取消耗行为，库存服务在这些模式下不开启战斗快照。
+	return is_training_mode() or not HackModeRules.is_settlement_enabled(_hack_variant)
+
+
+func _apply_hack_variant_player_rules() -> void:
+	## 把当前骇入模式的玩家规则豁免写入玩家组件；标准与零装模式全部保持默认值，超频模式开启三类豁免。
+	## 该函数只在入场时调用一次；全部开关都属于场景内组件状态，离开战斗后自动失效，不写入任何存档。
+	if _player == null or _hack_variant != HackModeRules.VARIANT_OVERCLOCK:
+		return
+	# 战斗属性组件；超频模式复用无限能量开关实现“能量不消耗”，与开发者调试开关语义一致。
+	var stats_component: Node = _player.get_node_or_null("CombatStatsComponent")
+	if HackModeRules.is_energy_consumption_disabled(_hack_variant) and stats_component != null and stats_component.has_method("set_infinite_energy"):
+		stats_component.call("set_infinite_energy", true)
+	# 武器耐久豁免；写入玩家控制器的模式级开关，与开发者调试开关互不覆盖。
+	if HackModeRules.is_durability_consumption_disabled(_hack_variant) and _player.has_method("set_weapon_durability_consumption_disabled_by_mode"):
+		_player.call("set_weapon_durability_consumption_disabled_by_mode", true)
+	# 装备组件；防具耐久豁免与武器豁免分开挂载，保持两类耐久规则各自可测试。
+	var equipment_component: Node = _player.get_node_or_null("EquipmentComponent")
+	if HackModeRules.is_durability_consumption_disabled(_hack_variant) and equipment_component != null and equipment_component.has_method("set_armor_durability_consumption_disabled_by_mode"):
+		equipment_component.call("set_armor_durability_consumption_disabled_by_mode", true)
+	# 主动技能组件；超频模式把技能冷却写入倍率降到规则表配置值，训练场无冷却开关优先级更高。
+	var active_skill_component: Node = _player.get_node_or_null("ActiveSkillComponent")
+	if active_skill_component != null and active_skill_component.has_method("set_mode_cooldown_scale"):
+		active_skill_component.call("set_mode_cooldown_scale", HackModeRules.get_skill_cooldown_scale(_hack_variant))
 
 
 func get_selected_character_id() -> String:
@@ -1076,6 +1113,7 @@ func _apply_session_state() -> void:
 	var session_state: Node = _get_session_state()
 	if session_state == null:
 		_is_training_mode = false
+		_hack_variant = HackModeRules.VARIANT_STANDARD
 		_selected_character_id = CHARACTER_STELLE
 		_apply_selected_character()
 		return
@@ -1086,6 +1124,12 @@ func _apply_session_state() -> void:
 		# 会话模式属性；取值为字符串，默认 hack，修改会影响当前 GameWorld 模式缓存。
 		var session_mode: String = str(session_state.get("game_mode"))
 		_is_training_mode = session_mode == GAME_MODE_TRAINING
+	# 骇入模式变体；训练场固定使用标准值，正式骇入按会话状态读取，缺少接口时按标准骇入兜底。
+	_hack_variant = HackModeRules.normalize_variant(str(session_state.call("get_hack_variant"))) if not _is_training_mode and session_state.has_method("get_hack_variant") else HackModeRules.VARIANT_STANDARD
+	# 二手概率模式覆盖；零装骇入把局内掉落武器装备的二手概率从基础值提高到规则表覆盖值，负值表示不覆盖。
+	var second_hand_override: float = HackModeRules.get_second_hand_chance_override(_hack_variant)
+	if second_hand_override >= 0.0:
+		second_hand_equipment_chance = second_hand_override
 
 	if session_state.has_method("get_selected_character_id"):
 		_selected_character_id = _normalize_character_id(str(session_state.call("get_selected_character_id")))
@@ -1102,13 +1146,19 @@ func _get_session_state() -> Node:
 
 
 func _begin_global_inventory_run() -> void:
-	if _is_training_mode:
+	# 娱乐模式补充：训练场与超频骇入都不开启正式战斗库存快照，拾取与死亡都不影响正式库存。
+	if _is_training_mode or is_settlement_disabled_mode():
 		return
 
 	# 全局背包服务；默认由自动加载提供，正式骇入开始时记录本局物品快照用于撤离和失败结算。
+	# 零装骇入补充：传入 true 让库存服务先封存真实背包与装备，再以空所有权开始本局。
 	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
 	if global_inventory != null and global_inventory.has_method("begin_combat_run"):
-		global_inventory.call("begin_combat_run")
+		global_inventory.call("begin_combat_run", HackModeRules.is_bare_loadout(_hack_variant))
+	# 生涯统计服务；只有产出结算的战斗模式会走到这里，对局开始计入总局数并清零本局临时计数。
+	var stats_service: Node = get_tree().root.get_node_or_null("StatsService")
+	if stats_service != null and stats_service.has_method("record_run_started"):
+		stats_service.call("record_run_started")
 
 
 func _apply_selected_character() -> void:
@@ -2338,8 +2388,8 @@ func _on_loot_chest_removed(chest: Node) -> void:
 
 
 func _spawn_monster_batch(requested_count: int = -1) -> void:
-	# 实际生成数量；负值使用开局配置（联机按成员数量倍率放大），补充刷新会传入当前缺口对应的批次数量。
-	var resolved_spawn_count: int = _apply_network_population_scale(monster_spawn_count) if requested_count < 0 else requested_count
+	# 实际生成数量；负值使用开局配置（先按骇入模式倍率缩放，联机再按成员数量倍率放大），补充刷新会传入当前缺口对应的批次数量。
+	var resolved_spawn_count: int = _apply_population_scales(monster_spawn_count) if requested_count < 0 else requested_count
 	if not _has_monster_scene_available() or resolved_spawn_count <= 0:
 		return
 
@@ -2546,12 +2596,12 @@ func _get_target_monster_population() -> int:
 	if _survival_time_seconds <= first_milestone_time:
 		# 第一阶段比例；取值 0 到 1，控制人口从 200 连续增长到 1200。
 		var first_stage_ratio: float = clampf(_survival_time_seconds / first_milestone_time, 0.0, 1.0)
-		return _apply_network_population_scale(roundi(lerpf(float(initial_population), float(monster_population_five_minute_count), first_stage_ratio)))
+		return _apply_population_scales(roundi(lerpf(float(initial_population), float(monster_population_five_minute_count), first_stage_ratio)))
 	if _survival_time_seconds <= second_milestone_time:
 		# 第二阶段比例；取值 0 到 1，控制人口从 1200 连续增长到 3200。
 		var second_stage_ratio: float = clampf((_survival_time_seconds - first_milestone_time) / (second_milestone_time - first_milestone_time), 0.0, 1.0)
-		return _apply_network_population_scale(roundi(lerpf(float(monster_population_five_minute_count), float(monster_population_ten_minute_count), second_stage_ratio)))
-	return _apply_network_population_scale(maxi(monster_population_ten_minute_count, 0))
+		return _apply_population_scales(roundi(lerpf(float(monster_population_five_minute_count), float(monster_population_ten_minute_count), second_stage_ratio)))
+	return _apply_population_scales(maxi(monster_population_ten_minute_count, 0))
 
 
 func _apply_network_population_scale(base_population: int) -> int:
@@ -2559,6 +2609,16 @@ func _apply_network_population_scale(base_population: int) -> int:
 	if not _network_combat_active or _network_population_multiplier <= 1.0:
 		return base_population
 	return roundi(float(base_population) * _network_population_multiplier)
+
+
+func _apply_population_scales(base_population: int) -> int:
+	## 统一应用骇入模式人口倍率与联机成员倍率；先按模式缩放（零装 0.6、超频 2.0），再按联机人数放大。
+	## 开局布怪数量、人口曲线目标与同时活跃真实敌人上限都必须经过本函数，保证三处口径一致。
+	# 模式人口倍率；标准骇入与训练场为 1.0，直接透传避免无意义的取整误差。
+	var variant_population_multiplier: float = HackModeRules.get_population_multiplier(_hack_variant)
+	# 模式缩放结果；四舍五入为整数后再交给联机倍率，保持与联机缩放相同的取整策略。
+	var variant_scaled_population: int = base_population if variant_population_multiplier == 1.0 else roundi(float(base_population) * variant_population_multiplier)
+	return _apply_network_population_scale(variant_scaled_population)
 
 
 func _on_monster_encountered(monster_id: String) -> void:
@@ -2577,8 +2637,17 @@ func _on_monster_died(monster_node: Node) -> void:
 	if equipment_set_component != null and equipment_set_component.has_method("notify_enemy_killed"):
 		equipment_set_component.call("notify_enemy_killed")
 
+	# 生涯统计击杀上报；单机战斗模式下本机世界的全部击杀都归属玩家侧（含友方单位击杀）。
+	# 联机口径补充：联机时由 NetworkCombatSync 按主机回传的击杀归属分别计数，这里不重复上报避免主机多计队友击杀。
+	if not _network_combat_active and not is_settlement_disabled_mode():
+		# 生涯统计服务；缺失时战斗照常运行，仅丢失计数。
+		var stats_service: Node = get_tree().root.get_node_or_null("StatsService")
+		if stats_service != null and stats_service.has_method("record_monster_killed"):
+			stats_service.call("record_monster_killed", str(monster_node.get("monster_id")))
+
 	# 训练场只用于测试战斗，不生成任何怪物掉落，避免调试资源进入正式库存。
-	if not _is_training_mode:
+	# 超频骇入补充：娱乐模式拾取不进入正式库存，掉落只会堆积干扰视野，因此与训练场一样跳过怪物掉落。
+	if not _is_training_mode and not is_settlement_disabled_mode():
 		_try_spawn_monster_weapon_drop(monster_node as Node2D)
 		_try_spawn_monster_equipment_drop(monster_node as Node2D)
 		_try_spawn_enhancement_stone_drop(monster_node as Node2D)

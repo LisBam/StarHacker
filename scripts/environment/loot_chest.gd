@@ -194,6 +194,14 @@ func _release_loot(broken_open: bool) -> void:
 	var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")
 	if stock_market_service != null and stock_market_service.has_method("record_run_metric"):
 		stock_market_service.call("record_run_metric", "chests_opened", 1.0)
+	# 生涯统计与悬赏开箱上报；训练场与超频骇入不产出结算，因此不计入统计与悬赏进度。
+	# 联机口径补充：只有实际出货的认领端执行本函数，其余成员走静默移除，天然按人头各自计数。
+	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
+	if session_state == null or not session_state.has_method("is_item_settlement_disabled") or not bool(session_state.call("is_item_settlement_disabled")):
+		# 生涯统计服务；携带品质标识供高级宝箱类悬赏判定。
+		var stats_service: Node = get_tree().root.get_node_or_null("StatsService")
+		if stats_service != null and stats_service.has_method("record_chest_opened"):
+			stats_service.call("record_chest_opened", _quality_id)
 	loot_released.emit(global_position, _quality_id, drop_count, minimum_high_quality_count, broken_open)
 	chest_removed.emit(self)
 	queue_free()

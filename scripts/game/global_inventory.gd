@@ -166,6 +166,10 @@ var _stock_holdings: Dictionary = {}
 var _discovered_encyclopedia_entries: Dictionary = {}
 ## 已读取存档是否完成内容精简迁移；默认 false，版本 10 之前补齐星扩展包装备后置为 true，并在启动阶段立即回写避免重复发放。
 var _loaded_inventory_requires_resave: bool = false
+## 零装骇入封存快照；键为 backpack、ranged、melee、armor 的序列化记录，空字典表示当前没有进行中的零装对局。
+## 开局时把真实背包与装备封存于此并立即落盘，本局任何强制存档都会附带该快照；
+## 结算时恢复原位并清空，读档发现残留快照说明零装局异常中断，此时恢复真实资产并放弃局内临时所得。
+var _bare_run_stash: Dictionary = {}
 
 
 func _ready() -> void:
@@ -187,7 +191,11 @@ func _notification(what: int) -> void:
 		_save_inventory()
 
 
-func begin_combat_run() -> void:
+func begin_combat_run(bare_loadout: bool = false) -> void:
+	## 开始一局正式战斗；bare_loadout 为 true 时先封存真实背包与装备并以空所有权入场（零装骇入）。
+	# 零装封存；必须在建立本局已见资源集合之前执行，封存后所有权为空，局内全部拾取都会计入本局收益。
+	if bare_loadout:
+		_stash_loadout_for_bare_run()
 	_run_active = true
 	_combat_inventory_save_pending = false
 	_combat_shipped_value = 0
@@ -208,6 +216,136 @@ func is_combat_run_active() -> bool:
 	return _run_active
 
 
+func is_bare_run_active() -> bool:
+	## 返回当前是否处于零装骇入封存状态；封存快照非空即表示真实资产尚未恢复原位。
+	return not _bare_run_stash.is_empty()
+
+
+func _stash_loadout_for_bare_run() -> void:
+	## 零装骇入开局封存：把真实背包、拖拽临时记录与全部装备槽序列化进封存快照，然后清空实时所有权并立即落盘。
+	## 立即落盘保证进程在局中意外退出时，重启读档仍能从快照恢复全部真实资产；本局中途的强制存档也会一并携带快照。
+	if not _bare_run_stash.is_empty():
+		return
+	# 封存背包记录；包含正式背包与拖拽中的临时记录，全部按现行存档格式序列化。
+	var stashed_backpack: Array = []
+	for record in _backpack_records:
+		stashed_backpack.append(_serialize_record(record))
+	for raw_detached_record in _detached_records.values():
+		if raw_detached_record is Dictionary:
+			stashed_backpack.append(_serialize_record(raw_detached_record as Dictionary))
+	# 封存远程槽；元素为序列化记录或 null，与运行时槽位下标保持一致。
+	var stashed_ranged: Array = []
+	for raw_ranged_record in _ranged_equipment_records:
+		stashed_ranged.append(_serialize_record(raw_ranged_record as Dictionary) if raw_ranged_record is Dictionary and not (raw_ranged_record as Dictionary).is_empty() else null)
+	# 封存防具槽；键保持固定部位，空槽写入 null。
+	var stashed_armor: Dictionary = {}
+	for armor_slot in ARMOR_SLOT_IDS:
+		# 防具槽记录；空字典表示该部位没有装备。
+		var armor_record: Dictionary = _armor_equipment_records.get(armor_slot, {}) as Dictionary
+		stashed_armor[armor_slot] = _serialize_record(armor_record) if not armor_record.is_empty() else null
+	_bare_run_stash = {
+		"backpack": stashed_backpack,
+		"ranged": stashed_ranged,
+		"melee": _serialize_record(_melee_equipment_record) if not _melee_equipment_record.is_empty() else null,
+		"armor": stashed_armor,
+	}
+	# 清空实时所有权；本局以空背包空装备开始，真实资产只存在于封存快照与磁盘存档。
+	_backpack_records.clear()
+	_detached_records.clear()
+	for slot_index in range(_ranged_equipment_records.size()):
+		_ranged_equipment_records[slot_index] = null
+	_melee_equipment_record = {}
+	for armor_slot in ARMOR_SLOT_IDS:
+		_armor_equipment_records[armor_slot] = {}
+	_refresh_current_ranged_slot_after_equipment_change()
+	# 立即写盘；封存发生在 _run_active 开启之前，直接执行完整存档而不进入战斗合并队列。
+	_save_inventory()
+	inventory_changed.emit()
+	equipment_changed.emit()
+
+
+func _finalize_bare_run_ownership() -> void:
+	## 零装骇入结算收尾：把本局仍持有的全部背包与装备物品转入安全仓库，再把封存的真实资产恢复原位。
+	## 成功撤离与失败结算共用本流程；必须在收益条目构建完成之后、结算存档执行之前调用，非零装局为空操作。
+	if _bare_run_stash.is_empty():
+		return
+	# 本局幸存背包记录；逐组并入仓库并保持堆叠合并规则，随后清空实时背包。
+	for record in _backpack_records:
+		_insert_record_with_stack_merge(_warehouse_records, record)
+	_backpack_records.clear()
+	_detached_records.clear()
+	# 本局幸存装备；远程、近战与防具槽逐件转入仓库后清空槽位。
+	for slot_index in range(_ranged_equipment_records.size()):
+		# 远程槽原始记录；空槽不产生仓库条目。
+		var raw_ranged_record: Variant = _ranged_equipment_records[slot_index]
+		if raw_ranged_record is Dictionary and not (raw_ranged_record as Dictionary).is_empty():
+			_insert_record_with_stack_merge(_warehouse_records, raw_ranged_record as Dictionary)
+		_ranged_equipment_records[slot_index] = null
+	if not _melee_equipment_record.is_empty():
+		_insert_record_with_stack_merge(_warehouse_records, _melee_equipment_record)
+		_melee_equipment_record = {}
+	for armor_slot in ARMOR_SLOT_IDS:
+		# 防具槽记录；空字典直接跳过，不产生仓库条目。
+		var armor_record: Dictionary = _armor_equipment_records.get(armor_slot, {}) as Dictionary
+		if not armor_record.is_empty():
+			_insert_record_with_stack_merge(_warehouse_records, armor_record)
+		_armor_equipment_records[armor_slot] = {}
+	# 恢复封存资产；写回原背包与装备槽并清空快照，随后的结算存档不再携带封存字段。
+	_restore_bare_run_stash(_bare_run_stash)
+	warehouse_changed.emit()
+
+
+func _restore_bare_run_stash(stash: Dictionary) -> void:
+	## 把零装封存快照恢复到实时背包与装备槽；恢复前清空当前实时所有权，因此调用方必须先转移或明确放弃局内物品。
+	## 结算收尾与异常中断读档共用本函数；恢复完成后清空封存快照成员。
+	if stash.is_empty():
+		return
+	_backpack_records.clear()
+	_detached_records.clear()
+	for slot_index in range(_ranged_equipment_records.size()):
+		_ranged_equipment_records[slot_index] = null
+	_melee_equipment_record = {}
+	for armor_slot in ARMOR_SLOT_IDS:
+		_armor_equipment_records[armor_slot] = {}
+	# 恢复背包；沿用读档插入器，历史溢出会自动转入仓库而不丢失任何单位。
+	var stashed_backpack: Variant = stash.get("backpack", [])
+	if stashed_backpack is Array:
+		for raw_stashed_record in stashed_backpack:
+			if raw_stashed_record is Dictionary:
+				# 恢复的背包记录；资源无法加载时为空字典并跳过。
+				var restored_backpack_record: Dictionary = _deserialize_record(raw_stashed_record as Dictionary, false)
+				if not restored_backpack_record.is_empty():
+					_insert_loaded_backpack_record(restored_backpack_record)
+	# 恢复远程槽；按槽位下标写回，超出当前槽数量的历史数据直接忽略。
+	var stashed_ranged: Variant = stash.get("ranged", [])
+	if stashed_ranged is Array:
+		for slot_index in range(mini((stashed_ranged as Array).size(), _ranged_equipment_records.size())):
+			# 远程槽封存值；取值为序列化记录或 null。
+			var raw_stashed_ranged: Variant = (stashed_ranged as Array)[slot_index]
+			if raw_stashed_ranged is Dictionary:
+				# 恢复的远程记录；空字典保持空槽。
+				var restored_ranged_record: Dictionary = _deserialize_record(raw_stashed_ranged as Dictionary, false)
+				if not restored_ranged_record.is_empty():
+					_ranged_equipment_records[slot_index] = restored_ranged_record
+	# 恢复近战槽；封存值为序列化记录或 null。
+	var stashed_melee: Variant = stash.get("melee")
+	if stashed_melee is Dictionary:
+		_melee_equipment_record = _deserialize_record(stashed_melee as Dictionary, false)
+	# 恢复防具槽；只接受与部位匹配的合法记录。
+	var stashed_armor: Variant = stash.get("armor", {})
+	if stashed_armor is Dictionary:
+		for armor_slot in ARMOR_SLOT_IDS:
+			# 防具槽封存值；取值为序列化记录或 null。
+			var raw_stashed_armor: Variant = (stashed_armor as Dictionary).get(armor_slot)
+			if raw_stashed_armor is Dictionary:
+				# 恢复的防具记录；资源缺失时保持空槽。
+				var restored_armor_record: Dictionary = _deserialize_record(raw_stashed_armor as Dictionary, false)
+				if not restored_armor_record.is_empty():
+					_armor_equipment_records[armor_slot] = restored_armor_record
+	_refresh_current_ranged_slot_after_equipment_change()
+	_bare_run_stash = {}
+
+
 func complete_combat_run_success() -> Dictionary:
 	if not _run_active:
 		return _last_run_outcome.duplicate(true)
@@ -220,7 +358,10 @@ func complete_combat_run_success() -> Dictionary:
 	# 成功撤离携带记录；包含背包与装备，全部写入本次撤离编号以支持以后卸下时仍优先排序。
 	for record in _get_all_owned_records():
 		record["last_extraction_epoch"] = _last_extraction_epoch
+	# 零装骇入收尾；本局所得全部转入仓库并恢复封存的真实资产，标准模式为空操作。
+	_finalize_bare_run_ownership()
 	# 成功撤离只保留背包现状，不自动转入仓库；玩家需要在局外仓库手动整理安全物品。
+	# 零装骇入例外补充：零装局的收尾已把本局所得存入仓库，恢复后的背包与装备为入场前的真实资产。
 	_run_active = false
 	_run_seen_resource_instance_ids.clear()
 	_run_gained_resources.clear()
@@ -315,6 +456,8 @@ func complete_combat_run_failure(reason: String = "战斗失败", retained_ratio
 	var gained_entries: Array[Dictionary] = _build_retained_run_gained_entries()
 	# 本局获得物品名称；保留为兼容字段，列表式结算使用 gained_entries 提供悬停详情。
 	var gained_items: Array[String] = _get_outcome_entry_names(gained_entries)
+	# 零装骇入收尾；失败概率判定后的幸存所得全部转入仓库并恢复封存的真实资产，标准模式为空操作。
+	_finalize_bare_run_ownership()
 	_run_active = false
 	_run_seen_resource_instance_ids.clear()
 	_run_gained_resources.clear()
@@ -674,6 +817,10 @@ func ship_combat_resource_to_warehouse(item_resource: Resource, source_location:
 		stock_market_service.call("record_run_metric", "shipped_value", shipping_value)
 		if str(item_resource.get("item_kind")) == "enhancement_stone":
 			stock_market_service.call("record_run_metric", "shipped_enhancement_stones", shipping_quantity)
+	# 生涯统计服务；同一份成功送回价值再上报一次，用于生涯累计、单局之最与“单局送回价值”类悬赏。
+	var stats_service: Node = get_tree().root.get_node_or_null("StatsService")
+	if stats_service != null and stats_service.has_method("record_shipped_value"):
+		stats_service.call("record_shipped_value", shipping_value)
 	_refresh_current_ranged_slot_after_equipment_change()
 	# 物资撤离已经把所有权转入仓库；即使正式战斗仍在进行也立即落盘，保证安全送回结果不会等待最终结算。
 	_queue_save_inventory(true)
@@ -717,6 +864,10 @@ func purchase_resource_to_warehouse(item_resource: Resource, purchase_price: int
 	purchased_record["quantity"] = resolved_quantity
 	_coins -= purchase_price
 	_insert_record_with_stack_merge(_warehouse_records, purchased_record)
+	# 生涯统计服务；商店与灰市购买同样计入图鉴“获得数量”，按实际入库数量累计。
+	var stats_service: Node = get_tree().root.get_node_or_null("StatsService")
+	if stats_service != null and stats_service.has_method("record_item_acquired"):
+		stats_service.call("record_item_acquired", item_resource, resolved_quantity)
 	_queue_save_inventory()
 	warehouse_changed.emit()
 	coins_changed.emit()
@@ -2289,6 +2440,10 @@ func _track_combat_acquisition(item_resource: Resource, quantity: int = 1) -> bo
 	var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")
 	if stock_market_service != null and stock_market_service.has_method("record_resource_obtained"):
 		stock_market_service.call("record_resource_obtained", item_resource, clampi(quantity, 1, MAX_STACK_QUANTITY))
+	# 生涯统计服务；战场首次获得计入图鉴“获得数量”，训练场与超频骇入没有战斗快照因此天然不计。
+	var stats_service: Node = get_tree().root.get_node_or_null("StatsService")
+	if stats_service != null and stats_service.has_method("record_item_acquired"):
+		stats_service.call("record_item_acquired", item_resource, clampi(quantity, 1, MAX_STACK_QUANTITY))
 	return true
 
 
@@ -2412,6 +2567,9 @@ func _save_inventory() -> void:
 		"melee_equipment": _serialize_record(_melee_equipment_record) if not _melee_equipment_record.is_empty() else null,
 		"armor_equipment": serialized_armor,
 	}
+	# 零装封存字段；只有零装骇入进行中才写入，正常结算后的存档不携带该键。
+	if not _bare_run_stash.is_empty():
+		save_data["bare_run_stash"] = _bare_run_stash.duplicate(true)
 	# 存档文件；取值为 user:// 下可写 FileAccess，打开失败时保留内存状态但不抛出运行时错误。
 	var save_file: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if save_file != null:
@@ -2580,6 +2738,12 @@ func _load_inventory() -> bool:
 	# 	_loaded_inventory_requires_resave = true
 	# if not has_separate_warehouse:
 	# 	_sort_warehouse_default()
+	# 零装封存恢复；存档中残留封存快照说明上一次零装骇入异常中断（未走到结算），
+	# 此时恢复封存的真实资产并放弃已恢复的局内临时所得，与“未落盘的本局变化不保留”的所有权规则一致。
+	var raw_bare_run_stash: Variant = save_data.get("bare_run_stash", {})
+	if raw_bare_run_stash is Dictionary and not (raw_bare_run_stash as Dictionary).is_empty():
+		_restore_bare_run_stash(raw_bare_run_stash as Dictionary)
+		_loaded_inventory_requires_resave = true
 	return true
 
 

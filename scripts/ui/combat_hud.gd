@@ -110,10 +110,10 @@ const SINGLE_MODE_EXTENSION_VIEW_BUTTON_TOP: float = -22.0
 const SINGLE_MODE_EXTENSION_VIEW_BUTTON_BOTTOM: float = 22.0
 ## 骇入协议选择窗口半尺寸；默认 390×250，完整窗口为 780×500 并容纳三张等宽候选卡。
 const HACK_PROTOCOL_SELECT_PANEL_HALF_SIZE: Vector2 = Vector2(390.0, 250.0)
-## 首次新手引导目标面板左上偏移；相对屏幕顶部中央为 (-420, 76)，避开上方计时与撤离状态。
-const FIRST_RUN_TUTORIAL_PANEL_TOP_LEFT: Vector2 = Vector2(-420.0, 76.0)
-## 首次新手引导目标面板右下偏移；相对屏幕顶部中央为 (420, 140)，提供单行长目标的稳定宽度。
-const FIRST_RUN_TUTORIAL_PANEL_BOTTOM_RIGHT: Vector2 = Vector2(420.0, 140.0)
+## 首次新手引导目标面板左上偏移；相对屏幕顶部中央为 (-450, 72)，与顶部战斗状态保留 4 像素间距。
+const FIRST_RUN_TUTORIAL_PANEL_TOP_LEFT: Vector2 = Vector2(-450.0, 72.0)
+## 首次新手引导目标面板右下偏移；相对屏幕顶部中央为 (450, 128)，形成 900×56 像素的单层目标横幅。
+const FIRST_RUN_TUTORIAL_PANEL_BOTTOM_RIGHT: Vector2 = Vector2(450.0, 128.0)
 
 ## 玩家节点路径；默认指向同一游戏世界下的 Player，必须解析到玩家根节点，运行时通常不修改。
 @export var player_path: NodePath = ^"../Player"
@@ -1453,10 +1453,10 @@ func _build_combat_status_panel() -> void:
 
 
 func _build_first_run_tutorial_panel() -> void:
-	## 创建首次战斗引导的单目标面板；面板只展示当前一步，不用多页说明遮挡真实战斗。
+	## 创建首次战斗引导的单层目标横幅；只显示当前行动目标，不重复展示引导名称或结算性质。
 	if _root_control == null or _first_run_tutorial_panel != null:
 		return
-	# 引导外层面板；锚定顶部中央并忽略鼠标，所有教学操作继续直接作用于战斗。
+	# 引导外层面板；锚定顶部中央并忽略鼠标，紧凑单层布局不会遮挡额外战斗视野。
 	var tutorial_panel: PanelContainer = PanelContainer.new()
 	tutorial_panel.name = "FirstRunTutorialPanel"
 	tutorial_panel.visible = false
@@ -1472,24 +1472,17 @@ func _build_first_run_tutorial_panel() -> void:
 	UI_STYLE_GUIDE.apply_section_panel(tutorial_panel)
 	_root_control.add_child(tutorial_panel)
 	_first_run_tutorial_panel = tutorial_panel
-	# 引导内容容器；只承载固定标题和随阶段变化的一行动目标。
-	var tutorial_content: VBoxContainer = VBoxContainer.new()
-	tutorial_content.add_theme_constant_override("separation", 4)
-	tutorial_panel.add_child(tutorial_content)
-	# 引导标题；明确当前撤离是教学，不会被误认为已经完成首次正式撤离。
-	var tutorial_title_label: Label = Label.new()
-	tutorial_title_label.text = "首次战斗引导 · 本次撤离不计入正式首撤"
-	tutorial_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	tutorial_title_label.add_theme_font_size_override("font_size", 14)
-	tutorial_title_label.add_theme_color_override("font_color", Color(0.45, 0.92, 1.0, 1.0))
-	tutorial_content.add_child(tutorial_title_label)
-	# 引导目标文本；允许自动换行，窄分辨率下仍能完整显示当前操作。
+	# 引导目标文本；直接填充横幅并水平、垂直居中，窄分辨率下允许自动换行以保持内容完整。
 	var tutorial_objective_label: Label = Label.new()
 	tutorial_objective_label.text = ""
 	tutorial_objective_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tutorial_objective_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	tutorial_objective_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	tutorial_objective_label.add_theme_font_size_override("font_size", 16)
-	tutorial_content.add_child(tutorial_objective_label)
+	tutorial_objective_label.add_theme_font_size_override("font_size", 17)
+	tutorial_objective_label.add_theme_color_override("font_color", Color(0.82, 0.96, 1.0, 1.0))
+	tutorial_objective_label.add_theme_color_override("font_outline_color", Color(0.02, 0.07, 0.12, 0.92))
+	tutorial_objective_label.add_theme_constant_override("outline_size", 3)
+	tutorial_panel.add_child(tutorial_objective_label)
 	_first_run_tutorial_objective_label = tutorial_objective_label
 
 

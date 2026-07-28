@@ -165,21 +165,25 @@ func present() -> void:
 
 func _present_offline_income_report() -> void:
 	## 展示启动时补发的离线收益报告；服务侧一次离线只产生一份报告，取走后不会重复弹出。
+	## 玩家未进入矿场时，多次启动产生的报告会由服务跨运行累计，并在本次进入后合并展示一次。
 	if _service == null or not _service.has_method("take_offline_income_report"):
 		return
 	# 待展示报告；为空表示本次启动没有离线补发或已经展示过。
+	# 累计报告补充；非空结果覆盖上次查看报告后产生的全部离线阶段，而不只代表最近一次启动。
 	var report: Dictionary = _service.call("take_offline_income_report") as Dictionary
 	if report.is_empty():
 		return
 	# 原始离线秒数；超出上限时在报告中说明封顶规则，帮助玩家理解补发金额。
 	var raw_seconds: int = int(report.get("raw_offline_seconds", 0))
 	# 参与补发的有效离线秒数；已按 8 小时上限截断。
+	# 累计报告补充；该值是每段离线分别应用当时收益上限后的有效秒数之和。
 	var counted_seconds: int = int(report.get("offline_seconds", 0))
 	# 报告正文；离线时长、折算比例与到账金额逐行展示。
-	var message: String = "离线时长：%s" % _format_hour_minute_duration(raw_seconds)
+	# 累计展示补充；明确标注累计口径，避免玩家把合并时长误解为最近一次退出后的单段时长。
+	var message: String = "累计离线时长：%s" % _format_hour_minute_duration(raw_seconds)
 	if raw_seconds > counted_seconds:
-		message += "（超出 8 小时上限的部分不计）"
-	message += "\n离线期间按在线基础产出的 25%% 折算\n本次到账：+%s 算力币" % _format_integer_value(int(report.get("earned", 0)))
+		message += "\n有效收益时长：%s（部分离线阶段超出单次收益上限）" % _format_hour_minute_duration(counted_seconds)
+	message += "\n离线期间按在线基础产出的 25%% 折算\n累计到账：+%s 算力币" % _format_integer_value(int(report.get("earned", 0)))
 	_message_dialog.present_information("离线收益报告", message)
 
 

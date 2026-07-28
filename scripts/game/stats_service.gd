@@ -2,6 +2,7 @@ extends Node
 
 ## 生涯统计服务：集中记录怪物击杀计数、物品获得计数、对局与撤离统计、单局之最和财富曲线采样，并聚合全局库存维护的累计获得星穹。
 ## 近期战绩补充：同一服务还拥有单局造成/受到伤害、击杀、开箱和最近 20 局完成快照，结算与战绩界面不保存副本。
+## 结算物品补充：每条新战绩同时保存库存统一序列化的获得与丢失物品快照，详情页恢复为独立只读资源。
 ## 战斗与库存挂点只上报事实事件，本服务负责口径判定、累计与独立持久化；
 ## 统计面板、图鉴计数与悬赏系统都只读取本服务或订阅其信号，不各自维护第二份计数。
 ## 统计口径：只有产出结算的战斗模式（标准骇入、零装骇入，含联机）计入；训练场与超频骇入不计。
@@ -23,7 +24,8 @@ signal run_finished(result_id: String, survival_seconds: float, extracted_value:
 const SAVE_PATH: String = "user://stats_state.json"
 ## 统计存档版本；默认 1 标识当前写入结构，未来字段调整时用于兼容判断。
 ## 版本演进补充：当前值为 2，用于保存最近 20 局正式战绩；版本 1 存档缺少该字段时按空记录兼容。
-const SAVE_VERSION: int = 2
+## 战绩物品补充：当前值为 3，用于在每条近期战绩中保存可恢复的具体结算物品快照。
+const SAVE_VERSION: int = 3
 ## 对局结果标识：成功撤离。
 const RUN_RESULT_SUCCESS: String = "success"
 ## 对局结果标识：死亡。
@@ -36,6 +38,8 @@ const ENHANCEMENT_STONE_STATISTICS_KEY: String = "enhancement_stone:any"
 const WEALTH_SAMPLE_LIMIT: int = 240
 ## 近期战绩保存上限；固定保留最新 20 局正式结算，超出后移除最早记录，避免存档随游玩局数无限增长。
 const RECENT_RUN_HISTORY_LIMIT: int = 20
+## 单局单类结算物品快照上限；获得与丢失列表各默认 128 组，覆盖正常所有权范围并阻止异常存档无限扩张。
+const RUN_SETTLEMENT_ITEM_SNAPSHOT_LIMIT: int = 128
 
 ## 怪物击杀计数表；键为怪物稳定 monster_id，值为累计击杀数量，训练场与超频骇入不计入。
 var _monster_kill_counts: Dictionary = {}
@@ -66,6 +70,7 @@ var _best_run_shipped_value: int = 0
 ## 财富曲线采样数组；元素为包含 unix_time 与 total_assets 的字典，按时间先后排列。
 var _wealth_samples: Array[Dictionary] = []
 ## 近期正式战绩数组；索引 0 为最新结算，每项保存结果、时间、单局战斗统计和结算价值，最多 20 项。
+## 具体结算物品以库存服务生成的纯字典快照随条目保存，统计服务不持有运行时 Resource 引用。
 var _recent_run_history: Array[Dictionary] = []
 ## 当前对局击杀计数；对局开始清零，结束时参与单局之最刷新。
 var _current_run_kills: int = 0
@@ -228,6 +233,9 @@ func record_run_finished(result_id: String, survival_seconds: float, extracted_v
 		"chests_opened": _current_run_chests_opened,
 		"extracted_value": resolved_extracted_value,
 		"shipped_value": _current_run_shipped_value,
+		"settlement_items_recorded": false,
+		"gained_item_snapshots": [],
+		"lost_item_snapshots": [],
 	}
 	_recent_run_history.push_front(completed_run)
 	while _recent_run_history.size() > RECENT_RUN_HISTORY_LIMIT:
@@ -243,6 +251,23 @@ func record_run_finished(result_id: String, survival_seconds: float, extracted_v
 	_queue_save()
 	stats_changed.emit()
 	return completed_run.duplicate()
+
+
+func record_latest_run_settlement_items(gained_item_snapshots: Array, lost_item_snapshots: Array) -> bool:
+	## 为最近完成的一局补充库存结算后的具体物品；调用方必须传入 GlobalInventory 生成的纯字典快照。
+	## 两阶段写入用于先保留库存结算前才能读取的带出价值，再记录随机保留与丢失完成后的最终物品结果。
+	if _recent_run_history.is_empty():
+		return false
+	# 最近完成战绩；正式结算同一帧内完成物品附加，不会修改更早的历史条目。
+	var latest_run: Dictionary = _recent_run_history[0]
+	if bool(latest_run.get("settlement_items_recorded", false)):
+		return false
+	latest_run["settlement_items_recorded"] = true
+	latest_run["gained_item_snapshots"] = _sanitize_item_snapshot_array(gained_item_snapshots)
+	latest_run["lost_item_snapshots"] = _sanitize_item_snapshot_array(lost_item_snapshots)
+	_queue_save()
+	stats_changed.emit()
+	return true
 
 
 func _is_permanent_progression_suppressed() -> bool:
@@ -473,6 +498,12 @@ func _sanitize_run_record(raw_run_record: Dictionary) -> Dictionary:
 	var result_id: String = str(raw_run_record.get("result_id", RUN_RESULT_ESCAPE))
 	if result_id not in [RUN_RESULT_SUCCESS, RUN_RESULT_DEATH, RUN_RESULT_ESCAPE]:
 		result_id = RUN_RESULT_ESCAPE
+	# 物品明细可用标志；版本 2 及更旧战绩缺失时保持 false，界面会明确提示该记录没有历史物品快照。
+	var settlement_items_recorded: bool = bool(raw_run_record.get("settlement_items_recorded", false))
+	# 已获得物品快照；仅恢复合法字典并限制单局数量，未知扩展字段保留给库存兼容加载器处理。
+	var gained_item_snapshots: Array[Dictionary] = _sanitize_item_snapshot_array(raw_run_record.get("gained_item_snapshots", []))
+	# 已丢失物品快照；成功撤离通常为空，失败和逃跑按库存实际随机结算结果恢复。
+	var lost_item_snapshots: Array[Dictionary] = _sanitize_item_snapshot_array(raw_run_record.get("lost_item_snapshots", []))
 	return {
 		"unix_time": maxi(int(raw_run_record.get("unix_time", 0)), 0),
 		"completed_at": str(raw_run_record.get("completed_at", "")).strip_edges(),
@@ -484,4 +515,25 @@ func _sanitize_run_record(raw_run_record: Dictionary) -> Dictionary:
 		"chests_opened": maxi(int(raw_run_record.get("chests_opened", 0)), 0),
 		"extracted_value": maxi(int(raw_run_record.get("extracted_value", 0)), 0),
 		"shipped_value": maxi(int(raw_run_record.get("shipped_value", 0)), 0),
+		"settlement_items_recorded": settlement_items_recorded,
+		"gained_item_snapshots": gained_item_snapshots,
+		"lost_item_snapshots": lost_item_snapshots,
 	}
+
+
+func _sanitize_item_snapshot_array(raw_snapshots: Variant) -> Array[Dictionary]:
+	## 清洗一组库存物品快照；战绩存档只接收非空字典，并按单局上限截断以控制长期存档体积。
+	# 清洗后快照数组；每项深复制，调用方后续修改原字典不会反向污染历史战绩。
+	var sanitized_snapshots: Array[Dictionary] = []
+	if not (raw_snapshots is Array):
+		return sanitized_snapshots
+	for raw_snapshot in raw_snapshots as Array:
+		if not (raw_snapshot is Dictionary) or (raw_snapshot as Dictionary).is_empty():
+			continue
+		# 单项物品快照；保留库存序列化协议的完整字段，详情页据此恢复强化、耐久、品质与数量。
+		var sanitized_snapshot: Dictionary = (raw_snapshot as Dictionary).duplicate(true)
+		sanitized_snapshot.erase("resource")
+		sanitized_snapshots.append(sanitized_snapshot)
+		if sanitized_snapshots.size() >= RUN_SETTLEMENT_ITEM_SNAPSHOT_LIMIT:
+			break
+	return sanitized_snapshots

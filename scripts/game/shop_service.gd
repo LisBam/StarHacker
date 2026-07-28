@@ -1,6 +1,7 @@
 extends Node
 
 ## 商店服务独立维护普通商店库存、自动刷新时间、手动刷新费用和灰市失败批次。
+## 灰市恢复范围补充：战斗遗失与玩家主动出售都形成独立恢复批次，商品资源不依赖原库存引用。
 ## UI 只通过公开查询与购买接口交互，星穹和物品所有权仍由 GlobalInventory 统一结算与持久化。
 
 signal shop_stock_changed
@@ -8,6 +9,7 @@ signal gray_market_changed
 signal refresh_state_changed
 
 ## 商店独立存档路径；保存当前库存、刷新截止时间和最近五次失败灰市批次。
+## 恢复批次补充：旧字段名继续用于存档兼容，现行数组同时保存失败遗失与玩家出售形成的灰市批次。
 const SAVE_PATH: String = "user://shop_state.json"
 ## 商店存档版本；版本 2 在新增稀有强化词条后重建旧版普通商品池，同时保留灰市与刷新状态。
 ## 扩展包内容补充：版本 3 重建旧普通商品池，使已默认解锁的角色扩展包内容进入下一份库存。
@@ -66,10 +68,13 @@ const STONE_DETRIMENTAL_CHANCE: float = 0.28
 ## 手动刷新星穹费用上限；默认 100 星穹，指数费用达到该值后保持不变，自动刷新仍会把费用恢复为基础值。
 @export_range(0, 999999, 1) var manual_refresh_maximum_cost: int = 100
 ## 灰市最低满耐久价值倍率；默认 4 倍，用于最近失败遗失物的回购价格。
+## 误售找回补充：玩家主动售出的物品使用同一最低倍率，不另建价格公式。
 @export_range(1.0, 50.0, 0.05) var gray_market_price_multiplier_minimum: float = 4.0
 ## 灰市最高满耐久价值倍率；默认 8 倍，用于最近失败遗失物的回购价格。
+## 误售找回补充：玩家主动售出的物品使用同一最高倍率，每项倍率在进入灰市时独立锁定。
 @export_range(1.0, 50.0, 0.05) var gray_market_price_multiplier_maximum: float = 8.0
 ## 灰市保留失败批次数；默认最近 5 次，新增第 6 次时移除最早批次剩余物品。
+## 恢复批次补充：变量名为存档兼容保留，现行上限统一作用于战斗遗失和玩家出售批次。
 @export_range(1, 20, 1) var gray_market_failure_limit: int = 5
 ## 可刷新武器资源路径；每次按等概率抽取并复制为独立商品实例，允许同轮出现同类多件武器。
 @export var weapon_resource_paths: PackedStringArray = PackedStringArray([
@@ -96,6 +101,7 @@ var _global_inventory: Node
 ## 普通商店运行时商品；每项包含唯一编号、资源、数量、价格、倍率和二手说明。
 var _shop_stock: Array[Dictionary] = []
 ## 灰市失败批次；每项包含批次编号和该次失败仍未购回的商品数组。
+## 恢复批次补充：数组同时保存主动出售批次，旧变量名不修改以保持现有存档与调用稳定。
 var _gray_market_failure_groups: Array[Dictionary] = []
 ## 下次自动刷新 Unix 时间；达到该时间后重建普通库存并重置手动刷新次数。
 var _next_automatic_refresh_unix: int = 0
@@ -119,6 +125,8 @@ func _ready() -> void:
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
 	if _global_inventory != null and _global_inventory.has_signal("combat_failure_losses_recorded"):
 		_global_inventory.connect("combat_failure_losses_recorded", Callable(self, "_on_combat_failure_losses_recorded"))
+	if _global_inventory != null and _global_inventory.has_signal("storage_items_sold"):
+		_global_inventory.connect("storage_items_sold", Callable(self, "_on_storage_items_sold"))
 	if not _load_state():
 		_refresh_normal_stock(true)
 	elif _loaded_state_was_repaired:
@@ -477,21 +485,36 @@ func _create_normal_stock_entry(item_resource: Resource) -> Dictionary:
 
 func _on_combat_failure_losses_recorded(lost_entries: Array) -> void:
 	# 新失败批次商品；每个结构化遗失条目复制成独立灰市商品，后续库存引用不会依赖结算弹窗生命周期。
+	_append_gray_market_recovery_group(lost_entries, "failure")
+
+
+func _on_storage_items_sold(sold_entries: Array) -> void:
+	## 接收全局库存的出售只读快照；单件、部分堆叠与批量出售共用同一入口，并按一次出售操作形成一个灰市恢复批次。
+	_append_gray_market_recovery_group(sold_entries, "sale")
+
+
+func _append_gray_market_recovery_group(recovery_entries: Array, group_prefix: String) -> void:
+	## 将结构化遗失或出售条目转换为灰市恢复批次；两类来源共用资源复制、满耐久估值、4 至 8 倍定价与最近批次上限。
+	# 新失败批次商品；每个结构化遗失条目复制成独立灰市商品，后续库存引用不会依赖结算弹窗生命周期。
+	# 来源语义补充：该数组也承载玩家主动出售条目，旧注释中的“失败”表示最初用途。
 	var gray_entries: Array[Dictionary] = []
-	for raw_entry in lost_entries:
+	for raw_entry in recovery_entries:
 		if not (raw_entry is Dictionary):
 			continue
 		# 遗失资源；深拷贝保留当时耐久和强化状态，避免原引用被释放或外部修改。
+		# 出售来源补充：玩家出售资源也在此深拷贝，部分出售不会与库存中剩余堆叠共享可变状态。
 		var lost_resource: Resource = (raw_entry as Dictionary).get("resource") as Resource
 		if lost_resource == null:
 			continue
 		# 灰市资源副本；每个遗失条目只生成一件商品记录，堆叠数量保留在 quantity 字段。
+		# 恢复条目补充：一次批量出售中的每个所选记录同样各生成一件灰市商品。
 		var gray_resource: Resource = lost_resource.duplicate(true) as Resource
 		if gray_resource == null:
 			continue
 		# 满耐久价值；武器按当前强化状态恢复到满耐久后估值，资源直接使用有效价值。
 		var full_durability_value: int = _get_full_durability_value(gray_resource)
 		# 遗失数量；武器固定为一，强化石保留该次失败实际遗失的堆叠数量。
+		# 出售数量补充：主动出售保留实际出售数量，批量出售完整堆叠时可一次购回整组。
 		var lost_quantity: int = maxi(int((raw_entry as Dictionary).get("quantity", 1)), 1)
 		# 灰市倍率；每项在 4 至 8 倍范围内独立抽取并永久固定到该条目。
 		var price_multiplier: float = _random.randf_range(minf(gray_market_price_multiplier_minimum, gray_market_price_multiplier_maximum), maxf(gray_market_price_multiplier_minimum, gray_market_price_multiplier_maximum))
@@ -506,7 +529,9 @@ func _on_combat_failure_losses_recorded(lost_entries: Array) -> void:
 		})
 	if gray_entries.is_empty():
 		return
-	_gray_market_failure_groups.append({"group_id": _create_unique_id("failure"), "entries": gray_entries})
+	# 恢复批次前缀；只用于生成唯一编号并区分调试来源，购买与存档继续使用统一 group_id 协议。
+	var resolved_group_prefix: String = group_prefix if group_prefix in ["failure", "sale"] else "recovery"
+	_gray_market_failure_groups.append({"group_id": _create_unique_id(resolved_group_prefix), "entries": gray_entries})
 	while _gray_market_failure_groups.size() > maxi(gray_market_failure_limit, 1):
 		_gray_market_failure_groups.remove_at(0)
 	_save_state()

@@ -439,6 +439,8 @@ var _escape_confirmation_dialog: CommonConfirmationDialog
 var _newcomer_protection_ended_dialog: CommonConfirmationDialog
 ## 当前结算结构化结果；默认空字典，结算弹窗打开后缓存获得与丢失条目供分类按钮重复重建。
 var _settlement_outcome: Dictionary = {}
+## 当前正式结算的单局统计快照；由 StatsService 在完成战绩写入时返回，供结算列表展示造成伤害、承伤、击杀与开箱。
+var _settlement_run_statistics: Dictionary = {}
 ## 结算获得物品主分类；取值为 all、weapons 或 resources，默认全部与战斗背包分类入口一致。
 var _settlement_primary_category: String = InventoryQuery.PRIMARY_ALL
 ## 结算获得物品子分类；取值随主分类变化，默认 all 表示展示当前主分类全部条目。
@@ -4441,6 +4443,7 @@ func _return_to_main_menu() -> void:
 func _show_success_settlement() -> void:
 	if _run_outcome_resolved:
 		return
+	_settlement_run_statistics = {}
 	if _is_first_run_tutorial:
 		_run_outcome_resolved = true
 		# 引导成功结算；保留全部拾取物但不写正式撤离编号，NewcomerProtectionService 只完成一次性引导状态。
@@ -4480,6 +4483,7 @@ func _show_failure_settlement(reason: String, retained_ratio: float = -1.0, equi
 		_set_death_overlay_visible(true)
 		return
 
+	_settlement_run_statistics = {}
 	# 全局背包服务；正式战斗失败时按死亡或主动逃跑的当前规则随机结算背包物品。
 	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
 	if global_inventory == null or not global_inventory.has_method("is_combat_run_active") or not bool(global_inventory.call("is_combat_run_active")):
@@ -4521,7 +4525,10 @@ func _record_stats_run_finished(result_id: String) -> void:
 			extracted_value = int((global_inventory.call("get_combat_carried_value_summary") as Dictionary).get("total_value", 0))
 		if global_inventory != null and global_inventory.has_method("get_combat_shipped_value"):
 			extracted_value += int(global_inventory.call("get_combat_shipped_value"))
-	stats_service.call("record_run_finished", result_id, _get_survival_time_seconds(), extracted_value)
+	# 已完成的单局统计；服务返回值与近期战绩使用同一字典结构，避免结算窗口重新拼装或读取已清零的当前局计数。
+	var completed_run: Variant = stats_service.call("record_run_finished", result_id, _get_survival_time_seconds(), extracted_value)
+	if completed_run is Dictionary:
+		_settlement_run_statistics = (completed_run as Dictionary).duplicate(true)
 
 
 func _record_stock_extracted_values(global_inventory: Node) -> void:
@@ -4574,6 +4581,7 @@ func _rebuild_settlement_list() -> void:
 	_clear_container(_death_settlement_list)
 	# 结算结果类型；用于决定是否创建失败时的实际丢失物品分区。
 	var result_type: String = str(_settlement_outcome.get("result", "failure"))
+	_build_settlement_run_statistics()
 	_build_settlement_category_controls()
 
 	# 本局获得条目；优先读取包含 Resource 的结构化列表，鼠标悬停时可显示完整物品属性。
@@ -4593,6 +4601,64 @@ func _rebuild_settlement_list() -> void:
 	_build_settlement_section("本局获得", filtered_gained_entries, "当前分类没有获得物品", Color(0.35, 1.0, 0.72, 1.0))
 	if result_type not in ["success", "tutorial_success"]:
 		_build_settlement_section("丢失物品", lost_entries, "本次没有丢失物品", Color(1.0, 0.46, 0.52, 1.0))
+
+
+func _build_settlement_run_statistics() -> void:
+	## 在正式结算顶部构建四项本局统计；教学结算没有正式战绩快照时不创建该分区。
+	if _settlement_run_statistics.is_empty():
+		return
+	# 本局统计外框；使用统一分区面板与物品分类区分层，滚动时和结算物品一起移动。
+	var statistics_panel: PanelContainer = PanelContainer.new()
+	UI_STYLE_GUIDE.apply_section_panel(statistics_panel)
+	_death_settlement_list.add_child(statistics_panel)
+	# 本局统计内边距；为四列数值和分区边框保留稳定留白。
+	var statistics_margin: MarginContainer = MarginContainer.new()
+	statistics_margin.add_theme_constant_override("margin_left", 12)
+	statistics_margin.add_theme_constant_override("margin_top", 10)
+	statistics_margin.add_theme_constant_override("margin_right", 12)
+	statistics_margin.add_theme_constant_override("margin_bottom", 12)
+	statistics_panel.add_child(statistics_margin)
+	# 本局统计纵向布局；标题与四列数据分行排列。
+	var statistics_layout: VBoxContainer = VBoxContainer.new()
+	statistics_layout.add_theme_constant_override("separation", 8)
+	statistics_margin.add_child(statistics_layout)
+	# 分区标题；明确下方数字只属于当前已经结算的正式对局。
+	var statistics_title: Label = Label.new()
+	statistics_title.text = "本局统计"
+	UI_STYLE_GUIDE.apply_muted_accent_label(statistics_title)
+	statistics_layout.add_child(statistics_title)
+	# 四列统计网格；窗口宽度足以保持每项名称和整数结果在单列内清晰显示。
+	var statistics_grid: GridContainer = GridContainer.new()
+	statistics_grid.columns = 4
+	statistics_grid.add_theme_constant_override("h_separation", 12)
+	statistics_layout.add_child(statistics_grid)
+	# 统计字段定义；下标依次为玩家可见名称、战绩字段键和数值单位。
+	var statistic_definitions: Array = [
+		["造成伤害数", "damage_dealt", ""],
+		["受到伤害数", "damage_received", ""],
+		["击杀数", "monster_kills", "只"],
+		["开启宝箱数", "chests_opened", "个"],
+	]
+	for raw_definition in statistic_definitions:
+		# 单项统计定义；由固定数组构造，包含名称、键与单位。
+		var statistic_definition: Array = raw_definition as Array
+		# 单项统计容器；纵向居中展示名称和醒目数值。
+		var statistic_cell: VBoxContainer = VBoxContainer.new()
+		statistic_cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		statistic_cell.add_theme_constant_override("separation", 3)
+		statistics_grid.add_child(statistic_cell)
+		# 单项名称标签；使用次要色降低与数值的视觉竞争。
+		var name_label: Label = Label.new()
+		name_label.text = str(statistic_definition[0])
+		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		UI_STYLE_GUIDE.apply_secondary_label(name_label)
+		statistic_cell.add_child(name_label)
+		# 单项数值标签；直接读取服务返回的完成快照，异常缺失字段安全回退为 0。
+		var value_label: Label = Label.new()
+		value_label.text = "%d%s" % [maxi(int(_settlement_run_statistics.get(str(statistic_definition[1]), 0)), 0), str(statistic_definition[2])]
+		value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		value_label.add_theme_font_size_override("font_size", 20)
+		statistic_cell.add_child(value_label)
 
 
 func _build_settlement_category_controls() -> void:

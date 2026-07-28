@@ -87,6 +87,8 @@ var _item_card_view: Control
 var _extraction_prefix: String = ""
 ## 当前卡片是否正在作为拖拽来源；默认 false，拖拽结束时用于统一恢复缩放与透明度。
 var _is_drag_source_active: bool = false
+## 当前卡片是否被仓库批量出售选中；默认 false，仅改变通用卡片选中边框，不修改资源或其他目标选择规则。
+var _batch_sale_selected: bool = false
 ## 主题刷新重入保护；重建样式盒会再次触发主题变更通知，置位期间跳过嵌套刷新以避免递归。
 var _theme_refresh_in_progress: bool = false
 
@@ -171,6 +173,12 @@ func set_item_selection_state(selection_active: bool, selectable: bool, highligh
 func set_drag_enabled(enabled: bool) -> void:
 	# 拖拽开关只影响新的拖拽开始，不改变普通点击、悬停详情或已存在的物品所有权。
 	_drag_enabled = enabled
+
+
+func set_batch_sale_selected(selected: bool) -> void:
+	## 设置仓库批量出售选中视觉；状态与强化、修复等目标高亮并行，卡片仍由上层决定点击行为。
+	_batch_sale_selected = selected and _item_resource != null
+	_refresh_enhancement_target_highlight()
 
 
 func set_weapon_slot_visual_style(enabled: bool) -> void:
@@ -332,7 +340,7 @@ func _refresh_enhancement_target_highlight() -> void:
 	if _target_filter_overlay != null:
 		_target_filter_overlay.visible = false
 	if _item_card_view != null:
-		_item_card_view.call("set_visual_state", false, not selection_blocked and (_enhancement_target_highlight or _item_selection_highlight))
+		_item_card_view.call("set_visual_state", _batch_sale_selected, not selection_blocked and (_enhancement_target_highlight or _item_selection_highlight))
 		_item_card_view.call("set_disabled_state", selection_blocked)
 		if selection_blocked:
 			_item_card_view.call("play_hover", self, false)
@@ -420,7 +428,7 @@ func _refresh_item_card_view() -> void:
 	# 第四行摘要；仓库与共享背包中的强化石独立显示整组价值，其他物品与界面保持空值。
 	var secondary_detail_bbcode: String = _build_secondary_detail_bbcode()
 	_item_card_view.call("configure", _item_resource, _quantity, _get_weapon_type_label(), detail_bbcode, "空", display_name, secondary_detail_bbcode)
-	_item_card_view.call("set_visual_state", false, _enhancement_target_highlight or _item_selection_highlight)
+	_item_card_view.call("set_visual_state", _batch_sale_selected, _enhancement_target_highlight or _item_selection_highlight)
 
 
 func _build_common_detail_bbcode() -> String:

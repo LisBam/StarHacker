@@ -8,6 +8,8 @@ signal equipment_changed
 signal run_state_changed
 signal warehouse_changed
 signal coins_changed
+## 存储物品出售完成信号；参数为本次原子出售的只读条目快照，灰市等局外系统可监听该信号提供误售找回能力。
+signal storage_items_sold(sold_entries: Array)
 ## 生涯累计获得星穹变化信号；参数为只增不减的最新累计值，金融入口据此即时刷新永久解锁状态。
 signal total_coins_earned_changed(total_coins_earned: int)
 ## 图鉴发现状态变化信号；只有首次获得新的稳定物品条目时派发，图鉴 UI 据此刷新已解锁卡片。
@@ -1397,6 +1399,13 @@ func sell_storage_resource_quantity(item_resource: Resource, source_location: St
 	var total_value: int = unit_value * sell_quantity
 	if total_value <= 0:
 		return false
+	# 已出售条目快照；资源引用只用于同步信号，监听方必须自行复制，数量固定为本次实际出售数量。
+	var sold_entries: Array[Dictionary] = [{
+		"resource": item_resource,
+		"quantity": sell_quantity,
+		"unit_value": unit_value,
+		"source_location": source_location,
+	}]
 
 	# 剩余数量；部分出售时保留原记录与资源实例，全部出售时移除整条所有权记录。
 	var remaining_quantity: int = stored_quantity - sell_quantity
@@ -1409,7 +1418,81 @@ func sell_storage_resource_quantity(item_resource: Resource, source_location: St
 	_queue_save_inventory()
 	_emit_storage_changed(source_location)
 	coins_changed.emit()
+	storage_items_sold.emit(sold_entries)
 	return true
+
+
+func sell_storage_resources(item_resources: Array, source_location: String) -> Dictionary:
+	## 原子出售同一存储区域中的多条完整记录；无效、重复或零价值资源会被跳过，成功时只派发一次库存与出售快照信号。
+	if not _is_storage_location(source_location):
+		return {"success": false, "message": "出售来源无效", "sold_group_count": 0, "sold_quantity": 0, "total_value": 0}
+	# 来源记录数组；批量出售只在指定仓库或背包内按资源实例身份定位，不接受装备栏或已脱离所有权的资源。
+	var source_records: Array[Dictionary] = _get_storage_records(source_location)
+	# 已处理实例集合；键为 Resource 实例编号，防止 UI 重复传入同一卡片后重复结算。
+	var processed_resource_ids: Dictionary = {}
+	# 待移除记录下标；最终倒序删除，避免前一条移除导致后续下标偏移。
+	var removal_indices: Array[int] = []
+	# 已出售条目快照；每项保留资源、整组数量、单件价值与来源，供监听方建立独立找回记录。
+	var sold_entries: Array[Dictionary] = []
+	# 本次出售总星穹；只累计仍由指定容器持有且有效价值大于零的记录。
+	var total_value: int = 0
+	# 本次出售物品总数量；堆叠资源按实际单位数累计，武器与装备各计一件。
+	var sold_quantity: int = 0
+	# 原始资源值；允许调用方传入非资源元素，异常值会被安全忽略而不影响其他合法选择。
+	for raw_resource in item_resources:
+		if not (raw_resource is Resource):
+			continue
+		# 待出售资源；实例身份必须仍能在当前来源数组中找到，筛选与排序不会改变定位结果。
+		var item_resource: Resource = raw_resource as Resource
+		# 资源实例编号；同一实例在单次请求中只允许进入一次结算。
+		var resource_instance_id: int = item_resource.get_instance_id()
+		if processed_resource_ids.has(resource_instance_id):
+			continue
+		processed_resource_ids[resource_instance_id] = true
+		# 当前记录下标；出售确认前已经移动、消费或被其他操作移除的资源会被跳过。
+		var record_index: int = _find_storage_record_index(source_location, item_resource)
+		if record_index < 0 or record_index >= source_records.size():
+			continue
+		# 当前完整记录；批量入口出售整组，不拆分堆叠数量。
+		var stored_record: Dictionary = source_records[record_index]
+		# 当前整组数量；非堆叠物品默认一件，异常旧存档数量至少按一件处理。
+		var stored_quantity: int = maxi(int(stored_record.get("quantity", 1)), 1)
+		# 当前单件有效价值；强化与耐久造成的动态价值在执行瞬间重新读取。
+		var unit_value: int = _get_resource_value(item_resource)
+		# 当前整组价值；零价值条目不移除，避免批量操作静默销毁无法结算的物品。
+		var record_value: int = unit_value * stored_quantity
+		if record_value <= 0:
+			continue
+		removal_indices.append(record_index)
+		sold_entries.append({
+			"resource": item_resource,
+			"quantity": stored_quantity,
+			"unit_value": unit_value,
+			"source_location": source_location,
+		})
+		total_value += record_value
+		sold_quantity += stored_quantity
+	if sold_entries.is_empty():
+		return {"success": false, "message": "没有可出售的已选物品", "sold_group_count": 0, "sold_quantity": 0, "total_value": 0}
+
+	removal_indices.sort()
+	removal_indices.reverse()
+	# 待移除下标；倒序处理保证每次 remove_at 都不会改变尚未处理的较小下标。
+	for record_index in removal_indices:
+		source_records.remove_at(record_index)
+	_coins += total_value
+	_record_coins_earned(total_value)
+	_queue_save_inventory()
+	_emit_storage_changed(source_location)
+	coins_changed.emit()
+	storage_items_sold.emit(sold_entries)
+	return {
+		"success": true,
+		"message": "已出售 %d 组物品" % sold_entries.size(),
+		"sold_group_count": sold_entries.size(),
+		"sold_quantity": sold_quantity,
+		"total_value": total_value,
+	}
 
 
 func get_storage_resource_quantity(item_resource: Resource, source_location: String) -> int:

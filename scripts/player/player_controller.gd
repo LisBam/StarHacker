@@ -233,6 +233,7 @@ func apply_damage(damage: float, source: Node) -> void:
 	# 最终伤害；武器蓄力、套装与技能来源先在免伤乘区加算，四舍五入到项目统一整数伤害。
 	var final_damage: float = float(maxi(roundi(damage_before_reduction * _get_received_damage_multiplier()), 1)) if damage_before_reduction > 0.0 else 0.0
 	_record_stock_metric("damage_taken", final_damage)
+	_record_received_damage_statistics(final_damage)
 	_damage_interval_remaining = maxf(damage_interval, 0.0)
 	# 受伤前死亡状态；取值来自属性组件，默认用于避免死亡特效重复生成。
 	var was_dead: bool = _is_stats_dead()
@@ -583,6 +584,14 @@ func _record_stock_metric(metric_name: String, amount: float) -> void:
 	var stock_market_service: Node = get_tree().root.get_node_or_null("StockMarketService")
 	if stock_market_service != null and stock_market_service.has_method("record_run_metric"):
 		stock_market_service.call("record_run_metric", metric_name, amount)
+
+
+func _record_received_damage_statistics(final_damage: float) -> void:
+	## 把一次未闪避攻击的最终伤害上报给生涯统计；护盾在此之后吸收伤害，因此该口径与受击飘字及技能受击信号一致。
+	# 生涯统计服务；服务缺失或当前为训练场、娱乐模式与首次引导时安全跳过，不影响玩家承伤流程。
+	var stats_service: Node = get_tree().root.get_node_or_null("StatsService")
+	if stats_service != null and stats_service.has_method("record_damage_received"):
+		stats_service.call("record_damage_received", final_damage)
 
 
 func _move_dodge(delta: float) -> void:

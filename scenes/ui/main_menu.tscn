@@ -179,6 +179,13 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "生涯"
 
+[node name="MatchHistoryButton" type="Button" parent="BottomCategoryExpansionMargin/StatisticsCategoryPanel/Margin/Buttons"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 36)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "战绩"
+
 [node name="BottomMenuMargin" type="MarginContainer" parent="." unique_id=541020951]
 layout_mode = 1
 anchors_preset = 12

@@ -544,6 +544,7 @@ func _forward_network_puppet_damage(damage: float, source: Node) -> void:
 	var final_damage: float = _apply_source_target_damage_multiplier(float(damage_result.get("damage", 0)), source)
 	if final_damage <= 0.0:
 		return
+	_record_local_damage_statistics(final_damage)
 	DAMAGE_NUMBER_POPUP_SCRIPT.spawn_damage_number(get_tree().current_scene, global_position, final_damage, bool(damage_result.get("is_critical", false)), get_instance_id())
 	_spawn_hit_effect()
 	_network_puppet_damage_handler.call(self, final_damage, bool(damage_result.get("is_critical", false)), _get_source_impact_force(source), _get_source_knockback_direction(source))
@@ -859,6 +860,7 @@ func apply_damage(damage: float, source: Node) -> void:
 	var damage_result: Dictionary = COMBAT_DAMAGE_CALCULATOR_SCRIPT.calculate_damage(damage, _get_source_combat_value(source, "get_attack_power", 100.0), defense_power, _get_source_critical_chance_against(source), _get_source_combat_value(source, "get_critical_damage_multiplier", 1.5))
 	# 最终伤害；生命与飘字统一使用同一个整数结果。
 	var final_damage: float = _apply_source_target_damage_multiplier(float(damage_result.get("damage", 0)), source)
+	_record_local_damage_statistics(final_damage)
 	_update_target_from_damage_source(source)
 	# 护盾结算后的生命伤害；同一次伤害允许击破护盾后把剩余值继续传给生命。
 	var health_damage: float = float(_shield_component.call("absorb_damage", final_damage)) if _shield_component != null and _shield_component.has_method("absorb_damage") else final_damage
@@ -992,6 +994,14 @@ func _notify_network_local_damage_source() -> void:
 		if sync_node != null and sync_node.has_method("record_host_local_enemy_damage"):
 			sync_node.call("record_host_local_enemy_damage", self)
 			return
+
+
+func _record_local_damage_statistics(final_damage: float) -> void:
+	## 把本机对敌人的最终伤害上报给生涯统计；主机远端伤害走 receive_network_final_damage，不会进入本入口，避免替队友累计。
+	# 生涯统计服务；缺失时只跳过战绩累计，不影响敌人生命、护盾、击退或联机同步。
+	var stats_service: Node = get_tree().root.get_node_or_null("StatsService")
+	if stats_service != null and stats_service.has_method("record_damage_dealt"):
+		stats_service.call("record_damage_dealt", final_damage)
 
 
 func _get_source_critical_chance_against(source: Node) -> float:

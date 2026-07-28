@@ -26,11 +26,30 @@ const ENTER_BUTTON_SIZE: Vector2 = Vector2(96.0, 38.0)
 const CONTENT_HORIZONTAL_MARGIN: int = 18
 ## 模式选择窗口内容纵向页边距；默认 16 像素，保证标题、分组滚动区和返回按钮与窗口边框保持稳定留白。
 const CONTENT_VERTICAL_MARGIN: int = 16
+## 首次正式成功撤离前的统一锁定提示；娱乐模式卡片禁用时显示，文案由主菜单宿主注入以保持成长规则一致。
+const DEFAULT_FIRST_SUCCESSFUL_EXTRACTION_UNLOCK_TOOLTIP: String = "首次成功撤离后解锁"
+
+## 当前是否已获得首次正式成功撤离资格；默认 false，决定娱乐模式的进入按钮是否可用，运行时完成后由宿主刷新。
+var _has_completed_first_successful_extraction: bool = false
+## 娱乐模式锁定提示；默认使用统一中文文案，宿主可传入项目统一提示，修改只影响未解锁时的悬停说明。
+var _first_successful_extraction_unlock_tooltip: String = DEFAULT_FIRST_SUCCESSFUL_EXTRACTION_UNLOCK_TOOLTIP
 
 
 func _ready() -> void:
 	UI_STYLE_GUIDE.apply_screen_theme(self)
 	UI_STYLE_GUIDE.apply_window_panel(self)
+	_build_content()
+
+
+func configure_first_successful_extraction_unlock(is_unlocked: bool, locked_tooltip: String = DEFAULT_FIRST_SUCCESSFUL_EXTRACTION_UNLOCK_TOOLTIP) -> void:
+	## 注入首次正式成功撤离资格；节点已就绪时重建模式卡，使完成信号无需关闭窗口即可解除娱乐模式锁定。
+	_has_completed_first_successful_extraction = is_unlocked
+	_first_successful_extraction_unlock_tooltip = locked_tooltip
+	if not is_node_ready():
+		return
+	# 旧内容节点；面板内容完全由规则表动态创建，立即释放后再构建可避免保留旧按钮的禁用状态与信号。
+	for content_child in get_children():
+		content_child.free()
 	_build_content()
 
 
@@ -109,6 +128,8 @@ func _build_category_section(category_id: String) -> Control:
 func _build_mode_card(mode_definition: Dictionary) -> Control:
 	## 构建单个模式卡；左侧为模式名与说明，右侧为“进入”按钮。
 	# 模式卡外框；使用统一浅色分区面板样式与其他局外面板卡片一致。
+	# 当前卡片的稳定模式标识；统一规范化后同时用于节点命名、资格判断和进入回调，避免三处读取结果不一致。
+	var mode_variant: String = HackModeRules.normalize_variant(str(mode_definition.get("variant", HackModeRules.VARIANT_STANDARD)))
 	var card_panel: PanelContainer = PanelContainer.new()
 	UI_STYLE_GUIDE.apply_section_panel(card_panel)
 	card_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -142,17 +163,28 @@ func _build_mode_card(mode_definition: Dictionary) -> Control:
 	text_layout.add_child(description_label)
 	# 进入按钮；点击后派发模式选择信号，由宿主写入会话状态并进入战斗。
 	var enter_button: Button = Button.new()
+	enter_button.name = "%sEnterButton" % mode_variant.capitalize()
 	enter_button.text = "进入"
 	enter_button.custom_minimum_size = ENTER_BUTTON_SIZE
 	enter_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	UI_STYLE_GUIDE.apply_primary_button(enter_button)
-	enter_button.pressed.connect(_on_enter_button_pressed.bind(str(mode_definition.get("variant", HackModeRules.VARIANT_STANDARD))))
+	# 娱乐模式锁定；首次正式成功撤离前仍展示完整模式规则，但禁止进入并提供与局外成长入口相同的提示。
+	if HackModeRules.requires_first_successful_extraction(mode_variant) and not _has_completed_first_successful_extraction:
+		enter_button.disabled = true
+		enter_button.tooltip_text = _first_successful_extraction_unlock_tooltip
+		UI_STYLE_GUIDE.apply_locked_button_visual(enter_button, true)
+	enter_button.pressed.connect(_on_enter_button_pressed.bind(mode_variant))
 	card_row.add_child(enter_button)
 	return card_panel
 
 
 func _on_enter_button_pressed(variant: String) -> void:
-	mode_selected.emit(HackModeRules.normalize_variant(variant))
+	## 为信号或脚本直调保留资格复核；不能只依赖按钮禁用状态阻止未解锁娱乐模式进入。
+	# 规范化后的入场模式；未知值回退标准骇入，再按该稳定值复核成长资格。
+	var normalized_variant: String = HackModeRules.normalize_variant(variant)
+	if HackModeRules.requires_first_successful_extraction(normalized_variant) and not _has_completed_first_successful_extraction:
+		return
+	mode_selected.emit(normalized_variant)
 
 
 func _on_close_button_pressed() -> void:

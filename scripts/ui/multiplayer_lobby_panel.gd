@@ -21,9 +21,13 @@ const COMBAT_MODE_BATTLE_ROYALE: String = "battle_royale"
 ## 模式显示名表；键为模式标识，值为玩家可见名称，房间列表与队伍提示共用。
 ## 展示名调整补充：该维度现称“多人模式”，大逃杀展示名更新为“对抗骇入”。
 const COMBAT_MODE_DISPLAY_NAMES: Dictionary = {"team": "组队骇入", "battle_royale": "对抗骇入"}
+## 首次正式成功撤离前的统一锁定提示；娱乐模式和模式扩展在联机房主设置中使用该文案。
+const FIRST_SUCCESSFUL_EXTRACTION_UNLOCK_TOOLTIP: String = "首次成功撤离后解锁"
 
 ## 联机会话服务缓存；ready 时解析，缺失时面板显示服务不可用提示。
 var _network_session: Node = null
+## 新手成长服务缓存；只读取本机首次正式成功撤离资格并监听解锁信号，不参与联机会话或网络数据同步。
+var _newcomer_protection_service: Node = null
 ## 状态提示标签；显示连接进度、失败原因与操作结果。
 var _status_label: Label = null
 ## 昵称输入框；建房或加入前可修改，入房后修改会即时同步给全员。
@@ -69,6 +73,7 @@ func _ready() -> void:
 	UI_STYLE_GUIDE.apply_screen_theme(self)
 	UI_STYLE_GUIDE.apply_window_panel(self)
 	_network_session = get_tree().root.get_node_or_null("NetworkSession")
+	_newcomer_protection_service = get_tree().root.get_node_or_null("NewcomerProtectionService")
 	_build_content()
 	if _network_session != null:
 		_network_session.connect("roster_changed", Callable(self, "_on_session_roster_changed"))
@@ -76,6 +81,8 @@ func _ready() -> void:
 		_network_session.connect("connection_failed", Callable(self, "_on_session_connection_failed"))
 		_network_session.connect("disconnected_from_host", Callable(self, "_on_session_disconnected"))
 		_network_session.connect("discovered_rooms_changed", Callable(self, "_on_discovered_rooms_changed"))
+	if _newcomer_protection_service != null and _newcomer_protection_service.has_signal("first_successful_extraction_completed"):
+		_newcomer_protection_service.connect("first_successful_extraction_completed", Callable(self, "_on_first_successful_extraction_completed"))
 	# 面板可见性驱动房间探测开关；遮罩隐藏后立即停止 UDP 广播，不在后台持续发包。
 	visibility_changed.connect(_on_panel_visibility_changed)
 	refresh()
@@ -463,6 +470,8 @@ func _refresh_action_states() -> void:
 	var session_active: bool = bool(_network_session.call("is_session_active"))
 	# 当前是否正在连接；连接期禁用全部会话操作避免重复请求。
 	var joining: bool = bool(_network_session.call("is_joining"))
+	# 本机高级模式资格；服务缺失时安全锁定娱乐模式与模式扩展，避免独立 UI 场景误开放。
+	var advanced_modes_unlocked: bool = _has_completed_first_successful_extraction()
 	if _create_room_button != null:
 		_create_room_button.disabled = session_active or joining
 	if _join_button != null:
@@ -482,10 +491,20 @@ func _refresh_action_states() -> void:
 		# 当前会话骇入模式下标；按选项标识缓存反查，未找到时回退第一项（标准骇入）。
 		var session_hack_variant_index: int = _hack_variant_option_ids.find(HackModeRules.normalize_variant(str(_network_session.call("get_session_hack_variant")))) if _network_session.has_method("get_session_hack_variant") else 0
 		_hack_variant_option_button.select(maxi(session_hack_variant_index, 0))
+		# 娱乐模式选项；只禁用需要首撤资格的条目，标准与零装仍保持原有房主可选规则。
+		for option_index in range(_hack_variant_option_ids.size()):
+			# 当前下拉选项的稳定模式标识；规则表据此判断是否属于需要首撤资格的娱乐模式。
+			var option_variant: String = _hack_variant_option_ids[option_index]
+			# 当前选项是否应锁定；仅娱乐模式在本机尚未首撤时为 true，用于禁用与工具提示同步。
+			var is_option_locked: bool = HackModeRules.requires_first_successful_extraction(option_variant) and not advanced_modes_unlocked
+			_hack_variant_option_button.set_item_disabled(option_index, is_option_locked)
+			_hack_variant_option_button.set_item_tooltip(option_index, FIRST_SUCCESSFUL_EXTRACTION_UNLOCK_TOOLTIP if is_option_locked else "")
 	if _mode_extension_button != null:
 		# 模式扩展按钮状态；客户端只读显示房主配置，房主入房后才能打开模态设置。
-		_mode_extension_button.disabled = not (session_active and bool(_network_session.call("is_session_host")))
-		_mode_extension_button.text = str(_network_session.call("get_session_mode_extension_summary")) if _network_session.has_method("get_session_mode_extension_summary") else "未开启"
+		_mode_extension_button.disabled = not (session_active and bool(_network_session.call("is_session_host")) and advanced_modes_unlocked)
+		_mode_extension_button.text = str(_network_session.call("get_session_mode_extension_summary")) if advanced_modes_unlocked and _network_session.has_method("get_session_mode_extension_summary") else "未开启"
+		_mode_extension_button.tooltip_text = "" if advanced_modes_unlocked else FIRST_SUCCESSFUL_EXTRACTION_UNLOCK_TOOLTIP
+		UI_STYLE_GUIDE.apply_locked_button_visual(_mode_extension_button, not advanced_modes_unlocked)
 	if _start_button != null:
 		_start_button.visible = session_active and bool(_network_session.call("is_session_host"))
 		_start_button.disabled = not bool(_network_session.call("is_everyone_ready"))
@@ -501,6 +520,13 @@ func _get_character_display_name(character_id: String) -> String:
 	if session_state != null and session_state.has_method("get_character_display_name"):
 		return str(session_state.call("get_character_display_name", character_id))
 	return character_id
+
+
+func _has_completed_first_successful_extraction() -> bool:
+	## 返回本机是否已获得首次正式成功撤离资格；联机仅用它约束本机房主可编辑的高级模式入口。
+	if _newcomer_protection_service == null or not _newcomer_protection_service.has_method("has_completed_first_successful_extraction"):
+		return false
+	return bool(_newcomer_protection_service.call("has_completed_first_successful_extraction"))
 
 
 # ---------------------------------------------------------------------------
@@ -592,6 +618,9 @@ func _on_hack_variant_option_selected(selected_index: int) -> void:
 		return
 	# 选中的骇入模式标识；下标越界时回退标准骇入，防止选项表与回调不同步。
 	var selected_hack_variant: String = _hack_variant_option_ids[selected_index] if selected_index >= 0 and selected_index < _hack_variant_option_ids.size() else HackModeRules.VARIANT_STANDARD
+	if HackModeRules.requires_first_successful_extraction(selected_hack_variant) and not _has_completed_first_successful_extraction():
+		_refresh_action_states()
+		return
 	_network_session.call("set_session_hack_variant", selected_hack_variant)
 	_refresh_team_section()
 
@@ -600,7 +629,7 @@ func _on_mode_extension_button_pressed() -> void:
 	## 房主打开模式扩展设置；使用当前权威配置作为初始值，取消时不写回任何变化。
 	if _network_session == null or _mode_extension_overlay == null or _mode_extension_panel == null:
 		return
-	if not bool(_network_session.call("is_session_active")) or not bool(_network_session.call("is_session_host")):
+	if not bool(_network_session.call("is_session_active")) or not bool(_network_session.call("is_session_host")) or not _has_completed_first_successful_extraction():
 		return
 	# 当前骇入模式；决定风险合约是否与本房间规则兼容。
 	var session_hack_variant: String = HackModeRules.normalize_variant(str(_network_session.call("get_session_hack_variant")))
@@ -616,7 +645,7 @@ func _on_mode_extension_configuration_confirmed(extension_ids: Array[String], ri
 	## 房主确认模式扩展配置；先关闭模态层，再由 NetworkSession 校验、清空准备并同步全员。
 	if _mode_extension_overlay != null:
 		_mode_extension_overlay.visible = false
-	if _network_session != null and _network_session.has_method("set_session_mode_extensions"):
+	if _network_session != null and _network_session.has_method("set_session_mode_extensions") and _has_completed_first_successful_extraction():
 		_network_session.call("set_session_mode_extensions", extension_ids, risk_modifier_ids)
 	_refresh_team_section()
 	_refresh_action_states()
@@ -667,6 +696,11 @@ func _on_session_state_changed() -> void:
 	_refresh_team_section()
 	_refresh_action_states()
 	_on_panel_visibility_changed()
+
+
+func _on_first_successful_extraction_completed() -> void:
+	## 首次正式成功撤离完成后立即刷新本机联机设置入口，无需关闭或重新打开联机面板。
+	_refresh_action_states()
 
 
 func _on_session_connection_failed(reason: String) -> void:

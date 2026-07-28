@@ -88,6 +88,7 @@ func _test_rule_table() -> void:
 	_check(offer_ids.duplicate().all(func(protocol_id: String) -> bool: return offer_ids.count(protocol_id) == 1), "同一批协议候选不得重复。")
 	_check(is_equal_approx(HackProtocolRules.get_fragment_requirement(0), 100.0), "首次协议需求应为 100 碎片。")
 	_check(is_equal_approx(HackProtocolRules.get_fragment_requirement(1), 175.0), "第二次协议需求应为 175 碎片。")
+	_check(is_equal_approx(HackProtocolRules.HOLD_DURATION_SECONDS, 2.0), "骇入协议选择键的长按时长应为 2 秒。")
 	_check(is_equal_approx(HackProtocolRules.SURVIVAL_FRAGMENT_AMOUNT, 2.0), "每 5 秒存活奖励应翻倍为 2 碎片。")
 	_check(is_equal_approx(HackProtocolRules.KILL_FRAGMENT_AMOUNT, 6.0), "最终击杀奖励应翻倍为 6 碎片。")
 	_check(is_equal_approx(HackProtocolRules.CHEST_FRAGMENT_AMOUNT, 36.0), "开箱奖励应翻倍为 36 碎片。")
@@ -193,7 +194,7 @@ func _test_runtime_flow() -> void:
 		Input.action_press("select_hack_protocol")
 		combat_hud.call("_update_hack_protocol_hold", HackProtocolRules.HOLD_DURATION_SECONDS)
 		Input.action_release("select_hack_protocol")
-	_check(selection_overlay != null and selection_overlay.visible, "持续按住选择键 3 秒后应打开协议窗口。")
+	_check(selection_overlay != null and selection_overlay.visible, "持续按住选择键 2 秒后应打开协议窗口。")
 	_check(not get_tree().paused, "骇入协议选择窗口打开期间不得暂停游戏。")
 	if combat_hud != null:
 		combat_hud.call("_close_hack_protocol_select")

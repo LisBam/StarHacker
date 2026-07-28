@@ -31,7 +31,7 @@
 | `DebugSettings` | 管理开发者调试选项 | `user://debug_settings.cfg` |
 | `GlobalInventory` | 拥有星穹、只增不减的累计获得星穹、仓库、背包、装备槽、持仓、永久图鉴发现记录和战斗结算数据；外部收益使用 `grant_coins()`，账户转移使用不累计的余额接口 | `user://global_inventory.json` |
 | `ShopService` | 生成普通商店与灰市库存，维护刷新状态 | `user://shop_state.json` |
-| `HideoutService` | 维护六座据点设施等级、建造队列与六类只读加成接口 | `user://hideout_state.json` |
+| `HideoutService` | 维护七座据点设施等级、建造队列与七类只读加成接口；战术仓储舱提供背包容量 | `user://hideout_state.json` |
 | `InsuranceService` | 维护骇入保单、死亡理赔、账户统计与保险股行为累计；必须注册在 `StockMarketService` 之前，保证对局结束时理赔先于股市正式结算入池 | `user://insurance_state.json` |
 | `StockMarketService` | 维护行情、事件、证券币、杠杆合约、交易历史记录、通知记录和对局行为影响 | `user://stock_market_state.json` |
 | `MiningFarmService` | 维护算力币、矿场资产、在线收益和临时增益 | `user://mining_farm_state.json` |
@@ -55,7 +55,7 @@
 - `ContentPackData` 只声明一个角色扩展包拥有的武器、装备、道具与怪物路径；`EquipmentSetData` 只声明共享套装门槛、显示原文、属性加成与特殊效果参数。
 - `EnhancementStoneData` 保存强化石品质、目标类型和词条方向；逐属性强化幅度、兼容规则与正式词条池集中在 `EnhancementRules`。特化品质额外在资源中保存散射、穿透、弹射或连击的 `+1/+2` 离散点数；四项机制不进入普通四品质词条池。
 - `EnhancementRules` 同时声明单件武器或装备最多使用 20 颗强化石；`WeaponData` 与 `EquipmentData` 分别在数据层记录已使用次数、返回剩余次数并拒绝第 21 次强化。
-- `InventoryLimits` 集中声明背包 50 组容量与资源单组 10 件现行上限；库存、地面掉落和 UI 不各自复制这些数字。历史 99 件常量只保留未调用兼容接口，不参与当前读档。
+- `InventoryLimits` 集中声明背包初始 25 组容量与资源单组 10 件现行上限；`HideoutService` 的战术仓储舱按 0/1/2/3/4/5 级把背包扩展为 25/30/35/40/45/50 组，`GlobalInventory` 是唯一容量校验者，库存、地面掉落和 UI 不各自复制这些数字。历史 99 件常量只保留未调用兼容接口，不参与当前读档。
 - `FinanceUnlockRules` 集中声明保险、银行、矿场与炒股的稳定功能标识、成长顺序和 1000 / 3000 / 6000 / 10000 累计获得星穹门槛；主菜单、测试和后续入口不得复制这些数字。
 - `SecondHandItemGenerator` 集中执行武器装备 30% 二手判定、1 至 20 次按 `21 - 次数` 递减权重抽取的历史强化，以及 1% 至 99% 耐久消耗；怪物、宝箱和普通商店只负责提供新物品实例与随机源。
 - `.tres` 保存单个内容的基础数值。脚本默认值只作为缺省值，场景或资源覆盖值优先。
@@ -253,7 +253,7 @@ HackModeRules + ModeExtensionRules + HackProtocolRules
 - 主菜单与战斗背包的共同交互进入 `SharedBackpackPanel`。仅场景特有的所有权结果由宿主通过信号处理。
 - 正式战斗中的普通拾取、丢弃、装备与耐久变化先写入 `GlobalInventory` 内存状态，不为每次操作重复序列化包含仓库的完整存档；成功撤离、失败或正常退出结算后统一落盘。物资撤离点已经送回仓库的资产使用强制保存路径，不等待本局最终结算。
 - 正式战斗失败结算由 `GlobalInventory` 按所有权位置统一执行：背包堆叠按物品单位独立抽取，武器栏与四个防具装备槽按每件物品独立抽取；实际遗失条目统一进入结算列表、灰市快照和最终存档，HUD 只负责根据死亡或提前逃跑传入两类保留率。
-- `GlobalInventory` 对背包执行 50 组原子容量预检，并把所有正式可堆叠资源限制为每组 10 件；武器和装备始终单件成组。读档数量直接限制到现行 10 件上限，不执行历史大堆叠拆分或溢出转仓库。
+- `GlobalInventory` 对背包执行据点实时 `25/30/35/40/45/50` 组原子容量预检，并把所有正式可堆叠资源限制为每组 10 件；武器和装备始终单件成组。读档数量直接限制到现行 10 件上限，已有背包记录不因初始容量下调而迁移或删除。
 - `user://global_inventory.json` 只能由 `/root/GlobalInventory` AutoLoad 写入；独立测试实例、临时验证脚本和普通场景节点没有持久化权限。库存服务只维护这一份主存档，不自动生成额外恢复或备份文件。当前存档显式保存物品与怪物的稳定图鉴发现键、强化累计、强化次数、二手状态和耐久字段；读档只恢复这些现行字段，不根据持有物品补建图鉴，也不清理或转换历史强化石数据。
 
 ### 7.3 敌人与环境

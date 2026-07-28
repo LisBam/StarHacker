@@ -33,6 +33,7 @@ var _coins_label: Label
 ## 建造状态文本；显示进行中建造的设施与剩余在线时间，无建造时显示提示文案。
 var _construction_label: Label
 ## 设施卡片流式容器；六座设施按定义顺序排列并自动换行。
+## 现行设施数量补充：容器按 HideoutService 定义表动态渲染七座设施，战术仓储舱与其他设施共用同一张卡片协议。
 var _facility_container: HFlowContainer
 ## 二次确认弹窗；完整展示升级费用、建造时长与效果说明后才执行真实升级。
 var _confirmation_dialog: CommonConfirmationDialog

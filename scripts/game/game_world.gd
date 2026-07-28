@@ -225,7 +225,8 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 ## 撤离点生成时间；取值为进入战斗后的秒数，默认 120 表示存活 2 分钟后生成撤离点。
 @export_range(1.0, 7200.0, 1.0, "or_greater") var extraction_spawn_time_seconds: float = 120.0
 ## 撤离点地图标记时间；取值为进入战斗后的秒数，默认 300 表示存活 5 分钟后在地图上显示撤离点标记。
-@export_range(1.0, 7200.0, 1.0, "or_greater") var extraction_map_marker_time_seconds: float = 300.0
+## 现行标记时机补充：常规局默认在存活 240 秒（4 分钟）后标记撤离点；首次战斗引导仍由独立 120 秒配置立即标记。
+@export_range(1.0, 7200.0, 1.0, "or_greater") var extraction_map_marker_time_seconds: float = 240.0
 ## 首次新手引导撤离点出现并标记的时间；默认 120 秒，让玩家完成战斗、拾取、开箱和协议选择后进入撤离教学。
 @export_range(30.0, 480.0, 1.0) var tutorial_extraction_time_seconds: float = 120.0
 ## 首次新手引导开局普通敌人与玩家的期望距离；默认 520 像素，保证很快遇敌且不会贴脸出生。
@@ -241,6 +242,7 @@ const CHEST_ITEM_CATEGORY_WEIGHT: float = 0.25
 ## 训练工具单次增加的游戏时长；默认 60 秒即 1 分钟，运行时修改会影响调试按钮加速撤离点生成与地图标记的幅度。
 @export_range(1.0, 3600.0, 1.0, "or_greater") var training_time_addition_seconds: float = 60.0
 ## 撤离驻留时长；取值应大于 0，默认 5 秒，玩家在撤离范围内连续停留满该时间后可按冲刺键撤离。
+## 现行驻留规则补充：正式撤离的 5 秒按整局累计，离开或在多个正式撤离点之间移动都保留已有进度；仅处于范围内时可执行撤离。
 @export_range(0.1, 120.0, 0.1, "or_greater") var extraction_hold_duration_seconds: float = 5.0
 ## 撤离点半径；取值建议大于玩家碰撞半径，默认 96 像素，修改会影响可驻留撤离范围。
 @export_range(16.0, 512.0, 1.0, "or_greater") var extraction_radius: float = 96.0
@@ -382,10 +384,13 @@ var _extraction_point_marked_on_map: bool = false
 ## 玩家是否处于撤离范围内；取值为 true/false，默认 false，用于 HUD 显示驻留状态。
 var _player_inside_extraction_area: bool = false
 ## 撤离驻留累计时间；取值大于等于 0，默认 0，离开撤离范围会重置。
+## 现行累计行为补充：离开正式撤离范围不会清零；本局只在点位尚未生成、玩家缺失或死亡时重置，防止死亡状态保留撤离资格。
 var _extraction_hold_elapsed_seconds: float = 0.0
 ## 是否已经满足撤离条件；取值为 true/false，默认 false，达到驻留时长且仍在范围内时变为 true。
+## 现行就绪状态补充：累计时间达到阈值后保持 true，但 CombatHud 仍会额外校验玩家在正式撤离范围内才能确认撤离。
 var _extraction_ready_to_leave: bool = false
 ## 当前玩家所在正式撤离点下标；默认 -1 表示不在任一撤离范围内，用于多点驻留计时切换时正确清零。
+## 现行点位切换补充：该下标仅表示 HUD 当前所在点位；正式撤离驻留改为整局累计后，切换点位不再重置累计时间。
 var _active_extraction_point_index: int = -1
 ## 物资撤离点位置列表；默认空数组，进入地图时按 2 至 5 个递减概率生成。
 var _supply_extraction_positions: Array[Vector2] = []
@@ -807,7 +812,7 @@ func get_first_run_tutorial_objective_text() -> String:
 	if not _player_inside_extraction_area:
 		return "撤离点已标记｜按 Q 查看地图，前往绿色撤离点"
 	if not _extraction_ready_to_leave:
-		return "保持在撤离区域内｜连续驻留 %.1f 秒" % get_extraction_hold_duration_seconds()
+		return "保持在撤离区域内｜累计驻留 %.1f 秒" % get_extraction_hold_duration_seconds()
 	return "撤离准备完成｜按 Space 完成本次新手引导"
 
 
@@ -1607,12 +1612,11 @@ func _update_extraction_state(delta: float) -> void:
 	_player_inside_extraction_area = next_active_extraction_point_index >= 0
 	if not _player_inside_extraction_area:
 		_active_extraction_point_index = -1
-		_extraction_hold_elapsed_seconds = 0.0
-		_extraction_ready_to_leave = false
+		# 离开正式撤离范围；累计进度保留到下一次进入，达到阈值后仍需重新站入范围才允许 HUD 确认撤离。
+		_extraction_ready_to_leave = _extraction_hold_elapsed_seconds >= get_extraction_hold_duration_seconds()
 		return
 	if next_active_extraction_point_index != _active_extraction_point_index:
 		_active_extraction_point_index = next_active_extraction_point_index
-		_extraction_hold_elapsed_seconds = 0.0
 
 	_extraction_hold_elapsed_seconds = minf(_extraction_hold_elapsed_seconds + maxf(delta, 0.0), get_extraction_hold_duration_seconds())
 	_extraction_ready_to_leave = _extraction_hold_elapsed_seconds >= get_extraction_hold_duration_seconds()

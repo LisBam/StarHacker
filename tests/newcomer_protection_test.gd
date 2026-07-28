@@ -28,6 +28,7 @@ func _ready() -> void:
 	_test_newcomer_service_default_state()
 	await _test_first_run_tutorial_transition()
 	await _test_first_successful_extraction_transition()
+	_test_backpack_capacity_and_extraction_rules()
 	_test_basic_monster_protection_attributes()
 	_test_ranged_monster_protection_attributes()
 	_test_network_protocol_version()
@@ -291,6 +292,66 @@ func _test_network_protocol_version() -> void:
 		return
 	_check(int(network_session.call("get_protocol_version")) == 4, "敌人新手保护倍率同步后联机协议版本必须为 4。")
 	network_session.free()
+
+
+func _test_backpack_capacity_and_extraction_rules() -> void:
+	## 验证战术仓储舱的六档背包容量、风险倍率的实时基数、四分钟地图标记与正式撤离驻留离开后累计规则。
+	# 全局库存服务；用于验证 UI 与拾取共用的公开容量接口会读取据点实时等级。
+	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+	# 据点服务；用于构造 0 至 5 级战术仓储舱的纯内存等级快照。
+	var hideout_service: Node = get_tree().root.get_node_or_null("HideoutService")
+	_check(global_inventory != null and hideout_service != null, "背包容量验证必须取得库存与据点 AutoLoad。")
+	if global_inventory == null or hideout_service == null:
+		return
+	# 原始设施等级表；测试完成后完整恢复，避免影响同一进程内后续用例。
+	var original_levels: Dictionary = (hideout_service.get("_facility_levels") as Dictionary).duplicate(true)
+	# 容量等级遍历值；依次覆盖用户指定的 0 至 5 级升级档位。
+	for tactical_storage_level in range(6):
+		# 本轮设施等级表；只覆盖战术仓储舱，其他设施保持原测试状态。
+		var test_levels: Dictionary = original_levels.duplicate(true)
+		test_levels["tactical_storage"] = tactical_storage_level
+		hideout_service.set("_facility_levels", test_levels)
+		# 本轮期望容量；初始 25 组，每级增加 5 组，5 级达到 50 组。
+		var expected_capacity_groups: int = 25 + tactical_storage_level * 5
+		_check(int(hideout_service.call("get_backpack_capacity_groups")) == expected_capacity_groups, "战术仓储舱等级 %d 的背包上限应为 %d 组。" % [tactical_storage_level, expected_capacity_groups])
+		_check(int(global_inventory.call("get_backpack_max_groups")) == expected_capacity_groups, "GlobalInventory 必须读取战术仓储舱等级 %d 的实时背包上限。" % tactical_storage_level)
+	# 0 级据点等级表；风险合约容量倍率必须以新的 25 组初始值计算。
+	var level_zero: Dictionary = original_levels.duplicate(true)
+	level_zero["tactical_storage"] = 0
+	hideout_service.set("_facility_levels", level_zero)
+	global_inventory.call("set_combat_backpack_capacity_multiplier", 0.50)
+	_check(int(global_inventory.call("get_backpack_max_groups")) == 13, "25 组基础容量在 50% 风险合约下应四舍五入为 13 组。")
+	global_inventory.call("set_combat_backpack_capacity_multiplier", 1.0)
+	hideout_service.set("_facility_levels", original_levels)
+
+	# 正式战斗世界；仅调用撤离纯状态函数，不启动场景人口、HUD 或库存结算。
+	var game_world: Node = GAME_WORLD_SCENE.instantiate()
+	_check(game_world != null, "撤离累计规则测试必须可以实例化战斗世界。")
+	if game_world == null:
+		return
+	# 临时玩家节点；没有属性组件时世界按存活状态处理，位置用于模拟进出撤离范围。
+	var test_player: Node2D = Node2D.new()
+	game_world.add_child(test_player)
+	# 正式撤离点位置表；使用原点单点即可覆盖进入、离开和重新进入的累计状态。
+	var extraction_positions: Array[Vector2] = [Vector2.ZERO]
+	game_world.set("_player", test_player)
+	game_world.set("_has_extraction_point", true)
+	game_world.set("_extraction_point_positions", extraction_positions)
+	game_world.set("extraction_radius", 96.0)
+	_check(is_equal_approx(float(game_world.get("extraction_map_marker_time_seconds")), 240.0), "常规正式撤离点地图标记时间应为 240 秒。")
+	test_player.global_position = Vector2.ZERO
+	game_world.call("_update_extraction_state", 2.0)
+	_check(is_equal_approx(float(game_world.call("get_extraction_hold_elapsed_seconds")), 2.0), "首次进入正式撤离点应累计 2 秒。")
+	test_player.global_position = Vector2(1000.0, 0.0)
+	game_world.call("_update_extraction_state", 10.0)
+	_check(is_equal_approx(float(game_world.call("get_extraction_hold_elapsed_seconds")), 2.0), "离开正式撤离点后累计驻留时间不得重置或继续增加。")
+	test_player.global_position = Vector2.ZERO
+	game_world.call("_update_extraction_state", 3.0)
+	_check(bool(game_world.call("is_extraction_ready_to_leave")), "重新进入后累计满 5 秒应达到正式撤离就绪状态。")
+	test_player.global_position = Vector2(1000.0, 0.0)
+	game_world.call("_update_extraction_state", 1.0)
+	_check(bool(game_world.call("is_extraction_ready_to_leave")) and not bool(game_world.call("is_player_inside_extraction_area")), "离开已就绪撤离点必须保留累计进度，但输入层仍可依据范围状态拒绝撤离。")
+	game_world.free()
 
 
 func _check(condition: bool, failure_message: String) -> void:

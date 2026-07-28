@@ -707,7 +707,7 @@ func _create_storage_category_button(target_bar: HBoxContainer, button_text: Str
 	# 分类按钮；一级与二级共用创建逻辑，但分别写入不同按钮表和回调。
 	var category_button: Button = Button.new()
 	category_button.text = button_text
-	category_button.toggle_mode = true
+	# 分类选中态；仓库使用与背包、商店相同的 disabled 样式表达当前分类，不使用 toggle 的按下外观。
 	category_button.custom_minimum_size = Vector2(104.0, 30.0)
 	if is_primary:
 		category_button.pressed.connect(Callable(self, "_on_storage_primary_category_pressed").bind(category_name))
@@ -757,12 +757,14 @@ func _refresh_storage_category_buttons() -> void:
 		# 一级分类按钮；当前主分类保持按下状态。
 		var primary_button: Button = _storage_primary_buttons.get(category_name) as Button
 		if primary_button != null:
-			primary_button.set_pressed_no_signal(str(category_name) == _storage_primary_category)
+			# 当前主分类禁用；统一复用背包和商店的选中后按钮视觉与重复点击防护。
+			primary_button.disabled = str(category_name) == _storage_primary_category
 	for category_name in _storage_subcategory_buttons.keys():
 		# 二级分类按钮；当前子分类保持按下状态。
 		var subcategory_button: Button = _storage_subcategory_buttons.get(category_name) as Button
 		if subcategory_button != null:
-			subcategory_button.set_pressed_no_signal(str(category_name) == _storage_subcategory)
+			# 当前子分类禁用；保持仓库、背包与商店三处分类选中态完全一致。
+			subcategory_button.disabled = str(category_name) == _storage_subcategory
 	_stone_attribute_option.visible = _storage_primary_category == InventoryQuery.PRIMARY_RESOURCES
 	_stone_attribute_clear_button.visible = _storage_primary_category == InventoryQuery.PRIMARY_RESOURCES
 	_equipment_set_filter_control.visible = _storage_primary_category == InventoryQuery.PRIMARY_EQUIPMENT
@@ -857,6 +859,7 @@ func _get_backpack_capacity_title(backpack_entries: Array) -> String:
 	# 背包当前组数；读取未筛选的真实库存数量，分类、搜索与排序不会改变显示。
 	var backpack_group_count: int = int(_global_inventory.call("get_backpack_count")) if _global_inventory.has_method("get_backpack_count") else backpack_entries.size()
 	# 背包容量上限；优先读取库存服务公开接口，旧服务回退项目统一 50 组配置。
+	# 现行兜底补充：库存服务缺失时回退 25 组初始容量，正常路径显示战术仓储舱对应的实时上限。
 	var backpack_maximum_groups: int = int(_global_inventory.call("get_backpack_max_groups")) if _global_inventory.has_method("get_backpack_max_groups") else INVENTORY_LIMITS.BACKPACK_MAX_GROUPS
 	return "背包 %d/%d" % [backpack_group_count, backpack_maximum_groups]
 

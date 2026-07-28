@@ -4474,6 +4474,7 @@ func _show_success_settlement() -> void:
 		passive_skill_component.call("apply_successful_extraction_bonuses", global_inventory, _game_world)
 	if global_inventory != null and global_inventory.has_method("complete_combat_run_success"):
 		outcome = global_inventory.call("complete_combat_run_success")
+	_record_stats_settlement_items(outcome)
 	_present_run_outcome(outcome)
 	_show_newcomer_protection_end_notice_if_needed()
 
@@ -4499,6 +4500,7 @@ func _show_failure_settlement(reason: String, retained_ratio: float = -1.0, equi
 	_record_stats_run_finished("death" if reason == "角色死亡" else "escape")
 	# 失败结算结果；两个保留率都有效时使用完整规则，缺省调用保留全局库存的默认失败概率作为兼容兜底。
 	var outcome: Dictionary = global_inventory.call("complete_combat_run_failure", reason, retained_ratio, equipment_retained_ratio) if retained_ratio >= 0.0 and equipment_retained_ratio >= 0.0 else global_inventory.call("complete_combat_run_failure", reason)
+	_record_stats_settlement_items(outcome)
 	_present_run_outcome(outcome)
 
 
@@ -4529,6 +4531,47 @@ func _record_stats_run_finished(result_id: String) -> void:
 	var completed_run: Variant = stats_service.call("record_run_finished", result_id, _get_survival_time_seconds(), extracted_value)
 	if completed_run is Dictionary:
 		_settlement_run_statistics = (completed_run as Dictionary).duplicate(true)
+
+
+func _record_stats_settlement_items(outcome: Dictionary) -> void:
+	## 把库存完成正式结算后的实际获得与丢失物品附加到最新战绩；统计快照无效时不会误写更早记录。
+	if _settlement_run_statistics.is_empty():
+		return
+	# 生涯统计服务；只接收可持久化的纯字典快照，不保存结算界面的运行时 Resource 引用。
+	var stats_service: Node = get_tree().root.get_node_or_null("StatsService")
+	if stats_service == null or not stats_service.has_method("record_latest_run_settlement_items"):
+		return
+	# 全局库存服务；复用统一物品序列化协议，完整保留武器强化、耐久、二手状态和资源品质。
+	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+	# 本局实际获得物品快照；包含成功带出、失败后仍保留以及物资撤离点已安全送回的本局所得。
+	var gained_item_snapshots: Array[Dictionary] = _serialize_stats_settlement_entries(outcome.get("gained_entries", []), global_inventory)
+	# 本局实际丢失物品快照；成功撤离为空，死亡与逃跑使用库存随机结算后从所有权移除的真实条目。
+	var lost_item_snapshots: Array[Dictionary] = _serialize_stats_settlement_entries(outcome.get("lost_entries", []), global_inventory)
+	stats_service.call("record_latest_run_settlement_items", gained_item_snapshots, lost_item_snapshots)
+
+
+func _serialize_stats_settlement_entries(raw_entries: Variant, global_inventory: Node) -> Array[Dictionary]:
+	## 把结算条目转换为 StatsService 可直接写入 JSON 的物品快照；服务缺失或异常条目会被安全忽略。
+	# 已序列化物品快照；顺序与结算窗口一致，详情页可以还原本局结算展示顺序。
+	var serialized_snapshots: Array[Dictionary] = []
+	if global_inventory == null or not global_inventory.has_method("serialize_item_snapshot") or not (raw_entries is Array):
+		return serialized_snapshots
+	for raw_entry in raw_entries as Array:
+		if not (raw_entry is Dictionary):
+			continue
+		# 结构化结算条目；包含物品资源与实际结算数量，不读取库存容器下标或所有权。
+		var entry: Dictionary = raw_entry as Dictionary
+		# 结算物品资源；无效引用无法形成可恢复快照，直接跳过并保留其他合法条目。
+		var item_resource: Resource = entry.get("resource") as Resource
+		if item_resource == null:
+			continue
+		# 结算物品数量；堆叠资源限制到正式单组上限，武器和装备由库存序列化器固定为 1。
+		var quantity: int = clampi(int(entry.get("quantity", 1)), 1, INVENTORY_LIMITS.MAX_STACK_QUANTITY)
+		# 序列化物品快照；空字典表示库存服务无法识别该资源类型，不写入历史战绩。
+		var serialized_snapshot: Dictionary = global_inventory.call("serialize_item_snapshot", item_resource, quantity) as Dictionary
+		if not serialized_snapshot.is_empty():
+			serialized_snapshots.append(serialized_snapshot)
+	return serialized_snapshots
 
 
 func _record_stock_extracted_values(global_inventory: Node) -> void:

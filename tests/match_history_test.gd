@@ -7,6 +7,10 @@ extends Node
 const STATS_SERVICE_SCRIPT: Script = preload("res://scripts/game/stats_service.gd")
 ## 主菜单场景；用于验证统计分类按钮顺序、战绩遮罩、面板刷新和关闭协议。
 const MAIN_MENU_SCENE: PackedScene = preload("res://scenes/ui/main_menu.tscn")
+## 测试获得物品模板；通过库存公开序列化接口生成可恢复历史快照，不进入玩家真实库存。
+const TEST_GAINED_ITEM: Resource = preload("res://data/weapons/basic/dagger.tres")
+## 测试丢失物品模板；与武器使用不同资源类型，验证详情页能够恢复多种结算物品。
+const TEST_LOST_ITEM: Resource = preload("res://data/items/repair_kit_basic.tres")
 
 ## 当前失败数量；默认 0，所有断言完成后用于决定测试进程退出码。
 var _failure_count: int = 0
@@ -67,6 +71,17 @@ func _test_recent_run_history_service() -> void:
 		var extracted_value: int = run_index * 100
 		_test_stats_service.call("record_run_finished", result_id, float(run_index * 60 + 5), extracted_value)
 
+	# 全局库存服务；只使用公开物品快照协议，不增减任何背包、装备栏或仓库所有权。
+	var global_inventory: Node = get_tree().root.get_node_or_null("GlobalInventory")
+	_check(global_inventory != null and global_inventory.has_method("serialize_item_snapshot"), "战绩物品测试必须取得库存快照序列化接口。")
+	if global_inventory != null and global_inventory.has_method("serialize_item_snapshot"):
+		# 测试获得物品快照；使用独立资源副本，确保历史记录保存的是纯字典而非模板引用。
+		var gained_item_snapshot: Dictionary = global_inventory.call("serialize_item_snapshot", TEST_GAINED_ITEM.duplicate(true), 1) as Dictionary
+		# 测试丢失物品快照；数量 2 用于验证堆叠数量能够进入历史详情。
+		var lost_item_snapshot: Dictionary = global_inventory.call("serialize_item_snapshot", TEST_LOST_ITEM.duplicate(true), 2) as Dictionary
+		_check(bool(_test_stats_service.call("record_latest_run_settlement_items", [gained_item_snapshot], [lost_item_snapshot])), "最新正式战绩必须能够附加具体结算物品。")
+		_check(not bool(_test_stats_service.call("record_latest_run_settlement_items", [], [])), "同一局具体结算物品不得被重复附加或覆盖。")
+
 	# 近期战绩快照；服务必须返回最新在前的深复制数组。
 	var history: Array = _test_stats_service.call("get_recent_run_history") as Array
 	_check(history.size() == 20, "近期战绩必须固定保留最新 20 局。")
@@ -80,6 +95,9 @@ func _test_recent_run_history_service() -> void:
 		_check(int(latest_run.get("chests_opened", -1)) == 3, "结算快照必须记录本局开启宝箱数 3。")
 		_check(int(latest_run.get("extracted_value", -1)) == 0, "逃跑战绩的带出价值必须规范化为 0。")
 		_check(int(latest_run.get("shipped_value", -1)) == 200, "战绩必须保留本局已送回价值 200。")
+		_check(bool(latest_run.get("settlement_items_recorded", false)), "最新战绩必须标记具体结算物品已经记录。")
+		_check((latest_run.get("gained_item_snapshots", []) as Array).size() == 1, "最新战绩必须保存 1 组实际获得物品。")
+		_check((latest_run.get("lost_item_snapshots", []) as Array).size() == 1, "最新战绩必须保存 1 组实际丢失物品。")
 		# 第二、第三条结果；对应 run_index=19 和 18，用于核对三类结果均被保存。
 		var second_run: Dictionary = history[1] as Dictionary
 		var third_run: Dictionary = history[2] as Dictionary
@@ -140,8 +158,61 @@ func _test_main_menu_match_history_integration() -> void:
 		var history_list: VBoxContainer = match_history_panel.get("_history_list") as VBoxContainer
 		# 战绩数量说明；必须明确 20 局上限和模式排除口径。
 		var history_summary_label: Label = match_history_panel.get("_history_summary_label") as Label
-		_check(history_list != null and history_list.get_child_count() == 20, "战绩面板必须展示最近 20 张记录卡片。")
+		_check(history_list != null and history_list.get_child_count() == 20, "战绩面板必须展示最近 20 行历史摘要。")
 		_check(history_summary_label != null and history_summary_label.text.begins_with("最近 20 / 20 局正式战绩"), "战绩面板必须显示当前记录数量与 20 局上限。")
+		if history_list != null and history_list.get_child_count() > 0:
+			# 第一条历史摘要；必须隐藏旧详细网格，仅保留结果与完成时间两个可见标签。
+			var first_history_row: Control = history_list.get_child(0) as Control
+			# 通用交互反馈组件；历史摘要必须独立挂载，避免把动画状态与战绩业务切换逻辑耦合。
+			var interaction_feedback: Node = first_history_row.get_node_or_null("InteractionFeedback")
+			_check(interaction_feedback != null, "历史摘要行必须挂载悬停、按下与焦点动态反馈组件。")
+			_check(
+				interaction_feedback != null and first_history_row.mouse_entered.is_connected(Callable(interaction_feedback, "_on_target_mouse_entered")),
+				"历史摘要行的鼠标进入信号必须连接到动态反馈组件。"
+			)
+			# 收起的旧详细网格；保留结构兼容但不能在历史列表中占用可见行。
+			var collapsed_detail_grid: Control = first_history_row.find_child("CollapsedDetailGrid", true, false) as Control
+			_check(collapsed_detail_grid != null and not collapsed_detail_grid.visible, "历史摘要行不得直接显示存活、伤害、击杀或价值详情。")
+			# 摘要行可见标签数量；固定为结果与完成时间两项，确保玩家看到单行结构。
+			var visible_summary_label_count: int = 0
+			for summary_label in first_history_row.find_children("*", "Label", true, false):
+				if (summary_label as Label).is_visible_in_tree():
+					visible_summary_label_count += 1
+			_check(visible_summary_label_count == 2, "每条历史摘要必须只显示结果与完成时间。")
+			# 无头测试的虚拟鼠标会按固定屏幕坐标自动补发离开事件，因此直接驱动已经确认连接的悬停回调验证最终视觉。
+			if interaction_feedback != null:
+				interaction_feedback.call("_on_target_mouse_entered")
+			await get_tree().create_timer(0.20).timeout
+			_check(first_history_row.scale.x > 1.0, "鼠标悬停历史摘要时必须平滑放大。")
+			_check(first_history_row.self_modulate.r > 1.0, "鼠标悬停历史摘要时必须平滑提亮。")
+			# 模拟左键按下事件；详情必须等到释放后才打开，保证玩家能够看到回缩反馈。
+			var press_feedback_event: InputEventMouseButton = InputEventMouseButton.new()
+			press_feedback_event.button_index = MOUSE_BUTTON_LEFT
+			press_feedback_event.pressed = true
+			press_feedback_event.position = first_history_row.size * 0.5
+			first_history_row.emit_signal("gui_input", press_feedback_event)
+			await get_tree().create_timer(0.08).timeout
+			_check(first_history_row.scale.x < 1.0 and first_history_row.self_modulate.r < 1.0, "鼠标按下历史摘要时必须回缩并降低亮度。")
+		# 最新战绩详情；点击协议应切换同窗详情并恢复 1 组获得物品与 1 组丢失物品。
+		var latest_history: Array = _test_stats_service.call("get_recent_run_history") as Array
+		if not latest_history.is_empty():
+			# 模拟左键释放事件；通过第一条摘要正式连接的 gui_input 信号进入详情，不直接调用切换函数。
+			var click_event: InputEventMouseButton = InputEventMouseButton.new()
+			click_event.button_index = MOUSE_BUTTON_LEFT
+			click_event.pressed = false
+			click_event.position = (history_list.get_child(0) as Control).size * 0.5
+			(history_list.get_child(0) as Control).emit_signal("gui_input", click_event)
+			# 历史列表根布局；进入详情后必须隐藏，避免摘要与详情同时占用窗口。
+			var history_root_layout: VBoxContainer = match_history_panel.get("_history_root_layout") as VBoxContainer
+			# 单局详情根布局；进入详情后显示完整数值与物品卡片。
+			var detail_root_layout: VBoxContainer = match_history_panel.get("_detail_root_layout") as VBoxContainer
+			# 单局详情内容；两份合法快照应恢复为两个只读标准物品卡片。
+			var detail_content: VBoxContainer = match_history_panel.get("_detail_content") as VBoxContainer
+			_check(history_root_layout != null and not history_root_layout.visible, "打开单局详情后必须隐藏历史摘要列表。")
+			_check(detail_root_layout != null and detail_root_layout.visible, "点击历史摘要后必须显示单局详情。")
+			_check(detail_content != null and detail_content.find_children("*", "StorageItemControl", true, false).size() == 2, "单局详情必须展示具体获得与丢失物品。")
+			match_history_panel.call("_show_history_list")
+			_check(history_root_layout != null and history_root_layout.visible, "从详情返回后必须恢复历史摘要列表。")
 		match_history_panel.call("_on_close_button_pressed")
 		_check(not match_history_overlay.visible, "点击战绩返回按钮后必须关闭遮罩。")
 	main_menu.queue_free()

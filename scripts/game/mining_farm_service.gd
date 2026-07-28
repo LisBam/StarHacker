@@ -107,6 +107,7 @@ var _contract_gold_amount: int = 0
 ## 进行中合同锁定的算力币；默认 0，签订时立即从余额扣除，仅用于展示与异常回退。
 var _contract_locked_compute: int = 0
 ## 待展示的离线收益报告；默认空字典，启动补发离线收益后填充，面板首次打开时消费并清空。
+## 未进入矿场前会跨运行持久化，并把多次启动产生的离线时长与收益累加为一份统一报告。
 var _pending_offline_report: Dictionary = {}
 ## 当前累计未结算在线秒数；默认 0，达到前台或后台周期后批量结算完整秒数。
 var _settlement_accumulator_seconds: float = 0.0
@@ -520,11 +521,14 @@ func start_contract(contract_id: String, gold_amount: int) -> Dictionary:
 
 func take_offline_income_report() -> Dictionary:
 	## 取走并清空待展示的离线收益报告；矿场面板首次打开时调用，重复调用返回空字典。
+	## 报告消费后会保存清空状态，后续启动不会重复展示已经查看过的累计结果。
 	if _pending_offline_report.is_empty():
 		return {}
 	# 报告副本；交给 UI 后立即清空内部记录，保证一次离线只弹一次报告。
+	# 累计报告补充；副本包含玩家上次查看报告后所有有效离线阶段的合计数据。
 	var report: Dictionary = _pending_offline_report.duplicate(true)
 	_pending_offline_report.clear()
+	_queue_save()
 	return report
 
 
@@ -623,6 +627,7 @@ func _complete_active_contract() -> void:
 
 func _settle_offline_income(last_online_unix_time: int) -> void:
 	## 按上次在线时间戳补发离线收益；只在存档加载时调用一次，结果写入待展示报告。
+	## 若存档中已有未查看报告，本次补发会追加到原报告，直到玩家主动进入矿场后统一消费。
 	if last_online_unix_time <= 0:
 		return
 	# 原始离线秒数；系统时钟被回拨时可能为负，此时直接放弃本次补发。
@@ -642,12 +647,23 @@ func _settle_offline_income(last_online_unix_time: int) -> void:
 		return
 	# 离线收益直接写入余额；此时面板尚未创建，不需要余额滚动信号，报告由面板打开时统一展示。
 	_balance += earned
-	_pending_offline_report = {
-		"raw_offline_seconds": raw_offline_seconds,
-		"offline_seconds": capped_offline_seconds,
-		"earned": earned,
-	}
+	_append_offline_income_report(raw_offline_seconds, capped_offline_seconds, earned)
 	_queue_save()
+
+
+func _append_offline_income_report(raw_offline_seconds: int, counted_offline_seconds: int, earned: int) -> void:
+	## 把一次有效离线补发合并到待展示报告；三个维度独立累加，保证跨多次启动后的时长与到账金额仍可追溯。
+	# 已累计的原始离线秒数；包含每段离线中超过该次收益上限的时间，用于展示玩家真实离线总时长。
+	var accumulated_raw_seconds: int = maxi(int(_pending_offline_report.get("raw_offline_seconds", 0)), 0)
+	# 已累计的有效离线秒数；只包含每段离线中实际参与 25% 收益折算的时间。
+	var accumulated_counted_seconds: int = maxi(int(_pending_offline_report.get("offline_seconds", 0)), 0)
+	# 已累计的离线收益；每段收益先按各自基础产出与取整规则结算，再在报告中执行整数求和。
+	var accumulated_earned: int = maxi(int(_pending_offline_report.get("earned", 0)), 0)
+	_pending_offline_report = {
+		"raw_offline_seconds": accumulated_raw_seconds + maxi(raw_offline_seconds, 0),
+		"offline_seconds": accumulated_counted_seconds + maxi(counted_offline_seconds, 0),
+		"earned": accumulated_earned + maxi(earned, 0),
+	}
 
 
 func _calculate_asset_type_production(unit_production: int, quantity: int, upgrade_level: int) -> int:
@@ -797,6 +813,7 @@ func _save_state() -> void:
 		"contract_remaining_seconds": _contract_remaining_seconds,
 		"contract_gold_amount": _contract_gold_amount,
 		"contract_locked_compute": _contract_locked_compute,
+		"pending_offline_report": _pending_offline_report,
 		"last_online_unix_time": int(Time.get_unix_time_from_system()),
 	}
 	# 存档文件；失败时保持内存状态，下一次变更仍会再次尝试写入。
@@ -843,6 +860,23 @@ func _load_state() -> bool:
 	_contract_remaining_seconds = maxf(float(save_data.get("contract_remaining_seconds", 0.0)), 0.0)
 	_contract_gold_amount = maxi(int(save_data.get("contract_gold_amount", 0)), 0)
 	_contract_locked_compute = maxi(int(save_data.get("contract_locked_compute", 0)), 0)
+	# 已保存待展示报告；旧存档缺失时按空报告处理，异常类型或非正数内容不会进入运行时状态。
+	var saved_pending_report_value: Variant = save_data.get("pending_offline_report", {})
+	if saved_pending_report_value is Dictionary:
+		# 已保存报告字典；只恢复 UI 与累计逻辑认识的三个整数维度，忽略未知扩展字段。
+		var saved_pending_report: Dictionary = saved_pending_report_value as Dictionary
+		# 已保存原始离线秒数；必须大于 0，作为有效收益秒数的安全上界。
+		var saved_raw_offline_seconds: int = maxi(int(saved_pending_report.get("raw_offline_seconds", 0)), 0)
+		# 已保存有效离线秒数；限制在原始时长范围内，防止损坏数据展示不可能的收益时长。
+		var saved_counted_offline_seconds: int = clampi(int(saved_pending_report.get("offline_seconds", 0)), 0, saved_raw_offline_seconds)
+		# 已保存累计收益；只有正数到账才值得生成玩家可见报告。
+		var saved_offline_earned: int = maxi(int(saved_pending_report.get("earned", 0)), 0)
+		if saved_raw_offline_seconds > 0 and saved_counted_offline_seconds > 0 and saved_offline_earned > 0:
+			_pending_offline_report = {
+				"raw_offline_seconds": saved_raw_offline_seconds,
+				"offline_seconds": saved_counted_offline_seconds,
+				"earned": saved_offline_earned,
+			}
 	if not _active_contract_id.is_empty() and (_get_contract_definition(_active_contract_id).is_empty() or _contract_remaining_seconds <= 0.0 or _contract_gold_amount <= 0):
 		# 合同数据异常兜底；合同类型被移除或计时数据损坏时退还锁定算力币并清空合同，不发放星穹。
 		_balance += maxi(_contract_locked_compute, 0)

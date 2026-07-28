@@ -89,7 +89,7 @@ func _build_interface() -> void:
 	warning_label.custom_minimum_size = Vector2(float(dialog_width - 56), 0.0)
 	warning_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	warning_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	warning_label.text = "此操作会永久删除角色、物品、货币、商店、股市、矿场、按键、UI 风格与调试设置。\n请输入“%s”后才能继续。" % CONFIRMATION_PHRASE
+	warning_label.text = "请输入“%s”后才能继续。" % CONFIRMATION_PHRASE
 	warning_label.add_theme_color_override("font_color", UI_STYLE_GUIDE.DANGER_COLOR)
 	content.add_child(warning_label)
 	# 确认短语输入框；不使用占位内容代替真实输入，玩家必须主动键入完整四字短语。

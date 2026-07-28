@@ -38,6 +38,7 @@ const ARMOR_SLOT_DISPLAY_NAMES: Dictionary = {"head": "头部", "body": "躯干"
 ## 面板最小尺寸；默认 920×620，暂停时居中显示并保留屏幕边缘空间。
 @export var panel_minimum_size: Vector2 = Vector2(920.0, 620.0)
 ## 撤离背包首次同步显示数量；默认 50，与背包容量上限一致，装备栏仍固定同步创建。
+## 现行加载策略补充：该值仅为渐进卡片加载批量，不是背包容量；据点 0 至 5 级的真实上限由 GlobalInventory 返回 25 至 50 组。
 @export_range(1, 200, 1) var progressive_initial_item_count: int = 50
 ## 撤离背包后续每帧创建数量；默认 8，送回物品刷新时旧任务自动取消。
 @export_range(1, 100, 1) var progressive_item_batch_count: int = 8

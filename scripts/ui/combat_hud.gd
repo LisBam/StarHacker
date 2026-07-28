@@ -2098,13 +2098,13 @@ func _get_extraction_status_text() -> String:
 		# 当前驻留进度；限制在 0 到总时长，避免帧延迟显示超出分母。
 		var supply_elapsed: float = clampf(float(_game_world.call("get_supply_extraction_hold_elapsed_seconds")), 0.0, supply_duration) if _game_world.has_method("get_supply_extraction_hold_elapsed_seconds") else 0.0
 		return "物资撤离准备  %d / %d秒" % [ceili(supply_elapsed), ceili(supply_duration)]
-	if _is_extraction_ready_to_leave():
-		return "撤离就绪  按冲刺返回"
-
 	# 是否在撤离范围内；取值来自 GameWorld，默认用于区分驻留倒计时和地图提示。
 	var is_inside_extraction_area: bool = false
 	if _game_world != null and _game_world.has_method("is_player_inside_extraction_area"):
 		is_inside_extraction_area = bool(_game_world.call("is_player_inside_extraction_area"))
+	# 正式撤离就绪状态；累计驻留完成后仍要求当前站在撤离范围内，避免离开点位后直接触发结算。
+	if is_inside_extraction_area and _is_extraction_ready_to_leave():
+		return "撤离就绪  按冲刺返回"
 	if not is_inside_extraction_area:
 		if _is_extraction_point_marked_on_map():
 			return "撤离点已在地图上标记"
@@ -2125,7 +2125,7 @@ func _get_extraction_status_text() -> String:
 
 
 func _is_extraction_return_event(event: InputEvent) -> bool:
-	if not _can_process_extraction_input() or not _is_extraction_ready_to_leave():
+	if not _can_process_extraction_input() or not _is_extraction_ready_to_leave() or not _is_player_inside_extraction_area():
 		return false
 
 	if event is InputEventKey:
@@ -2173,6 +2173,13 @@ func _is_extraction_ready_to_leave() -> bool:
 		return false
 
 	return bool(_game_world.call("is_extraction_ready_to_leave"))
+
+
+func _is_player_inside_extraction_area() -> bool:
+	## 返回本机是否站在正式撤离范围内；累计驻留完成后仍由输入与状态文本共同使用该校验阻止范围外撤离。
+	if _game_world == null or not _game_world.has_method("is_player_inside_extraction_area"):
+		return false
+	return bool(_game_world.call("is_player_inside_extraction_area"))
 
 
 func _is_extraction_point_marked_on_map() -> bool:

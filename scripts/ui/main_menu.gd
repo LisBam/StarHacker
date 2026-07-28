@@ -1230,6 +1230,7 @@ func _build_hideout_overlay() -> void:
 	hideout_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	hideout_overlay.add_child(hideout_dim)
 	# 据点面板；固定 1080×640 像素并由独立组件维护六座设施卡与建造队列。
+	# 现行设施数量补充：战术仓储舱加入后独立组件按定义表动态构建七张设施卡，无需主菜单维护数量。
 	var hideout_panel: Control = HIDEOUT_PANEL_SCRIPT.new() as Control
 	if hideout_panel == null:
 		hideout_overlay.visible = false

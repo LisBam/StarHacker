@@ -37,6 +37,7 @@ const CHARACTER_STATS_PANEL_SCRIPT: Script = preload("res://scripts/ui/character
 ## 套装筛选控件脚本；装备分类使用与强化石筛选一致的多选与清空交互。
 const EQUIPMENT_SET_FILTER_CONTROL_SCRIPT: Script = preload("res://scripts/ui/equipment_set_filter_control.gd")
 ## 库存限制配置；容量标签在全局库存服务缺失时仍使用项目统一的 50 组上限兜底。
+## 现行容量兜底补充：项目统一初始上限为 25 组，正常运行时优先读取 GlobalInventory 的据点实时容量。
 const INVENTORY_LIMITS: Script = preload("res://scripts/data/inventory_limits.gd")
 ## 通用渐进物品加载器；背包复用既有卡片，仅把新增卡片分批创建。
 const PROGRESSIVE_ITEM_LOADER_SCRIPT: Script = preload("res://scripts/ui/progressive_item_loader.gd")
@@ -62,6 +63,7 @@ const SEARCH_DEBOUNCE_SECONDS: float = 0.2
 ## 面板最小尺寸；与战斗背包接近，确保左侧七个装备槽和右侧物品网格可读。
 @export var panel_minimum_size: Vector2 = Vector2(960.0, 620.0)
 ## 背包首次同步显示数量；默认 50，常规容量下打开界面即可立即显示完整背包。
+## 现行加载策略补充：该值只控制首帧创建卡片数，不代表背包容量；据点满级 50 组时仍可一次完成 UI 同步。
 @export_range(1, 200, 1) var progressive_initial_item_count: int = 50
 ## 背包后续每帧创建数量；默认 8，筛选、排序或库存变化会取消旧任务。
 @export_range(1, 100, 1) var progressive_item_batch_count: int = 8
@@ -113,6 +115,7 @@ var _cancel_use_button: Button
 ## 局外仓库快捷按钮；默认仅主菜单上下文显示，点击后由主菜单宿主切换到仓库界面。
 var _warehouse_button: Button
 ## 背包容量标签；固定显示当前物品组数与 50 组上限，并与二级分类栏保持同一垂直高度。
+## 现行显示补充：容量上限为据点当前的 25/30/35/40/45/50 组，标签通过 GlobalInventory 接口实时读取。
 var _capacity_label: Label
 ## 当前运行上下文；默认主菜单，必须在加入场景树前通过 configure_context 修改。
 var _context_mode: String = CONTEXT_MAIN_MENU
@@ -577,6 +580,7 @@ func _refresh_capacity_label() -> void:
 	# 当前背包组数；武器、装备和每个资源堆叠记录都各计为一组。
 	var current_group_count: int = int(_global_inventory.call("get_backpack_count")) if _global_inventory.has_method("get_backpack_count") else 0
 	# 背包组数上限；优先读取库存服务公开接口，兼容旧服务时回退现行固定 50 组。
+	# 现行兜底补充：库存服务缺失时回退初始 25 组，正常路径始终展示据点实时上限。
 	var maximum_group_count: int = int(_global_inventory.call("get_backpack_max_groups")) if _global_inventory.has_method("get_backpack_max_groups") else INVENTORY_LIMITS.BACKPACK_MAX_GROUPS
 	_capacity_label.text = "%d/%d" % [current_group_count, maximum_group_count]
 

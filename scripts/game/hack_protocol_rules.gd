@@ -8,7 +8,8 @@ class_name HackProtocolRules
 ## 每次选择展示的随机候选数量；固定为 3，候选内部不重复但允许已经获得的协议再次出现并叠加。
 const OFFER_COUNT: int = 3
 ## 打开协议选择窗口所需持续按住时间；默认 3 秒，松开、界面受阻或碎片不足都会清空本次进度。
-const HOLD_DURATION_SECONDS: float = 3.0
+## 现行交互时长补充：长按 H 选择骇入协议的默认时长为 2 秒；实际按键文字继续由 InputBindings 读取，允许玩家改键。
+const HOLD_DURATION_SECONDS: float = 2.0
 ## 首次获得协议需要的数据碎片；默认 100，配合翻倍后的三类来源使正常战斗约 0.75 至 1.25 分钟出现第一次选择。
 const BASE_FRAGMENT_REQUIREMENT: float = 100.0
 ## 每获得一项协议后增加的碎片需求；默认每层 +75，控制中后期协议成长速度不会失控。

@@ -100,6 +100,7 @@ const ARMOR_SLOT_IDS: Array[String] = ["head", "body", "legs", "feet"]
 ## 现行限制补充：统一配置已将正式单组上限调整为 10，旧注释中的 99 仅代表历史存档格式。
 const MAX_STACK_QUANTITY: int = INVENTORY_LIMITS.MAX_STACK_QUANTITY
 ## 背包最大物品组数；现行固定为 50，武器、装备和每一组资源都各占用一组。
+## 现行容量来源补充：该常量现在是 25 组初始值，战术仓储舱的永久等级由 HideoutService 追加到实时上限。
 const BACKPACK_MAX_GROUPS: int = INVENTORY_LIMITS.BACKPACK_MAX_GROUPS
 ## 强化石图鉴稳定发现键；随机生成的强化石没有固定模板，任意一颗首次获得后统一解锁该资源类别条目。
 const ENHANCEMENT_STONE_DISCOVERY_KEY: String = "enhancement_stone:any"
@@ -191,6 +192,25 @@ func _ready() -> void:
 		_save_inventory()
 	elif _loaded_inventory_requires_resave:
 		_save_inventory()
+	# 据点服务在本 AutoLoad 之后创建；延迟连接确保战术仓储舱建成时，已打开的背包与仓库能立即刷新容量文本。
+	call_deferred("_connect_hideout_capacity_signal")
+
+
+func _connect_hideout_capacity_signal() -> void:
+	## 连接据点等级变化信号；容量查询本身始终按需读取，此连接只负责通知已可见库存 UI 重建。
+	# 据点服务；默认从根节点读取，服务缺失或测试中的临时库存实例均安全跳过。
+	var hideout_service: Node = get_tree().root.get_node_or_null("HideoutService")
+	if hideout_service == null or not hideout_service.has_signal("facility_levels_changed"):
+		return
+	# 容量刷新回调；避免同一实例重复连接导致一次建成触发多次 UI 重建。
+	var capacity_changed_callback: Callable = Callable(self, "_on_hideout_facility_levels_changed")
+	if not hideout_service.is_connected("facility_levels_changed", capacity_changed_callback):
+		hideout_service.connect("facility_levels_changed", capacity_changed_callback)
+
+
+func _on_hideout_facility_levels_changed() -> void:
+	## 响应据点设施建成；背包上限由实时查询决定，广播库存变化只用于刷新当前可见容量标签和可交互状态。
+	inventory_changed.emit()
 
 
 func _notification(what: int) -> void:
@@ -1691,7 +1711,21 @@ func get_backpack_count() -> int:
 func get_backpack_max_groups() -> int:
 	## 返回背包物品组数上限；界面和外部系统不得另行硬编码容量数值。
 	## 模式扩展补充：风险合约倍率按基础 50 组四舍五入，最低保留 1 组。
-	return maxi(roundi(float(BACKPACK_MAX_GROUPS) * _combat_backpack_capacity_multiplier), 1)
+	## 现行倍率规则补充：先读取据点当前的 25/30/35/40/45/50 组基础上限，再按风险合约倍率四舍五入且最低保留 1 组。
+	return maxi(roundi(float(get_backpack_base_max_groups()) * _combat_backpack_capacity_multiplier), 1)
+
+
+func get_backpack_base_max_groups() -> int:
+	## 返回不含本局风险合约缩减的背包基础上限；据点服务缺失时安全回退到新档 25 组配置。
+	# 据点服务；按需从根节点读取，避免 GlobalInventory 与 HideoutService 的 AutoLoad 初始化顺序形成强缓存依赖。
+	# 当前场景树；未加入树的临时测试库存实例没有据点服务，直接使用初始容量兜底。
+	var scene_tree: SceneTree = get_tree()
+	if scene_tree == null:
+		return BACKPACK_MAX_GROUPS
+	var hideout_service: Node = scene_tree.root.get_node_or_null("HideoutService")
+	if hideout_service != null and hideout_service.has_method("get_backpack_capacity_groups"):
+		return maxi(int(hideout_service.call("get_backpack_capacity_groups")), 1)
+	return BACKPACK_MAX_GROUPS
 
 
 func get_backpack_remaining_groups() -> int:
@@ -2305,7 +2339,7 @@ func _insert_storage_record(location: String, record: Dictionary, target_index: 
 		var item_resource: Resource = record.get("resource") as Resource
 		# 待插入数量；武器装备固定为 1，历史堆叠迁移可大于现行单组上限。
 		var record_quantity: int = maxi(int(record.get("quantity", 1)), 1)
-		# 当前背包组数上限；正式战斗风险合约使用折算后容量，局外与读档恢复保持基础 50 组。
+		# 当前背包组数上限；正式战斗风险合约使用据点基础容量折算，局外按战术仓储舱当前等级实时读取。
 		var maximum_group_count: int = get_backpack_max_groups()
 		if not _can_insert_record_quantity(_backpack_records, item_resource, record_quantity, maximum_group_count):
 			return false
@@ -2845,12 +2879,13 @@ func _load_inventory() -> bool:
 
 func _insert_loaded_backpack_record(restored_record: Dictionary) -> void:
 	## 把读档记录拆分并加入现行背包；超过 50 组的历史溢出物品自动转入安全仓库且不删除任何单位。
+	## 现行容量迁移补充：初始容量下调为 25 组后，旧档已持有的背包记录完整保留，不因读档而移动或删除；后续新增仍受当前上限约束。
 	if restored_record.is_empty():
 		return
 	# 原始恢复数量；旧存档可为 1 至 99，现行插入器会按每组 10 件拆分。
 	var restored_quantity: int = maxi(int(restored_record.get("quantity", 1)), 1)
-	# 未能写入背包的剩余数量；容量未满时为 0，达到 50 组后保留真实溢出单位数。
-	var overflow_quantity: int = _insert_record_with_stack_merge(_backpack_records, restored_record, -1, BACKPACK_MAX_GROUPS)
+	# 未能写入背包的剩余数量；读档不施加新容量，确保旧档既有资产不会因规则更新被迁移。
+	var overflow_quantity: int = _insert_record_with_stack_merge(_backpack_records, restored_record)
 	if restored_quantity > MAX_STACK_QUANTITY or overflow_quantity > 0:
 		_loaded_inventory_requires_resave = true
 	if overflow_quantity <= 0:

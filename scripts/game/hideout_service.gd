@@ -1,6 +1,7 @@
 extends Node
 
 ## 据点设施建设服务在全部场景中持续运行，统一维护六座局外设施的永久等级、建造队列与独立存档。
+## 现行设施数量补充：战术仓储舱加入后服务统一维护七座局外设施，并继续以同一建造队列规则调度。
 ## 商店、锻造、矿场、保险、银行与派遣只通过只读加成接口查询设施效果，不反向修改据点状态。
 ## 设施升级消耗局外星穹并占用在线建造时间；同一时间最多存在一个建造队列，建成后等级永久生效。
 
@@ -14,6 +15,7 @@ signal construction_completed(facility_id: String, new_level: int)
 ## 据点独立存档路径；与库存、股市、矿场存档分离，避免设施字段污染其他玩法的序列化结构。
 const SAVE_PATH: String = "user://hideout_state.json"
 ## 据点存档版本；版本 1 保存六座设施的整数等级与进行中建造队列的剩余在线时长。
+## 现行存档内容补充：同一等级表现已额外保存战术仓储舱，版本 1 的缺失键安全按 0 级初始化，无需单独迁移版本。
 const SAVE_VERSION: int = 1
 ## 设施最大等级；默认 5 级，全部设施共用同一上限，达到后升级入口禁用。
 const FACILITY_MAX_LEVEL: int = 5
@@ -33,6 +35,8 @@ const INSURANCE_RATE_REDUCTION_PER_LEVEL: float = 0.005
 const BANK_FIXED_RATE_BONUS_PER_LEVEL: float = 0.04
 ## 派遣设施每级报酬加成比例；默认 4%，满级共 20%，只在委托签订时计入预期报酬。
 const DISPATCH_REWARD_BONUS_PER_LEVEL: float = 0.04
+## 战术仓储舱每级追加的背包物品组数；默认 5 组，配合初始 25 组在 5 级时达到 50 组。
+const BACKPACK_CAPACITY_GROUPS_PER_LEVEL: int = 5
 ## 设施定义表；稳定标识、名称、关联模块、基础造价与效果文案集中维护，UI 只读取公开副本。
 const FACILITY_DEFINITIONS: Array[Dictionary] = [
 	{"id": "supply_hub", "name": "补给中转站", "module": "商店", "base_cost": 200, "effect_text": "商店与灰市购买价格每级 -1%", "description": "打通稳定补给渠道，压低前线物资采购成本"},
@@ -41,6 +45,7 @@ const FACILITY_DEFINITIONS: Array[Dictionary] = [
 	{"id": "actuarial_office", "name": "精算办公室", "module": "保险", "base_cost": 200, "effect_text": "骇入保险保费费率每级 -0.5%", "description": "雇佣专业精算师，为骇客争取更低保费"},
 	{"id": "vault", "name": "星海金库", "module": "银行", "base_cost": 200, "effect_text": "定期存单利率每级 +4%（相对）", "description": "加固金库信用评级，换取更优存款利率"},
 	{"id": "mercenary_office", "name": "佣兵联络站", "module": "派遣", "base_cost": 200, "effect_text": "派遣委托报酬每级 +4%", "description": "拓展佣兵人脉网络，接到报酬更高的委托"},
+	{"id": "tactical_storage", "name": "战术仓储舱", "module": "背包", "base_cost": 200, "effect_text": "背包上限每级 +5 组", "description": "扩展随身模组与收纳隔层，提高每局可携带的物品组数"},
 ]
 
 ## 据点存档合并延迟；默认 0.5 秒，建造倒计时的高频状态变化只执行一次磁盘写入。
@@ -194,6 +199,15 @@ func get_bank_fixed_rate_multiplier() -> float:
 func get_dispatch_reward_bonus_ratio() -> float:
 	## 返回派遣委托报酬的加成比例；佣兵联络站每级 4%，派遣服务只在委托签订时锁定该值。
 	return DISPATCH_REWARD_BONUS_PER_LEVEL * float(get_facility_level("mercenary_office"))
+
+
+func get_backpack_capacity_groups() -> int:
+	## 返回据点当前提供的背包物品组数上限；GlobalInventory 在新增、转入和拾取前读取，避免 UI 或玩法入口各自维护容量表。
+	# 初始背包容量；从库存限制表读取 25 组基线，保证新档、服务缺失兜底与据点计算使用同一来源。
+	var base_capacity_groups: int = InventoryLimits.BACKPACK_MAX_GROUPS
+	# 战术仓储舱等级；取值为 0 到 5，每级稳定增加 5 组可携带物品容量。
+	var tactical_storage_level: int = get_facility_level("tactical_storage")
+	return maxi(base_capacity_groups + tactical_storage_level * BACKPACK_CAPACITY_GROUPS_PER_LEVEL, 1)
 
 
 func _complete_active_construction() -> void:

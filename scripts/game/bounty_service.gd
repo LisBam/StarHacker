@@ -44,6 +44,7 @@ const SHIP_BOUNTY_REQUIRED_VALUE: int = 600
 ## 送回悬赏星穹报酬；默认 320，为四类悬赏最高，对应其对局内行为约束最强。
 const SHIP_BOUNTY_REWARD_GOLD: int = 320
 ## 撤离悬赏存活时长门槛；默认 360 秒，超过正式撤离点标记时间（300 秒）一分钟后再撤离即可达成。
+## 现行标记时间补充：正式撤离点现于 240 秒标记，因此该 360 秒悬赏门槛位于标记后 120 秒，不调整悬赏数值。
 const SURVIVE_BOUNTY_REQUIRED_SECONDS: float = 360.0
 ## 撤离悬赏星穹报酬；默认 300。
 const SURVIVE_BOUNTY_REWARD_GOLD: int = 300

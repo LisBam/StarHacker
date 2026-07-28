@@ -52,6 +52,8 @@ const ENCYCLOPEDIA_PANEL_SCRIPT: Script = preload("res://scripts/ui/encyclopedia
 const BOUNTY_PANEL_SCRIPT: Script = preload("res://scripts/ui/bounty_panel.gd")
 ## 统计面板脚本；默认在主菜单点击右侧“统计”按钮后动态创建并读取全局生涯统计服务。
 const STATS_PANEL_SCRIPT: Script = preload("res://scripts/ui/stats_panel.gd")
+## 战绩面板脚本；默认由“统计”分类中的“战绩”按钮打开，只读展示最近 20 局正式结算。
+const MATCH_HISTORY_PANEL_SCRIPT: Script = preload("res://scripts/ui/match_history_panel.gd")
 ## 骇入模式选择面板脚本；点击“骇入”后先打开该面板选择标准、零装或超频模式再进入战斗。
 const HACK_MODE_SELECT_PANEL_SCRIPT: Script = preload("res://scripts/ui/hack_mode_select_panel.gd")
 ## 模式扩展选择面板脚本；骇入模式确定后继续配置可多选扩展与风险合约词条，再进入正式战斗。
@@ -153,6 +155,7 @@ const LOBBY_ACTION_QUIT: String = "quit"
 ## 金融分类按钮缓存；默认位于主菜单底部，点击后展开或收起炒股、矿场、保险和银行入口。
 @onready var _finance_category_button: Button = %FinanceCategoryButton
 ## 统计分类按钮缓存；默认位于主菜单底部，点击后展开或收起图鉴与生涯入口。
+## 战绩入口补充：同一分类还会展开“战绩”，用于读取最近 20 局正式结算。
 @onready var _statistics_category_button: Button = %StatisticsCategoryButton
 ## 图鉴按钮缓存；默认位于“统计”展开分类中，点击后查看武器、装备与资源的永久收集状态。
 ## 怪物图鉴补充；同一入口还会展示按基础内容和扩展包分组的永久怪物遇敌收集状态。
@@ -161,6 +164,8 @@ const LOBBY_ACTION_QUIT: String = "quit"
 @onready var _bounty_button: Button = %BountyButton
 ## 生涯按钮缓存；默认位于“统计”展开分类中，点击后打开生涯统计与财富曲线面板。
 @onready var _stats_button: Button = %StatsButton
+## 战绩按钮缓存；默认位于“统计”展开分类中，点击后查看最近 20 局正式结算记录。
+@onready var _match_history_button: Button = %MatchHistoryButton
 ## 设置面板缓存；默认绑定唯一名 SettingsPanel，控制主菜单设置界面的显示和隐藏。
 @onready var _settings_panel: Control = %SettingsPanel
 ## 设置内容容器缓存；默认通过场景路径绑定，用于动态挂载按键绑定面板。
@@ -190,6 +195,7 @@ const LOBBY_ACTION_QUIT: String = "quit"
 ## 金融分类展开面板缓存；内部承载炒股、矿场、保险和银行四个既有入口。
 @onready var _finance_category_panel: PanelContainer = get_node("BottomCategoryExpansionMargin/FinanceCategoryPanel") as PanelContainer
 ## 统计分类展开面板缓存；内部承载图鉴与生涯两个既有入口。
+## 战绩入口补充：面板在既有入口下方追加第三个同规格按钮，不改变图鉴与生涯原有顺序。
 @onready var _statistics_category_panel: PanelContainer = get_node("BottomCategoryExpansionMargin/StatisticsCategoryPanel") as PanelContainer
 
 ## Master 音频总线索引；取值为 -1 或有效总线下标，默认 -1 表示尚未解析，修改会影响音量应用目标。
@@ -271,6 +277,10 @@ var _bounty_panel: Control
 var _stats_overlay: Control
 ## 统计面板实例；关闭后复用，打开时从生涯统计服务读取最新快照与财富采样。
 var _stats_panel: Control
+## 战绩全屏遮罩；默认运行时创建并隐藏，显示时阻止主菜单其他入口接收鼠标输入。
+var _match_history_overlay: Control
+## 战绩面板实例；关闭后复用，打开时从生涯统计服务读取最近 20 局正式战绩。
+var _match_history_panel: Control
 ## 骇入模式选择全屏遮罩；默认运行时创建并隐藏，显示时阻止主菜单其他入口接收鼠标输入。
 var _hack_mode_overlay: Control
 ## 骇入模式选择面板实例；关闭后复用，模式清单与说明由 HackModeRules 规则表提供。
@@ -334,6 +344,7 @@ func _ready() -> void:
 	_encyclopedia_button.pressed.connect(_on_encyclopedia_button_pressed)
 	_bounty_button.pressed.connect(_on_bounty_button_pressed)
 	_stats_button.pressed.connect(_on_stats_button_pressed)
+	_match_history_button.pressed.connect(_on_match_history_button_pressed)
 	_global_inventory = get_tree().root.get_node_or_null("GlobalInventory")
 	if _global_inventory != null and _global_inventory.has_signal("total_coins_earned_changed"):
 		_global_inventory.connect("total_coins_earned_changed", Callable(self, "_refresh_finance_unlock_buttons"))
@@ -360,6 +371,7 @@ func _ready() -> void:
 	_build_multiplayer_overlay()
 	_build_bounty_overlay()
 	_build_stats_overlay()
+	_build_match_history_overlay()
 	_build_hack_mode_overlay()
 	_build_mode_extension_overlay()
 	_build_developer_overlay()
@@ -496,6 +508,7 @@ func _on_finance_category_button_pressed() -> void:
 
 func _on_statistics_category_button_pressed() -> void:
 	## 切换统计分类；展开时只显示图鉴和生涯入口，并同步把向上三角形翻转为向下三角形。
+	## 战绩入口补充：当前分类同时显示战绩按钮，仍与金融分类保持互斥。
 	_set_bottom_category_visibility(false, not _statistics_category_panel.visible)
 
 
@@ -760,6 +773,7 @@ func is_modal_open() -> bool:
 		or (_multiplayer_overlay != null and _multiplayer_overlay.visible)
 		or (_bounty_overlay != null and _bounty_overlay.visible)
 		or (_stats_overlay != null and _stats_overlay.visible)
+		or (_match_history_overlay != null and _match_history_overlay.visible)
 		or (_hack_mode_overlay != null and _hack_mode_overlay.visible)
 		or (_mode_extension_overlay != null and _mode_extension_overlay.visible)
 		or (_developer_overlay != null and _developer_overlay.visible)
@@ -910,6 +924,17 @@ func _on_stats_button_pressed() -> void:
 	_stats_overlay.visible = true
 	if _stats_panel != null and _stats_panel.has_method("refresh"):
 		_stats_panel.call("refresh")
+
+
+func _on_match_history_button_pressed() -> void:
+	## 打开最近战绩面板；入口属于统计分类，打开后先收起展开列表并重新读取持久化记录。
+	if _match_history_overlay == null:
+		return
+	_collapse_bottom_categories()
+	_settings_panel.visible = false
+	_match_history_overlay.visible = true
+	if _match_history_panel != null and _match_history_panel.has_method("refresh"):
+		_match_history_panel.call("refresh")
 
 
 func _build_warehouse_overlay() -> void:
@@ -1446,6 +1471,43 @@ func _build_stats_overlay() -> void:
 	stats_overlay.visible = false
 
 
+func _build_match_history_overlay() -> void:
+	## 创建战绩遮罩与独立面板；主菜单只管理可见性，战绩读取和卡片构建由 MatchHistoryPanel 自身负责。
+	if _match_history_overlay != null:
+		return
+	# 战绩遮罩；覆盖完整主菜单并拦截输入，关闭时仅隐藏以便后续复用面板实例。
+	var match_history_overlay: Control = Control.new()
+	match_history_overlay.name = "MatchHistoryOverlay"
+	match_history_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	match_history_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(match_history_overlay)
+	_match_history_overlay = match_history_overlay
+	# 战绩背景遮罩；使用项目统一深色透明层突出只读记录窗口。
+	var match_history_dim: ColorRect = ColorRect.new()
+	match_history_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	UI_STYLE_GUIDE.apply_overlay_dim(match_history_dim)
+	match_history_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	match_history_overlay.add_child(match_history_dim)
+	# 战绩面板；固定 900×600 像素，滚动区可完整承载 20 张详细记录卡片。
+	var match_history_panel: Control = MATCH_HISTORY_PANEL_SCRIPT.new() as Control
+	if match_history_panel == null:
+		match_history_overlay.visible = false
+		return
+	match_history_panel.name = "MatchHistoryPanel"
+	match_history_panel.anchor_left = 0.5
+	match_history_panel.anchor_top = 0.5
+	match_history_panel.anchor_right = 0.5
+	match_history_panel.anchor_bottom = 0.5
+	match_history_panel.offset_left = -450.0
+	match_history_panel.offset_top = -300.0
+	match_history_panel.offset_right = 450.0
+	match_history_panel.offset_bottom = 300.0
+	match_history_panel.connect("closed", Callable(self, "_on_match_history_closed"))
+	match_history_overlay.add_child(match_history_panel)
+	_match_history_panel = match_history_panel
+	match_history_overlay.visible = false
+
+
 func _build_hack_mode_overlay() -> void:
 	if _hack_mode_overlay != null:
 		return
@@ -1536,6 +1598,13 @@ func _on_stats_closed() -> void:
 	_statistics_category_button.grab_focus()
 
 
+func _on_match_history_closed() -> void:
+	## 关闭战绩遮罩并把焦点交还统计分类按钮，键盘与手柄可继续打开同一分类。
+	if _match_history_overlay != null:
+		_match_history_overlay.visible = false
+	_statistics_category_button.grab_focus()
+
+
 func _build_developer_overlay() -> void:
 	if _developer_overlay != null:
 		return
@@ -1600,6 +1669,8 @@ func _open_developer_menu() -> void:
 		_bounty_overlay.visible = false
 	if _stats_overlay != null:
 		_stats_overlay.visible = false
+	if _match_history_overlay != null:
+		_match_history_overlay.visible = false
 	if _hack_mode_overlay != null:
 		_hack_mode_overlay.visible = false
 	if _mode_extension_overlay != null:

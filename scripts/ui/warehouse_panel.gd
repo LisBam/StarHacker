@@ -95,6 +95,10 @@ var _storage_split_handle: Control
 var _mode_toggle_button: Button
 ## 一键存入仓库按钮；仅展开背包时显示，把背包内全部物品立即移动到安全仓库。
 var _store_all_button: Button
+## 仓库多选出售模式按钮；默认显示“多选出售”，启用后仓库卡片点击改为切换选中状态。
+var _batch_sale_toggle_button: Button
+## 仓库一键出售按钮；仅在多选模式显示，文字同步展示选中组数与可获得星穹。
+var _batch_sale_button: Button
 ## 新版星穹标签；默认显示局外星穹余额，出售仓库物品后即时刷新。
 var _coins_label: Label
 ## 新版仓库摘要标签；默认显示仓库与背包数量，并明确安全和死亡损失边界。
@@ -180,6 +184,10 @@ var _warehouse_item_loader: ProgressiveItemLoader
 var _backpack_item_loader: ProgressiveItemLoader
 ## 搜索防抖计时器；单次触发，文本变化时重置计时并在停止输入后统一重建一次，清空搜索框时立即刷新。
 var _search_debounce_timer: Timer
+## 仓库是否处于多选出售模式；默认 false，关闭面板或主动取消时清空全部选择。
+var _batch_sale_mode_active: bool = false
+## 多选出售资源表；键为资源实例编号、值为仓库中的真实 Resource，仅在执行瞬间交给库存服务重新校验。
+var _batch_sale_selection: Dictionary = {}
 
 
 func _ready() -> void:
@@ -374,11 +382,27 @@ func _build_storage_interface() -> void:
 	_rebuild_storage_subcategory_buttons()
 
 	# 仓库标题；始终位于界面上方并说明安全存储属性。
+	# 批量出售补充：标题与操作按钮共用一行，让多选入口只作用于下方仓库区域。
+	var warehouse_header: HBoxContainer = HBoxContainer.new()
+	warehouse_header.add_theme_constant_override("separation", 8)
+	content.add_child(warehouse_header)
+	# 仓库标题；扩展占据剩余宽度，使多选按钮固定靠右且不会挤压物品列表。
 	var warehouse_title: Label = Label.new()
 	warehouse_title.text = "仓库"
 	warehouse_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	warehouse_title.add_theme_font_size_override("font_size", 18)
-	content.add_child(warehouse_title)
+	warehouse_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	warehouse_header.add_child(warehouse_title)
+	_batch_sale_toggle_button = Button.new()
+	_batch_sale_toggle_button.custom_minimum_size = Vector2(112.0, 34.0)
+	_batch_sale_toggle_button.pressed.connect(_on_batch_sale_toggle_pressed)
+	warehouse_header.add_child(_batch_sale_toggle_button)
+	_batch_sale_button = Button.new()
+	_batch_sale_button.custom_minimum_size = Vector2(190.0, 34.0)
+	_batch_sale_button.visible = false
+	_batch_sale_button.pressed.connect(_on_batch_sale_pressed)
+	_apply_danger_button_style(_batch_sale_button)
+	warehouse_header.add_child(_batch_sale_button)
 
 	_warehouse_scroll = ScrollContainer.new()
 	_warehouse_scroll.name = "WarehouseItemScroll"
@@ -482,6 +506,7 @@ func _rebuild_storage_content() -> void:
 
 	# 仓库条目；顺序由全局服务按上次撤离优先和获得时间维护。
 	var warehouse_entries: Array = _global_inventory.call("get_warehouse_entries")
+	_prune_batch_sale_selection(warehouse_entries)
 	# 背包条目；顺序只影响当前携带布局，进入战斗后由 HUD 读取同一数组。
 	var backpack_entries: Array = _global_inventory.call("get_backpack_entries")
 	if _backpack_title_label != null:
@@ -489,6 +514,7 @@ func _rebuild_storage_content() -> void:
 	_equipment_set_filter_control.configure_entries(warehouse_entries + backpack_entries)
 	_coins_label.text = "星穹：%d" % int(_global_inventory.call("get_coins"))
 	_storage_summary_label.text = _get_storage_summary_text(warehouse_entries, backpack_entries)
+	_refresh_batch_sale_controls()
 	# 已查询仓库条目；按当前多层分类、关键词、属性和排序生成展示副本。
 	var visible_warehouse_entries: Array[Dictionary] = InventoryQuery.filter_and_sort_entries(warehouse_entries, _storage_primary_category, _storage_subcategory, _storage_search_edit.text, _stone_attribute_filter, _storage_sort_mode, _equipment_set_filter_control.get_selected_set_ids())
 	# 已查询背包条目；使用同一查询条件保证上下区域对比一致。
@@ -601,9 +627,11 @@ func _create_storage_entry_control(entry: Dictionary, location: String, entry_in
 	# 物品控件；展开模式允许点击跨容器转移，纯仓库模式只提供浏览、拖拽和出售。
 	var item_control: Button = STORAGE_ITEM_CONTROL_SCRIPT.new() as Button
 	item_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	item_control.call("configure", item_resource, location, entry_index, _backpack_expanded, extraction_prefix, quantity)
+	item_control.call("configure", item_resource, location, entry_index, _backpack_expanded and not (_batch_sale_mode_active and location == "warehouse"), extraction_prefix, quantity)
 	item_control.call("set_stone_value_on_fourth_line", true)
 	item_control.call("set_weapon_target_selection_state", _is_weapon_target_selection_active(), _is_pending_item_usable_on_weapon(item_resource))
+	item_control.call("set_drag_enabled", not (_batch_sale_mode_active and location == "warehouse"))
+	item_control.call("set_batch_sale_selected", location == "warehouse" and _batch_sale_selection.has(item_resource.get_instance_id()))
 	item_control.connect("quick_action_requested", Callable(self, "_on_quick_action_requested").bind(location))
 	item_control.connect("item_action_requested", Callable(self, "_on_item_action_requested").bind(location))
 	item_control.connect("item_drop_requested", Callable(self, "_on_item_drop_requested"))
@@ -625,9 +653,11 @@ func _update_storage_entry_control(item_control: Button, entry: Dictionary, loca
 	var quantity: int = clampi(int(entry.get("quantity", 1)), 1, INVENTORY_LIMITS.MAX_STACK_QUANTITY)
 	# 上次撤离前缀；状态变化时由卡片组件刷新文字，普通移动只更新来源下标。
 	var extraction_prefix: String = "[上次撤离] " if bool(entry.get("is_last_extraction", false)) else ""
-	item_control.call("update_storage_context", item_resource, location, entry_index, _backpack_expanded, extraction_prefix, quantity)
+	item_control.call("update_storage_context", item_resource, location, entry_index, _backpack_expanded and not (_batch_sale_mode_active and location == "warehouse"), extraction_prefix, quantity)
 	item_control.call("set_stone_value_on_fourth_line", true)
 	item_control.call("set_weapon_target_selection_state", _is_weapon_target_selection_active(), _is_pending_item_usable_on_weapon(item_resource))
+	item_control.call("set_drag_enabled", not (_batch_sale_mode_active and location == "warehouse"))
+	item_control.call("set_batch_sale_selected", location == "warehouse" and _batch_sale_selection.has(item_resource.get_instance_id()))
 
 
 func _build_loadout_entries() -> void:
@@ -849,6 +879,8 @@ func _get_storage_summary_text(warehouse_entries: Array, backpack_entries: Array
 		return "正在使用 %s：请选择仓库、背包或装备栏中的一把武器" % str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", _pending_repair_kit_resource))
 	if _pending_stone_resource != null:
 		return "正在使用 %s：请选择仓库、背包或装备栏中的一把兼容武器" % str(ITEM_DETAIL_FORMATTER.call("get_item_display_name", _pending_stone_resource))
+	if _batch_sale_mode_active:
+		return "已选 %d 组 · 出售可得 %d 星穹" % [_batch_sale_selection.size(), _get_batch_sale_total_value()]
 	return "仓库 %d 组 · 背包 %d 组" % [warehouse_entries.size(), backpack_entries.size()]
 
 
@@ -880,6 +912,7 @@ func _apply_storage_display_mode() -> void:
 	_backpack_scroll.size_flags_stretch_ratio = 1.0 - warehouse_split_ratio
 	if _cancel_stone_use_button != null:
 		_cancel_stone_use_button.visible = _pending_stone_resource != null or _pending_repair_kit_resource != null
+	_refresh_batch_sale_controls()
 
 
 func _on_mode_toggle_pressed() -> void:
@@ -896,6 +929,75 @@ func _on_store_all_backpack_pressed() -> void:
 	_rebuild_storage_content()
 
 
+func _on_batch_sale_toggle_pressed() -> void:
+	## 切换仓库多选出售模式；强化或修复目标选择期间不接管卡片点击，避免两种选择语义冲突。
+	if _is_weapon_target_selection_active():
+		return
+	_batch_sale_mode_active = not _batch_sale_mode_active
+	if not _batch_sale_mode_active:
+		_batch_sale_selection.clear()
+	_rebuild_storage_content()
+
+
+func _on_batch_sale_pressed() -> void:
+	## 一次出售当前选中的全部仓库记录；库存服务会重新校验所有权与价值，并以单一批次通知灰市建立误售找回商品。
+	if not _batch_sale_mode_active or _global_inventory == null or _batch_sale_selection.is_empty():
+		return
+	# 待售资源数组；从实例表提取当前选择，服务端不信任该缓存并会逐项复核真实仓库记录。
+	var selected_resources: Array = _batch_sale_selection.values()
+	# 批量出售结果；成功时包含实际出售组数、物品总数与获得星穹，失效选择不会导致其他合法记录回滚。
+	var sale_result: Dictionary = _global_inventory.call("sell_storage_resources", selected_resources, "warehouse") as Dictionary
+	if bool(sale_result.get("success", false)):
+		_batch_sale_selection.clear()
+	_rebuild_storage_content()
+
+
+func _prune_batch_sale_selection(warehouse_entries: Array) -> void:
+	## 清理已经转移、消费或出售的旧选择；筛选隐藏不会取消选择，只有真实仓库所有权变化才会移除。
+	if _batch_sale_selection.is_empty():
+		return
+	# 当前仓库资源集合；键使用实例编号，重复模板和同名武器仍可被独立选择。
+	var available_resource_ids: Dictionary = {}
+	# 原始仓库条目；无效条目不进入所有权集合。
+	for raw_entry in warehouse_entries:
+		if not (raw_entry is Dictionary):
+			continue
+		# 当前条目资源；只读实例用于确认选择仍属于仓库。
+		var item_resource: Resource = (raw_entry as Dictionary).get("resource") as Resource
+		if item_resource != null:
+			available_resource_ids[item_resource.get_instance_id()] = true
+	# 已选实例编号副本；遍历副本时可以安全删除原字典中的失效项。
+	var selected_resource_ids: Array = _batch_sale_selection.keys()
+	# 已选实例编号；不再存在于真实仓库时立即移除。
+	for resource_instance_id in selected_resource_ids:
+		if not available_resource_ids.has(resource_instance_id):
+			_batch_sale_selection.erase(resource_instance_id)
+
+
+func _get_batch_sale_total_value() -> int:
+	## 返回当前有效选择的整组出售总价；每次显示都读取库存服务，耐久或强化变化会立即反映到金额。
+	if _global_inventory == null:
+		return 0
+	# 当前选择总价；失效或零价值资源由库存查询返回零，不影响其他选择。
+	var total_value: int = 0
+	# 已选资源值；字典值应为 Resource，异常值会被安全忽略。
+	for raw_resource in _batch_sale_selection.values():
+		if raw_resource is Resource:
+			total_value += int(_global_inventory.call("get_storage_resource_value", raw_resource as Resource, "warehouse"))
+	return total_value
+
+
+func _refresh_batch_sale_controls() -> void:
+	## 同步多选按钮文字、可见性与操作资格；该方法只刷新轻量控件，不重建任何物品卡片。
+	if _batch_sale_toggle_button == null or _batch_sale_button == null:
+		return
+	_batch_sale_toggle_button.text = "取消多选" if _batch_sale_mode_active else "多选出售"
+	_batch_sale_toggle_button.disabled = _is_weapon_target_selection_active()
+	_batch_sale_button.visible = _batch_sale_mode_active
+	_batch_sale_button.disabled = _batch_sale_selection.is_empty() or _get_batch_sale_total_value() <= 0
+	_batch_sale_button.text = "出售选中（%d 组 / +%d）" % [_batch_sale_selection.size(), _get_batch_sale_total_value()]
+
+
 func _on_quick_action_requested(item_resource: Resource, source_location: String) -> void:
 	if not _backpack_expanded or _global_inventory == null:
 		return
@@ -907,6 +1009,16 @@ func _on_quick_action_requested(item_resource: Resource, source_location: String
 
 func _on_item_action_requested(item_resource: Resource, source_location: String) -> void:
 	if item_resource == null or _global_inventory == null:
+		return
+	if _batch_sale_mode_active:
+		if source_location == "warehouse":
+			# 当前实例编号；同一卡片再次点击会取消选择，所有权仍由库存服务保持不变。
+			var resource_instance_id: int = item_resource.get_instance_id()
+			if _batch_sale_selection.has(resource_instance_id):
+				_batch_sale_selection.erase(resource_instance_id)
+			else:
+				_batch_sale_selection[resource_instance_id] = item_resource
+			_rebuild_storage_content()
 		return
 	if _pending_repair_kit_resource != null and (str(item_resource.get("weapon_type")) in ["melee", "ranged"] or str(item_resource.get("item_kind")) == "equipment"):
 		if not _is_pending_item_usable_on_weapon(item_resource):
@@ -1240,5 +1352,7 @@ func _on_close_pressed() -> void:
 	_pending_stone_location = ""
 	_stone_return_view_pending = false
 	_reset_quantity_operation()
+	_batch_sale_mode_active = false
+	_batch_sale_selection.clear()
 	_apply_storage_display_mode()
 	closed.emit()

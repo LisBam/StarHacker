@@ -1,12 +1,14 @@
 extends Node
 
 ## 生涯统计服务：集中记录怪物击杀计数、物品获得计数、对局与撤离统计、单局之最和财富曲线采样，并聚合全局库存维护的累计获得星穹。
+## 近期战绩补充：同一服务还拥有单局造成/受到伤害、击杀、开箱和最近 20 局完成快照，结算与战绩界面不保存副本。
 ## 战斗与库存挂点只上报事实事件，本服务负责口径判定、累计与独立持久化；
 ## 统计面板、图鉴计数与悬赏系统都只读取本服务或订阅其信号，不各自维护第二份计数。
 ## 统计口径：只有产出结算的战斗模式（标准骇入、零装骇入，含联机）计入；训练场与超频骇入不计。
 ## 联机击杀口径：按“本机确认击杀”计数——单机记录本机世界全部击杀，联机按主机回传的击杀归属只记本人击杀。
 
 ## 任意统计数值变化信号；统计面板与图鉴按此刷新展示，参数不携带明细避免高频拷贝。
+## 战绩刷新补充：正式对局完成时同样派发，已打开的近期战绩面板会重新读取最多 20 条快照。
 signal stats_changed
 ## 怪物击杀事件信号；参数为怪物稳定 ID，悬赏服务订阅它推进击杀类悬赏进度。
 signal monster_kill_recorded(monster_id: String)
@@ -20,7 +22,8 @@ signal run_finished(result_id: String, survival_seconds: float, extracted_value:
 ## 统计存档路径；独立文件保存，纳入导出、导入与删除存档白名单。
 const SAVE_PATH: String = "user://stats_state.json"
 ## 统计存档版本；默认 1 标识当前写入结构，未来字段调整时用于兼容判断。
-const SAVE_VERSION: int = 1
+## 版本演进补充：当前值为 2，用于保存最近 20 局正式战绩；版本 1 存档缺少该字段时按空记录兼容。
+const SAVE_VERSION: int = 2
 ## 对局结果标识：成功撤离。
 const RUN_RESULT_SUCCESS: String = "success"
 ## 对局结果标识：死亡。
@@ -31,6 +34,8 @@ const RUN_RESULT_ESCAPE: String = "escape"
 const ENHANCEMENT_STONE_STATISTICS_KEY: String = "enhancement_stone:any"
 ## 财富曲线采样上限；默认 240 个点，超出后移除最早采样，防止长期游玩导致存档无限膨胀。
 const WEALTH_SAMPLE_LIMIT: int = 240
+## 近期战绩保存上限；固定保留最新 20 局正式结算，超出后移除最早记录，避免存档随游玩局数无限增长。
+const RECENT_RUN_HISTORY_LIMIT: int = 20
 
 ## 怪物击杀计数表；键为怪物稳定 monster_id，值为累计击杀数量，训练场与超频骇入不计入。
 var _monster_kill_counts: Dictionary = {}
@@ -60,10 +65,20 @@ var _best_run_extracted_value: int = 0
 var _best_run_shipped_value: int = 0
 ## 财富曲线采样数组；元素为包含 unix_time 与 total_assets 的字典，按时间先后排列。
 var _wealth_samples: Array[Dictionary] = []
+## 近期正式战绩数组；索引 0 为最新结算，每项保存结果、时间、单局战斗统计和结算价值，最多 20 项。
+var _recent_run_history: Array[Dictionary] = []
 ## 当前对局击杀计数；对局开始清零，结束时参与单局之最刷新。
 var _current_run_kills: int = 0
+## 当前对局开启宝箱计数；对局开始清零，正式结算时写入结算快照与近期战绩。
+var _current_run_chests_opened: int = 0
+## 当前对局本机造成的最终伤害累计；对局开始清零，取值为非负整数伤害之和，训练场与无结算模式不会写入。
+var _current_run_damage_dealt: int = 0
+## 当前对局玩家实际承受的最终伤害累计；包含被护盾吸收的最终伤害，闪避伤害不计，对局开始时清零。
+var _current_run_damage_received: int = 0
 ## 当前对局送回价值累计；对局开始清零，供“单局送回价值”悬赏与单局之最使用。
 var _current_run_shipped_value: int = 0
+## 当前是否正在追踪一局正式对局；只在 record_run_started 与 record_run_finished 之间为 true，防止孤立伤害或重复结算生成错误战绩。
+var _current_run_tracking_active: bool = false
 ## 全局库存服务缓存；只读取永久累计获得星穹并转发变化通知，不复制或持久化第二份累计值。
 var _global_inventory: Node = null
 ## 存档是否已排队；默认 false，同一帧多次事件只在帧末写盘一次。
@@ -88,7 +103,11 @@ func record_run_started() -> void:
 	if _is_permanent_progression_suppressed():
 		return
 	_total_runs_started += 1
+	_current_run_tracking_active = true
 	_current_run_kills = 0
+	_current_run_chests_opened = 0
+	_current_run_damage_dealt = 0
+	_current_run_damage_received = 0
 	_current_run_shipped_value = 0
 	_queue_save()
 	stats_changed.emit()
@@ -104,7 +123,8 @@ func record_monster_killed(monster_id: String) -> void:
 		resolved_monster_id = "unknown"
 	_monster_kill_counts[resolved_monster_id] = int(_monster_kill_counts.get(resolved_monster_id, 0)) + 1
 	_total_monster_kills += 1
-	_current_run_kills += 1
+	if _current_run_tracking_active:
+		_current_run_kills += 1
 	_queue_save()
 	monster_kill_recorded.emit(resolved_monster_id)
 	stats_changed.emit()
@@ -115,9 +135,33 @@ func record_chest_opened(quality_id: String) -> void:
 	if _is_permanent_progression_suppressed():
 		return
 	_total_chests_opened += 1
+	if _current_run_tracking_active:
+		_current_run_chests_opened += 1
 	_queue_save()
 	chest_open_recorded.emit(quality_id.strip_edges())
 	stats_changed.emit()
+
+
+func record_damage_dealt(final_damage: float) -> void:
+	## 记录当前正式对局由本机玩家或归属本机的友方单位对敌人造成的最终伤害；伤害按项目整数飘字口径累计。
+	if _is_permanent_progression_suppressed() or not _current_run_tracking_active:
+		return
+	# 规范化最终伤害；非正值不形成有效伤害事件，小数兼容值按项目统一的四舍五入规则转为整数。
+	var resolved_damage: int = maxi(roundi(final_damage), 0)
+	if resolved_damage <= 0:
+		return
+	_current_run_damage_dealt += resolved_damage
+
+
+func record_damage_received(final_damage: float) -> void:
+	## 记录当前正式对局玩家实际收到的最终伤害；闪避不会调用，护盾吸收仍属于有效承伤并计入。
+	if _is_permanent_progression_suppressed() or not _current_run_tracking_active:
+		return
+	# 规范化最终伤害；与造成伤害使用相同整数口径，保证结算显示可直接和战斗飘字核对。
+	var resolved_damage: int = maxi(roundi(final_damage), 0)
+	if resolved_damage <= 0:
+		return
+	_current_run_damage_received += resolved_damage
 
 
 func record_shipped_value(shipped_value: int) -> void:
@@ -127,7 +171,8 @@ func record_shipped_value(shipped_value: int) -> void:
 	if shipped_value <= 0:
 		return
 	_total_shipped_value += shipped_value
-	_current_run_shipped_value += shipped_value
+	if _current_run_tracking_active:
+		_current_run_shipped_value += shipped_value
 	_queue_save()
 	run_shipped_value_changed.emit(_current_run_shipped_value)
 	stats_changed.emit()
@@ -148,30 +193,56 @@ func record_item_acquired(item_resource: Resource, quantity: int = 1) -> void:
 	stats_changed.emit()
 
 
-func record_run_finished(result_id: String, survival_seconds: float, extracted_value: int) -> void:
+func record_run_finished(result_id: String, survival_seconds: float, extracted_value: int) -> Dictionary:
 	## 记录一局正式战斗结算；刷新对局计数、单局之最并追加一次财富采样。
-	if _is_permanent_progression_suppressed():
-		return
+	## 近期战绩补充：同一次调用还会持久化完成快照并返回其副本；没有活动正式对局或重复调用时返回空字典。
+	if _is_permanent_progression_suppressed() or not _current_run_tracking_active:
+		return {}
 	# 规范化结果标识；未知取值按逃跑处理，保证三类计数总和不漏计。
 	var resolved_result_id: String = result_id
 	if resolved_result_id not in [RUN_RESULT_SUCCESS, RUN_RESULT_DEATH, RUN_RESULT_ESCAPE]:
 		resolved_result_id = RUN_RESULT_ESCAPE
+	# 规范化存活时间；负值按 0 处理，战绩与信号共用同一数值。
+	var resolved_survival_seconds: float = maxf(survival_seconds, 0.0)
+	# 规范化带出价值；失败与异常负值均按 0 保存，成功撤离值由 HUD 在库存结算前聚合。
+	var resolved_extracted_value: int = maxi(extracted_value, 0) if resolved_result_id == RUN_RESULT_SUCCESS else 0
 	if resolved_result_id == RUN_RESULT_SUCCESS:
 		_total_success_extractions += 1
-		_best_run_extracted_value = maxi(_best_run_extracted_value, maxi(extracted_value, 0))
+		_best_run_extracted_value = maxi(_best_run_extracted_value, resolved_extracted_value)
 	elif resolved_result_id == RUN_RESULT_DEATH:
 		_total_deaths += 1
 	else:
 		_total_escapes += 1
 	_best_run_kills = maxi(_best_run_kills, _current_run_kills)
-	_best_run_survival_seconds = maxf(_best_run_survival_seconds, maxf(survival_seconds, 0.0))
+	_best_run_survival_seconds = maxf(_best_run_survival_seconds, resolved_survival_seconds)
 	_best_run_shipped_value = maxi(_best_run_shipped_value, _current_run_shipped_value)
-	run_finished.emit(resolved_result_id, maxf(survival_seconds, 0.0), maxi(extracted_value, 0))
+	# 本局完成快照；同时作为结算界面数据源与近期战绩持久化条目，避免两个消费方分别拼装字段。
+	var completed_run: Dictionary = {
+		"unix_time": int(Time.get_unix_time_from_system()),
+		"completed_at": Time.get_datetime_string_from_system(false, true),
+		"result_id": resolved_result_id,
+		"survival_seconds": resolved_survival_seconds,
+		"damage_dealt": _current_run_damage_dealt,
+		"damage_received": _current_run_damage_received,
+		"monster_kills": _current_run_kills,
+		"chests_opened": _current_run_chests_opened,
+		"extracted_value": resolved_extracted_value,
+		"shipped_value": _current_run_shipped_value,
+	}
+	_recent_run_history.push_front(completed_run)
+	while _recent_run_history.size() > RECENT_RUN_HISTORY_LIMIT:
+		_recent_run_history.pop_back()
+	_current_run_tracking_active = false
+	run_finished.emit(resolved_result_id, resolved_survival_seconds, resolved_extracted_value)
 	_current_run_kills = 0
+	_current_run_chests_opened = 0
+	_current_run_damage_dealt = 0
+	_current_run_damage_received = 0
 	_current_run_shipped_value = 0
 	record_wealth_sample()
 	_queue_save()
 	stats_changed.emit()
+	return completed_run.duplicate()
 
 
 func _is_permanent_progression_suppressed() -> bool:
@@ -253,6 +324,20 @@ func get_wealth_samples() -> Array[Dictionary]:
 	return samples
 
 
+func get_recent_run_history() -> Array[Dictionary]:
+	## 返回最近 20 局正式战绩的深复制数组；索引 0 为最新结算，界面修改副本不会影响服务状态。
+	# 战绩结果副本；逐项复制字典，防止展示层意外改写持久化数据。
+	var history_snapshot: Array[Dictionary] = []
+	for run_record in _recent_run_history:
+		history_snapshot.append(run_record.duplicate(true))
+	return history_snapshot
+
+
+func get_latest_completed_run() -> Dictionary:
+	## 返回最近一次正式结算快照；尚无战绩时返回空字典，主要供结算界面兼容查询。
+	return _recent_run_history[0].duplicate(true) if not _recent_run_history.is_empty() else {}
+
+
 func get_current_run_shipped_value() -> int:
 	## 返回当前对局已送回价值累计；悬赏面板在局外查询时为 0。
 	return _current_run_shipped_value
@@ -317,6 +402,7 @@ func _save_state() -> void:
 		"best_run_extracted_value": _best_run_extracted_value,
 		"best_run_shipped_value": _best_run_shipped_value,
 		"wealth_samples": _wealth_samples,
+		"recent_run_history": _recent_run_history,
 	}
 	# 存档文件；打开失败时保留内存状态，不中断游戏流程。
 	var save_file: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -371,3 +457,31 @@ func _load_state() -> void:
 				})
 		while _wealth_samples.size() > WEALTH_SAMPLE_LIMIT:
 			_wealth_samples.pop_front()
+	# 近期战绩原始数组；版本 1 存档缺少该字段时保持空数组，异常条目经统一清洗后再恢复。
+	var raw_recent_run_history: Variant = save_data.get("recent_run_history", [])
+	if raw_recent_run_history is Array:
+		for raw_run_record in raw_recent_run_history:
+			if raw_run_record is Dictionary:
+				_recent_run_history.append(_sanitize_run_record(raw_run_record as Dictionary))
+		while _recent_run_history.size() > RECENT_RUN_HISTORY_LIMIT:
+			_recent_run_history.pop_back()
+
+
+func _sanitize_run_record(raw_run_record: Dictionary) -> Dictionary:
+	## 清洗一条读档战绩；未知结果回退逃跑、全部数值限制为非负，确保损坏存档不会把非法数据传入界面。
+	# 结果标识；只保留服务公开的三类正式结算结果。
+	var result_id: String = str(raw_run_record.get("result_id", RUN_RESULT_ESCAPE))
+	if result_id not in [RUN_RESULT_SUCCESS, RUN_RESULT_DEATH, RUN_RESULT_ESCAPE]:
+		result_id = RUN_RESULT_ESCAPE
+	return {
+		"unix_time": maxi(int(raw_run_record.get("unix_time", 0)), 0),
+		"completed_at": str(raw_run_record.get("completed_at", "")).strip_edges(),
+		"result_id": result_id,
+		"survival_seconds": maxf(float(raw_run_record.get("survival_seconds", 0.0)), 0.0),
+		"damage_dealt": maxi(int(raw_run_record.get("damage_dealt", 0)), 0),
+		"damage_received": maxi(int(raw_run_record.get("damage_received", 0)), 0),
+		"monster_kills": maxi(int(raw_run_record.get("monster_kills", 0)), 0),
+		"chests_opened": maxi(int(raw_run_record.get("chests_opened", 0)), 0),
+		"extracted_value": maxi(int(raw_run_record.get("extracted_value", 0)), 0),
+		"shipped_value": maxi(int(raw_run_record.get("shipped_value", 0)), 0),
+	}

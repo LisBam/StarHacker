@@ -337,7 +337,7 @@ func _rebuild_content() -> void:
 		# 空状态；占满双列宽度需要添加两个控件中的第一个提示，当前文本已足够明确通道与分类。
 		# 流式布局补充：空状态由居中容器承载，不再依赖双列占位规则。
 		var empty_label: Label = Label.new()
-		empty_label.text = "当前分类暂无商品" if _current_channel == CHANNEL_NORMAL else "当前分类没有可购回的遗失物"
+		empty_label.text = "当前分类暂无商品" if _current_channel == CHANNEL_NORMAL else "当前分类没有可购回物品"
 		empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		empty_label.custom_minimum_size = Vector2(0.0, 70.0)
 		_item_grid.add_child(empty_label)

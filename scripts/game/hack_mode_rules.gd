@@ -91,6 +91,11 @@ static func get_category(variant: String) -> String:
 	return CATEGORY_BATTLE
 
 
+static func requires_first_successful_extraction(variant: String) -> bool:
+	## 返回模式是否必须先完成首次正式成功撤离；当前仅娱乐模式使用该永久成长门槛，战斗模式可直接选择。
+	return get_category(variant) == CATEGORY_CASUAL
+
+
 static func get_category_display_name(category: String) -> String:
 	## 返回分组展示名；模式选择界面用它绘制“战斗模式 / 娱乐模式”分组标题。
 	return "娱乐模式" if category == CATEGORY_CASUAL else "战斗模式"

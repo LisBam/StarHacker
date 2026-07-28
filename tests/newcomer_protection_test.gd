@@ -10,6 +10,7 @@ const RANGED_MONSTER_SCRIPT: Script = preload("res://scripts/enemies/ranged_mons
 ## 新手保护服务脚本；用于验证新档默认处于保护状态且统一输出 0.75 倍率。
 const NEWCOMER_PROTECTION_SERVICE_SCRIPT: Script = preload("res://scripts/game/newcomer_protection_service.gd")
 ## 主菜单场景；用于验证锻造、据点、派遣与悬赏在首次成功撤离前锁定并在完成后实时开放。
+## 模式解锁补充：同一场景还验证娱乐模式与模式扩展共用首次正式成功撤离资格。
 const MAIN_MENU_SCENE: PackedScene = preload("res://scenes/ui/main_menu.tscn")
 ## 正式战斗场景；用于验证首次引导两分钟单出口、阶段目标与三项固定保底内容。
 const GAME_WORLD_SCENE: PackedScene = preload("res://scenes/game/game_world.tscn")
@@ -149,10 +150,15 @@ func _test_first_successful_extraction_transition() -> void:
 	var dispatch_button: Button = main_menu.get_node("%DispatchButton") as Button
 	# 悬赏按钮；与锻造共享同一永久资格。
 	var bounty_button: Button = main_menu.get_node("%BountyButton") as Button
+	# 骇入模式面板；单人娱乐模式卡片与模式扩展入口同样不得在首次正式成功撤离前使用。
+	var hack_mode_panel: Control = main_menu.get_node("HackModeOverlay/HackModeSelectPanel") as Control
+	# 超频进入按钮；娱乐模式唯一当前卡片，锁定时必须复用统一首撤提示与纯黑禁用外观。
+	var overclock_enter_button: Button = hack_mode_panel.find_child("OverclockEnterButton", true, false) as Button if hack_mode_panel != null else null
 	_check(_is_first_extraction_button_locked(forge_button), "首次成功撤离前锻造必须锁定。")
 	_check(_is_first_extraction_button_locked(hideout_button), "首次成功撤离前据点必须锁定。")
 	_check(_is_first_extraction_button_locked(dispatch_button), "首次成功撤离前派遣必须锁定。")
 	_check(_is_first_extraction_button_locked(bounty_button), "首次成功撤离前悬赏必须锁定。")
+	_check(_is_first_extraction_button_locked(overclock_enter_button), "首次成功撤离前超频骇入必须锁定。")
 	# 锻造锁定样式；四个入口复用同一局部样式，抽查锻造必须为完全不透明纯黑背景。
 	var forge_locked_style: StyleBox = forge_button.get_theme_stylebox("disabled")
 	_check(forge_locked_style is StyleBoxFlat and (forge_locked_style as StyleBoxFlat).bg_color == Color(0.0, 0.0, 0.0, 1.0), "首次撤离成长入口锁定时必须使用纯黑背景。")
@@ -185,6 +191,17 @@ func _test_first_successful_extraction_transition() -> void:
 		_check(bool(bounty_service.call("_is_bounty_feature_unlocked")), "首次正式成功撤离后悬赏事实事件推进必须开放。")
 	_check(not forge_button.disabled and not hideout_button.disabled and not dispatch_button.disabled and not bounty_button.disabled, "首次正式成功撤离后必须同时解锁锻造、据点、派遣与悬赏。")
 	_check(forge_button.tooltip_text.is_empty() and hideout_button.tooltip_text.is_empty() and dispatch_button.tooltip_text.is_empty() and bounty_button.tooltip_text.is_empty(), "四个成长入口解锁后必须清除条件提示。")
+	await get_tree().process_frame
+	# 刷新后的模式选择面板；首次成功信号会重建娱乐模式卡片，因此重新获取节点引用。
+	hack_mode_panel = main_menu.get_node("HackModeOverlay/HackModeSelectPanel") as Control
+	# 刷新后的超频进入按钮；解锁后必须可用且不保留旧的锁定工具提示。
+	overclock_enter_button = hack_mode_panel.find_child("OverclockEnterButton", true, false) as Button if hack_mode_panel != null else null
+	_check(overclock_enter_button != null and not overclock_enter_button.disabled and overclock_enter_button.tooltip_text.is_empty(), "首次成功撤离后超频骇入必须立即解锁并清除提示。")
+	# 模式扩展遮罩；完成首次正式成功撤离后选择标准骇入必须进入扩展配置流程。
+	main_menu.call("_on_hack_mode_selected", HackModeRules.VARIANT_STANDARD)
+	var mode_extension_overlay: Control = main_menu.get_node("ModeExtensionOverlay") as Control
+	_check(mode_extension_overlay != null and mode_extension_overlay.visible, "首次成功撤离后单人骇入必须开放模式扩展配置窗口。")
+	main_menu.call("_on_mode_extension_select_closed")
 	_check(bool(protection_service.call("consume_completion_notice")), "首次成功撤离后必须产生一次结束提示。")
 	_check(not bool(protection_service.call("consume_completion_notice")), "结束提示被消费后不得在同一结算流程重复弹出。")
 	# 新手成长存档；成功结算必须同步落盘永久资格，重启后四个入口不会重新锁定。

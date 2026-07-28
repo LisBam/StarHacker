@@ -98,6 +98,7 @@ const LOBBY_ACTION_ENCYCLOPEDIA: String = "encyclopedia"
 const LOBBY_ACTION_BOUNTY: String = "bounty"
 ## 首次成功撤离成长入口锁定提示；锻造、据点、派遣与悬赏在完成首局正式成功撤离前统一显示该文案。
 const FIRST_SUCCESSFUL_EXTRACTION_UNLOCK_TOOLTIP: String = "首次成功撤离后解锁"
+## 首次成功撤离模式解锁补充：娱乐模式与模式扩展同样复用该永久资格，避免新手在首撤前接触高级规则。
 ## 大厅统计动作标识；固定 stats，复用主菜单统计面板，当前大厅尚未放置对应实体。
 const LOBBY_ACTION_STATS: String = "stats"
 ## 大厅联机组队动作标识；固定 multiplayer，复用主菜单联机组队面板。
@@ -409,6 +410,9 @@ func _refresh_first_successful_extraction_unlock_buttons() -> void:
 	_apply_first_successful_extraction_button_state(_hideout_button, is_unlocked)
 	_apply_first_successful_extraction_button_state(_dispatch_button, is_unlocked)
 	_apply_first_successful_extraction_button_state(_bounty_button, is_unlocked)
+	# 骇入模式面板；娱乐模式卡片由独立展示组件维护，资格变化时同步刷新其禁用状态与悬停提示。
+	if _hack_mode_panel != null and _hack_mode_panel.has_method("configure_first_successful_extraction_unlock"):
+		_hack_mode_panel.call("configure_first_successful_extraction_unlock", is_unlocked, FIRST_SUCCESSFUL_EXTRACTION_UNLOCK_TOOLTIP)
 
 
 func _apply_first_successful_extraction_button_state(button: Button, is_unlocked: bool) -> void:
@@ -608,14 +612,26 @@ func _on_training_button_pressed() -> void:
 func _on_hack_mode_selected(hack_variant: String) -> void:
 	## 模式面板选择回调；写入所选骇入模式变体后按正式骇入流程进入战斗。
 	## 模式扩展补充：正式骇入流程会先打开扩展窗口，只有确认扩展配置后才切换战斗场景。
+	# 标准化后的模式标识；先复核娱乐模式永久资格，防止外部信号绕过模式卡禁用状态。
+	var resolved_hack_variant: String = HackModeRules.normalize_variant(hack_variant)
+	if HackModeRules.requires_first_successful_extraction(resolved_hack_variant) and not _has_completed_first_successful_extraction():
+		return
 	if _hack_mode_overlay != null:
 		_hack_mode_overlay.visible = false
-	_pending_hack_variant = HackModeRules.normalize_variant(hack_variant)
+	_pending_hack_variant = resolved_hack_variant
 	# 会话状态节点；缺失时仍按标准流程进入，模式变体留待战斗世界按标准骇入兜底。
 	# 模式扩展补充：先写入骇入模式，使扩展规则能正确判断超频等无结算模式的兼容性。
 	var session_state: Node = get_tree().root.get_node_or_null("SessionState")
 	if session_state != null and session_state.has_method("set_hack_variant"):
 		session_state.call("set_hack_variant", _pending_hack_variant)
+	# 首次正式成功撤离前不提供模式扩展窗口；明确清空上一局运行期配置后直接进入本次标准或零装骇入。
+	if not _has_completed_first_successful_extraction():
+		if session_state != null and session_state.has_method("clear_mode_extensions"):
+			session_state.call("clear_mode_extensions")
+		elif session_state != null and session_state.has_method("configure_mode_extensions"):
+			session_state.call("configure_mode_extensions", [], [])
+		_start_game(GAME_MODE_HACK)
+		return
 	if _mode_extension_panel != null and _mode_extension_panel.has_method("configure"):
 		# 单人每次模式选择都从空扩展开始；玩家必须主动确认本局配置，不继承上一局风险词条。
 		_mode_extension_panel.call("configure", _pending_hack_variant, [], [], "进入游戏")
@@ -638,7 +654,11 @@ func _on_mode_extension_configuration_confirmed(extension_ids: Array[String], ri
 	if session_state != null and session_state.has_method("set_hack_variant"):
 		session_state.call("set_hack_variant", _pending_hack_variant)
 	if session_state != null and session_state.has_method("configure_mode_extensions"):
-		session_state.call("configure_mode_extensions", extension_ids, risk_modifier_ids)
+		# 回调防御；即使外部脚本直接派发确认信号，首次正式成功撤离前也不能把扩展写入本局会话。
+		if _has_completed_first_successful_extraction():
+			session_state.call("configure_mode_extensions", extension_ids, risk_modifier_ids)
+		else:
+			session_state.call("configure_mode_extensions", [], [])
 	_start_game(GAME_MODE_HACK)
 
 
@@ -1447,6 +1467,9 @@ func _build_hack_mode_overlay() -> void:
 		hack_mode_overlay.visible = false
 		return
 	hack_mode_panel.name = "HackModeSelectPanel"
+	# 初始成长资格；面板进入场景树前注入，避免新档首帧短暂显示可进入的娱乐模式按钮。
+	if hack_mode_panel.has_method("configure_first_successful_extraction_unlock"):
+		hack_mode_panel.call("configure_first_successful_extraction_unlock", _has_completed_first_successful_extraction(), FIRST_SUCCESSFUL_EXTRACTION_UNLOCK_TOOLTIP)
 	hack_mode_panel.anchor_left = 0.5
 	hack_mode_panel.anchor_top = 0.5
 	hack_mode_panel.anchor_right = 0.5

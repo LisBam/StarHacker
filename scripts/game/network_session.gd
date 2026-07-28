@@ -224,6 +224,9 @@ func set_session_hack_variant(hack_variant: String) -> void:
 		return
 	# 规范化骇入模式标识；未知取值一律回退标准骇入。
 	var resolved_hack_variant: String = HackModeRules.normalize_variant(hack_variant)
+	# 娱乐模式资格复核；联机服务作为房主设置的最终入口，不能只依赖界面禁用状态阻止直接调用。
+	if HackModeRules.requires_first_successful_extraction(resolved_hack_variant) and not _has_completed_first_successful_extraction():
+		return
 	if resolved_hack_variant == _session_hack_variant:
 		return
 	_session_hack_variant = resolved_hack_variant
@@ -252,6 +255,9 @@ func _rpc_sync_hack_variant(hack_variant: String) -> void:
 func set_session_mode_extensions(extension_ids: Array, risk_modifier_ids: Array) -> void:
 	## 房主更新模式扩展配置；任何有效变化都会清空全员准备，客户端与战斗进行中调用无效。
 	if _session_state != SESSION_STATE_HOSTING or _combat_session_active:
+		return
+	# 模式扩展资格复核；首次正式成功撤离前拒绝任何新增配置，已有会话默认空配置保持不变。
+	if not _has_completed_first_successful_extraction():
 		return
 	# 规范化配置；规则表统一过滤未知扩展、同类重复风险词条与当前骇入模式不兼容项。
 	var sanitized_configuration: Dictionary = ModeExtensionRules.sanitize_configuration(extension_ids, risk_modifier_ids, _session_hack_variant)
@@ -297,6 +303,15 @@ func get_session_risk_modifier_ids() -> Array[String]:
 func get_session_mode_extension_summary() -> String:
 	## 返回适合房间界面展示的模式扩展摘要；未启用时明确显示“未开启”。
 	return ModeExtensionRules.get_configuration_summary(_session_mode_extension_ids, _session_risk_modifier_ids)
+
+
+func _has_completed_first_successful_extraction() -> bool:
+	## 返回本机房主是否已经完成首次正式成功撤离；网络服务只在写入高级房间规则前防御式读取该永久资格。
+	# 新手成长服务；缺失时按未解锁处理，避免独立网络测试或异常启动开放高级房间规则。
+	var newcomer_protection_service: Node = get_tree().root.get_node_or_null("NewcomerProtectionService")
+	if newcomer_protection_service == null or not newcomer_protection_service.has_method("has_completed_first_successful_extraction"):
+		return false
+	return bool(newcomer_protection_service.call("has_completed_first_successful_extraction"))
 
 
 func get_protocol_version() -> int:

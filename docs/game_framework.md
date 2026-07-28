@@ -7,7 +7,7 @@
 | 入口 | 实现 | 职责 |
 | --- | --- | --- |
 | 启动路由 | `res://scenes/game/startup_router.tscn`、`res://scripts/game/startup_router.gd` | 项目主场景；在可见 UI 出现前查询一次性首次战斗引导资格，新档直接配置标准骇入、星与骇入协议并进入战斗，已完成引导的档案进入主菜单 |
-| 主菜单 | `res://scenes/ui/main_menu.tscn`、`res://scripts/ui/main_menu.gd` | 常规启动落点；底部直接打开角色、背包、仓库、商店及局外成长入口，锻造、据点、派遣和悬赏共用首次成功撤离资格；普通样式“金融 ▲”位于“统计 ▲”左侧，两者分别向上展开单列的股市/矿场/保险/银行和图鉴/生涯入口；点击“骇入”先选择标准/零装/超频骇入，再进入可多选或不选的模式扩展窗口；同一场景可作为大厅局外面板宿主 |
+| 主菜单 | `res://scenes/ui/main_menu.tscn`、`res://scripts/ui/main_menu.gd` | 常规启动落点；底部直接打开角色、背包、仓库、商店及局外成长入口，锻造、据点、派遣、悬赏、娱乐模式与模式扩展共用首次成功撤离资格；普通样式“金融 ▲”位于“统计 ▲”左侧，两者分别向上展开单列的股市/矿场/保险/银行和图鉴/生涯入口；点击“骇入”先选择标准/零装/超频骇入，首撤前超频禁用且标准/零装跳过扩展配置，首撤后进入可多选或不选的模式扩展窗口；同一场景可作为大厅局外面板宿主 |
 | 主大厅 | `res://scenes/game/main_lobby.tscn`、`res://scripts/game/lobby_world.gd` | 承载当前角色自由移动、攻击、技能、静态交互设施与大厅 HUD；不创建敌人、掉落、撤离或战斗结算 |
 | 联机大厅 | `res://scenes/game/multiplayer_lobby.tscn`、`res://scripts/game/multiplayer_lobby_world.gd`（继承 `LobbyWorld`） | 主菜单“联机”入口目标场景；进场自动打开联机面板，左上角提供“联机设置”入口，房间成员经 `NetworkLobbySync` 在同一大厅内互相可见；玩法约束与主大厅一致 |
 | 角色系统 | `res://scenes/ui/character_select.tscn`、`res://scripts/ui/character_select.gd` | 完整模式展示可选角色并持久化确认结果；当前角色模式隐藏角色列表，供战斗内只读查看同一套属性与技能详情 |
@@ -111,7 +111,7 @@
 - `CombatHud` 负责局内信息、暂停、地图、模式扩展查看入口、拾取提示、物资撤离和结算编排，不直接拥有库存或模式扩展数据。首次战斗引导使用顶部中央 `900×56` 像素单层目标横幅，只读取 `GameWorld.get_first_run_tutorial_objective_text()`，不显示固定标题或撤离性质说明。暂停左栏只为本局已启用扩展显示入口：`RiskContractViewPanel` 从 `SessionState` 读取风险 ID，`HackProtocolViewPanel` 从本机组件读取协议 ID；生命能量面板上方的数据碎片条读取组件快照与 `InputBindings` 实际键位，长按达标才显示不暂停世界的 `HackProtocolSelectPanel`。物资撤离面板由 `SupplyExtractionPanel` 在左侧武器栏和右侧防具栏中展示全部已装备槽位，两个分区只向 `GlobalInventory` 的统一报价与原子送回接口发起操作。
 - `LobbyHud` 负责大厅左上切换按钮、最近设施提示、角色生命能量、主动技能和武器快照；它不处理 F 输入、设施距离或场景动作。主菜单以 `lobby_host_mode` 嵌入更高 CanvasLayer，只复用局外面板，不复制背包、仓库、商店等业务 UI。
 - `EncyclopediaPanel` 读取 `ContentCatalog` 的全量武器、装备、道具与怪物模板，并通过 `GlobalInventory` 的稳定发现记录决定显示正式信息或“？？？”。怪物只在离树场景实例中读取稳定 ID、说明和基础属性，首次有效遇敌后解锁；左侧列表只负责选择当前条目，右侧物品详情复用 `ItemDetailFormatter`，怪物详情显示其固定基础数值。关键词筛选匹配名称、类型和说明，条目固定按基础内容、`stelle`（星）扩展包、其余扩展包目录顺序分组，并在每个扩展包前显示标题分割。组内装备按套装聚合并固定为头部、躯干、腿部、脚部；资源按初级、中级、高级、极品排列，无法识别品质时回退名称排序。它不复制物品数值或规则、不修改库存，也不把浏览、商店预览或临时快照视为获得。图鉴条目名称行最右侧与详情首行显示 `StatsService` 提供的获得数量或击杀数量，图鉴只读取计数不写入统计。
-- `HackModeSelectPanel` 按 `HackModeRules` 定义表构建“战斗模式 / 娱乐模式”两组模式卡并派发 `mode_selected`；窗口内容四周使用左右 18、上下 16 像素页边距，写入会话状态与场景切换由主菜单宿主完成。`MainMenu` 自身维护金融与统计两个互斥分类：普通样式的分类按钮展开时在所属按钮正上方以 0.18 秒动画打开纵向列表，分类子按钮仍复用原有面板打开回调；`BountyPanel` 与 `StatsPanel` 同样使用左右 18、上下 16 像素页边距，前者只读取 `BountyService` 快照并订阅其变化信号，后者只读取 `StatsService` 快照，包括由该服务从 `GlobalInventory` 聚合的累计获得星穹；财富曲线由面板内部类 `WealthCurveChart` 按采样数组绘制。三个面板都通过主菜单遮罩复用，不直接访问战斗节点。
+- `HackModeSelectPanel` 按 `HackModeRules` 定义表构建“战斗模式 / 娱乐模式”两组模式卡并派发 `mode_selected`；主菜单注入首次成功撤离资格，面板据此禁用娱乐模式并在完成信号到达时重建卡片。窗口内容四周使用左右 18、上下 16 像素页边距，写入会话状态与场景切换由主菜单宿主完成。`MainMenu` 自身维护金融与统计两个互斥分类：普通样式的分类按钮展开时在所属按钮正上方以 0.18 秒动画打开纵向列表，分类子按钮仍复用原有面板打开回调；`BountyPanel` 与 `StatsPanel` 同样使用左右 18、上下 16 像素页边距，前者只读取 `BountyService` 快照并订阅其变化信号，后者只读取 `StatsService` 快照，包括由该服务从 `GlobalInventory` 聚合的累计获得星穹；财富曲线由面板内部类 `WealthCurveChart` 按采样数组绘制。三个面板都通过主菜单遮罩复用，不直接访问战斗节点。
 - `CombatHud` 运行时实例化角色系统的当前角色模式，负责 O 键打开、关闭、输入锁定和场景树暂停；角色档案、属性条与技能卡片仍由角色系统从 `SessionState` 读取，HUD 不保存副本。
 - 战斗常驻 HUD 将技能栏放在屏幕左下角、武器栏放在屏幕右下角，角色名字、生命与能量独立保留在底部中心；常驻 HUD 节点必须位于全部交互遮罩之前，菜单显示时不依赖逐项隐藏也不会覆盖菜单内容。
 - 右下常驻武器栏由 `CombatHud` 直接创建 `CombatHudSlotView` 并读取装备组件快照，顶部使用与技能按键相同的居中区域显示“远程 1 / 远程 2 / 近战”，下方显示武器名、能耗、耐久、当前手持高亮和攻击冷却；它不复用 `WeaponSlotControl` 或 `ItemCardView`，装备、卸下、修复、强化和拖拽操作只存在于背包等交互界面。

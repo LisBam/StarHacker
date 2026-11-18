@@ -1,3 +1,44 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+
+# Local development tools and private notes do not belong to the public source tree.
+/.idea/
+/.vs/
+/.agents/
+/.claude/
+/.codex/
+/.dsh/
+/.trellis/
+/AGENTS.md
+/CLAUDE.md
+/项目专属AGENTS.md
+/临时反馈文档.md
+/设计自用文档（AI禁改禁读）.md
+
+# Generated caches, test output, and machine-specific export credentials.
+.godot/
+.godot-user/
+.godot_test_user*/
+__pycache__/
+*.pyc
+*.tmp
+*.bak
+*.log
+/export_credentials.cfg
+.env
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Exported player save data is local runtime output.
+/导出的存档/
+
+# Private recovery copies must never be published.
+/.repo-privacy-backup/
